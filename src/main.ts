@@ -1,4 +1,3 @@
-import { mockClients } from './mockData';
 import { templates, WebsiteTemplate, BuilderBlock } from './templates';
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities } from './db';
 import { Activity } from './types';
@@ -10,6 +9,11 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 let currentView: string = 'dashboard';
 let currentTemplate: WebsiteTemplate = templates[0];
 let canvasBlocks: BuilderBlock[] = [...currentTemplate.blocks];
+
+// Filter & Selection State
+let clientSearchQuery: string = '';
+let clientStatusFilter: string = 'all';
+let selectedContactId: string | null = null;
 
 function renderSidebar(activeView: string) {
   return `
@@ -166,40 +170,90 @@ function renderDashboard() {
 }
 
 function renderClients() {
-  const tableRows = mockClients.map(client => `
-    <tr>
-      <td>${client.name}</td>
-      <td>${client.service}</td>
-      <td><span class="badge badge-${client.status.toLowerCase().replace(' ', '-')}">${client.status}</span></td>
-      <td>${client.lastContact}</td>
-      <td><button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">View</button></td>
-    </tr>
-  `).join('');
+  const filteredContacts = mockContacts.filter(contact => {
+    const matchesSearch = contact.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) || 
+                         contact.phone.includes(clientSearchQuery);
+    const matchesFilter = clientStatusFilter === 'all' || contact.status === clientStatusFilter;
+    return matchesSearch && matchesFilter;
+  });
+
+  const tableRows = filteredContacts.map(contact => {
+    const lastActivity = mockActivities
+      .filter(a => a.contact_id === contact.id)
+      .sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime())[0];
+    
+    return `
+      <tr onclick="window.navigateTo('contact-detail', '${contact.id}')" style="cursor: pointer;">
+        <td style="font-weight: 600; color: var(--primary-color);">${contact.name}</td>
+        <td>${contact.phone}</td>
+        <td><span class="badge badge-${contact.status}">${contact.status}</span></td>
+        <td><span style="font-size: 0.85rem; color: #666;">${contact.source}</span></td>
+        <td>${lastActivity ? new Date(lastActivity.due_date).toLocaleDateString() : 'No activity'}</td>
+        <td><button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">View</button></td>
+      </tr>
+    `;
+  }).join('');
 
   app.innerHTML = `
     ${renderSidebar('clients')}
     <main class="main-content">
       <header class="view-header">
         <h2>Clients & Leads</h2>
-        <button class="btn-primary">+ Add Lead</button>
+        <button class="btn-primary" onclick="window.navigateTo('lead-capture')">+ Add Lead</button>
       </header>
-      <table class="clients-table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Service</th>
-            <th>Status</th>
-            <th>Last Contact</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${tableRows}
-        </tbody>
-      </table>
+
+      <div class="card" style="margin-bottom: 24px; padding: 16px;">
+        <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 300px;">
+            <input type="text" id="client-search" placeholder="Search by name or phone..." 
+                   value="${clientSearchQuery}" 
+                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button class="btn-primary" style="background: ${clientStatusFilter === 'all' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'all' ? 'white' : '#333'}" onclick="window.filterClients('all')">All</button>
+            <button class="btn-primary" style="background: ${clientStatusFilter === 'lead' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'lead' ? 'white' : '#333'}" onclick="window.filterClients('lead')">Leads</button>
+            <button class="btn-primary" style="background: ${clientStatusFilter === 'customer' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'customer' ? 'white' : '#333'}" onclick="window.filterClients('customer')">Customers</button>
+            <button class="btn-primary" style="background: ${clientStatusFilter === 'lost' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'lost' ? 'white' : '#333'}" onclick="window.filterClients('lost')">Lost</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <table class="clients-table" style="box-shadow: none; margin-top: 0;">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Phone</th>
+              <th>Status</th>
+              <th>Source</th>
+              <th>Last Activity</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows || '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #666;">No clients found matching your criteria</td></tr>'}
+          </tbody>
+        </table>
+      </div>
     </main>
   `;
+
+  const searchInput = document.getElementById('client-search') as HTMLInputElement;
+  searchInput?.addEventListener('input', (e) => {
+    clientSearchQuery = (e.target as HTMLInputElement).value;
+    renderClients();
+  });
+  // Keep focus and cursor at the end
+  if (clientSearchQuery) {
+    searchInput.focus();
+    searchInput.setSelectionRange(clientSearchQuery.length, clientSearchQuery.length);
+  }
 }
+
+(window as any).filterClients = (status: string) => {
+  clientStatusFilter = status;
+  renderClients();
+};
 
 // Builder Rendering Logic
 function renderBuilder() {
@@ -517,7 +571,7 @@ function renderOpportunities() {
     const cardsHtml = stageOpportunities.map(opp => {
       const contact = mockContacts.find(c => c.id === opp.contact_id);
       return `
-        <div class="kanban-card" draggable="true" ondragstart="drag(event, '${opp.id}')">
+        <div class="kanban-card" draggable="true" ondragstart="drag(event, '${opp.id}')" onclick="window.navigateTo('contact-detail', '${opp.contact_id}')" style="cursor: pointer;">
           <div class="contact-name">${contact ? contact.name : 'Unknown Contact'}</div>
           <div class="opportunity-value">$${opp.value.toLocaleString()}</div>
           <div class="contact-phone">${contact ? contact.phone : 'N/A'}</div>
@@ -589,8 +643,10 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   }
 };
 
-(window as any).navigateTo = (view: string) => {
+(window as any).navigateTo = (view: string, id?: string) => {
   currentView = view;
+  if (id) selectedContactId = id;
+
   if (view === 'dashboard') renderDashboard();
   if (view === 'clients') renderClients();
   if (view === 'opportunities') renderOpportunities();
@@ -598,6 +654,125 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   if (view === 'builder') renderBuilder();
   if (view === 'reports') renderReports();
   if (view === 'quickstart') renderQuickstart();
+  if (view === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
+};
+
+function renderContactDetail(contactId: string) {
+  const contact = mockContacts.find(c => c.id === contactId);
+  if (!contact) return;
+
+  const contactOpps = mockOpportunities.filter(opp => opp.contact_id === contactId);
+  const contactActivities = mockActivities
+    .filter(a => a.contact_id === contactId)
+    .sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime());
+
+  app.innerHTML = `
+    ${renderSidebar('clients')}
+    <main class="main-content">
+      <header class="view-header">
+        <div style="display: flex; align-items: center; gap: 15px;">
+          <button onclick="window.navigateTo('clients')" class="btn-primary" style="background: #eee; color: #333; padding: 5px 10px;">← Back</button>
+          <h2>${contact.name}</h2>
+          <span class="badge badge-${contact.status}">${contact.status}</span>
+        </div>
+      </header>
+
+      <div class="action-bar">
+        <button class="btn-primary" onclick="window.logCall('${contactId}')">📞 Log Call</button>
+        <button class="btn-primary" onclick="window.addNote('${contactId}')" style="background: var(--secondary-color);">📝 Add Note</button>
+      </div>
+
+      <div class="detail-container">
+        <!-- Sidebar Info -->
+        <aside class="detail-sidebar">
+          <div class="card">
+            <h3>Contact Information</h3>
+            <div style="margin-top: 15px;">
+              <p><strong>Phone:</strong> ${contact.phone}</p>
+              <p><strong>Email:</strong> ${contact.email}</p>
+              <p><strong>Address:</strong> ${contact.address}</p>
+              <p><strong>Source:</strong> ${contact.source}</p>
+              <p><strong>Created:</strong> ${new Date(contact.created_at).toLocaleDateString()}</p>
+            </div>
+            
+            <h3 style="margin-top: 25px;">Active Opportunities</h3>
+            <div style="margin-top: 15px;">
+              ${contactOpps.map(opp => `
+                <div class="opportunity-strip">
+                  <div>
+                    <div style="font-weight: 600;">$${opp.value.toLocaleString()}</div>
+                    <small style="color: #666;">${opp.pipeline_stage}</small>
+                  </div>
+                  <span class="badge badge-${opp.status}" style="font-size: 0.7rem;">${opp.status}</span>
+                </div>
+              `).join('') || '<p>No opportunities</p>'}
+            </div>
+          </div>
+        </aside>
+
+        <!-- Main Timeline -->
+        <div class="timeline-container">
+          <div class="card">
+            <h3>Activity Timeline</h3>
+            <div class="timeline">
+              ${contactActivities.map(activity => `
+                <div class="timeline-item">
+                  <div class="timeline-dot" style="background: ${activity.completed ? '#28a745' : 'var(--primary-color)'}"></div>
+                  <div class="timeline-content">
+                    <div class="timeline-time">${new Date(activity.due_date).toLocaleString()}</div>
+                    <div style="display: flex; justify-content: space-between; align-items: start;">
+                      <div>
+                        <strong>${activity.type.toUpperCase()}</strong>: ${activity.description}
+                      </div>
+                      ${!activity.completed ? `<button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.completeTask('${activity.id}')">Complete</button>` : '<span style="color: #28a745;">✓</span>'}
+                    </div>
+                  </div>
+                </div>
+              `).join('') || '<p style="padding: 20px;">No activity logged.</p>'}
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  `;
+}
+
+(window as any).logCall = (contactId: string) => {
+  const note = prompt("Enter call summary:");
+  if (note) {
+    mockActivities.push({
+      id: 'act-' + Date.now(),
+      contact_id: contactId,
+      type: 'call',
+      description: note,
+      due_date: new Date().toISOString(),
+      completed: true
+    });
+    renderContactDetail(contactId);
+  }
+};
+
+(window as any).addNote = (contactId: string) => {
+  const note = prompt("Enter your note:");
+  if (note) {
+    mockActivities.push({
+      id: 'act-' + Date.now(),
+      contact_id: contactId,
+      type: 'note',
+      description: note,
+      due_date: new Date().toISOString(),
+      completed: true
+    });
+    renderContactDetail(contactId);
+  }
+};
+
+(window as any).completeTask = (activityId: string) => {
+  const activity = mockActivities.find(a => a.id === activityId);
+  if (activity) {
+    activity.completed = true;
+    if (selectedContactId) renderContactDetail(selectedContactId);
+  }
 };
 
 renderDashboard();
