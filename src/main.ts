@@ -135,7 +135,7 @@ function renderBuilder() {
   document.querySelectorAll('.draggable-item').forEach(item => {
     item.addEventListener('click', () => {
       const type = item.getAttribute('data-type') as any;
-      addBlock(type);
+      (window as any).addBlock(type);
     });
   });
 }
