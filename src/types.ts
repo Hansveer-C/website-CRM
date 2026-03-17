@@ -39,3 +39,15 @@ export interface Pipeline {
   name: string;
   stages: string[];
 }
+
+export type TriggerType = 'OPPORTUNITY_CREATED' | 'OPPORTUNITY_STAGE_UPDATED';
+export type ActionType = 'CREATE_TASK' | 'SEND_NOTIFICATION';
+
+export interface Automation {
+  id: string;
+  name: string;
+  trigger: TriggerType;
+  condition?: (context: any) => boolean;
+  action: ActionType;
+  actionParams: any;
+}

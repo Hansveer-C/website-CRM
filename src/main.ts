@@ -1,6 +1,8 @@
 import { mockClients } from './mockData';
 import { templates, WebsiteTemplate, BuilderBlock } from './templates';
-import { mockContacts, mockOpportunities, mockPipelines } from './db';
+import { mockContacts, mockOpportunities, mockPipelines, mockActivities } from './db';
+import { Activity } from './types';
+import { runAutomations } from './automation';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
@@ -31,6 +33,9 @@ function renderSidebar(activeView: string) {
 }
 
 function renderDashboard() {
+  const now = new Date();
+  
+  // Top Level Metrics
   const openOpportunities = mockOpportunities.filter(o => o.status === 'open');
   const pipelineValue = openOpportunities.reduce((sum, o) => sum + o.value, 0);
   const openCount = openOpportunities.length;
@@ -39,12 +44,32 @@ function renderDashboard() {
   const wonCount = mockOpportunities.filter(o => o.status === 'won').length;
   const conversionRate = totalCount > 0 ? (wonCount / totalCount) * 100 : 0;
 
+  // 1. Revenue by Stage (Only Open/Won)
+  const stages = mockPipelines[0].stages;
+  const revenueByStage = stages.map(stage => {
+    const value = mockOpportunities
+      .filter(o => o.pipeline_stage === stage && (o.status === 'open' || o.status === 'won'))
+      .reduce((sum, o) => sum + o.value, 0);
+    return { stage, value };
+  }).filter(s => s.value > 0);
+
+  // 2. Leads by Source
+  const sourceMap: Record<string, number> = {};
+  mockContacts.forEach(c => {
+    sourceMap[c.source] = (sourceMap[c.source] || 0) + 1;
+  });
+  const leadsBySource = Object.entries(sourceMap).map(([source, count]) => ({ source, count }));
+
+  // 3. Overdue Tasks
+  const overdueTasks = mockActivities.filter((a: Activity) => !a.completed && new Date(a.due_date) < now);
+
   app.innerHTML = `
     ${renderSidebar('dashboard')}
     <main class="main-content">
       <header class="view-header">
         <h2>Dashboard Overview</h2>
       </header>
+      
       <div class="dashboard-grid">
         <div class="card">
           <h3>Pipeline Value (Open)</h3>
@@ -58,7 +83,65 @@ function renderDashboard() {
           <h3>Conversion Rate</h3>
           <p class="value">${conversionRate.toFixed(1)}%</p>
         </div>
+        <div class="card" style="border-left: 5px solid #ff4444;">
+          <h3>Overdue Tasks</h3>
+          <p class="value" style="color: #ff4444;">${overdueTasks.length}</p>
+        </div>
       </div>
+
+      <div class="stats-grid" style="margin-top: 30px;">
+        <div class="card">
+          <h3>Revenue by Pipeline Stage</h3>
+          <div class="chart-container" style="margin-top: 15px;">
+            ${revenueByStage.map(s => `
+              <div class="report-item">
+                <span>${s.stage}</span>
+                <span style="font-weight: 600;">$${s.value.toLocaleString()}</span>
+              </div>
+            `).join('') || '<p style="color: #666; font-style: italic;">No revenue data for active stages</p>'}
+          </div>
+        </div>
+        <div class="card">
+          <h3>Leads by Source</h3>
+          <div class="chart-container" style="margin-top: 15px;">
+            ${leadsBySource.map(s => `
+              <div class="report-item">
+                <span>${s.source}</span>
+                <span class="badge" style="background: #e9ecef; color: #495057;">${s.count} Leads</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+
+      ${overdueTasks.length > 0 ? `
+        <div class="card" style="margin-top: 30px;">
+          <h3>Critical: Overdue Tasks</h3>
+          <table class="clients-table" style="box-shadow: none; border: 1px solid #eee; margin-top: 15px;">
+            <thead>
+              <tr>
+                <th>Contact</th>
+                <th>Task</th>
+                <th>Due Date</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${overdueTasks.map((task: Activity) => {
+                const contact = mockContacts.find(c => c.id === task.contact_id);
+                return `
+                  <tr style="background: #fff5f5;">
+                    <td style="font-weight: 600;">${contact ? contact.name : 'Unknown'}</td>
+                    <td>${task.description}</td>
+                    <td style="color: #ff4444; font-weight: 500;">${new Date(task.due_date).toLocaleDateString()}</td>
+                    <td><button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #ff4444;">Resolve</button></td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
     </main>
   `;
 }
@@ -378,15 +461,19 @@ function handleLeadCaptureSubmission(e: Event) {
   });
 
   // 2. Create new opportunity
-  mockOpportunities.push({
+  const newOpp = {
     id: opp_id,
     contact_id,
     pipeline_stage: 'New Lead',
     value: 0, // Initial value
     assigned_to: 'Hansveer',
-    status: 'open',
+    status: 'open' as any,
     created_at: new Date().toISOString()
-  });
+  };
+  mockOpportunities.push(newOpp);
+
+  // Trigger Automation
+  runAutomations('OPPORTUNITY_CREATED', newOpp);
 
   const container = document.querySelector('.lead-form-container');
   if (container) {
@@ -460,6 +547,9 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
     // UI Refresh without reload
     (window as any).navigateTo(currentView);
     console.log(`Opportunity ${opportunity_id} updated: Stage=[${new_stage}], Status=[${opp.status}]`);
+    
+    // Trigger Automation
+    runAutomations('OPPORTUNITY_STAGE_UPDATED', opp);
   }
 }
 
