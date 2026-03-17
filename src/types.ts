@@ -51,3 +51,37 @@ export interface Automation {
   action: ActionType;
   actionParams: any;
 }
+
+export type QuoteStatus = 'draft' | 'sent' | 'approved' | 'rejected';
+
+export interface Quote {
+  id: string;
+  contact_id: string;
+  opportunity_id: string;
+  status: QuoteStatus;
+  total_amount: number;
+  notes: string;
+  created_at: string;
+}
+
+export interface QuoteItem {
+  id: string;
+  quote_id: string;
+  service_name: string;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  total: number;
+}
+
+export type InvoiceStatus = 'unpaid' | 'paid' | 'overdue';
+
+export interface Invoice {
+  id: string;
+  contact_id: string;
+  quote_id: string;
+  amount: number;
+  status: InvoiceStatus;
+  due_date: string;
+  created_at: string;
+}

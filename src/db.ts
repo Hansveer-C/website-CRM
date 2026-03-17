@@ -1,4 +1,4 @@
-import { Contact, Opportunity, Activity, Pipeline } from './types';
+import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice } from './types';
 
 export const mockContacts: Contact[] = [
   {
@@ -70,5 +70,41 @@ export const mockActivities: Activity[] = [
     description: 'Sent quote via text',
     due_date: '2026-03-05T10:00:00Z',
     completed: false,
+  },
+];
+
+export const mockQuotes: Quote[] = [
+  {
+    id: 'q1',
+    contact_id: 'c2',
+    opportunity_id: 'o1',
+    status: 'sent',
+    total_amount: 250,
+    notes: 'Standard driveway cleaning quote',
+    created_at: '2026-03-02T10:00:00Z',
+  },
+];
+
+export const mockQuoteItems: QuoteItem[] = [
+  {
+    id: 'qi1',
+    quote_id: 'q1',
+    service_name: 'Driveway Cleaning',
+    description: 'High pressure wash for standard 2-car driveway',
+    quantity: 1,
+    unit_price: 250,
+    total: 250,
+  },
+];
+
+export const mockInvoices: Invoice[] = [
+  {
+    id: 'i1',
+    contact_id: 'c2',
+    quote_id: 'q1',
+    status: 'unpaid',
+    amount: 250,
+    due_date: '2026-03-24T12:00:00Z',
+    created_at: '2026-03-17T15:00:00Z',
   },
 ];

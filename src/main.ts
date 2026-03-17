@@ -1,5 +1,5 @@
 import { templates, WebsiteTemplate, BuilderBlock } from './templates';
-import { mockContacts, mockOpportunities, mockPipelines, mockActivities } from './db';
+import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices } from './db';
 import { Activity } from './types';
 import { runAutomations } from './automation';
 
@@ -24,6 +24,8 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('dashboard')" class="${activeView === 'dashboard' ? 'active' : ''}">Dashboard</li>
           <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}">Clients & Leads</li>
           <li onclick="window.navigateTo('opportunities')" class="${activeView === 'opportunities' ? 'active' : ''}">Opportunities</li>
+          <li onclick="window.navigateTo('quotes')" class="${activeView === 'quotes' ? 'active' : ''}">Quotes</li>
+          <li onclick="window.navigateTo('invoices')" class="${activeView === 'invoices' ? 'active' : ''}">Invoices</li>
           <li onclick="window.navigateTo('lead-capture')" class="${activeView === 'lead-capture' ? 'active' : ''}">Lead Capture</li>
           <li onclick="window.navigateTo('builder')" class="${activeView === 'builder' ? 'active' : ''}">Website Builder</li>
           <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
@@ -611,6 +613,94 @@ function renderOpportunities() {
   `;
 }
 
+function renderQuotes() {
+  const tableRows = mockQuotes.map(quote => {
+    const contact = mockContacts.find(c => c.id === quote.contact_id);
+    return `
+      <tr onclick="window.navigateTo('contact-detail', '${quote.contact_id}')" style="cursor: pointer;">
+        <td style="font-weight: 600; color: var(--primary-color);">Q-${quote.id}</td>
+        <td>${contact ? contact.name : 'Unknown'}</td>
+        <td><span class="badge badge-${quote.status}">${quote.status}</span></td>
+        <td style="font-weight: 600;">$${quote.total_amount.toLocaleString()}</td>
+        <td>${new Date(quote.created_at).toLocaleDateString()}</td>
+        <td><button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">View</button></td>
+      </tr>
+    `;
+  }).join('');
+
+  app.innerHTML = `
+    ${renderSidebar('quotes')}
+    <main class="main-content">
+      <header class="view-header">
+        <h2>Quotes</h2>
+        <button class="btn-primary" onclick="alert('Create Quote from Client Detail page')">+ New Quote</button>
+      </header>
+
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <table class="clients-table" style="box-shadow: none; margin-top: 0;">
+          <thead>
+            <tr>
+              <th>Quote #</th>
+              <th>Contact</th>
+              <th>Status</th>
+              <th>Amount</th>
+              <th>Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows || '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #666;">No quotes found</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </main>
+  `;
+}
+
+function renderInvoices() {
+  const tableRows = mockInvoices.map(invoice => {
+    const contact = mockContacts.find(c => c.id === invoice.contact_id);
+    return `
+      <tr onclick="window.navigateTo('contact-detail', '${invoice.contact_id}')" style="cursor: pointer;">
+        <td style="font-weight: 600; color: var(--primary-color);">INV-${invoice.id}</td>
+        <td>${contact ? contact.name : 'Unknown'}</td>
+        <td><span class="badge badge-${invoice.status}">${invoice.status}</span></td>
+        <td style="font-weight: 600;">$${invoice.amount.toLocaleString()}</td>
+        <td>${new Date(invoice.due_date).toLocaleDateString()}</td>
+        <td><button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">View</button></td>
+      </tr>
+    `;
+  }).join('');
+
+  app.innerHTML = `
+    ${renderSidebar('invoices')}
+    <main class="main-content">
+      <header class="view-header">
+        <h2>Invoices</h2>
+        <button class="btn-primary" onclick="alert('Create Invoice from Quote or Client Detail page')">+ New Invoice</button>
+      </header>
+
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <table class="clients-table" style="box-shadow: none; margin-top: 0;">
+          <thead>
+            <tr>
+              <th>Invoice #</th>
+              <th>Contact</th>
+              <th>Status</th>
+              <th>Amount</th>
+              <th>Due Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows || '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #666;">No invoices found</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </main>
+  `;
+}
+
 function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   const opp = mockOpportunities.find(o => o.id === opportunity_id);
   if (opp) {
@@ -660,6 +750,8 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   if (view === 'dashboard') renderDashboard();
   if (view === 'clients') renderClients();
   if (view === 'opportunities') renderOpportunities();
+  if (view === 'quotes') renderQuotes();
+  if (view === 'invoices') renderInvoices();
   if (view === 'lead-capture') renderLeadCapture();
   if (view === 'builder') renderBuilder();
   if (view === 'reports') renderReports();
@@ -691,6 +783,8 @@ function renderContactDetail(contactId: string) {
         <button class="btn-primary" onclick="window.logCall('${contactId}')">📞 Log Call</button>
         <button class="btn-primary" onclick="window.addNote('${contactId}')" style="background: var(--secondary-color);">📝 Add Note</button>
         <button class="btn-primary" onclick="window.createOpportunity('${contactId}')" style="background: #28a745;">💰 New Opportunity</button>
+        <button class="btn-primary" onclick="window.createQuote('${contactId}')" style="background: #17a2b8;">📄 Create Quote</button>
+        <button class="btn-primary" onclick="window.createInvoice('${contactId}')" style="background: #e67e22;">💳 Create Invoice</button>
       </div>
 
       <div class="detail-container">
@@ -755,6 +849,60 @@ function renderContactDetail(contactId: string) {
                   </div>
                 </div>
               `).join('') || '<p style="padding: 20px;">No activity logged.</p>'}
+            </div>
+          </div>
+
+          <div class="card" style="margin-top: 24px;">
+            <h3>Quotes</h3>
+            <div style="margin-top: 15px;">
+              <table class="clients-table" style="box-shadow: none; border: 1px solid #eee;">
+                <thead>
+                  <tr>
+                    <th>Quote #</th>
+                    <th>Status</th>
+                    <th>Total</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${mockQuotes.filter(q => q.contact_id === contactId).map(quote => `
+                    <tr>
+                      <td style="font-weight: 600;">Q-${quote.id}</td>
+                      <td><span class="badge badge-${quote.status}">${quote.status}</span></td>
+                      <td>$${quote.total_amount.toLocaleString()}</td>
+                      <td><button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;">View</button></td>
+                    </tr>
+                  `).join('') || '<tr><td colspan="4" style="text-align: center; color: #666; padding: 20px;">No quotes created.</td></tr>'}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top: 24px;">
+            <h3>Invoices</h3>
+            <div style="margin-top: 15px;">
+              <table class="clients-table" style="box-shadow: none; border: 1px solid #eee;">
+                <thead>
+                  <tr>
+                    <th>Invoice #</th>
+                    <th>Status</th>
+                    <th>Total</th>
+                    <th>Due Date</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${mockInvoices.filter(i => i.contact_id === contactId).map(invoice => `
+                    <tr>
+                      <td style="font-weight: 600;">INV-${invoice.id}</td>
+                      <td><span class="badge badge-${invoice.status}">${invoice.status}</span></td>
+                      <td>$${invoice.amount.toLocaleString()}</td>
+                      <td>${new Date(invoice.due_date).toLocaleDateString()}</td>
+                      <td><button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;">View</button></td>
+                    </tr>
+                  `).join('') || '<tr><td colspan="5" style="text-align: center; color: #666; padding: 20px;">No invoices created.</td></tr>'}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -841,6 +989,72 @@ function renderContactDetail(contactId: string) {
     (contact as any)[field] = value;
     (window as any).navigateTo(currentView, selectedContactId || undefined);
   }
+};
+
+(window as any).createQuote = (contactId: string) => {
+  const service = prompt("Enter Service Name:", "Driveway Cleaning");
+  if (!service) return;
+  const amountStr = prompt("Enter Total Amount:", "250");
+  const amount = parseFloat(amountStr || "0");
+  if (isNaN(amount)) return;
+
+  const quoteId = 'q' + (mockQuotes.length + 1) + '-' + Math.floor(Math.random() * 100);
+  const contactOpps = mockOpportunities.filter(opp => opp.contact_id === contactId);
+  const opportunity_id = contactOpps.length > 0 ? contactOpps[0].id : 'new';
+
+  mockQuotes.push({
+    id: quoteId,
+    contact_id: contactId,
+    opportunity_id: opportunity_id,
+    status: 'draft',
+    total_amount: amount,
+    notes: 'Created via CRM',
+    created_at: new Date().toISOString()
+  });
+
+  mockQuoteItems.push({
+    id: 'qi-' + Date.now(),
+    quote_id: quoteId,
+    service_name: service,
+    description: service,
+    quantity: 1,
+    unit_price: amount,
+    total: amount
+  });
+
+  renderContactDetail(contactId);
+};
+
+(window as any).createInvoice = (contactId: string) => {
+  const contactQuotes = mockQuotes.filter(q => q.contact_id === contactId);
+  if (contactQuotes.length === 0) {
+    alert("Please create a Quote first.");
+    return;
+  }
+
+  // Use the most recent quote by default for simulation
+  const latestQuote = contactQuotes[contactQuotes.length - 1];
+  
+  const amountStr = prompt("Enter Invoice Amount:", latestQuote.total_amount.toString());
+  const amount = parseFloat(amountStr || "0");
+  if (isNaN(amount)) return;
+
+  const invoiceId = 'i' + (mockInvoices.length + 1) + '-' + Math.floor(Math.random() * 100);
+  
+  const dueDate = new Date();
+  dueDate.setDate(dueDate.getDate() + 7); // Due in 7 days
+
+  mockInvoices.push({
+    id: invoiceId,
+    contact_id: contactId,
+    quote_id: latestQuote.id,
+    amount: amount,
+    status: 'unpaid',
+    due_date: dueDate.toISOString(),
+    created_at: new Date().toISOString()
+  });
+
+  renderContactDetail(contactId);
 };
 
 renderDashboard();
