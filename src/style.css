@@ -543,3 +543,8 @@ body {
 .inline-select:hover {
     background: rgba(0,0,0,0.02);
 }
+
+.badge-draft {
+    background: #e9ecef;
+    color: #495057;
+}

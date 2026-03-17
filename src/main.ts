@@ -15,6 +15,14 @@ let clientSearchQuery: string = '';
 let clientStatusFilter: string = 'all';
 let selectedContactId: string | null = null;
 
+// New Quote State
+let newQuoteLineItems: { service: string, description: string, quantity: number, price: number }[] = [{ service: '', description: '', quantity: 1, price: 0 }];
+(window as any).newQuoteLineItems = newQuoteLineItems;
+let newQuoteContactId: string = '';
+(window as any).newQuoteContactId = newQuoteContactId;
+let newQuoteOpportunityId: string = '';
+(window as any).newQuoteOpportunityId = newQuoteOpportunityId;
+
 function renderSidebar(activeView: string) {
   return `
     <div class="sidebar">
@@ -633,7 +641,7 @@ function renderQuotes() {
     <main class="main-content">
       <header class="view-header">
         <h2>Quotes</h2>
-        <button class="btn-primary" onclick="alert('Create Quote from Client Detail page')">+ New Quote</button>
+        <button class="btn-primary" onclick="window.navigateTo('new-quote')">+ New Quote</button>
       </header>
 
       <div class="card" style="padding: 0; overflow: hidden;">
@@ -701,6 +709,171 @@ function renderInvoices() {
   `;
 }
 
+function renderNewQuote() {
+  const contacts = mockContacts;
+  const nqcId = (window as any).newQuoteContactId;
+  const nqoId = (window as any).newQuoteOpportunityId;
+  const nqItems = (window as any).newQuoteLineItems;
+
+  const opportunities = nqcId 
+    ? mockOpportunities.filter(o => o.contact_id === nqcId) 
+    : [];
+
+  const total = nqItems.reduce((sum: number, item: any) => sum + (item.quantity * item.price), 0);
+
+  app.innerHTML = `
+    ${renderSidebar('quotes')}
+    <main class="main-content">
+      <header class="view-header">
+        <div style="display: flex; align-items: center; gap: 15px;">
+          <button onclick="window.navigateTo('quotes')" class="btn-primary" style="background: #eee; color: #333; padding: 5px 10px;">← Back</button>
+          <h2>Create New Quote</h2>
+        </div>
+      </header>
+
+      <div class="card" style="padding: 24px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
+          <div class="form-group">
+            <label>Select Contact</label>
+            <select id="quote-contact" style="width: 100%; padding: 10px;" onchange="window.updateNewQuoteContact(this.value)">
+              <option value="">-- Choose Contact --</option>
+              ${contacts.map(c => `<option value="${c.id}" ${nqcId === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Select Opportunity (Optional)</label>
+            <select id="quote-opportunity" style="width: 100%; padding: 10px;" onchange="window.newQuoteOpportunityId = this.value">
+              <option value="">-- No Opportunity --</option>
+              ${opportunities.map(o => `<option value="${o.id}" ${nqoId === o.id ? 'selected' : ''}>$${o.value} - ${o.pipeline_stage}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <h3>Line Items</h3>
+        <table class="clients-table" style="box-shadow: none; border: 1px solid #eee; margin-top: 15px; margin-bottom: 15px;">
+          <thead>
+            <tr>
+              <th>Service</th>
+              <th>Description</th>
+              <th style="width: 80px;">Qty</th>
+              <th style="width: 120px;">Unit Price</th>
+              <th style="width: 120px;">Total</th>
+              <th style="width: 50px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${nqItems.map((item: any, index: number) => `
+              <tr>
+                <td><input type="text" placeholder="Service Name" value="${item.service}" style="width: 100%; padding: 8px;" oninput="window.updateLineItem(${index}, 'service', this.value, false)"></td>
+                <td><input type="text" placeholder="Description" value="${item.description}" style="width: 100%; padding: 8px;" oninput="window.updateLineItem(${index}, 'description', this.value, false)"></td>
+                <td><input type="number" value="${item.quantity}" style="width: 100%; padding: 8px;" oninput="window.updateLineItem(${index}, 'quantity', this.value, true)"></td>
+                <td><input type="number" value="${item.price}" style="width: 100%; padding: 8px;" oninput="window.updateLineItem(${index}, 'price', this.value, true)"></td>
+                <td id="line-total-${index}" style="font-weight: 600;">$${(item.quantity * item.price).toLocaleString()}</td>
+                <td><button onclick="window.removeLineItem(${index})" style="background:none; border:none; color:#ff4444; cursor:pointer; font-size:1.2rem;">×</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+          <button class="btn-primary" style="background: #28a745;" onclick="window.addLineItem()">+ Add Line Item</button>
+          <div style="text-align: right;">
+            <div style="font-size: 0.9rem; color: #666;">Total Amount</div>
+            <div id="quote-running-total" style="font-size: 1.5rem; font-weight: 600; color: var(--primary-color);">$${total.toLocaleString()}</div>
+          </div>
+        </div>
+
+        <div style="margin-top: 40px; border-top: 1px solid #eee; padding-top: 20px;">
+          <button class="btn-primary" style="width: 100%; padding: 15px; font-size: 1.1rem;" onclick="window.saveQuote()">Create Quote</button>
+        </div>
+      </div>
+    </main>
+  `;
+}
+
+(window as any).updateNewQuoteContact = (id: string) => {
+  (window as any).newQuoteContactId = id;
+  (window as any).newQuoteOpportunityId = '';
+  renderNewQuote();
+};
+
+(window as any).addLineItem = () => {
+  (window as any).newQuoteLineItems.push({ service: '', description: '', quantity: 1, price: 0 });
+  renderNewQuote();
+};
+
+(window as any).removeLineItem = (index: number) => {
+  (window as any).newQuoteLineItems.splice(index, 1);
+  if ((window as any).newQuoteLineItems.length === 0) {
+    (window as any).newQuoteLineItems.push({ service: '', description: '', quantity: 1, price: 0 });
+  }
+  renderNewQuote();
+};
+
+(window as any).updateLineItem = (index: number, field: string, value: string | number, shouldUpdateTotals: boolean) => {
+  const nqItems = (window as any).newQuoteLineItems;
+  const item = nqItems[index] as any;
+  if (field === 'quantity' || field === 'price') {
+    item[field] = parseFloat(value as string) || 0;
+  } else {
+    item[field] = value;
+  }
+
+  if (shouldUpdateTotals) {
+    const lineTotalEl = document.getElementById(`line-total-${index}`);
+    if (lineTotalEl) {
+      lineTotalEl.textContent = `$${(item.quantity * item.price).toLocaleString()}`;
+    }
+    const runningTotalEl = document.getElementById('quote-running-total');
+    if (runningTotalEl) {
+      const grandTotal = nqItems.reduce((sum: number, it: any) => sum + (it.quantity * it.price), 0);
+      runningTotalEl.textContent = `$${grandTotal.toLocaleString()}`;
+    }
+  }
+};
+
+(window as any).saveQuote = () => {
+  const nqcId = (window as any).newQuoteContactId;
+  const nqoId = (window as any).newQuoteOpportunityId;
+  const nqItems = (window as any).newQuoteLineItems;
+
+  if (!nqcId) {
+    alert("Please select a contact.");
+    return;
+  }
+
+  const quoteId = 'q' + (mockQuotes.length + 1) + '-' + Math.floor(Math.random() * 100);
+  const total = nqItems.reduce((sum: number, item: any) => sum + (item.quantity * item.price), 0);
+
+  mockQuotes.push({
+    id: quoteId,
+    contact_id: nqcId,
+    opportunity_id: nqoId || '',
+    status: 'draft',
+    total_amount: total,
+    notes: 'Created via New Quote page',
+    created_at: new Date().toISOString()
+  });
+
+  nqItems.forEach((item: any, idx: number) => {
+    mockQuoteItems.push({
+      id: 'qi-' + quoteId + '-' + idx,
+      quote_id: quoteId,
+      service_name: item.service,
+      description: item.description,
+      quantity: item.quantity,
+      unit_price: item.price,
+      total: item.quantity * item.price
+    });
+  });
+
+  (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0 }];
+  (window as any).newQuoteContactId = '';
+  (window as any).newQuoteOpportunityId = '';
+
+  (window as any).navigateTo('quotes');
+};
+
 function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   const opp = mockOpportunities.find(o => o.id === opportunity_id);
   if (opp) {
@@ -751,6 +924,7 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   if (view === 'clients') renderClients();
   if (view === 'opportunities') renderOpportunities();
   if (view === 'quotes') renderQuotes();
+  if (view === 'new-quote') renderNewQuote();
   if (view === 'invoices') renderInvoices();
   if (view === 'lead-capture') renderLeadCapture();
   if (view === 'builder') renderBuilder();
@@ -992,37 +1166,10 @@ function renderContactDetail(contactId: string) {
 };
 
 (window as any).createQuote = (contactId: string) => {
-  const service = prompt("Enter Service Name:", "Driveway Cleaning");
-  if (!service) return;
-  const amountStr = prompt("Enter Total Amount:", "250");
-  const amount = parseFloat(amountStr || "0");
-  if (isNaN(amount)) return;
-
-  const quoteId = 'q' + (mockQuotes.length + 1) + '-' + Math.floor(Math.random() * 100);
-  const contactOpps = mockOpportunities.filter(opp => opp.contact_id === contactId);
-  const opportunity_id = contactOpps.length > 0 ? contactOpps[0].id : 'new';
-
-  mockQuotes.push({
-    id: quoteId,
-    contact_id: contactId,
-    opportunity_id: opportunity_id,
-    status: 'draft',
-    total_amount: amount,
-    notes: 'Created via CRM',
-    created_at: new Date().toISOString()
-  });
-
-  mockQuoteItems.push({
-    id: 'qi-' + Date.now(),
-    quote_id: quoteId,
-    service_name: service,
-    description: service,
-    quantity: 1,
-    unit_price: amount,
-    total: amount
-  });
-
-  renderContactDetail(contactId);
+  (window as any).newQuoteContactId = contactId;
+  (window as any).newQuoteOpportunityId = '';
+  (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0 }];
+  (window as any).navigateTo('new-quote');
 };
 
 (window as any).createInvoice = (contactId: string) => {
