@@ -28,8 +28,8 @@ export const mockContacts: Contact[] = [
 export const mockPipelines: Pipeline[] = [
   {
     id: 'p1',
-    name: 'Pressure Washing Sales',
-    stages: ['New Lead', 'Quote Sent', 'Job Scheduled', 'Completed', 'Lost'],
+    name: 'Residential Cleaning Pipeline',
+    stages: ['New Lead', 'Quote Sent', 'Scheduled', 'Completed', 'Paid'],
   },
 ];
 

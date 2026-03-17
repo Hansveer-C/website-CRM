@@ -1,9 +1,11 @@
 import { mockClients } from './mockData';
 import { templates, WebsiteTemplate, BuilderBlock } from './templates';
+import { mockContacts, mockOpportunities, mockPipelines } from './db';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
-// Builder State
+// State Management
+let currentView: string = 'dashboard';
 let currentTemplate: WebsiteTemplate = templates[0];
 let canvasBlocks: BuilderBlock[] = [...currentTemplate.blocks];
 
@@ -15,6 +17,7 @@ function renderSidebar(activeView: string) {
         <ul>
           <li onclick="window.navigateTo('dashboard')" class="${activeView === 'dashboard' ? 'active' : ''}">Dashboard</li>
           <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}">Clients & Leads</li>
+          <li onclick="window.navigateTo('opportunities')" class="${activeView === 'opportunities' ? 'active' : ''}">Opportunities</li>
           <li onclick="window.navigateTo('builder')" class="${activeView === 'builder' ? 'active' : ''}">Website Builder</li>
           <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
           <li onclick="window.navigateTo('quickstart')" class="${activeView === 'quickstart' ? 'active' : ''}">Quickstart Guide</li>
@@ -27,6 +30,14 @@ function renderSidebar(activeView: string) {
 }
 
 function renderDashboard() {
+  const openOpportunities = mockOpportunities.filter(o => o.status === 'open');
+  const pipelineValue = openOpportunities.reduce((sum, o) => sum + o.value, 0);
+  const openCount = openOpportunities.length;
+  
+  const totalCount = mockOpportunities.length;
+  const wonCount = mockOpportunities.filter(o => o.status === 'won').length;
+  const conversionRate = totalCount > 0 ? (wonCount / totalCount) * 100 : 0;
+
   app.innerHTML = `
     ${renderSidebar('dashboard')}
     <main class="main-content">
@@ -35,16 +46,16 @@ function renderDashboard() {
       </header>
       <div class="dashboard-grid">
         <div class="card">
-          <h3>Pipeline Value</h3>
-          <p class="value">$1,250.00</p>
+          <h3>Pipeline Value (Open)</h3>
+          <p class="value">$${pipelineValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
         </div>
         <div class="card">
-          <h3>Opportunities</h3>
-          <p class="value">${mockClients.length}</p>
+          <h3>Open Opportunities</h3>
+          <p class="value">${openCount}</p>
         </div>
         <div class="card">
           <h3>Conversion Rate</h3>
-          <p class="value">33%</p>
+          <p class="value">${conversionRate.toFixed(1)}%</p>
         </div>
       </div>
     </main>
@@ -299,9 +310,89 @@ function renderQuickstart() {
   `;
 }
 
+function renderOpportunities() {
+  const defaultPipeline = mockPipelines[0];
+  const stages = defaultPipeline.stages;
+  
+  const columnsHtml = stages.map(stage => {
+    const stageOpportunities = mockOpportunities.filter(opp => opp.pipeline_stage === stage);
+    const cardsHtml = stageOpportunities.map(opp => {
+      const contact = mockContacts.find(c => c.id === opp.contact_id);
+      return `
+        <div class="kanban-card" draggable="true" ondragstart="drag(event, '${opp.id}')">
+          <div class="contact-name">${contact ? contact.name : 'Unknown Contact'}</div>
+          <div class="opportunity-value">$${opp.value.toLocaleString()}</div>
+          <div class="contact-phone">${contact ? contact.phone : 'N/A'}</div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="kanban-column" ondragover="allowDrop(event)" ondrop="drop(event, '${stage}')">
+        <h4>${stage} <span>${stageOpportunities.length}</span></h4>
+        <div class="kanban-cards">
+          ${cardsHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  app.innerHTML = `
+    ${renderSidebar('opportunities')}
+    <main class="main-content">
+      <header class="view-header">
+        <h2>Sales Pipeline: ${defaultPipeline.name}</h2>
+        <button class="btn-primary">+ New Opportunity</button>
+      </header>
+      <div class="kanban-board">
+        ${columnsHtml}
+      </div>
+    </main>
+  `;
+}
+
+function updateOpportunityStage(opportunity_id: string, new_stage: string) {
+  const opp = mockOpportunities.find(o => o.id === opportunity_id);
+  if (opp) {
+    opp.pipeline_stage = new_stage;
+    
+    // Simple logic to update status based on stage
+    if (new_stage === 'Completed' || new_stage === 'Paid') {
+      opp.status = 'won';
+    } else if (new_stage === 'Lost') {
+      opp.status = 'lost';
+    } else {
+      opp.status = 'open';
+    }
+    
+    // UI Refresh without reload
+    (window as any).navigateTo(currentView);
+    console.log(`Opportunity ${opportunity_id} updated: Stage=[${new_stage}], Status=[${opp.status}]`);
+  }
+}
+
+// Drag & Drop Handlers
+(window as any).allowDrop = (ev: DragEvent) => {
+  ev.preventDefault();
+};
+
+(window as any).drag = (ev: DragEvent, id: string) => {
+  ev.dataTransfer?.setData("text", id);
+};
+
+(window as any).drop = (ev: DragEvent, stage: string) => {
+  ev.preventDefault();
+  const id = ev.dataTransfer?.getData("text");
+  if (id) {
+    updateOpportunityStage(id, stage);
+  }
+};
+
 (window as any).navigateTo = (view: string) => {
+  currentView = view;
   if (view === 'dashboard') renderDashboard();
   if (view === 'clients') renderClients();
+  if (view === 'opportunities') renderOpportunities();
   if (view === 'builder') renderBuilder();
   if (view === 'reports') renderReports();
   if (view === 'quickstart') renderQuickstart();
