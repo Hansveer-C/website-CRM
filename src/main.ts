@@ -18,6 +18,7 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('dashboard')" class="${activeView === 'dashboard' ? 'active' : ''}">Dashboard</li>
           <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}">Clients & Leads</li>
           <li onclick="window.navigateTo('opportunities')" class="${activeView === 'opportunities' ? 'active' : ''}">Opportunities</li>
+          <li onclick="window.navigateTo('lead-capture')" class="${activeView === 'lead-capture' ? 'active' : ''}">Lead Capture</li>
           <li onclick="window.navigateTo('builder')" class="${activeView === 'builder' ? 'active' : ''}">Website Builder</li>
           <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
           <li onclick="window.navigateTo('quickstart')" class="${activeView === 'quickstart' ? 'active' : ''}">Quickstart Guide</li>
@@ -310,6 +311,97 @@ function renderQuickstart() {
   `;
 }
 
+function renderLeadCapture() {
+  app.innerHTML = `
+    ${renderSidebar('lead-capture')}
+    <main class="main-content">
+      <header class="view-header">
+        <h2>Lead Capture Form</h2>
+      </header>
+      <div class="lead-form-container">
+        <p style="margin-bottom: 24px; color: var(--secondary-color);">Complete the form below to register a new lead and create a sales opportunity.</p>
+        <form id="lead-form">
+          <div class="form-group">
+            <label for="lead_name">Full Name</label>
+            <input type="text" id="lead_name" placeholder="John Doe" required>
+          </div>
+          <div class="form-group">
+            <label for="lead_phone">Phone Number</label>
+            <input type="tel" id="lead_phone" placeholder="555-012-3456" required>
+          </div>
+          <div class="form-group">
+            <label for="lead_email">Email Address</label>
+            <input type="email" id="lead_email" placeholder="john@example.com" required>
+          </div>
+          <div class="form-group">
+            <label for="lead_address">Service Address</label>
+            <input type="text" id="lead_address" placeholder="123 Main St, Anytown" required>
+          </div>
+          <div class="form-group">
+            <label for="lead_service">Service Needed</label>
+            <textarea id="lead_service" placeholder="Description of what needs cleaning..." required></textarea>
+          </div>
+          <div class="form-footer">
+            <button type="submit" class="btn-primary">Submit Lead Info</button>
+          </div>
+        </form>
+      </div>
+    </main>
+  `;
+
+  document.getElementById('lead-form')?.addEventListener('submit', handleLeadCaptureSubmission);
+}
+
+function handleLeadCaptureSubmission(e: Event) {
+  e.preventDefault();
+  const name = (document.getElementById('lead_name') as HTMLInputElement).value;
+  const phone = (document.getElementById('lead_phone') as HTMLInputElement).value;
+  const email = (document.getElementById('lead_email') as HTMLInputElement).value;
+  const address = (document.getElementById('lead_address') as HTMLInputElement).value;
+  const service = (document.getElementById('lead_service') as HTMLTextAreaElement).value;
+
+  const contact_id = 'c' + (mockContacts.length + 1);
+  const opp_id = 'o' + (mockOpportunities.length + 1);
+
+  // 1. Create new contact
+  mockContacts.push({
+    id: contact_id,
+    name,
+    phone,
+    email,
+    address,
+    tags: ['new-lead'],
+    source: 'Lead Capture Form',
+    service,
+    status: 'lead',
+    created_at: new Date().toISOString()
+  });
+
+  // 2. Create new opportunity
+  mockOpportunities.push({
+    id: opp_id,
+    contact_id,
+    pipeline_stage: 'New Lead',
+    value: 0, // Initial value
+    assigned_to: 'Hansveer',
+    status: 'open',
+    created_at: new Date().toISOString()
+  });
+
+  const container = document.querySelector('.lead-form-container');
+  if (container) {
+    container.innerHTML = `
+      <div style="text-align: center; padding: 40px 0;">
+        <div style="font-size: 3rem; color: var(--primary-color); margin-bottom: 20px;">✓</div>
+        <h2 style="margin-bottom: 10px;">Submission Received</h2>
+        <p style="font-size: 1.2rem; color: var(--secondary-color);">Thanks! We’ll contact you shortly.</p>
+        <button onclick="window.navigateTo('lead-capture')" class="btn-primary" style="margin-top: 30px; background-color: var(--secondary-color);">Capture Another Lead</button>
+        <button onclick="window.navigateTo('opportunities')" class="btn-primary" style="margin-top: 30px; margin-left:10px;">View Pipeline</button>
+      </div>
+    `;
+  }
+}
+
 function renderOpportunities() {
   const defaultPipeline = mockPipelines[0];
   const stages = defaultPipeline.stages;
@@ -393,6 +485,7 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   if (view === 'dashboard') renderDashboard();
   if (view === 'clients') renderClients();
   if (view === 'opportunities') renderOpportunities();
+  if (view === 'lead-capture') renderLeadCapture();
   if (view === 'builder') renderBuilder();
   if (view === 'reports') renderReports();
   if (view === 'quickstart') renderQuickstart();

@@ -10,6 +10,7 @@ export interface Contact {
   address: string;
   tags: string[];
   source: string;
+  service?: string;
   status: ContactStatus;
   created_at: string;
 }
