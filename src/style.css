@@ -395,3 +395,33 @@ body {
         padding: 20px;
     }
 }
+
+/* Advanced Dashboard Visuals */
+.report-item {
+    display: flex;
+    flex-direction: column;
+    padding: 12px 0;
+    border-bottom: 1px solid #eee;
+    gap: 8px;
+}
+
+.report-item-header {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.visual-bar-bg {
+    height: 8px;
+    background: #e9ecef;
+    border-radius: 4px;
+    width: 100%;
+    overflow: hidden;
+}
+
+.visual-bar-fill {
+    height: 100%;
+    background: var(--primary-color);
+    border-radius: 4px;
+    transition: width 0.5s ease;
+}

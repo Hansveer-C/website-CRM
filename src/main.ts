@@ -52,6 +52,8 @@ function renderDashboard() {
       .reduce((sum, o) => sum + o.value, 0);
     return { stage, value };
   }).filter(s => s.value > 0);
+  
+  const maxRevenue = Math.max(...revenueByStage.map(s => s.value), 1);
 
   // 2. Leads by Source
   const sourceMap: Record<string, number> = {};
@@ -59,6 +61,7 @@ function renderDashboard() {
     sourceMap[c.source] = (sourceMap[c.source] || 0) + 1;
   });
   const leadsBySource = Object.entries(sourceMap).map(([source, count]) => ({ source, count }));
+  const maxLeads = Math.max(...leadsBySource.map(s => s.count), 1);
 
   // 3. Overdue Tasks
   const overdueTasks = mockActivities.filter((a: Activity) => !a.completed && new Date(a.due_date) < now);
@@ -70,21 +73,25 @@ function renderDashboard() {
         <h2>Dashboard Overview</h2>
       </header>
       
-      <div class="dashboard-grid">
+      <div class="dashboard-grid" style="grid-template-columns: repeat(4, 1fr);">
         <div class="card">
-          <h3>Pipeline Value (Open)</h3>
-          <p class="value">$${pipelineValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+          <small style="color: #666;">Cash in Pipeline</small>
+          <h3>Pipeline Value</h3>
+          <p class="value" style="color: var(--primary-color);">$${pipelineValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
         </div>
         <div class="card">
-          <h3>Open Opportunities</h3>
+          <small style="color: #666;">Action Required</small>
+          <h3>Open Leads</h3>
           <p class="value">${openCount}</p>
         </div>
         <div class="card">
-          <h3>Conversion Rate</h3>
+          <small style="color: #666;">Success Rate</small>
+          <h3>Conv. Rate</h3>
           <p class="value">${conversionRate.toFixed(1)}%</p>
         </div>
-        <div class="card" style="border-left: 5px solid #ff4444;">
-          <h3>Overdue Tasks</h3>
+        <div class="card" style="border-bottom: 4px solid #ff4444;">
+          <small style="color: #666;">Attention Needed</small>
+          <h3 style="color: #ff4444;">Overdue</h3>
           <p class="value" style="color: #ff4444;">${overdueTasks.length}</p>
         </div>
       </div>
@@ -92,22 +99,32 @@ function renderDashboard() {
       <div class="stats-grid" style="margin-top: 30px;">
         <div class="card">
           <h3>Revenue by Pipeline Stage</h3>
-          <div class="chart-container" style="margin-top: 15px;">
+          <div class="chart-container" style="margin-top: 20px;">
             ${revenueByStage.map(s => `
               <div class="report-item">
-                <span>${s.stage}</span>
-                <span style="font-weight: 600;">$${s.value.toLocaleString()}</span>
+                <div class="report-item-header">
+                  <span>${s.stage}</span>
+                  <span style="font-weight: 600;">$${s.value.toLocaleString()}</span>
+                </div>
+                <div class="visual-bar-bg">
+                  <div class="visual-bar-fill" style="width: ${(s.value / maxRevenue) * 100}%"></div>
+                </div>
               </div>
-            `).join('') || '<p style="color: #666; font-style: italic;">No revenue data for active stages</p>'}
+            `).join('') || '<p style="color: #666; font-style: italic; padding: 20px;">No revenue data for active stages</p>'}
           </div>
         </div>
         <div class="card">
-          <h3>Leads by Source</h3>
-          <div class="chart-container" style="margin-top: 15px;">
+          <h3>Lead Sources Performance</h3>
+          <div class="chart-container" style="margin-top: 20px;">
             ${leadsBySource.map(s => `
               <div class="report-item">
-                <span>${s.source}</span>
-                <span class="badge" style="background: #e9ecef; color: #495057;">${s.count} Leads</span>
+                <div class="report-item-header">
+                  <span>${s.source}</span>
+                  <span style="font-weight: 600;">${s.count} Leads</span>
+                </div>
+                <div class="visual-bar-bg">
+                  <div class="visual-bar-fill" style="width: ${(s.count / maxLeads) * 100}%; background: #6c757d;"></div>
+                </div>
               </div>
             `).join('')}
           </div>
@@ -115,9 +132,11 @@ function renderDashboard() {
       </div>
 
       ${overdueTasks.length > 0 ? `
-        <div class="card" style="margin-top: 30px;">
-          <h3>Critical: Overdue Tasks</h3>
-          <table class="clients-table" style="box-shadow: none; border: 1px solid #eee; margin-top: 15px;">
+        <div class="card" style="margin-top: 30px; border: 1px solid #ffcccc;">
+          <h3 style="color: #cc0000; display: flex; align-items: center; gap: 10px;">
+             🛑 Action Item: Overdue Tasks
+          </h3>
+          <table class="clients-table" style="box-shadow: none; border: 1px solid #eee; margin-top: 20px;">
             <thead>
               <tr>
                 <th>Contact</th>
@@ -130,11 +149,11 @@ function renderDashboard() {
               ${overdueTasks.map((task: Activity) => {
                 const contact = mockContacts.find(c => c.id === task.contact_id);
                 return `
-                  <tr style="background: #fff5f5;">
+                  <tr style="background: #fffafa;">
                     <td style="font-weight: 600;">${contact ? contact.name : 'Unknown'}</td>
                     <td>${task.description}</td>
                     <td style="color: #ff4444; font-weight: 500;">${new Date(task.due_date).toLocaleDateString()}</td>
-                    <td><button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #ff4444;">Resolve</button></td>
+                    <td><button class="btn-primary" style="padding: 6px 12px; font-size: 0.8rem; background: #ff4444; border-radius: 4px;">Resolve</button></td>
                   </tr>
                 `;
               }).join('')}
