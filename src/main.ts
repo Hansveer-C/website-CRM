@@ -573,7 +573,15 @@ function renderOpportunities() {
       return `
         <div class="kanban-card" draggable="true" ondragstart="drag(event, '${opp.id}')" onclick="window.navigateTo('contact-detail', '${opp.contact_id}')" style="cursor: pointer;">
           <div class="contact-name">${contact ? contact.name : 'Unknown Contact'}</div>
-          <div class="opportunity-value">$${opp.value.toLocaleString()}</div>
+          <div class="opportunity-value" style="display: flex; align-items: center; gap: 4px;">
+            <span>$</span>
+            <input type="number" 
+                   value="${opp.value}" 
+                   class="inline-input" 
+                   style="font-weight: 600; width: 80px;"
+                   onclick="event.stopPropagation()" 
+                   onchange="window.updateOpportunityField('${opp.id}', 'value', this.value)">
+          </div>
           <div class="contact-phone">${contact ? contact.phone : 'N/A'}</div>
         </div>
       `;
@@ -618,13 +626,15 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
     }
     
     // UI Refresh without reload
-    (window as any).navigateTo(currentView);
+    (window as any).navigateTo(currentView, selectedContactId || undefined);
     console.log(`Opportunity ${opportunity_id} updated: Stage=[${new_stage}], Status=[${opp.status}]`);
     
     // Trigger Automation
     runAutomations('OPPORTUNITY_STAGE_UPDATED', opp);
   }
 }
+
+(window as any).updateOpportunityStage = updateOpportunityStage;
 
 // Drag & Drop Handlers
 (window as any).allowDrop = (ev: DragEvent) => {
@@ -680,6 +690,7 @@ function renderContactDetail(contactId: string) {
       <div class="action-bar">
         <button class="btn-primary" onclick="window.logCall('${contactId}')">📞 Log Call</button>
         <button class="btn-primary" onclick="window.addNote('${contactId}')" style="background: var(--secondary-color);">📝 Add Note</button>
+        <button class="btn-primary" onclick="window.createOpportunity('${contactId}')" style="background: #28a745;">💰 New Opportunity</button>
       </div>
 
       <div class="detail-container">
@@ -687,9 +698,15 @@ function renderContactDetail(contactId: string) {
         <aside class="detail-sidebar">
           <div class="card">
             <h3>Contact Information</h3>
-            <div style="margin-top: 15px;">
-              <p><strong>Phone:</strong> ${contact.phone}</p>
-              <p><strong>Email:</strong> ${contact.email}</p>
+            <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #666;">Phone</label>
+                <input type="text" value="${contact.phone}" class="inline-input" onchange="window.updateContactField('${contactId}', 'phone', this.value)" style="width: 100%;">
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #666;">Email</label>
+                <input type="email" value="${contact.email}" class="inline-input" onchange="window.updateContactField('${contactId}', 'email', this.value)" style="width: 100%;">
+              </div>
               <p><strong>Address:</strong> ${contact.address}</p>
               <p><strong>Source:</strong> ${contact.source}</p>
               <p><strong>Created:</strong> ${new Date(contact.created_at).toLocaleDateString()}</p>
@@ -699,9 +716,18 @@ function renderContactDetail(contactId: string) {
             <div style="margin-top: 15px;">
               ${contactOpps.map(opp => `
                 <div class="opportunity-strip">
-                  <div>
-                    <div style="font-weight: 600;">$${opp.value.toLocaleString()}</div>
-                    <small style="color: #666;">${opp.pipeline_stage}</small>
+                  <div style="flex: 1;">
+                    <div style="display: flex; align-items: center;">
+                      <span>$</span>
+                      <input type="number" 
+                             value="${opp.value}" 
+                             class="inline-input" 
+                             onchange="window.updateOpportunityField('${opp.id}', 'value', this.value)" 
+                             style="width: 80px; font-weight: 600;">
+                    </div>
+                    <select class="inline-select" onchange="window.updateOpportunityStage('${opp.id}', this.value)">
+                      ${mockPipelines[0].stages.map(s => `<option value="${s}" ${s === opp.pipeline_stage ? 'selected' : ''}>${s}</option>`).join('')}
+                    </select>
                   </div>
                   <span class="badge badge-${opp.status}" style="font-size: 0.7rem;">${opp.status}</span>
                 </div>
@@ -772,6 +798,48 @@ function renderContactDetail(contactId: string) {
   if (activity) {
     activity.completed = true;
     if (selectedContactId) renderContactDetail(selectedContactId);
+  }
+};
+
+(window as any).createOpportunity = (contactId: string) => {
+  const valueInput = prompt("Enter Opportunity value (e.g. 500):", "0");
+  const value = parseFloat(valueInput || "0");
+
+  const newOpp = {
+    id: 'o' + (mockOpportunities.length + 1) + '-' + Math.floor(Math.random() * 100),
+    contact_id: contactId,
+    pipeline_stage: 'New Lead',
+    value: isNaN(value) ? 0 : value,
+    assigned_to: 'Hansveer',
+    status: 'open' as any,
+    created_at: new Date().toISOString()
+  };
+
+  mockOpportunities.push(newOpp);
+  
+  // Trigger automation
+  runAutomations('OPPORTUNITY_CREATED', newOpp);
+  
+  renderContactDetail(contactId);
+};
+
+(window as any).updateOpportunityField = (oppId: string, field: string, value: string) => {
+  const opp = mockOpportunities.find(o => o.id === oppId);
+  if (opp) {
+    if (field === 'value') {
+      opp.value = parseFloat(value) || 0;
+    } else {
+      (opp as any)[field] = value;
+    }
+    (window as any).navigateTo(currentView, selectedContactId || undefined);
+  }
+};
+
+(window as any).updateContactField = (contactId: string, field: string, value: string) => {
+  const contact = mockContacts.find(c => c.id === contactId);
+  if (contact) {
+    (contact as any)[field] = value;
+    (window as any).navigateTo(currentView, selectedContactId || undefined);
   }
 };
 

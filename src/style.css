@@ -504,3 +504,42 @@ body {
     align-items: center;
     border-left: 4px solid var(--primary-color);
 }
+
+/* Inline Editing Styles */
+.inline-input {
+    border: none;
+    border-bottom: 1px solid transparent;
+    background: transparent;
+    font-family: inherit;
+    font-size: inherit;
+    padding: 2px 4px;
+    transition: all 0.2s;
+    color: inherit;
+}
+
+.inline-input:hover {
+    background: rgba(0,0,0,0.02);
+    border-bottom-color: #ddd;
+}
+
+.inline-input:focus {
+    outline: none;
+    background: white;
+    border-bottom-color: var(--primary-color);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.inline-select {
+    border: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: inherit;
+    color: #666;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 4px;
+}
+
+.inline-select:hover {
+    background: rgba(0,0,0,0.02);
+}
