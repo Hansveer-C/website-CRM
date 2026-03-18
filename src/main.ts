@@ -1,4 +1,3 @@
-import { templates, WebsiteTemplate, BuilderBlock } from './templates';
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents } from './db';
 import { Activity } from './types';
 import { runAutomations, checkOverdueInvoices } from './automation';
@@ -7,14 +6,16 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 
 // State Management
 let currentView: string = 'dashboard';
-let currentTemplate: WebsiteTemplate = templates[0];
-let canvasBlocks: BuilderBlock[] = [...currentTemplate.blocks];
 
 // Filter & Selection State
 let clientSearchQuery: string = '';
 let clientStatusFilter: string = 'all';
 let selectedContactId: string | null = null;
 let invoiceStatusFilter: string = 'all';
+
+// Page Builder State
+let builderPageId: string = mockPages[0]?.id || '';
+let builderSelectedSectionId: string | null = null;
 
 // New Quote State
 let newQuoteLineItems: { service: string, description: string, quantity: number, price: number, tier: 'basic' | 'standard' | 'premium' }[] = [
@@ -272,170 +273,201 @@ function renderClients() {
 
 // Builder Rendering Logic
 function renderBuilder() {
+  const page = mockPages.find(p => p.id === builderPageId);
+  if (!page) return;
+
+  const sections = mockPageSections
+    .filter(s => s.page_id === builderPageId)
+    .sort((a, b) => a.order - b.order);
+
+  const selectedSection = sections.find(s => s.id === builderSelectedSectionId);
+
   app.innerHTML = `
     ${renderSidebar('builder')}
-    <main class="main-content">
-      <header class="view-header">
-        <div style="display: flex; align-items: center; gap: 20px;">
-          <h2>Website Builder</h2>
-          <select id="template-select" style="padding: 8px; border-radius: 4px; border: 1px solid #ccc;">
-            ${templates.map(t => `<option value="${t.id}" ${t.id === currentTemplate.id ? 'selected' : ''}>${t.name}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <button class="btn-primary" style="background-color: var(--secondary-color); margin-right: 10px;">Preview</button>
-          <button class="btn-primary">Publish Website</button>
-        </div>
-      </header>
-      <div class="builder-container">
-        <div class="builder-sidebar">
-          <h4>Add Elements</h4>
-          <div class="draggable-item" data-type="hero">Hero Block</div>
-          <div class="draggable-item" data-type="services">Services Block</div>
-          <div class="draggable-item" data-type="contact">Contact Block</div>
-          <div class="draggable-item" data-type="gallery">Gallery Block</div>
-          <div class="draggable-item" data-type="trust">Trust Block</div>
-        </div>
-        <div class="builder-canvas" id="canvas">
-          ${renderCanvasBlocks()}
-        </div>
+    <main class="main-content" style="padding: 0; overflow: hidden;">
+      <div class="pb-layout">
+        <!-- Left Panel: Components -->
+        <aside class="pb-left-panel">
+          <div class="pb-panel-header">Components</div>
+          <div class="pb-component-list">
+            ${mockComponents.map(comp => `
+              <div class="pb-component-card" onclick="window.addSectionToPage('${comp.id}')">
+                <div style="font-weight: 500;">${comp.name}</div>
+                <small style="color: #666; margin-left: auto;">${comp.type}</small>
+              </div>
+            `).join('')}
+          </div>
+          <div style="margin-top: auto; padding: 16px; background: #f8f9fa; border-top: 1px solid #eee;">
+             <label style="font-size: 0.75rem; color: #666; display: block; margin-bottom: 5px;">Editing Page:</label>
+             <select onchange="window.switchBuilderPage(this.value)" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ddd;">
+                ${mockPages.map(p => `<option value="${p.id}" ${p.id === builderPageId ? 'selected' : ''}>${p.name}</option>`).join('')}
+             </select>
+          </div>
+        </aside>
+
+        <!-- Center Panel: Canvas Preview -->
+        <section class="pb-center-canvas">
+          <header style="width: 100%; max-width: 900px; display: flex; justify-content: space-between; margin-bottom: 20px;">
+            <h3 style="color: #444;">Preview: ${page.name}</h3>
+            <div style="display: flex; gap: 10px;">
+              <button class="btn-primary" style="background: #eee; color: #333;" onclick="window.savePageSections()">Save Changes</button>
+              <button class="btn-primary" onclick="alert('Publishing...')">Publish</button>
+            </div>
+          </header>
+          
+          ${sections.map(section => `
+            <div class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''}" 
+                 onclick="window.selectSectionForBuilder('${section.id}')">
+              
+              <div style="padding: 40px; text-align: ${section.styles.textAlign || 'left'}; background: ${section.styles.background || section.styles.backgroundColor || 'white'}; color: ${section.styles.color || 'inherit'}; border-radius: 8px;">
+                ${renderSectionPreviewContent(section)}
+              </div>
+
+              <div class="pb-section-controls">
+                <button class="btn-primary" style="padding: 4px 8px; font-size: 0.7rem; background: #eee; color: #333; border: 1px solid #ddd;" onclick="event.stopPropagation(); window.moveSection('${section.id}', -1)">↑</button>
+                <button class="btn-primary" style="padding: 4px 8px; font-size: 0.7rem; background: #eee; color: #333; border: 1px solid #ddd;" onclick="event.stopPropagation(); window.moveSection('${section.id}', 1)">↓</button>
+                <button class="btn-primary" style="padding: 4px 8px; font-size: 0.7rem; background: #dc3545; color: white;" onclick="event.stopPropagation(); window.removeSection('${section.id}')">×</button>
+              </div>
+            </div>
+          `).join('') || '<div class="pb-section-preview" style="padding: 60px; text-align: center; color: #999; border: 2px dashed #cbd5e0;">No sections yet. Add one from the left!</div>'}
+        </section>
+
+        <!-- Right Panel: Settings -->
+        <aside class="pb-right-panel">
+          <div class="pb-panel-header">Settings ${selectedSection ? `: ${selectedSection.type}` : ''}</div>
+          <div class="pb-settings-form">
+            ${selectedSection ? `
+              <div class="pb-setting-group">
+                <label>Content (JSON)</label>
+                <textarea id="setting-content" class="pb-json-editor" oninput="window.updateSectionData('${selectedSection.id}', 'content', this.value)">${JSON.stringify(selectedSection.content, null, 2)}</textarea>
+              </div>
+              <div class="pb-setting-group">
+                <label>Styles (JSON)</label>
+                <textarea id="setting-styles" class="pb-json-editor" oninput="window.updateSectionData('${selectedSection.id}', 'styles', this.value)">${JSON.stringify(selectedSection.styles, null, 2)}</textarea>
+              </div>
+              <div style="background: #fff8e1; padding: 12px; border-radius: 4px; border: 1px solid #ffe082; font-size: 0.8rem; color: #795548;">
+                <strong>Pro Tip:</strong> JSON edits apply live to the center preview!
+              </div>
+            ` : `
+              <div style="height: 100%; display: flex; align-items: center; justify-content: center; text-align: center; color: #999; padding: 20px;">
+                Select a section on the canvas to edit its properties
+              </div>
+            `}
+          </div>
+          <div class="pb-panel-footer">
+             <button class="btn-primary" style="width: 100%; background: #6c757d;" onclick="window.builderSelectedSectionId = null; renderBuilder();">Deselect</button>
+          </div>
+        </aside>
       </div>
     </main>
   `;
-
-  // Attach event listeners
-  document.getElementById('template-select')?.addEventListener('change', (e) => {
-    const val = (e.target as HTMLSelectElement).value;
-    const template = templates.find(t => t.id === val);
-    if (template) {
-      currentTemplate = template;
-      canvasBlocks = [...template.blocks];
-      renderBuilder();
-    }
-  });
-
-  // Attach drag listeners to draggable items
-  document.querySelectorAll('.draggable-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const type = item.getAttribute('data-type') as any;
-      (window as any).addBlock(type);
-    });
-  });
 }
 
-function renderCanvasBlocks() {
-  if (canvasBlocks.length === 0) {
-    return `<div class="canvas-section" style="border: 2px dashed #007bff; background: #f0f7ff;">
-              <p style="color: #007bff;">Click an element to add it here</p>
-            </div>`;
-  }
-
-  return canvasBlocks.map((block, index) => {
-    let content = '';
-    switch (block.type) {
-      case 'hero':
-        content = `
-          <div class="canvas-hero" style="background: linear-gradient(135deg, ${currentTemplate.theme.primary}, ${currentTemplate.theme.secondary});">
-            <h1>${block.data.title}</h1>
-            <p>${block.data.subtitle}</p>
-            <button class="btn-primary" style="background: white; color: ${currentTemplate.theme.primary}; margin-top: 20px;">${block.data.buttonText}</button>
-          </div>
-        `;
-        break;
-      case 'services':
-        content = `
-          <div class="canvas-section">
-            <h3>${block.data.title}</h3>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px;">
-              ${block.data.items.map((i: string) => `<div style="padding: 10px; border: 1px solid #eee; border-radius: 4px;">${i}</div>`).join('')}
-            </div>
-          </div>
-        `;
-        break;
-      case 'contact':
-        content = `
-          <div class="canvas-section">
-            <h3>${block.data.title}</h3>
-            <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 10px; max-width: 400px; margin-left: auto; margin-right: auto;">
-              <input type="text" placeholder="Name" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-              <input type="email" placeholder="Email" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-              <button class="btn-primary" style="background: ${currentTemplate.theme.primary}">Send Quote Request</button>
-            </div>
-          </div>
-        `;
-        break;
-      case 'gallery':
-        content = `
-          <div class="canvas-section">
-            <h3>${block.data.title}</h3>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 20px;">
-              ${block.data.images.map((img: string) => `<div style="height: 100px; background: #eee; border-radius: 4px; display: flex; align-items: center; justify-content: center;">${img}</div>`).join('')}
-            </div>
-          </div>
-        `;
-        break;
-      case 'trust':
-        content = `
-          <div class="canvas-section">
-            <h3>${block.data.title}</h3>
-            <div style="display: flex; justify-content: center; gap: 30px; margin-top: 20px; opacity: 0.6;">
-              ${(block.data.logos || []).map((l: string) => `<strong>${l}</strong>`).join('')}
-              ${(block.data.testimonials || []).map((t: any) => `<div><p>"${t.text}"</p><small>- ${t.name}</small></div>`).join('')}
-            </div>
-          </div>
-        `;
-        break;
-    }
-
-    return `
-      <div class="block-wrapper" style="position: relative; width: 100%;">
-        <div style="position: absolute; right: -40px; top: 0; display: flex; flex-direction: column; gap: 5px;">
-           <button onclick="window.removeBlock(${index})" style="background: #ff4444; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer;">×</button>
-           <button onclick="window.moveBlock(${index}, -1)" style="background: #eee; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">↑</button>
-           <button onclick="window.moveBlock(${index}, 1)" style="background: #eee; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;">↓</button>
+function renderSectionPreviewContent(section: any) {
+  const content = section.content;
+  switch (section.type) {
+    case 'hero':
+      return `
+        <h1 style="font-size: 2.5rem; margin-bottom: 1rem;">${content.title || 'Hero Title'}</h1>
+        <p style="font-size: 1.25rem; opacity: 0.8; margin-bottom: 2rem;">${content.subtitle || 'Hero Subtitle'}</p>
+        <button class="btn-primary">${content.buttonText || 'Action'}</button>
+      `;
+    case 'text':
+      return `<div style="line-height: 1.6;">${content.text || 'Text content goes here...'}</div>`;
+    case 'image':
+      return `<img src="${content.url}" alt="${content.alt}" style="width: 100%; height: auto; border-radius: inherit;">`;
+    case 'form':
+      return `
+        <h3>${content.title || 'Contact Form'}</h3>
+        <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 20px;">
+          ${(content.fields || ['name', 'email']).map((f: string) => `<input type="text" placeholder="${f.toUpperCase()}" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px;">`).join('')}
+          <button class="btn-primary">Submit</button>
         </div>
-        ${content}
-      </div>
-    `;
-  }).join('');
+      `;
+    case 'button':
+      return `<button class="btn-primary" onclick="alert('Link: ${content.link}')">${content.text || 'Click Here'}</button>`;
+    default:
+      return `<pre>${JSON.stringify(content, null, 2)}</pre>`;
+  }
 }
 
-// Global functions for block manipulation
-(window as any).addBlock = (type: any) => {
-  const newBlock: BuilderBlock = {
-    id: Date.now().toString(),
-    type,
-    data: getInitialData(type)
+// Global functions for Builder interaction
+(window as any).switchBuilderPage = (id: string) => {
+  builderPageId = id;
+  builderSelectedSectionId = null;
+  renderBuilder();
+};
+
+(window as any).selectSectionForBuilder = (id: string) => {
+  builderSelectedSectionId = id;
+  renderBuilder();
+};
+
+(window as any).addSectionToPage = (componentId: string) => {
+  const component = mockComponents.find(c => c.id === componentId);
+  if (!component) return;
+
+  const currentSections = mockPageSections.filter(s => s.page_id === builderPageId);
+  const maxOrder = Math.max(...currentSections.map(s => s.order), 0);
+
+  const newSection = {
+    id: `sec-${Date.now()}`,
+    page_id: builderPageId,
+    type: component.type,
+    content: JSON.parse(JSON.stringify(component.default_content)),
+    styles: JSON.parse(JSON.stringify(component.default_styles)),
+    order: maxOrder + 1
   };
-  canvasBlocks.push(newBlock);
+
+  mockPageSections.push(newSection);
+  builderSelectedSectionId = newSection.id;
   renderBuilder();
 };
 
-(window as any).removeBlock = (index: number) => {
-  canvasBlocks.splice(index, 1);
-  renderBuilder();
-};
-
-(window as any).moveBlock = (index: number, direction: number) => {
-  const newIndex = index + direction;
-  if (newIndex >= 0 && newIndex < canvasBlocks.length) {
-    const temp = canvasBlocks[index];
-    canvasBlocks[index] = canvasBlocks[newIndex];
-    canvasBlocks[newIndex] = temp;
+(window as any).removeSection = (id: string) => {
+  const index = mockPageSections.findIndex(s => s.id === id);
+  if (index !== -1) {
+    mockPageSections.splice(index, 1);
+    if (builderSelectedSectionId === id) builderSelectedSectionId = null;
     renderBuilder();
   }
 };
 
-function getInitialData(type: string) {
-  switch (type) {
-    case 'hero': return { title: 'Insert Title', subtitle: 'Insert Subtitle', buttonText: 'Click Me' };
-    case 'services': return { title: 'Our Services', items: ['Service 1', 'Service 2', 'Service 3'] };
-    case 'contact': return { title: 'Get In Touch' };
-    case 'gallery': return { title: 'Our Work', images: ['Image 1', 'Image 2', 'Image 3'] };
-    case 'trust': return { title: 'What Clients Say', testimonials: [{ name: 'John D.', text: 'Great Job!' }] };
-    default: return {};
+(window as any).moveSection = (id: string, direction: number) => {
+  const pageSections = mockPageSections
+    .filter(s => s.page_id === builderPageId)
+    .sort((a, b) => a.order - b.order);
+  
+  const index = pageSections.findIndex(s => s.id === id);
+  const newIndex = index + direction;
+  
+  if (newIndex >= 0 && newIndex < pageSections.length) {
+    const section1 = pageSections[index];
+    const section2 = pageSections[newIndex];
+    
+    const tempOrder = section1.order;
+    section1.order = section2.order;
+    section2.order = tempOrder;
+    
+    renderBuilder();
   }
-}
+};
+
+(window as any).updateSectionData = (id: string, field: 'content' | 'styles', value: string) => {
+  const section = mockPageSections.find(s => s.id === id);
+  if (!section) return;
+
+  try {
+    section[field] = JSON.parse(value);
+    renderBuilder(); // Live update!
+  } catch (e) {
+    // Silently ignore invalid JSON while typing
+  }
+};
+
+(window as any).savePageSections = () => {
+  alert('All changes saved to database!');
+};
 
 function renderReports() {
   app.innerHTML = `

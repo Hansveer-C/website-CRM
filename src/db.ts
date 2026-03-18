@@ -180,5 +180,19 @@ export const mockComponents: Component[] = [
     type: 'form',
     default_content: { fields: ['name', 'email', 'message'] },
     default_styles: { border: '1px solid #ccc' }
+  },
+  {
+    id: 'comp4',
+    name: 'Featured Image',
+    type: 'image',
+    default_content: { url: 'https://via.placeholder.com/800x400', alt: 'Placeholder' },
+    default_styles: { borderRadius: '8px' }
+  },
+  {
+    id: 'comp5',
+    name: 'Call to Action',
+    type: 'button',
+    default_content: { text: 'Get Started', link: '#' },
+    default_styles: { backgroundColor: '#007bff', color: 'white', padding: '12px 24px' }
   }
 ];
