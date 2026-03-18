@@ -240,7 +240,8 @@ export const mockComponents: Component[] = [
     type: 'form',
     default_content: { 
       title: 'Get a Free Quote',
-      fields: ['name', 'phone', 'email', 'message'] 
+      fields: ['name', 'phone', 'email', 'message'],
+      pipeline_id: 'p1'
     },
     default_styles: { 
       padding: '30px', 

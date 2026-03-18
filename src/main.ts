@@ -42,10 +42,11 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('invoices')" class="${activeView === 'invoices' ? 'active' : ''}">Invoices</li>
           <li onclick="window.navigateTo('lead-capture')" class="${activeView === 'lead-capture' ? 'active' : ''}">Lead Capture</li>
           
-          <div class="nav-group-title">Website Builder</div>
-          <li onclick="window.navigateTo('pages')" class="${activeView === 'pages' || activeView === 'page-sections' ? 'active' : ''}">Manage Pages</li>
-          <li onclick="window.navigateTo('components')" class="${activeView === 'components' ? 'active' : ''}">Component Library</li>
-          <li onclick="window.navigateTo('builder')" class="${activeView === 'builder' ? 'active' : ''}">Launch Visual Editor</li>
+          <div class="nav-group-title">Websites</div>
+          <li onclick="window.navigateTo('pages')" class="${activeView === 'pages' || activeView === 'page-sections' ? 'active' : ''}">Pages</li>
+          <li onclick="window.navigateTo('templates')" class="${activeView === 'templates' ? 'active' : ''}">Templates</li>
+          <li onclick="window.navigateTo('components')" class="${activeView === 'components' ? 'active' : ''}">Components</li>
+          <li onclick="window.navigateTo('website-settings')" class="${activeView === 'website-settings' ? 'active' : ''}">Settings</li>
           
           <div class="nav-group-title">System</div>
           <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
@@ -277,8 +278,62 @@ function renderClients() {
   renderClients();
 };
 
+(window as any).updatePageName = (id: string, name: string) => {
+  const page = mockPages.find(p => p.id === id);
+  if (page) {
+    page.name = name;
+    (page as any).updated_at = new Date().toISOString();
+  }
+};
+
+(window as any).togglePublishFromBuilder = (id: string) => {
+  const page = mockPages.find(p => p.id === id);
+  if (page) {
+    page.status = page.status === 'published' ? 'draft' : 'published';
+    (page as any).updated_at = new Date().toISOString();
+    renderBuilder();
+  }
+};
+
+let isAutoSaving = false;
+let autoSaveTimeout: any;
+
+(window as any).triggerAutoSave = () => {
+  isAutoSaving = true;
+  const indicator = document.getElementById('pb-autosave-indicator');
+  if (indicator) {
+    indicator.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #ffc107; box-shadow: 0 0 5px #ffc107;"></span> Saving...`;
+  }
+  clearTimeout(autoSaveTimeout);
+  autoSaveTimeout = setTimeout(() => {
+    isAutoSaving = false;
+    const page = mockPages.find(p => p.id === builderPageId);
+    if(page) (page as any).updated_at = new Date().toISOString();
+    const ind = document.getElementById('pb-autosave-indicator');
+    if(ind) {
+       ind.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #28a745;"></span> Saved`;
+    }
+  }, 1000);
+};
+
 // Builder Rendering Logic
+let builderRightPanelTab: 'content' | 'styles' = 'content';
+(window as any).setBuilderTab = (tab: 'content' | 'styles') => {
+  builderRightPanelTab = tab;
+  renderBuilder();
+};
+
 function renderBuilder() {
+  if (!(document as any).startViewTransition) {
+    _renderBuilder();
+    return;
+  }
+  (document as any).startViewTransition(() => {
+    _renderBuilder();
+  });
+}
+
+function _renderBuilder() {
   const page = mockPages.find(p => p.id === builderPageId);
   if (!page) return;
 
@@ -290,8 +345,22 @@ function renderBuilder() {
 
   app.innerHTML = `
     ${renderSidebar('builder')}
-    <main class="main-content" style="padding: 0; overflow: hidden; height: 100vh;">
-      <div class="pb-layout">
+    <main class="main-content" style="padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column;">
+      <header style="background: #111; border-bottom: 1px solid #333; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; z-index: 100; flex-shrink: 0;">
+        <div style="display: flex; align-items: center; gap: 15px;">
+          <button class="btn-primary" style="background: transparent; border: 1px solid #333; color: #888; padding: 6px 12px; font-size: 0.8rem;" onclick="window.navigateTo('pages')">← Back to List</button>
+          <input type="text" value="${page.name}" onchange="window.updatePageName('${page.id}', this.value)" style="background: transparent; border: 1px solid transparent; color: white; font-size: 1.1rem; font-weight: 600; padding: 4px 8px; border-radius: 4px; transition: border-color 0.2s; outline: none; width: 300px;" onfocus="this.style.borderColor='#333'; this.style.background='#000'" onblur="this.style.borderColor='transparent'; this.style.background='transparent'" title="Edit Page Name">
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span id="pb-autosave-indicator" style="color: #888; font-size: 0.8rem; margin-right: 15px; display: flex; align-items: center; gap: 6px; font-weight: 600;">
+            <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: ${isAutoSaving ? '#ffc107' : '#28a745'}; box-shadow: ${isAutoSaving ? '0 0 5px #ffc107' : 'none'};"></span> ${isAutoSaving ? 'Saving...' : 'Saved'}
+          </span>
+          <button class="btn-primary" style="background: #222; border: 1px solid #444; padding: 6px 15px; font-size: 0.85rem;" onclick="window.navigateTo('preview', '${page.slug}')">Preview</button>
+          <div style="width: 1px; height: 20px; background: #333; margin: 0 5px;"></div>
+          <button class="btn-primary" style="background: ${page.status === 'published' ? '#ea580c' : 'var(--primary-color)'}; padding: 6px 15px; font-size: 0.85rem;" onclick="window.togglePublishFromBuilder('${page.id}')">${page.status === 'published' ? 'Unpublish' : 'Publish'}</button>
+        </div>
+      </header>
+      <div class="pb-layout" style="flex: 1;">
         <!-- Left Panel: Navigator & Components -->
         <aside class="pb-left-panel">
           <div class="pb-panel-header">
@@ -300,29 +369,35 @@ function renderBuilder() {
           </div>
           
           <div class="pb-component-list">
-            <div style="font-size: 0.7rem; color: #555; margin-bottom: 10px; font-weight: 800; text-transform: uppercase;">Basic Elements</div>
+            <div style="font-size: 0.7rem; color: #555; margin-bottom: 10px; font-weight: 800; text-transform: uppercase;">Basic</div>
             ${mockComponents.filter(c => ['text', 'button', 'image'].includes(c.type)).map(comp => `
               <div class="pb-component-item" onclick="window.addSectionToPage('${comp.id}')">
-                <div style="width: 32px; height: 32px; background: #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">
-                  ${comp.type === 'text' ? 'T' : comp.type === 'button' ? '?' : '?' }
-                </div>
-                <div>
-                  <div style="font-weight: 600; font-size: 0.85rem;">${comp.name}</div>
-                  <small style="color: #666; font-size: 0.7rem;">Click to append</small>
-                </div>
+                <div style="width: 32px; height: 32px; background: #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">+</div>
+                <div><div style="font-weight: 600; font-size: 0.85rem;">${comp.name}</div></div>
               </div>
             `).join('')}
 
-            <div style="font-size: 0.7rem; color: #555; margin: 20px 0 10px 0; font-weight: 800; text-transform: uppercase;">Advanced Sections</div>
-            ${mockComponents.filter(c => !['text', 'button', 'image'].includes(c.type)).map(comp => `
+            <div style="font-size: 0.7rem; color: #555; margin: 20px 0 10px 0; font-weight: 800; text-transform: uppercase;">Layout</div>
+            ${mockComponents.filter(c => ['hero', 'section'].includes(c.type)).map(comp => `
               <div class="pb-component-item" onclick="window.addSectionToPage('${comp.id}')">
-                <div style="width: 32px; height: 32px; background: #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">
-                   ${comp.type === 'hero' ? '?' : '?' }
-                </div>
-                <div>
-                  <div style="font-weight: 600; font-size: 0.85rem;">${comp.name}</div>
-                  <small style="color: #666; font-size: 0.7rem;">Conversion focus</small>
-                </div>
+                <div style="width: 32px; height: 32px; background: #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">+</div>
+                <div><div style="font-weight: 600; font-size: 0.85rem;">${comp.name}</div></div>
+              </div>
+            `).join('')}
+            
+            <div style="font-size: 0.7rem; color: #555; margin: 20px 0 10px 0; font-weight: 800; text-transform: uppercase;">Forms</div>
+            ${mockComponents.filter(c => ['form'].includes(c.type)).map(comp => `
+              <div class="pb-component-item" onclick="window.addSectionToPage('${comp.id}')">
+                <div style="width: 32px; height: 32px; background: #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">+</div>
+                <div><div style="font-weight: 600; font-size: 0.85rem;">${comp.name}</div></div>
+              </div>
+            `).join('')}
+
+            <div style="font-size: 0.7rem; color: #555; margin: 20px 0 10px 0; font-weight: 800; text-transform: uppercase;">Advanced</div>
+            ${mockComponents.filter(c => !['text', 'button', 'image', 'hero', 'section', 'form'].includes(c.type)).map(comp => `
+              <div class="pb-component-item" onclick="window.addSectionToPage('${comp.id}')">
+                <div style="width: 32px; height: 32px; background: #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">+</div>
+                <div><div style="font-weight: 600; font-size: 0.85rem;">${comp.name}</div></div>
               </div>
             `).join('')}
           </div>
@@ -336,20 +411,9 @@ function renderBuilder() {
         </aside>
 
         <!-- Center Panel: Live Canvas -->
-        <section class="pb-canvas-area">
-          <div style="width: 100%; max-width: 1200px; display: flex; justify-content: space-between; margin-bottom: 25px; align-items: center;">
-            <div>
-               <h2 style="color: white; font-size: 1.2rem; margin: 0;">${page.name}</h2>
-               <small style="color: #444;">Live Visual Editing Mode</small>
-            </div>
-            <div style="display: flex; gap: 12px;">
-               <button class="btn-primary" style="background: transparent; border: 1px solid #333; color: #888;" onclick="window.navigateTo('pages')">Back to List</button>
-               <button class="btn-primary" style="background: #222; border: 1px solid #444;" onclick="window.savePageSections()">Save Draft</button>
-               <button class="btn-primary" style="background: var(--primary-color);" onclick="alert('Publishing Site...')">Publish Live</button>
-            </div>
-          </div>
+        <section class="pb-canvas-area" style="overflow-y: auto; height: 100%; padding-bottom: 50px;">
           
-          <div class="pb-canvas-inner">
+          <div class="pb-canvas-inner" style="padding-top: 25px;">
             ${['Add Initial', ...sections].map((item) => {
               const isInitial = item === 'Add Initial';
               const section = isInitial ? null : (item as any);
@@ -361,7 +425,10 @@ function renderBuilder() {
                 </div>
                 ${!isInitial ? `
                   <div class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''}" 
-                       onclick="window.selectSectionForBuilder('${section.id}')">
+                       style="position: relative; view-transition-name: section-${section.id}; ${builderSelectedSectionId === section.id ? 'outline: 3px solid var(--primary-color); outline-offset: -3px; box-shadow: 0 0 15px rgba(0,0,0,0.1);' : ''} transition: all 0.2s;"
+                       onclick="window.selectSectionForBuilder('${section.id}')"
+                       onmouseenter="this.querySelector('.pb-section-controls').style.opacity='1'"
+                       onmouseleave="this.querySelector('.pb-section-controls').style.opacity='0'">
                       
                       <div style="padding: ${section.styles.padding || '60px 20px'}; 
                                   text-align: ${section.styles.text_alignment || section.styles.alignment || section.styles.textAlign || 'left'}; 
@@ -384,10 +451,12 @@ function renderBuilder() {
                         </div>
                       </div>
 
-                      <div class="pb-section-controls">
-                        <button onclick="event.stopPropagation(); window.moveSection('${section.id}', -1)" style="background: #333; color: white; border: none; padding: 4px 10px; cursor: pointer;">↑</button>
-                        <button onclick="event.stopPropagation(); window.moveSection('${section.id}', 1)" style="background: #333; color: white; border: none; padding: 4px 10px; cursor: pointer;">↓</button>
-                        <button onclick="event.stopPropagation(); window.removeSection('${section.id}')" style="background: #dc3545; color: white; border: none; padding: 4px 10px; cursor: pointer;">×</button>
+                      <div class="pb-section-controls" style="opacity: 0; transition: opacity 0.2s; position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; z-index: 10;">
+                        <button title="Add section below" onclick="event.stopPropagation(); window.showComponentPickerAt('${order}')" style="background: #28a745; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: 600;">+ Add</button>
+                        <button title="Duplicate section" onclick="event.stopPropagation(); window.duplicateBuilderSection('${section.id}')" style="background: #ffc107; color: #000; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: 600;">Copy</button>
+                        <button title="Move Up" onclick="event.stopPropagation(); window.moveSection('${section.id}', -1)" style="background: #333; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: 600;">↑</button>
+                        <button title="Move Down" onclick="event.stopPropagation(); window.moveSection('${section.id}', 1)" style="background: #333; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: 600;">↓</button>
+                        <button title="Delete section" onclick="event.stopPropagation(); window.removeSection('${section.id}')" style="background: #dc3545; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: 600;">Delete</button>
                       </div>
                   </div>
                 ` : ''}
@@ -423,72 +492,88 @@ function renderBuilder() {
 }
 
 function renderSectionSettings(section: any) {
+  const isContent = builderRightPanelTab === 'content';
+  const isStyles = builderRightPanelTab === 'styles';
+
   const settingsMarkup = [];
   
-  // 1. Content Fields based on type
-  settingsMarkup.push(`<div class="pb-settings-group">
-    <span class="pb-settings-group-title">Content Settings</span>`);
-  
-  for (const key in section.content) {
-    const val = section.content[key];
-    const isImageField = key === 'background_image' || key === 'image_url' || key === 'url' && section.type === 'image';
-    
-    if (typeof val === 'string' && !isImageField) {
-       settingsMarkup.push(`
-         <div class="pb-control-group">
-           <label>${key.replace(/_/g, ' ').toUpperCase()}</label>
-           <input type="text" class="pb-control-input" value="${val}" oninput="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)">
-         </div>
-       `);
-    } else if (isImageField) {
-       settingsMarkup.push(`
-         <div class="pb-control-group">
-           <label>${key.replace(/_/g, ' ').toUpperCase()}</label>
-           <div class="pb-asset-grid">
-             ${mockMedia.map(asset => `
-               <div class="pb-asset-thumb ${val === asset.url ? 'active' : ''}" 
-                    style="background-image: url('${asset.url}');" 
-                    title="${asset.name}"
-                    onclick="window.updateSpecificField('${section.id}', 'content', '${key}', '${asset.url}')">
-               </div>
-             `).join('')}
+  settingsMarkup.push(`
+    <div style="display: flex; border-bottom: 1px solid #333; margin-bottom: 20px;">
+      <button style="flex: 1; padding: 10px; background: ${isContent ? '#222' : 'transparent'}; border: none; color: ${isContent ? 'white' : '#888'}; cursor: pointer; border-bottom: ${isContent ? '2px solid var(--primary-color)' : 'none'}; font-weight: 600;" onclick="window.setBuilderTab('content')">Content</button>
+      <button style="flex: 1; padding: 10px; background: ${isStyles ? '#222' : 'transparent'}; border: none; color: ${isStyles ? 'white' : '#888'}; cursor: pointer; border-bottom: ${isStyles ? '2px solid var(--primary-color)' : 'none'}; font-weight: 600;" onclick="window.setBuilderTab('styles')">Styles</button>
+    </div>
+  `);
+
+  if (isContent) {
+    settingsMarkup.push(`<div class="pb-settings-group">`);
+    for (const key in section.content) {
+      const val = section.content[key];
+      const isImageField = key === 'background_image' || key === 'image_url' || key === 'url' && section.type === 'image';
+      
+      if (typeof val === 'string' && !isImageField && key !== 'pipeline_id') {
+         settingsMarkup.push(`
+           <div class="pb-control-group">
+             <label>${key.replace(/_/g, ' ').toUpperCase()}</label>
+             <input type="text" class="pb-control-input" value="${val}" oninput="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)">
            </div>
-           <input type="text" class="pb-control-input" style="margin-top: 8px; font-size: 0.7rem;" value="${val}" 
-                  oninput="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)" 
-                  placeholder="Or paste custom URL...">
-         </div>
-       `);
+         `);
+      } else if (key === 'pipeline_id') {
+         settingsMarkup.push(`
+           <div class="pb-control-group">
+             <label>TARGET PIPELINE</label>
+             <select class="pb-control-input" onchange="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)" style="margin-top: 5px; padding: 8px; border-radius: 4px; background: #222; color: #fff; border: 1px solid #444; width: 100%;">
+               ${mockPipelines.map(p => `<option value="${p.id}" ${p.id === val ? 'selected' : ''}>${p.name}</option>`).join('')}
+             </select>
+           </div>
+         `);
+      } else if (isImageField) {
+         settingsMarkup.push(`
+           <div class="pb-control-group">
+             <label>${key.replace(/_/g, ' ').toUpperCase()}</label>
+             <div class="pb-asset-grid">
+               ${mockMedia.map(asset => `
+                 <div class="pb-asset-thumb ${val === asset.url ? 'active' : ''}" 
+                      style="background-image: url('${asset.url}');" 
+                      title="${asset.name}"
+                      onclick="window.updateSpecificField('${section.id}', 'content', '${key}', '${asset.url}')">
+                 </div>
+               `).join('')}
+             </div>
+             <input type="text" class="pb-control-input" style="margin-top: 8px; font-size: 0.7rem;" value="${val}" 
+                    oninput="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)" 
+                    placeholder="Or paste custom URL...">
+           </div>
+         `);
+      }
     }
+    settingsMarkup.push(`</div>`);
   }
-  settingsMarkup.push(`</div>`);
 
-  // 2. Style Fields
-  settingsMarkup.push(`<div class="pb-settings-group">
-    <span class="pb-settings-group-title">Design & Layout</span>`);
-  
-  const designFields = [
-    { label: 'Background Color', key: 'background', type: 'color' },
-    { label: 'Text Alignment', key: 'text_alignment', type: 'select', options: ['left', 'center', 'right'] },
-    { label: 'Vertical Padding', key: 'padding', type: 'text' },
-    { label: 'Container Width', key: 'width', type: 'text' }
-  ];
+  if (isStyles) {
+    settingsMarkup.push(`<div class="pb-settings-group">`);
+    const designFields = [
+      { label: 'Background Color', key: 'background', type: 'color' },
+      { label: 'Text Alignment', key: 'text_alignment', type: 'select', options: ['left', 'center', 'right'] },
+      { label: 'Vertical Padding', key: 'padding', type: 'text' },
+      { label: 'Container Width', key: 'width', type: 'text' }
+    ];
 
-  designFields.forEach(field => {
-    const val = section.styles[field.key] || '';
-    settingsMarkup.push(`
-      <div class="pb-control-group">
-        <label>${field.label.toUpperCase()}</label>
-        ${field.type === 'select' 
-          ? `<select class="pb-control-input" onchange="window.updateSpecificField('${section.id}', 'styles', '${field.key}', this.value)">
-              ${field.options!.map(opt => `<option value="${opt}" ${opt === val ? 'selected' : ''}>${opt.toUpperCase()}</option>`).join('')}
-             </select>`
-          : `<input type="${field.type}" class="pb-control-input" value="${val}" oninput="window.updateSpecificField('${section.id}', 'styles', '${field.key}', this.value)">`
-        }
-      </div>
-    `);
-  });
-
-  settingsMarkup.push(`</div>`);
+    designFields.forEach(field => {
+      const val = section.styles[field.key] || '';
+      settingsMarkup.push(`
+        <div class="pb-control-group">
+          <label>${field.label.toUpperCase()}</label>
+          ${field.type === 'select' 
+            ? `<select class="pb-control-input" onchange="window.updateSpecificField('${section.id}', 'styles', '${field.key}', this.value)">
+                ${field.options!.map(opt => `<option value="${opt}" ${opt === val ? 'selected' : ''}>${opt.toUpperCase()}</option>`).join('')}
+               </select>`
+            : `<input type="${field.type}" class="pb-control-input" value="${val}" oninput="window.updateSpecificField('${section.id}', 'styles', '${field.key}', this.value)">`
+          }
+        </div>
+      `);
+    });
+    settingsMarkup.push(`</div>`);
+  }
 
   return settingsMarkup.join('');
 }
@@ -498,6 +583,7 @@ function renderSectionSettings(section: any) {
   if (section) {
     (section as any)[area][key] = value;
     renderBuilder();
+    (window as any).triggerAutoSave();
   }
 };
 
@@ -542,11 +628,37 @@ function renderSectionPreviewContent(section: any) {
 }
 
 // Global functions for Builder interaction
-(window as any).switchBuilderPage = (id: string) => {
+(window as any).switchBuilderPage = (id: string, noSkeleton = false) => {
   builderPageId = id;
   builderSelectedSectionId = null;
   builderInsertOrder = null;
-  renderBuilder();
+  
+  if (!noSkeleton) {
+    app.innerHTML = `
+      ${renderSidebar('builder')}
+      <style>@keyframes pbPulse { 0% { opacity: 0.8; } 50% { opacity: 0.4; } 100% { opacity: 0.8; } }</style>
+      <main class="main-content" style="padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column;">
+        <header style="background: #111; border-bottom: 1px solid #333; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; z-index: 100; flex-shrink: 0;">
+           <div style="width: 200px; height: 30px; background: #222; border-radius: 4px; animation: pbPulse 1.5s infinite;"></div>
+           <div style="width: 300px; height: 30px; background: #222; border-radius: 4px; animation: pbPulse 1.5s infinite;"></div>
+        </header>
+        <div class="pb-layout" style="flex: 1; display: flex;">
+           <div style="width: 280px; background: #1a1a1a; padding: 20px;">
+              <div style="height: 40px; background: #222; border-radius: 4px; margin-bottom: 20px; animation: pbPulse 1.5s infinite;"></div>
+              <div style="height: 100px; background: #222; border-radius: 4px; margin-bottom: 20px; animation: pbPulse 1.5s infinite;"></div>
+              <div style="height: 100px; background: #222; border-radius: 4px; margin-bottom: 20px; animation: pbPulse 1.5s infinite;"></div>
+           </div>
+           <div style="flex: 1; padding: 40px; display: flex; flex-direction: column; gap: 30px; background: #000;">
+              <div style="height: 400px; background: #111; border-radius: 8px; animation: pbPulse 1.5s infinite;"></div>
+              <div style="height: 200px; background: #111; border-radius: 8px; animation: pbPulse 1.5s infinite;"></div>
+           </div>
+        </div>
+      </main>
+    `;
+    setTimeout(() => renderBuilder(), 400);
+  } else {
+    renderBuilder();
+  }
 };
 
 (window as any).selectSectionForBuilder = (id: string) => {
@@ -562,6 +674,20 @@ function renderSectionPreviewContent(section: any) {
     leftPanel.setAttribute('style', 'box-shadow: 0 0 0 3px var(--primary-color) inset; transition: box-shadow 0.2s; border-right: none;');
     setTimeout(() => leftPanel.removeAttribute('style'), 1500);
   }
+};
+(window as any).duplicateBuilderSection = (id: string) => {
+  const section = mockPageSections.find(s => s.id === id);
+  if (!section) return;
+  const newSection = {
+    ...section,
+    id: `sec-${Date.now()}`,
+    content: JSON.parse(JSON.stringify(section.content)),
+    styles: JSON.parse(JSON.stringify(section.styles)),
+    order: section.order + 0.1
+  };
+  mockPageSections.push(newSection);
+  renderBuilder();
+  (window as any).triggerAutoSave();
 };
 
 (window as any).addSectionToPage = (componentId: string) => {
@@ -590,6 +716,7 @@ function renderSectionPreviewContent(section: any) {
   mockPageSections.push(newSection);
   builderSelectedSectionId = newSection.id;
   renderBuilder();
+  (window as any).triggerAutoSave();
 };
 
 (window as any).removeSection = (id: string) => {
@@ -599,6 +726,7 @@ function renderSectionPreviewContent(section: any) {
     if (builderSelectedSectionId === id) builderSelectedSectionId = null;
     builderInsertOrder = null;
     renderBuilder();
+    (window as any).triggerAutoSave();
   }
 };
 
@@ -619,6 +747,7 @@ function renderSectionPreviewContent(section: any) {
     section2.order = tempOrder;
     
     renderBuilder();
+    (window as any).triggerAutoSave();
   }
 };
 
@@ -671,10 +800,14 @@ function renderSectionPreviewContent(section: any) {
   });
 
   // 2. Create Opportunity (New Lead)
+  const pipelineId = section.content?.pipeline_id || 'p1';
+  const targetPipeline = mockPipelines.find(p => p.id === pipelineId) || mockPipelines[0];
+  const initialStage = targetPipeline?.stages[0] || 'New Lead';
+
   const newOpportunity = {
     id: `opp-${Date.now()}`,
     contact_id: newContactId,
-    pipeline_stage: 'New Lead',
+    pipeline_stage: initialStage,
     value: 0,
     assigned_to: 'Unassigned',
     status: 'open' as any, // Use status: 'open' as typed in interface
@@ -830,14 +963,146 @@ function renderReports() {
   `;
 }
 
+(window as any).createNewPage = () => {
+   const modal = document.createElement('div');
+   modal.id = 'new-page-modal';
+   modal.innerHTML = `
+      <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+        <div style="background: white; padding: 40px; border-radius: 12px; width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+          <h2 style="margin-top: 0; margin-bottom: 20px; font-size: 1.5rem;">Create New Page</h2>
+          <p style="color: #666; margin-bottom: 30px;">Choose how you want to start your new page.</p>
+          
+          <div style="display: flex; flex-direction: column; gap: 15px;">
+             <button onclick="window.createPageFromSelection('blank')" style="padding: 15px; border: 2px solid #e2e8f0; border-radius: 8px; background: white; text-align: left; cursor: pointer; font-size: 1rem; font-weight: 600; transition: border-color 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#e2e8f0'">📄 Blank Page</button>
+             <button onclick="window.createPageFromSelection('template')" style="padding: 15px; border: 2px solid #e2e8f0; border-radius: 8px; background: white; text-align: left; cursor: pointer; font-size: 1rem; font-weight: 600; transition: border-color 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#e2e8f0'">✨ Use Template</button>
+             <button onclick="window.createPageFromSelection('ai')" style="padding: 15px; border: 2px solid #e2e8f0; border-radius: 8px; background: white; text-align: left; cursor: pointer; font-size: 1rem; font-weight: 600; transition: border-color 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#e2e8f0'">🤖 Generate with AI</button>
+          </div>
+          <button onclick="document.getElementById('new-page-modal').remove()" style="margin-top: 25px; width: 100%; padding: 10px; border: none; background: transparent; color: #888; cursor: pointer;">Cancel</button>
+        </div>
+      </div>
+   `;
+   document.body.appendChild(modal);
+};
+
+(window as any).createPageFromSelection = (type: string) => {
+   const modal = document.getElementById('new-page-modal');
+   if (modal) modal.remove();
+
+   const newName = prompt('Enter new page name:');
+   if (!newName) return;
+   
+   const slug = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+   const newPage = {
+    id: `p${Date.now()}`,
+    name: newName,
+    slug: slug,
+    status: 'draft',
+    seo_title: newName,
+    seo_description: '',
+    seo_keywords: [],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+   };
+   mockPages.push(newPage as any);
+
+   if (type === 'template') {
+     mockPageSections.push({
+        id: `ps-tpl-${Date.now()}`,
+        page_id: newPage.id,
+        type: 'hero',
+        content: { heading: 'Stunning Template Applied', subheading: 'Ready for you to customize visually!' },
+        order: 1,
+        styles: { background: '#2c3e50', color: '#ffffff' }
+     });
+   } else if (type === 'ai') {
+     mockPageSections.push({
+        id: `ps-ai-${Date.now()}`,
+        page_id: newPage.id,
+        type: 'text',
+        content: { text: '✨ This content was generated by AI specifically for ' + newName },
+        order: 1,
+        styles: { padding: '40px', background: '#fdfbfe' }
+     });
+   }
+   
+   (window as any).switchBuilderPage(newPage.id);
+   (window as any).navigateTo('builder');
+};
+
+(window as any).duplicatePage = (id: string) => {
+  const page = mockPages.find(p => p.id === id);
+  if (!page) return;
+  const newPage = {
+    ...page,
+    id: `p${Date.now()}`,
+    name: `${page.name} (Copy)`,
+    slug: `${page.slug}-copy`,
+    status: 'draft',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  mockPages.push(newPage as any);
+  
+  const sections = mockPageSections.filter(s => s.page_id === id);
+  sections.forEach(s => {
+    mockPageSections.push({
+      ...s,
+      id: `ps${Date.now()}-${Math.random().toString().slice(2,6)}`,
+      page_id: newPage.id
+    });
+  });
+
+  renderPages();
+};
+
+(window as any).togglePublish = (id: string) => {
+  const page = mockPages.find(p => p.id === id);
+  if (page) {
+    page.status = page.status === 'published' ? 'draft' : 'published';
+    (page as any).updated_at = new Date().toISOString();
+    renderPages();
+  }
+};
+
+(window as any).generatePageWithAI = (id: string) => {
+  // Mock AI generation
+  mockPageSections.push({
+    id: `ps-ai-${Date.now()}`,
+    page_id: id,
+    type: 'text',
+    content: { text: '✨ This content was generated by AI specifically for this page.' },
+    order: 1,
+    styles: { padding: '40px', background: '#fdfbfe' }
+  });
+  (window as any).switchBuilderPage(id);
+  (window as any).navigateTo('builder');
+};
+
+(window as any).applyTemplate = (id: string) => {
+  // Mock template application
+  mockPageSections.push({
+    id: `ps-tpl-${Date.now()}`,
+    page_id: id,
+    type: 'hero',
+    content: { heading: 'Stunning Template Applied', subheading: 'Ready for you to customize visually!' },
+    order: 1,
+    styles: { background: '#2c3e50', color: '#ffffff' }
+  });
+  (window as any).switchBuilderPage(id);
+  (window as any).navigateTo('builder');
+};
+
 function renderPages() {
-  const tableRows = mockPages.map(page => `
+  const tableRows = mockPages.map(page => {
+    const lastEdited = (page as any).updated_at ? new Date((page as any).updated_at).toLocaleDateString() : new Date(page.created_at).toLocaleDateString();
+    return `
     <tr>
       <td style="font-weight: 600; color: var(--primary-color);">${page.name}</td>
       <td><code>/${page.slug}</code></td>
       <td><span class="badge badge-${page.status}">${page.status}</span></td>
+      <td style="color: #666; font-size: 0.9rem;">${lastEdited}</td>
       <td>
-        <div style="font-size: 0.85rem; color: #666; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${page.seo_title}">
+        <div style="font-size: 0.85rem; color: #666; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${page.seo_title}">
           ${page.seo_title}
         </div>
       </td>
@@ -845,18 +1110,17 @@ function renderPages() {
         <span class="badge" style="background: #eef2f6; color: #333;">${mockPageSections.filter(s => s.page_id === page.id).length}</span>
       </td>
       <td>
-        <div style="display: flex; gap: 5px;">
-          ${page.status === 'published' 
-            ? `<button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="window.navigateTo('site', '${page.slug}')">View Live</button>`
-            : `<button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #ea580c;" onclick="window.navigateTo('preview', '${page.slug}')">Preview</button>`
-          }
-          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="window.navigateTo('page-sections', '${page.id}')">Sections</button>
-          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="alert('Edit Page: ${page.name}')">Edit</button>
-          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #6c757d;" onclick="alert('SEO Settings for: ${page.name}')">SEO</button>
+        <div style="display: flex; gap: 5px; flex-wrap: wrap; max-width: 380px;">
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="window.switchBuilderPage('${page.id}'); window.navigateTo('builder');">Edit</button>
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #6c757d;" onclick="window.duplicatePage('${page.id}')">Duplicate</button>
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: ${page.status === 'published' ? '#ea580c' : '#28a745'};" onclick="window.togglePublish('${page.id}')">${page.status === 'published' ? 'Unpublish' : 'Publish'}</button>
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #8a2be2;" onclick="window.generatePageWithAI('${page.id}')">✨ AI Gen</button>
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #17a2b8;" onclick="window.applyTemplate('${page.id}')">Template</button>
         </div>
       </td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 
   app.innerHTML = `
     ${renderSidebar('pages')}
@@ -866,7 +1130,7 @@ function renderPages() {
           <h2>Website Pages</h2>
           <button class="btn-primary" style="background: #6c757d; padding: 5px 15px; font-size: 0.85rem;" onclick="window.downloadSitemap()">Export sitemap.xml</button>
         </div>
-        <button class="btn-primary" onclick="alert('Create New Page logic would go here')">+ New Page</button>
+        <button class="btn-primary" onclick="window.createNewPage()">+ New Page</button>
       </header>
 
       <div class="card" style="padding: 0; overflow: hidden;">
@@ -876,13 +1140,14 @@ function renderPages() {
               <th>Page Name</th>
               <th>Slug</th>
               <th>Status</th>
+              <th>Last Edited</th>
               <th>SEO Title</th>
               <th>Sections</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            ${tableRows || '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #666;">No pages found</td></tr>'}
+            ${tableRows || '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #666;">No pages found</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -978,48 +1243,57 @@ function renderPageSections(pageId: string) {
 }
 
 function renderComponents() {
-  const tableRows = mockComponents.map(comp => `
-    <tr>
-      <td style="font-weight: 600; color: var(--primary-color);">${comp.name}</td>
-      <td><span class="badge" style="background: #e9ecef; color: #495057;">${comp.type.toUpperCase()}</span></td>
-      <td>
-        <pre style="font-size: 0.75rem; background: #f8f9fa; padding: 10px; border-radius: 4px; max-width: 300px; overflow: auto;">${JSON.stringify(comp.default_content, null, 2)}</pre>
-      </td>
-      <td>
-        <pre style="font-size: 0.75rem; background: #f8f9fa; padding: 10px; border-radius: 4px; max-width: 300px; overflow: auto;">${JSON.stringify(comp.default_styles, null, 2)}</pre>
-      </td>
-      <td>
-        <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="alert('Edit Component: ${comp.name}')">Edit</button>
-      </td>
-    </tr>
+  const gridItems = mockComponents.map(comp => `
+    <div class="card" style="display: flex; flex-direction: column; gap: 15px;">
+      <!-- Visual Preview -->
+      <div style="width: 100%; height: 250px; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 8px; position: relative; background: #f8fafc;">
+        <div style="width: 200%; height: 500px; transform: scale(0.5); transform-origin: top left; pointer-events: none;">
+           ${renderSection(comp.type, comp.default_content, comp.default_styles, comp.id)}
+        </div>
+      </div>
+      
+      <!-- Name & Type -->
+      <div>
+        <h3 style="margin: 0; font-size: 1.1rem; color: var(--primary-color);">${comp.name}</h3>
+        <span class="badge" style="background: #e9ecef; color: #495057; font-size: 0.7rem; margin-top: 5px; display: inline-block;">${comp.type.toUpperCase()}</span>
+      </div>
+      
+      <!-- Actions -->
+      <div style="display: flex; gap: 10px;">
+        <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 0.85rem; background: #222;" onclick="alert('Edit Content for ${comp.name}')">Edit Content</button>
+        <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 0.85rem; background: #222;" onclick="alert('Edit Styles for ${comp.name}')">Edit Styles</button>
+      </div>
+      
+      <!-- Advanced JSON -->
+      <details style="background: #f8f9fa; border-radius: 6px; padding: 10px; border: 1px solid #e2e8f0;">
+        <summary style="cursor: pointer; font-size: 0.8rem; font-weight: 600; color: #666; outline: none;">Advanced JSON</summary>
+        <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px;">
+          <div>
+            <label style="font-size: 0.7rem; color: #999; text-transform: uppercase;">Default Content</label>
+            <pre style="font-size: 0.7rem; background: #1e1e1e; color: #d4d4d4; padding: 10px; border-radius: 4px; overflow-x: auto; margin: 0;">${JSON.stringify(comp.default_content, null, 2)}</pre>
+          </div>
+          <div>
+            <label style="font-size: 0.7rem; color: #999; text-transform: uppercase;">Default Styles</label>
+            <pre style="font-size: 0.7rem; background: #1e1e1e; color: #d4d4d4; padding: 10px; border-radius: 4px; overflow-x: auto; margin: 0;">${JSON.stringify(comp.default_styles, null, 2)}</pre>
+          </div>
+        </div>
+      </details>
+    </div>
   `).join('');
 
   app.innerHTML = `
     ${renderSidebar('components')}
     <main class="main-content">
       <header class="view-header">
-        <h2>System Components</h2>
+        <h2>Component Library</h2>
         <button class="btn-primary" onclick="alert('Register New Component')">+ New Component</button>
       </header>
 
-      <div class="card" style="padding: 0; overflow: hidden;">
-        <table class="clients-table" style="box-shadow: none; margin-top: 0;">
-          <thead>
-            <tr>
-              <th>Component Name</th>
-              <th>Type</th>
-              <th>Default Content</th>
-              <th>Default Styles</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tableRows || '<tr><td colspan="5" style="text-align: center; padding: 40px; color: #666;">No components found</td></tr>'}
-          </tbody>
-        </table>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 24px;">
+        ${gridItems || '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #666;">No components found</div>'}
       </div>
 
-      <div class="stats-grid" style="margin-top: 30px;">
+      <div class="stats-grid" style="margin-top: 40px;">
         <div class="card">
           <h3>Collection: Components</h3>
           <p style="color: #666; margin-bottom: 15px;">Schema defined with the following fields:</p>
@@ -1032,6 +1306,26 @@ function renderComponents() {
           </ul>
         </div>
       </div>
+    </main>
+  `;
+}
+
+function renderTemplates() {
+  app.innerHTML = `
+    ${renderSidebar('templates')}
+    <main class="main-content">
+      <header class="view-header"><h2>Templates</h2></header>
+      <div style="padding: 40px; text-align: center; color: #666;">Templates library coming soon</div>
+    </main>
+  `;
+}
+
+function renderWebsiteSettings() {
+  app.innerHTML = `
+    ${renderSidebar('website-settings')}
+    <main class="main-content">
+      <header class="view-header"><h2>Website Settings</h2></header>
+      <div style="padding: 40px; text-align: center; color: #666;">Global site settings coming soon</div>
     </main>
   `;
 }
@@ -1582,6 +1876,8 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   if (view === 'pages') renderPages();
   if (view === 'page-sections' && id) renderPageSections(id);
   if (view === 'components') renderComponents();
+  if (view === 'templates') renderTemplates();
+  if (view === 'website-settings') renderWebsiteSettings();
   if (view === 'quickstart') renderQuickstart();
   if (view === 'quote-preview' && id) renderQuotePreview(id);
   if (view === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
