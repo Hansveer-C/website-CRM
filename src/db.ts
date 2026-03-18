@@ -124,11 +124,31 @@ export const mockPages: Page[] = [
     id: 'p2',
     name: 'About Us',
     slug: 'about',
-    status: 'draft',
-    seo_title: 'About PressurePro | Our Story',
-    seo_description: 'Learn more about PressurePro and our commitment to excellence.',
+    status: 'published',
+    seo_title: 'About HansSays | Our Mission',
+    seo_description: 'Professional exterior cleaning services you can trust.',
     seo_keywords: ['about us', 'quality service', 'professional cleaners'],
     created_at: '2026-01-05T10:00:00Z',
+  },
+  {
+    id: 'p3',
+    name: 'Driveway Cleaning',
+    slug: 'driveway-cleaning',
+    status: 'published',
+    seo_title: 'Driveway Cleaning Services | Professional Pressure Washing',
+    seo_description: 'Transform your driveway with our professional pressure washing services.',
+    seo_keywords: ['driveway cleaning', 'concrete washing', 'restore driveway'],
+    created_at: '2026-03-10T09:00:00Z',
+  },
+  {
+    id: 'p4',
+    name: 'Patio Cleaning',
+    slug: 'patio-cleaning',
+    status: 'published',
+    seo_title: 'Patio Cleaning & Restoration | Garden Services',
+    seo_description: 'Get your patio ready for summer with our high-pressure cleaning solutions.',
+    seo_keywords: ['patio cleaning', 'stone washing', 'patio restoration'],
+    created_at: '2026-03-12T09:00:00Z',
   }
 ];
 
@@ -137,9 +157,35 @@ export const mockPageSections: PageSection[] = [
     id: 'ps1',
     page_id: 'p1',
     type: 'hero',
-    content: { title: 'Welcome to PressurePro', subtitle: 'Leading pressure washing experts in the Pacific Northwest.' },
+    content: { heading: 'Welcome to HansSays', subheading: 'Leading pressure washing experts in the region.' },
     order: 1,
-    styles: { backgroundColor: '#007bff', textColor: '#ffffff' }
+    styles: { background: '#007bff' }
+  },
+  {
+    id: 'ps-d1',
+    page_id: 'p3',
+    type: 'hero',
+    content: { 
+        heading: 'Pristine Driveways, Every Time.',
+        subheading: 'We remove years of stains, oil, and moss with ease.',
+        button_text: 'Get an Instant Quote',
+        background_image: 'https://images.unsplash.com/photo-1541604193435-22077a288934?auto=format&fit=crop&w=1200'
+    },
+    order: 1,
+    styles: { text_alignment: 'center' }
+  },
+  {
+    id: 'ps-p1',
+    page_id: 'p4',
+    type: 'hero',
+    content: { 
+        heading: 'Revitalize Your Patio.',
+        subheading: 'Enjoy your outdoor space again without the grime.',
+        button_text: 'See Pricing',
+        background_image: 'https://images.unsplash.com/photo-1590150117409-51a66e13885d?auto=format&fit=crop&w=1200'
+    },
+    order: 1,
+    styles: { text_alignment: 'left' }
   },
   {
     id: 'ps2',

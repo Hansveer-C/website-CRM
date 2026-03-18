@@ -583,6 +583,18 @@ function renderSitePage(slug: string) {
   `;
   
   document.title = page.seo_title || page.name;
+  updateMetaTag('description', page.seo_description);
+  updateMetaTag('keywords', (page.seo_keywords || []).join(', '));
+}
+
+function updateMetaTag(name: string, content: string) {
+  let meta = document.querySelector(`meta[name="${name}"]`);
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.setAttribute('name', name);
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute('content', content || '');
 }
 
 function renderSection(type: string, content: any, styles: any, id: string) {
@@ -702,7 +714,10 @@ function renderPages() {
     ${renderSidebar('pages')}
     <main class="main-content">
       <header class="view-header">
-        <h2>Website Pages</h2>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <h2>Website Pages</h2>
+          <button class="btn-primary" style="background: #6c757d; padding: 5px 15px; font-size: 0.85rem;" onclick="window.downloadSitemap()">Export sitemap.xml</button>
+        </div>
         <button class="btn-primary" onclick="alert('Create New Page logic would go here')">+ New Page</button>
       </header>
 
@@ -1423,6 +1438,38 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   if (view === 'quote-preview' && id) renderQuotePreview(id);
   if (view === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
   if (view === 'site' && id) renderSitePage(id);
+  else {
+    document.title = 'Hansveer CRM'; // Restore admin title
+    updateMetaTag('description', 'Professional CRM for Handyman Businesses');
+    updateMetaTag('keywords', 'crm, handyman, pressure washing');
+  }
+};
+
+(window as any).downloadSitemap = () => {
+    const publishedPages = mockPages.filter(p => p.status === 'published');
+    const baseUrl = 'https://hanssays.com/site'; // Hypothetical production base URL
+
+    const sitemapContent = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${publishedPages.map(page => `  <url>
+    <loc>${baseUrl}/${page.slug}</loc>
+    <lastmod>${new Date(page.created_at).toISOString().split('T')[0]}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>${page.slug === 'home' ? '1.0' : '0.8'}</priority>
+  </url>`).join('\n')}
+</urlset>`;
+
+    const blob = new Blob([sitemapContent], { type: 'application/xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'sitemap.xml';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    alert('Dynamic Sitemap generated and downloaded for ' + publishedPages.length + ' published pages.');
 };
 
 (window as any).selectQuoteTier = (quoteId: string, tier: 'basic' | 'standard' | 'premium') => {
