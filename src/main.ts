@@ -631,7 +631,16 @@ function renderQuotes() {
         <td><span class="badge badge-${quote.status}">${quote.status}</span></td>
         <td style="font-weight: 600;">$${quote.total_amount.toLocaleString()}</td>
         <td>${new Date(quote.created_at).toLocaleDateString()}</td>
-        <td><button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">View</button></td>
+        <td>
+          <div style="display: flex; gap: 5px;">
+            <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">View</button>
+            ${quote.status === 'draft' ? `<button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="event.stopPropagation(); window.sendQuote('${quote.id}')">Send</button>` : ''}
+            ${quote.status === 'sent' ? `
+              <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="event.stopPropagation(); window.approveQuote('${quote.id}')">Approve</button>
+              <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #dc3545;" onclick="event.stopPropagation(); window.rejectQuote('${quote.id}')">Reject</button>
+            ` : ''}
+          </div>
+        </td>
       </tr>
     `;
   }).join('');
@@ -1044,7 +1053,16 @@ function renderContactDetail(contactId: string) {
                       <td style="font-weight: 600;">Q-${quote.id}</td>
                       <td><span class="badge badge-${quote.status}">${quote.status}</span></td>
                       <td>$${quote.total_amount.toLocaleString()}</td>
-                      <td><button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;">View</button></td>
+                      <td>
+                        <div style="display: flex; gap: 5px;">
+                          <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;">View</button>
+                          ${quote.status === 'draft' ? `<button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.sendQuote('${quote.id}')">Send</button>` : ''}
+                          ${quote.status === 'sent' ? `
+                            <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.approveQuote('${quote.id}')">Approve</button>
+                            <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #dc3545;" onclick="window.rejectQuote('${quote.id}')">Reject</button>
+                          ` : ''}
+                        </div>
+                      </td>
                     </tr>
                   `).join('') || '<tr><td colspan="4" style="text-align: center; color: #666; padding: 20px;">No quotes created.</td></tr>'}
                 </tbody>
@@ -1170,6 +1188,75 @@ function renderContactDetail(contactId: string) {
   (window as any).newQuoteOpportunityId = '';
   (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0 }];
   (window as any).navigateTo('new-quote');
+};
+
+(window as any).approveQuote = (quoteId: string) => {
+  const quote = mockQuotes.find(q => q.id === quoteId);
+  if (quote) {
+    quote.status = 'approved';
+    const opportunity = mockOpportunities.find(o => o.id === quote.opportunity_id);
+    if (opportunity) {
+      opportunity.status = 'won';
+      opportunity.pipeline_stage = 'Scheduled';
+    }
+    
+    mockActivities.push({
+      id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
+      contact_id: quote.contact_id,
+      type: 'note',
+      description: `Quote Q-${quote.id} approved! Opportunity marked as Won.`,
+      due_date: new Date().toISOString(),
+      completed: true
+    });
+
+    if (currentView === 'quotes') renderQuotes();
+    if (currentView === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
+  }
+};
+
+(window as any).rejectQuote = (quoteId: string) => {
+  const quote = mockQuotes.find(q => q.id === quoteId);
+  if (quote) {
+    quote.status = 'rejected';
+    const opportunity = mockOpportunities.find(o => o.id === quote.opportunity_id);
+    if (opportunity) {
+       opportunity.status = 'lost';
+    }
+
+    mockActivities.push({
+      id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
+      contact_id: quote.contact_id,
+      type: 'note',
+      description: `Quote Q-${quote.id} was rejected. Opportunity marked as Lost.`,
+      due_date: new Date().toISOString(),
+      completed: true
+    });
+
+    if (currentView === 'quotes') renderQuotes();
+    if (currentView === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
+  }
+};
+
+(window as any).sendQuote = (quoteId: string) => {
+  const quote = mockQuotes.find(q => q.id === quoteId);
+  if (quote) {
+    quote.status = 'sent';
+    console.log(`Sending Quote Q-${quote.id} to client...`);
+    
+    // Log Activity
+    mockActivities.push({
+      id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
+      contact_id: quote.contact_id,
+      type: 'note',
+      description: `Quote Q-${quote.id} sent to customer`,
+      due_date: new Date().toISOString(),
+      completed: true
+    });
+
+    // Refresh view
+    if (currentView === 'quotes') renderQuotes();
+    if (currentView === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
+  }
 };
 
 (window as any).createInvoice = (contactId: string) => {

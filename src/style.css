@@ -548,3 +548,28 @@ body {
     background: #e9ecef;
     color: #495057;
 }
+
+.badge-sent {
+    background: #fff3bf;
+    color: #f08c00;
+}
+.badge-approved {
+    background: #d3f9d8;
+    color: #2b8a3e;
+}
+.badge-rejected {
+    background: #ffc9c9;
+    color: #e03131;
+}
+.badge-unpaid {
+    background: #fff3bf;
+    color: #f08c00;
+}
+.badge-paid {
+    background: #d3f9d8;
+    color: #2b8a3e;
+}
+.badge-overdue {
+    background: #ffc9c9;
+    color: #e03131;
+}
