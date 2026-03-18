@@ -693,7 +693,12 @@ function renderInvoices() {
         <td style="font-weight: 600;">$${invoice.amount.toLocaleString()}</td>
         <td><span class="badge badge-${invoice.status}">${invoice.status}</span></td>
         <td>${new Date(invoice.due_date).toLocaleDateString()}</td>
-        <td><button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">View</button></td>
+        <td>
+          <div style="display: flex; gap: 5px;">
+            <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">View</button>
+            ${invoice.status !== 'paid' ? `<button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="event.stopPropagation(); window.markAsPaid('${invoice.id}')">Mark as Paid</button>` : ''}
+          </div>
+        </td>
       </tr>
     `;
   }).join('');
@@ -1115,7 +1120,12 @@ function renderContactDetail(contactId: string) {
                       <td><span class="badge badge-${invoice.status}">${invoice.status}</span></td>
                       <td>$${invoice.amount.toLocaleString()}</td>
                       <td>${new Date(invoice.due_date).toLocaleDateString()}</td>
-                      <td><button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;">View</button></td>
+                      <td>
+                        <div style="display: flex; gap: 5px;">
+                          <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;">View</button>
+                          ${invoice.status !== 'paid' ? `<button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.markAsPaid('${invoice.id}')">Mark as Paid</button>` : ''}
+                        </div>
+                      </td>
                     </tr>
                   `).join('') || '<tr><td colspan="5" style="text-align: center; color: #666; padding: 20px;">No invoices created.</td></tr>'}
                 </tbody>
@@ -1213,6 +1223,34 @@ function renderContactDetail(contactId: string) {
   (window as any).newQuoteOpportunityId = '';
   (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0 }];
   (window as any).navigateTo('new-quote');
+};
+
+(window as any).markAsPaid = (invoiceId: string) => {
+  const invoice = mockInvoices.find(i => i.id === invoiceId);
+  if (invoice) {
+    invoice.status = 'paid';
+    
+    // Update linked opportunity
+    const quote = mockQuotes.find(q => q.id === invoice.quote_id);
+    if (quote && quote.opportunity_id) {
+      const opportunity = mockOpportunities.find(o => o.id === quote.opportunity_id);
+      if (opportunity) {
+        opportunity.pipeline_stage = 'Paid';
+      }
+    }
+
+    mockActivities.push({
+      id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
+      contact_id: invoice.contact_id,
+      type: 'note',
+      description: `Invoice ${invoice.id} marked as Paid.`,
+      due_date: new Date().toISOString(),
+      completed: true
+    });
+
+    if (currentView === 'invoices') renderInvoices();
+    if (currentView === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
+  }
 };
 
 (window as any).convertToInvoice = (quoteId: string) => {
