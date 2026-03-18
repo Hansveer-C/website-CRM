@@ -202,7 +202,7 @@ function renderClients() {
         <td><span class="badge badge-${contact.status}">${contact.status}</span></td>
         <td><span style="font-size: 0.85rem; color: #666;">${contact.source}</span></td>
         <td>${lastActivity ? new Date(lastActivity.due_date).toLocaleDateString() : 'No activity'}</td>
-        <td><button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">View</button></td>
+        <td><button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${contact.id}')">View</button></td>
       </tr>
     `;
   }).join('');
@@ -636,8 +636,8 @@ function renderQuotes() {
         <td>${new Date(quote.created_at).toLocaleDateString()}</td>
         <td>
           <div style="display: flex; gap: 5px;">
-            <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="window.navigateTo('quote-preview', '${quote.id}')">Preview</button>
-            <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">View</button>
+            <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="event.stopPropagation(); window.navigateTo('quote-preview', '${quote.id}')">Preview</button>
+            <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${quote.contact_id}')">View</button>
             ${quote.status === 'draft' ? `<button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="event.stopPropagation(); window.sendQuote('${quote.id}')">Send</button>` : ''}
             ${quote.status === 'sent' ? `
               <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="event.stopPropagation(); window.approveQuote('${quote.id}')">Approve</button>
@@ -695,7 +695,7 @@ function renderInvoices() {
         <td>${new Date(invoice.due_date).toLocaleDateString()}</td>
         <td>
           <div style="display: flex; gap: 5px;">
-            <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">View</button>
+            <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${invoice.contact_id}')">View</button>
             ${invoice.status !== 'paid' ? `<button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="event.stopPropagation(); window.markAsPaid('${invoice.id}')">Mark as Paid</button>` : ''}
           </div>
         </td>
@@ -785,7 +785,7 @@ function renderNewQuote() {
                 </div>
                 <div style="flex: 1; text-align: right;">
                   <label style="font-size: 0.7rem; color: #999; display: block;">TOTAL</label>
-                  <span style="font-weight: 700; color: var(--primary-color);">$${(item.quantity * item.price).toLocaleString()}</span>
+                  <span id="line-total-${item.index}" style="font-weight: 700; color: var(--primary-color);">$${(item.quantity * item.price).toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -795,7 +795,7 @@ function renderNewQuote() {
 
         <div style="margin-top: 20px; padding-top: 15px; border-top: 2px solid #f1f5f9; text-align: right;">
           <div style="font-size: 0.85rem; color: #64748b; font-weight: 500;">Option Total</div>
-          <div style="font-size: 1.5rem; font-weight: 800; color: #1e293b;">$${tierTotal.toLocaleString()}</div>
+          <div id="tier-total-${tier}" style="font-size: 1.5rem; font-weight: 800; color: #1e293b;">$${tierTotal.toLocaleString()}</div>
         </div>
       </div>
     `;
@@ -877,10 +877,16 @@ function renderNewQuote() {
     if (lineTotalEl) {
       lineTotalEl.textContent = `$${(item.quantity * item.price).toLocaleString()}`;
     }
-    const runningTotalEl = document.getElementById('quote-running-total');
-    if (runningTotalEl) {
-      const grandTotal = nqItems.reduce((sum: number, it: any) => sum + (it.quantity * it.price), 0);
-      runningTotalEl.textContent = `$${grandTotal.toLocaleString()}`;
+    
+    // Update the tier total
+    const tier = item.tier;
+    const tierTotal = nqItems
+      .filter((i: any) => i.tier === tier)
+      .reduce((sum: number, i: any) => sum + (i.quantity * i.price), 0);
+    
+    const tierTotalEl = document.getElementById(`tier-total-${tier}`);
+    if (tierTotalEl) {
+      tierTotalEl.textContent = `$${tierTotal.toLocaleString()}`;
     }
   }
 };
@@ -912,6 +918,14 @@ function renderNewQuote() {
     notes: notes,
     created_at: new Date().toISOString()
   });
+
+  // Sync with Opportunity value
+  if (nqoId) {
+    const opportunity = mockOpportunities.find(o => o.id === nqoId);
+    if (opportunity) {
+      opportunity.value = basicTotal;
+    }
+  }
 
   nqItems.forEach((item: any, idx: number) => {
     mockQuoteItems.push({
@@ -1002,6 +1016,15 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
     quote.selected_tier = tier;
     const tierItems = mockQuoteItems.filter(i => i.quote_id === quoteId && i.tier === tier);
     quote.total_amount = tierItems.reduce((sum, item) => sum + item.total, 0);
+
+    // Update linked opportunity value
+    if (quote.opportunity_id) {
+      const opportunity = mockOpportunities.find(o => o.id === quote.opportunity_id);
+      if (opportunity) {
+        opportunity.value = quote.total_amount;
+      }
+    }
+
     renderQuotePreview(quoteId);
   }
 };
@@ -1022,8 +1045,15 @@ function renderQuotePreview(quoteId: string) {
       <div style="flex: 1; min-width: 280px; border: 2px solid ${isSelected ? 'var(--primary-color)' : '#eef2f6'}; border-radius: 16px; padding: 30px; background: ${isSelected ? '#f0f7ff' : '#fff'}; display: flex; flex-direction: column; transition: all 0.2s; position: relative; ${isSelected ? 'box-shadow: 0 10px 25px -5px rgba(0, 123, 255, 0.1);' : ''}">
         ${isSelected ? '<div style="position: absolute; top: -14px; left: 50%; transform: translateX(-50%); background: var(--primary-color); color: white; padding: 4px 16px; border-radius: 20px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">Recommended</div>' : ''}
         
-        <h3 style="text-align: center; text-transform: capitalize; margin: 0 0 25px 0; color: #1e293b; font-size: 1.25rem;">${tier}</h3>
+        <h3 style="text-align: center; text-transform: capitalize; margin: 0 0 10px 0; color: #1e293b; font-size: 1.25rem;">${tier}</h3>
         
+        <div style="text-align: center; margin-bottom: 30px; padding-bottom: 25px; border-bottom: 2px dashed ${isSelected ? '#d0e5ff' : '#f1f5f9'};">
+          <div style="font-size: 2.25rem; font-weight: 900; color: #0f172a; margin-bottom: 20px;">$${tierTotal.toLocaleString()}</div>
+          <button class="btn-primary no-print" style="width: 100%; padding: 12px; border-radius: 8px; font-weight: 700; background: ${isSelected ? '#28a745' : 'var(--primary-color)'}; color: white; border: none; cursor: pointer;" onclick="window.selectQuoteTier('${quote.id}', '${tier}')">
+            ${isSelected ? '✓ Selected' : 'Choose ' + tier}
+          </button>
+        </div>
+
         <div style="flex: 1;">
           <ul style="list-style: none; padding: 0; margin: 0;">
             ${tierItems.map(item => `
@@ -1035,13 +1065,6 @@ function renderQuotePreview(quoteId: string) {
             `).join('')}
             ${tierItems.length === 0 ? '<li style="text-align: center; color: #94a3b8; padding: 40px 0; font-style: italic;">No items included</li>' : ''}
           </ul>
-        </div>
-
-        <div style="margin-top: 30px; text-align: center; border-top: 2px dashed ${isSelected ? '#d0e5ff' : '#f1f5f9'}; padding-top: 25px;">
-          <div style="font-size: 2.25rem; font-weight: 900; color: #0f172a; margin-bottom: 20px;">$${tierTotal.toLocaleString()}</div>
-          <button class="btn-primary no-print" style="width: 100%; padding: 12px; border-radius: 8px; font-weight: 700; background: ${isSelected ? '#28a745' : 'var(--primary-color)'}; color: white; border: none; cursor: pointer;" onclick="window.selectQuoteTier('${quote.id}', '${tier}')">
-            ${isSelected ? '✓ Selected' : 'Choose ' + tier}
-          </button>
         </div>
       </div>
     `;
@@ -1222,11 +1245,12 @@ function renderContactDetail(contactId: string) {
                       <td>$${quote.total_amount.toLocaleString()}</td>
                       <td>
                         <div style="display: flex; gap: 5px;">
-                          <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;">View</button>
-                          ${quote.status === 'draft' ? `<button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.sendQuote('${quote.id}')">Send</button>` : ''}
+                          <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="event.stopPropagation(); window.navigateTo('quote-preview', '${quote.id}')">Preview</button>
+                          <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${quote.contact_id}')">View</button>
+                          ${quote.status === 'draft' ? `<button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="event.stopPropagation(); window.sendQuote('${quote.id}')">Send</button>` : ''}
                           ${quote.status === 'sent' ? `
-                            <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.approveQuote('${quote.id}')">Approve</button>
-                            <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #dc3545;" onclick="window.rejectQuote('${quote.id}')">Reject</button>
+                            <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="event.stopPropagation(); window.approveQuote('${quote.id}')">Approve</button>
+                            <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #dc3545;" onclick="event.stopPropagation(); window.rejectQuote('${quote.id}')">Reject</button>
                           ` : ''}
                         </div>
                       </td>
@@ -1259,8 +1283,8 @@ function renderContactDetail(contactId: string) {
                       <td>${new Date(invoice.due_date).toLocaleDateString()}</td>
                       <td>
                         <div style="display: flex; gap: 5px;">
-                          <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;">View</button>
-                          ${invoice.status !== 'paid' ? `<button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.markAsPaid('${invoice.id}')">Mark as Paid</button>` : ''}
+                          <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${invoice.contact_id}')">View</button>
+                          ${invoice.status !== 'paid' ? `<button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="event.stopPropagation(); window.markAsPaid('${invoice.id}')">Mark as Paid</button>` : ''}
                         </div>
                       </td>
                     </tr>
@@ -1357,8 +1381,14 @@ function renderContactDetail(contactId: string) {
 
 (window as any).createQuote = (contactId: string) => {
   (window as any).newQuoteContactId = contactId;
-  (window as any).newQuoteOpportunityId = '';
-  (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0 }];
+  
+  // Try to find the latest open opportunity for this contact
+  const activeOpp = mockOpportunities
+    .filter(o => o.contact_id === contactId && o.status === 'open')
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+    
+  (window as any).newQuoteOpportunityId = activeOpp ? activeOpp.id : '';
+  (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0, tier: 'basic' }];
   (window as any).navigateTo('new-quote');
 };
 
@@ -1435,6 +1465,7 @@ function renderContactDetail(contactId: string) {
     if (opportunity) {
       opportunity.status = 'won';
       opportunity.pipeline_stage = 'Scheduled';
+      opportunity.value = quote.total_amount; // Update value to reflect actual quote
     }
     
     mockActivities.push({
@@ -1515,6 +1546,17 @@ function renderContactDetail(contactId: string) {
       due_date: new Date().toISOString(),
       completed: true
     });
+
+    // Update Opportunity stage and value
+    if (quote.opportunity_id) {
+      const opportunity = mockOpportunities.find(o => o.id === quote.opportunity_id);
+      if (opportunity) {
+        opportunity.pipeline_stage = 'Quote Sent';
+        opportunity.value = quote.total_amount;
+        // Trigger automated follow-up
+        runAutomations('OPPORTUNITY_STAGE_UPDATED', opportunity);
+      }
+    }
 
     // Refresh view
     if (currentView === 'quotes') renderQuotes();
