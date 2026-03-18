@@ -1,7 +1,7 @@
 import { templates, WebsiteTemplate, BuilderBlock } from './templates';
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices } from './db';
 import { Activity } from './types';
-import { runAutomations } from './automation';
+import { runAutomations, checkOverdueInvoices } from './automation';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
@@ -640,9 +640,6 @@ function renderQuotes() {
               <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="event.stopPropagation(); window.approveQuote('${quote.id}')">Approve</button>
               <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #dc3545;" onclick="event.stopPropagation(); window.rejectQuote('${quote.id}')">Reject</button>
             ` : ''}
-            ${quote.status === 'approved' ? `
-              <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #e67e22;" onclick="event.stopPropagation(); window.convertToInvoice('${quote.id}')">Convert to Invoice</button>
-            ` : ''}
           </div>
         </td>
       </tr>
@@ -955,6 +952,9 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
 (window as any).navigateTo = (view: string, id?: string) => {
   currentView = view;
   if (id) selectedContactId = id;
+  
+  // Automation: Check for overdue invoices on navigation
+  checkOverdueInvoices();
 
   if (view === 'dashboard') renderDashboard();
   if (view === 'clients') renderClients();
@@ -1087,9 +1087,6 @@ function renderContactDetail(contactId: string) {
                           ${quote.status === 'sent' ? `
                             <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.approveQuote('${quote.id}')">Approve</button>
                             <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #dc3545;" onclick="window.rejectQuote('${quote.id}')">Reject</button>
-                          ` : ''}
-                          ${quote.status === 'approved' ? `
-                            <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #e67e22;" onclick="window.convertToInvoice('${quote.id}')">Convert to Invoice</button>
                           ` : ''}
                         </div>
                       </td>
@@ -1309,6 +1306,32 @@ function renderContactDetail(contactId: string) {
       completed: true
     });
 
+    // Automatically create Invoice if one doesn't exist
+    if (!mockInvoices.some(i => i.quote_id === quote.id)) {
+      const invoiceId = 'inv-' + (mockInvoices.length + 1) + '-' + Math.floor(Math.random() * 100);
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 7);
+
+      mockInvoices.push({
+        id: invoiceId,
+        contact_id: quote.contact_id,
+        quote_id: quote.id,
+        amount: quote.total_amount,
+        status: 'unpaid',
+        due_date: dueDate.toISOString(),
+        created_at: new Date().toISOString()
+      });
+
+      mockActivities.push({
+        id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
+        contact_id: quote.contact_id,
+        type: 'note',
+        description: `Invoice ${invoiceId} automatically created from Quote Q-${quote.id}`,
+        due_date: new Date().toISOString(),
+        completed: true
+      });
+    }
+
     if (currentView === 'quotes') renderQuotes();
     if (currentView === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
   }
@@ -1391,4 +1414,5 @@ function renderContactDetail(contactId: string) {
   renderContactDetail(contactId);
 };
 
+checkOverdueInvoices();
 renderDashboard();

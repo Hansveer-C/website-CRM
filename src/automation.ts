@@ -1,5 +1,33 @@
 import { Automation, TriggerType, Opportunity, Activity } from './types';
-import { mockActivities, mockContacts } from './db';
+import { mockActivities, mockContacts, mockInvoices } from './db';
+
+
+export function checkOverdueInvoices() {
+  const now = new Date();
+  mockInvoices.forEach(invoice => {
+    // If unpaid and overdue
+    if (invoice.status === 'unpaid' && new Date(invoice.due_date) < now) {
+      // Check if a follow-up task already exists for this invoice to avoid spam
+      const alreadyExists = mockActivities.some(a => 
+        a.contact_id === invoice.contact_id && 
+        a.description.includes(`INV-${invoice.id}`) &&
+        a.description.includes('Follow up for payment')
+      );
+
+      if (!alreadyExists) {
+        mockActivities.push({
+          id: 'task-overdue-' + invoice.id + '-' + Math.floor(Math.random() * 1000),
+          contact_id: invoice.contact_id,
+          type: 'note',
+          description: `Follow up for payment (INV-${invoice.id})`,
+          due_date: new Date().toISOString(),
+          completed: false
+        });
+        console.log(`[AUTOMATION: OVERDUE] Created payment follow-up for INV-${invoice.id}`);
+      }
+    }
+  });
+}
 
 const automations: Automation[] = [
   {
