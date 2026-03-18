@@ -118,3 +118,11 @@ export interface Component {
   default_content: any; // JSON
   default_styles: any; // JSON
 }
+
+export interface Asset {
+  id: string;
+  url: string;
+  name: string;
+  type: 'image' | 'video';
+  tags: string[];
+}

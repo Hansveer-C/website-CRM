@@ -1,4 +1,4 @@
-import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component } from './types';
+import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component, Asset } from './types';
 
 export const mockContacts: Contact[] = [
   {
@@ -271,5 +271,43 @@ export const mockComponents: Component[] = [
       color: '#007bff', 
       size: 'medium' 
     }
+  }
+];
+
+export const mockMedia: Asset[] = [
+  {
+    id: 'm1',
+    name: 'Clean Driveway',
+    url: 'https://images.unsplash.com/photo-1541604193435-22077a288934?auto=format&fit=crop&w=800&q=80',
+    type: 'image',
+    tags: ['driveway', 'clean', 'concrete']
+  },
+  {
+    id: 'm2',
+    name: 'Power Washing Patio',
+    url: 'https://images.unsplash.com/photo-1516743618621-af979b8d49b1?auto=format&fit=crop&w=800&q=80',
+    type: 'image',
+    tags: ['patio', 'washing', 'stone']
+  },
+  {
+    id: 'm3',
+    name: 'Siding Cleaning',
+    url: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80',
+    type: 'image',
+    tags: ['house', 'siding', 'clean']
+  },
+  {
+    id: 'm4',
+    name: 'Roof Moss Removal',
+    url: 'https://images.unsplash.com/photo-1626700051175-6518a4993f57?auto=format&fit=crop&w=800&q=80',
+    type: 'image',
+    tags: ['roof', 'moss', 'washing']
+  },
+  {
+    id: 'm5',
+    name: 'Commercial Exterior',
+    url: 'https://images.unsplash.com/photo-1621905252507-b35221ad889a?auto=format&fit=crop&w=800&q=80',
+    type: 'image',
+    tags: ['commercial', 'brick', 'clean']
   }
 ];

@@ -1,4 +1,4 @@
-import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents } from './db';
+import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia } from './db';
 import { Activity } from './types';
 import { runAutomations, checkOverdueInvoices } from './automation';
 
@@ -16,6 +16,7 @@ let invoiceStatusFilter: string = 'all';
 // Page Builder State
 let builderPageId: string = mockPages[0]?.id || '';
 let builderSelectedSectionId: string | null = null;
+let builderInsertOrder: number | null = null;
 
 // New Quote State
 let newQuoteLineItems: { service: string, description: string, quantity: number, price: number, tier: 'basic' | 'standard' | 'premium' }[] = [
@@ -33,16 +34,21 @@ function renderSidebar(activeView: string) {
       <h1>PressurePro</h1>
       <nav>
         <ul>
+          <div class="nav-group-title" style="margin-top: 0;">Main Menu</div>
           <li onclick="window.navigateTo('dashboard')" class="${activeView === 'dashboard' ? 'active' : ''}">Dashboard</li>
           <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}">Clients & Leads</li>
           <li onclick="window.navigateTo('opportunities')" class="${activeView === 'opportunities' ? 'active' : ''}">Opportunities</li>
           <li onclick="window.navigateTo('quotes')" class="${activeView === 'quotes' ? 'active' : ''}">Quotes</li>
           <li onclick="window.navigateTo('invoices')" class="${activeView === 'invoices' ? 'active' : ''}">Invoices</li>
           <li onclick="window.navigateTo('lead-capture')" class="${activeView === 'lead-capture' ? 'active' : ''}">Lead Capture</li>
-          <li onclick="window.navigateTo('builder')" class="${activeView === 'builder' ? 'active' : ''}">Website Builder</li>
+          
+          <div class="nav-group-title">Website Builder</div>
+          <li onclick="window.navigateTo('pages')" class="${activeView === 'pages' || activeView === 'page-sections' ? 'active' : ''}">Manage Pages</li>
+          <li onclick="window.navigateTo('components')" class="${activeView === 'components' ? 'active' : ''}">Component Library</li>
+          <li onclick="window.navigateTo('builder')" class="${activeView === 'builder' ? 'active' : ''}">Launch Visual Editor</li>
+          
+          <div class="nav-group-title">System</div>
           <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
-          <li onclick="window.navigateTo('pages')" class="${activeView === 'pages' || activeView === 'page-sections' ? 'active' : ''}">Pages</li>
-          <li onclick="window.navigateTo('components')" class="${activeView === 'components' ? 'active' : ''}">Components</li>
           <li onclick="window.navigateTo('quickstart')" class="${activeView === 'quickstart' ? 'active' : ''}">Quickstart Guide</li>
           <li>Payments</li>
           <li>Settings</li>
@@ -284,101 +290,216 @@ function renderBuilder() {
 
   app.innerHTML = `
     ${renderSidebar('builder')}
-    <main class="main-content" style="padding: 0; overflow: hidden;">
+    <main class="main-content" style="padding: 0; overflow: hidden; height: 100vh;">
       <div class="pb-layout">
-        <!-- Left Panel: Components -->
+        <!-- Left Panel: Navigator & Components -->
         <aside class="pb-left-panel">
-          <div class="pb-panel-header">Components</div>
+          <div class="pb-panel-header">
+            <h3>Library</h3>
+            <span style="font-size: 0.7rem; background: #333; padding: 2px 6px; border-radius: 4px; color: #888;">${mockComponents.length} Assets</span>
+          </div>
+          
           <div class="pb-component-list">
-            ${mockComponents.map(comp => `
-              <div class="pb-component-card" onclick="window.addSectionToPage('${comp.id}')">
-                <div style="font-weight: 500;">${comp.name}</div>
-                <small style="color: #666; margin-left: auto;">${comp.type}</small>
+            <div style="font-size: 0.7rem; color: #555; margin-bottom: 10px; font-weight: 800; text-transform: uppercase;">Basic Elements</div>
+            ${mockComponents.filter(c => ['text', 'button', 'image'].includes(c.type)).map(comp => `
+              <div class="pb-component-item" onclick="window.addSectionToPage('${comp.id}')">
+                <div style="width: 32px; height: 32px; background: #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">
+                  ${comp.type === 'text' ? 'T' : comp.type === 'button' ? '?' : '?' }
+                </div>
+                <div>
+                  <div style="font-weight: 600; font-size: 0.85rem;">${comp.name}</div>
+                  <small style="color: #666; font-size: 0.7rem;">Click to append</small>
+                </div>
+              </div>
+            `).join('')}
+
+            <div style="font-size: 0.7rem; color: #555; margin: 20px 0 10px 0; font-weight: 800; text-transform: uppercase;">Advanced Sections</div>
+            ${mockComponents.filter(c => !['text', 'button', 'image'].includes(c.type)).map(comp => `
+              <div class="pb-component-item" onclick="window.addSectionToPage('${comp.id}')">
+                <div style="width: 32px; height: 32px; background: #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">
+                   ${comp.type === 'hero' ? '?' : '?' }
+                </div>
+                <div>
+                  <div style="font-weight: 600; font-size: 0.85rem;">${comp.name}</div>
+                  <small style="color: #666; font-size: 0.7rem;">Conversion focus</small>
+                </div>
               </div>
             `).join('')}
           </div>
-          <div style="margin-top: auto; padding: 16px; background: #f8f9fa; border-top: 1px solid #eee;">
-             <label style="font-size: 0.75rem; color: #666; display: block; margin-bottom: 5px;">Editing Page:</label>
-             <select onchange="window.switchBuilderPage(this.value)" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ddd;">
+          
+          <div style="margin-top: auto; padding: 15px; background: #111; border-top: 1px solid #222;">
+             <label style="font-size: 0.65rem; color: #666; display: block; margin-bottom: 8px; text-transform: uppercase; font-weight: 800;">Acting on Page</label>
+             <select onchange="window.switchBuilderPage(this.value)" style="width: 100%; padding: 10px; border-radius: 4px; background: #000; border: 1px solid #333; color: white; font-size: 0.85rem;">
                 ${mockPages.map(p => `<option value="${p.id}" ${p.id === builderPageId ? 'selected' : ''}>${p.name}</option>`).join('')}
              </select>
           </div>
         </aside>
 
-        <!-- Center Panel: Canvas Preview -->
-        <section class="pb-center-canvas">
-          <header style="width: 100%; max-width: 900px; display: flex; justify-content: space-between; margin-bottom: 20px;">
-            <h3 style="color: #444;">Preview: ${page.name}</h3>
-            <div style="display: flex; gap: 10px;">
-              <button class="btn-primary" style="background: #eee; color: #333;" onclick="window.savePageSections()">Save Changes</button>
-              <button class="btn-primary" onclick="alert('Publishing...')">Publish</button>
+        <!-- Center Panel: Live Canvas -->
+        <section class="pb-canvas-area">
+          <div style="width: 100%; max-width: 1200px; display: flex; justify-content: space-between; margin-bottom: 25px; align-items: center;">
+            <div>
+               <h2 style="color: white; font-size: 1.2rem; margin: 0;">${page.name}</h2>
+               <small style="color: #444;">Live Visual Editing Mode</small>
             </div>
-          </header>
+            <div style="display: flex; gap: 12px;">
+               <button class="btn-primary" style="background: transparent; border: 1px solid #333; color: #888;" onclick="window.navigateTo('pages')">Back to List</button>
+               <button class="btn-primary" style="background: #222; border: 1px solid #444;" onclick="window.savePageSections()">Save Draft</button>
+               <button class="btn-primary" style="background: var(--primary-color);" onclick="alert('Publishing Site...')">Publish Live</button>
+            </div>
+          </div>
           
-          ${sections.map(section => `
-          <div class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''}" 
-                 onclick="window.selectSectionForBuilder('${section.id}')">
+          <div class="pb-canvas-inner">
+            ${['Add Initial', ...sections].map((item) => {
+              const isInitial = item === 'Add Initial';
+              const section = isInitial ? null : (item as any);
+              const order = isInitial ? 0 : section.order + 0.5;
               
-              <div style="padding: ${section.styles.padding || '40px'}; 
-                          text-align: ${section.styles.text_alignment || section.styles.alignment || section.styles.textAlign || 'left'}; 
-                          background-image: ${section.content.background_image ? `url('${section.content.background_image}')` : 'none'};
-                          background-size: cover;
-                          background-position: center;
-                          background-color: ${section.styles.background || section.styles.backgroundColor || 'white'}; 
-                          color: ${section.styles.color || (section.content.background_image ? 'white' : 'inherit')}; 
-                          border-radius: ${section.styles.border_radius || '8px'};
-                          width: ${section.styles.width || '100%'};
-                          margin-left: auto; margin-right: auto;
-                          min-height: ${section.type === 'hero' ? '400px' : 'auto'};
-                          display: flex;
-                          flex-direction: column;
-                          justify-content: ${section.type === 'hero' ? 'center' : 'flex-start'};
-                          position: relative;">
-                ${section.content.background_image ? `<div style="position: absolute; inset: 0; background: rgba(0,0,0,0.4); border-radius: inherit;"></div>` : ''}
-                <div style="position: relative; z-index: 1;">
-                  ${renderSectionPreviewContent(section)}
+              return `
+                <div class="pb-add-between" onclick="window.showComponentPickerAt('${order}')">
+                   <div class="pb-add-btn">+</div>
                 </div>
-              </div>
+                ${!isInitial ? `
+                  <div class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''}" 
+                       onclick="window.selectSectionForBuilder('${section.id}')">
+                      
+                      <div style="padding: ${section.styles.padding || '60px 20px'}; 
+                                  text-align: ${section.styles.text_alignment || section.styles.alignment || section.styles.textAlign || 'left'}; 
+                                  background-image: ${section.content.background_image ? `url('${section.content.background_image}')` : 'none'};
+                                  background-size: cover;
+                                  background-position: center;
+                                  background-color: ${section.styles.background || section.styles.backgroundColor || 'white'}; 
+                                  color: ${section.styles.color || (section.content.background_image ? 'white' : 'inherit')}; 
+                                  width: ${section.styles.width || '100%'};
+                                  margin-left: auto; margin-right: auto;
+                                  min-height: ${section.type === 'hero' ? '500px' : 'auto'};
+                                  display: flex;
+                                  flex-direction: column;
+                                  justify-content: ${section.type === 'hero' ? 'center' : 'flex-start'};
+                                  position: relative;
+                                  overflow: hidden;">
+                        ${section.content.background_image ? `<div style="position: absolute; inset: 0; background: rgba(0,0,0,0.4);"></div>` : ''}
+                        <div style="position: relative; z-index: 1;">
+                          ${renderSectionPreviewContent(section)}
+                        </div>
+                      </div>
 
-              <div class="pb-section-controls">
-                <button class="btn-primary" style="padding: 4px 8px; font-size: 0.7rem; background: #eee; color: #333; border: 1px solid #ddd;" onclick="event.stopPropagation(); window.moveSection('${section.id}', -1)">↑</button>
-                <button class="btn-primary" style="padding: 4px 8px; font-size: 0.7rem; background: #eee; color: #333; border: 1px solid #ddd;" onclick="event.stopPropagation(); window.moveSection('${section.id}', 1)">↓</button>
-                <button class="btn-primary" style="padding: 4px 8px; font-size: 0.7rem; background: #dc3545; color: white;" onclick="event.stopPropagation(); window.removeSection('${section.id}')">×</button>
+                      <div class="pb-section-controls">
+                        <button onclick="event.stopPropagation(); window.moveSection('${section.id}', -1)" style="background: #333; color: white; border: none; padding: 4px 10px; cursor: pointer;">↑</button>
+                        <button onclick="event.stopPropagation(); window.moveSection('${section.id}', 1)" style="background: #333; color: white; border: none; padding: 4px 10px; cursor: pointer;">↓</button>
+                        <button onclick="event.stopPropagation(); window.removeSection('${section.id}')" style="background: #dc3545; color: white; border: none; padding: 4px 10px; cursor: pointer;">×</button>
+                      </div>
+                  </div>
+                ` : ''}
+              `;
+            }).join('') || `
+              <div style="padding: 100px 40px; text-align: center; color: #999; border: 2px dashed #eee; margin: 40px;">
+                <h3 style="margin-bottom: 10px;">Your Canvas is Empty</h3>
+                <p>Click components on the left to start building your page.</p>
               </div>
-            </div>
-          `).join('') || '<div class="pb-section-preview" style="padding: 60px; text-align: center; color: #999; border: 2px dashed #cbd5e0;">No sections yet. Add one from the left!</div>'}
+            `}
+          </div>
         </section>
 
         <!-- Right Panel: Settings -->
         <aside class="pb-right-panel">
-          <div class="pb-panel-header">Settings ${selectedSection ? `: ${selectedSection.type}` : ''}</div>
+          <div class="pb-panel-header">
+             <h3>Inspector</h3>
+          </div>
+          
           <div class="pb-settings-form">
-            ${selectedSection ? `
-              <div class="pb-setting-group">
-                <label>Content (JSON)</label>
-                <textarea id="setting-content" class="pb-json-editor" oninput="window.updateSectionData('${selectedSection.id}', 'content', this.value)">${JSON.stringify(selectedSection.content, null, 2)}</textarea>
-              </div>
-              <div class="pb-setting-group">
-                <label>Styles (JSON)</label>
-                <textarea id="setting-styles" class="pb-json-editor" oninput="window.updateSectionData('${selectedSection.id}', 'styles', this.value)">${JSON.stringify(selectedSection.styles, null, 2)}</textarea>
-              </div>
-              <div style="background: #fff8e1; padding: 12px; border-radius: 4px; border: 1px solid #ffe082; font-size: 0.8rem; color: #795548;">
-                <strong>Pro Tip:</strong> JSON edits apply live to the center preview!
-              </div>
-            ` : `
-              <div style="height: 100%; display: flex; align-items: center; justify-content: center; text-align: center; color: #999; padding: 20px;">
-                Select a section on the canvas to edit its properties
+            ${selectedSection ? renderSectionSettings(selectedSection) : `
+              <div style="height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #555; padding: 40px;">
+                <div style="font-size: 3rem; margin-bottom: 20px;">?</div>
+                <div style="font-weight: 700; color: #888; text-transform: uppercase; font-size: 0.75rem;">No Selection</div>
+                <p style="font-size: 0.85rem; margin-top: 10px;">Select a section on the canvas to configure settings</p>
               </div>
             `}
-          </div>
-          <div class="pb-panel-footer">
-             <button class="btn-primary" style="width: 100%; background: #6c757d;" onclick="window.builderSelectedSectionId = null; renderBuilder();">Deselect</button>
           </div>
         </aside>
       </div>
     </main>
   `;
 }
+
+function renderSectionSettings(section: any) {
+  const settingsMarkup = [];
+  
+  // 1. Content Fields based on type
+  settingsMarkup.push(`<div class="pb-settings-group">
+    <span class="pb-settings-group-title">Content Settings</span>`);
+  
+  for (const key in section.content) {
+    const val = section.content[key];
+    const isImageField = key === 'background_image' || key === 'image_url' || key === 'url' && section.type === 'image';
+    
+    if (typeof val === 'string' && !isImageField) {
+       settingsMarkup.push(`
+         <div class="pb-control-group">
+           <label>${key.replace(/_/g, ' ').toUpperCase()}</label>
+           <input type="text" class="pb-control-input" value="${val}" oninput="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)">
+         </div>
+       `);
+    } else if (isImageField) {
+       settingsMarkup.push(`
+         <div class="pb-control-group">
+           <label>${key.replace(/_/g, ' ').toUpperCase()}</label>
+           <div class="pb-asset-grid">
+             ${mockMedia.map(asset => `
+               <div class="pb-asset-thumb ${val === asset.url ? 'active' : ''}" 
+                    style="background-image: url('${asset.url}');" 
+                    title="${asset.name}"
+                    onclick="window.updateSpecificField('${section.id}', 'content', '${key}', '${asset.url}')">
+               </div>
+             `).join('')}
+           </div>
+           <input type="text" class="pb-control-input" style="margin-top: 8px; font-size: 0.7rem;" value="${val}" 
+                  oninput="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)" 
+                  placeholder="Or paste custom URL...">
+         </div>
+       `);
+    }
+  }
+  settingsMarkup.push(`</div>`);
+
+  // 2. Style Fields
+  settingsMarkup.push(`<div class="pb-settings-group">
+    <span class="pb-settings-group-title">Design & Layout</span>`);
+  
+  const designFields = [
+    { label: 'Background Color', key: 'background', type: 'color' },
+    { label: 'Text Alignment', key: 'text_alignment', type: 'select', options: ['left', 'center', 'right'] },
+    { label: 'Vertical Padding', key: 'padding', type: 'text' },
+    { label: 'Container Width', key: 'width', type: 'text' }
+  ];
+
+  designFields.forEach(field => {
+    const val = section.styles[field.key] || '';
+    settingsMarkup.push(`
+      <div class="pb-control-group">
+        <label>${field.label.toUpperCase()}</label>
+        ${field.type === 'select' 
+          ? `<select class="pb-control-input" onchange="window.updateSpecificField('${section.id}', 'styles', '${field.key}', this.value)">
+              ${field.options!.map(opt => `<option value="${opt}" ${opt === val ? 'selected' : ''}>${opt.toUpperCase()}</option>`).join('')}
+             </select>`
+          : `<input type="${field.type}" class="pb-control-input" value="${val}" oninput="window.updateSpecificField('${section.id}', 'styles', '${field.key}', this.value)">`
+        }
+      </div>
+    `);
+  });
+
+  settingsMarkup.push(`</div>`);
+
+  return settingsMarkup.join('');
+}
+
+(window as any).updateSpecificField = (sectionId: string, area: 'content' | 'styles', key: string, value: string) => {
+  const section = mockPageSections.find(s => s.id === sectionId);
+  if (section) {
+    (section as any)[area][key] = value;
+    renderBuilder();
+  }
+};
 
 function renderSectionPreviewContent(section: any) {
   const content = section.content;
@@ -424,12 +545,23 @@ function renderSectionPreviewContent(section: any) {
 (window as any).switchBuilderPage = (id: string) => {
   builderPageId = id;
   builderSelectedSectionId = null;
+  builderInsertOrder = null;
   renderBuilder();
 };
 
 (window as any).selectSectionForBuilder = (id: string) => {
   builderSelectedSectionId = id;
+  builderInsertOrder = null;
   renderBuilder();
+};
+
+(window as any).showComponentPickerAt = (order: string) => {
+  builderInsertOrder = parseFloat(order);
+  const leftPanel = document.querySelector('.pb-left-panel');
+  if (leftPanel) {
+    leftPanel.setAttribute('style', 'box-shadow: 0 0 0 3px var(--primary-color) inset; transition: box-shadow 0.2s; border-right: none;');
+    setTimeout(() => leftPanel.removeAttribute('style'), 1500);
+  }
 };
 
 (window as any).addSectionToPage = (componentId: string) => {
@@ -437,7 +569,14 @@ function renderSectionPreviewContent(section: any) {
   if (!component) return;
 
   const currentSections = mockPageSections.filter(s => s.page_id === builderPageId);
-  const maxOrder = Math.max(...currentSections.map(s => s.order), 0);
+  let orderToInsertAt = 0;
+  
+  if (builderInsertOrder !== null) {
+      orderToInsertAt = builderInsertOrder;
+      builderInsertOrder = null; // reset
+  } else {
+      orderToInsertAt = Math.max(...currentSections.map(s => s.order), 0) + 1;
+  }
 
   const newSection = {
     id: `sec-${Date.now()}`,
@@ -445,7 +584,7 @@ function renderSectionPreviewContent(section: any) {
     type: component.type,
     content: JSON.parse(JSON.stringify(component.default_content)),
     styles: JSON.parse(JSON.stringify(component.default_styles)),
-    order: maxOrder + 1
+    order: orderToInsertAt
   };
 
   mockPageSections.push(newSection);
@@ -458,6 +597,7 @@ function renderSectionPreviewContent(section: any) {
   if (index !== -1) {
     mockPageSections.splice(index, 1);
     if (builderSelectedSectionId === id) builderSelectedSectionId = null;
+    builderInsertOrder = null;
     renderBuilder();
   }
 };
