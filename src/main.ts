@@ -14,6 +14,7 @@ let canvasBlocks: BuilderBlock[] = [...currentTemplate.blocks];
 let clientSearchQuery: string = '';
 let clientStatusFilter: string = 'all';
 let selectedContactId: string | null = null;
+let invoiceStatusFilter: string = 'all';
 
 // New Quote State
 let newQuoteLineItems: { service: string, description: string, quantity: number, price: number }[] = [{ service: '', description: '', quantity: 1, price: 0 }];
@@ -678,14 +679,19 @@ function renderQuotes() {
 }
 
 function renderInvoices() {
-  const tableRows = mockInvoices.map(invoice => {
+  const filteredInvoices = mockInvoices.filter(i => {
+    if (invoiceStatusFilter === 'all') return true;
+    return i.status === invoiceStatusFilter;
+  });
+
+  const tableRows = filteredInvoices.map(invoice => {
     const contact = mockContacts.find(c => c.id === invoice.contact_id);
     return `
       <tr onclick="window.navigateTo('contact-detail', '${invoice.contact_id}')" style="cursor: pointer;">
         <td style="font-weight: 600; color: var(--primary-color);">INV-${invoice.id}</td>
         <td>${contact ? contact.name : 'Unknown'}</td>
-        <td><span class="badge badge-${invoice.status}">${invoice.status}</span></td>
         <td style="font-weight: 600;">$${invoice.amount.toLocaleString()}</td>
+        <td><span class="badge badge-${invoice.status}">${invoice.status}</span></td>
         <td>${new Date(invoice.due_date).toLocaleDateString()}</td>
         <td><button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">View</button></td>
       </tr>
@@ -696,30 +702,43 @@ function renderInvoices() {
     ${renderSidebar('invoices')}
     <main class="main-content">
       <header class="view-header">
-        <h2>Invoices</h2>
+        <div style="display: flex; align-items: center; gap: 20px;">
+          <h2>Invoices</h2>
+          <select onchange="window.updateInvoiceFilter(this.value)" style="padding: 8px 12px; border-radius: 4px; border: 1px solid #ddd; background: white; font-family: inherit;">
+            <option value="all" ${invoiceStatusFilter === 'all' ? 'selected' : ''}>All Invoices</option>
+            <option value="unpaid" ${invoiceStatusFilter === 'unpaid' ? 'selected' : ''}>Unpaid</option>
+            <option value="paid" ${invoiceStatusFilter === 'paid' ? 'selected' : ''}>Paid</option>
+            <option value="overdue" ${invoiceStatusFilter === 'overdue' ? 'selected' : ''}>Overdue</option>
+          </select>
+        </div>
         <button class="btn-primary" onclick="alert('Create Invoice from Quote or Client Detail page')">+ New Invoice</button>
       </header>
 
       <div class="card" style="padding: 0; overflow: hidden;">
-        <table class="clients-table" style="box-shadow: none; margin-top: 0;">
+        <table class="clients-table" style="box-shadow: none; border: none; margin-top: 0;">
           <thead>
             <tr>
               <th>Invoice #</th>
-              <th>Contact</th>
-              <th>Status</th>
+              <th>Contact Name</th>
               <th>Amount</th>
+              <th>Status</th>
               <th>Due Date</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            ${tableRows || '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #666;">No invoices found</td></tr>'}
+            ${tableRows || '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #666;">No invoices match your selection</td></tr>'}
           </tbody>
         </table>
       </div>
     </main>
   `;
 }
+
+(window as any).updateInvoiceFilter = (status: string) => {
+  invoiceStatusFilter = status;
+  renderInvoices();
+};
 
 function renderNewQuote() {
   const contacts = mockContacts;
