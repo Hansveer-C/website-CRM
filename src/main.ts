@@ -639,6 +639,9 @@ function renderQuotes() {
               <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="event.stopPropagation(); window.approveQuote('${quote.id}')">Approve</button>
               <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #dc3545;" onclick="event.stopPropagation(); window.rejectQuote('${quote.id}')">Reject</button>
             ` : ''}
+            ${quote.status === 'approved' ? `
+              <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #e67e22;" onclick="event.stopPropagation(); window.convertToInvoice('${quote.id}')">Convert to Invoice</button>
+            ` : ''}
           </div>
         </td>
       </tr>
@@ -1061,6 +1064,9 @@ function renderContactDetail(contactId: string) {
                             <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.approveQuote('${quote.id}')">Approve</button>
                             <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #dc3545;" onclick="window.rejectQuote('${quote.id}')">Reject</button>
                           ` : ''}
+                          ${quote.status === 'approved' ? `
+                            <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #e67e22;" onclick="window.convertToInvoice('${quote.id}')">Convert to Invoice</button>
+                          ` : ''}
                         </div>
                       </td>
                     </tr>
@@ -1188,6 +1194,43 @@ function renderContactDetail(contactId: string) {
   (window as any).newQuoteOpportunityId = '';
   (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0 }];
   (window as any).navigateTo('new-quote');
+};
+
+(window as any).convertToInvoice = (quoteId: string) => {
+  const quote = mockQuotes.find(q => q.id === quoteId);
+  if (quote) {
+    // Check for existing invoice
+    if (mockInvoices.some(i => i.quote_id === quoteId)) {
+      alert("Invoice already exists for this quote.");
+      return;
+    }
+
+    const invoiceId = 'inv-' + (mockInvoices.length + 1) + '-' + Math.floor(Math.random() * 100);
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 7);
+
+    mockInvoices.push({
+      id: invoiceId,
+      contact_id: quote.contact_id,
+      quote_id: quote.id,
+      amount: quote.total_amount,
+      status: 'unpaid',
+      due_date: dueDate.toISOString(),
+      created_at: new Date().toISOString()
+    });
+
+    mockActivities.push({
+      id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
+      contact_id: quote.contact_id,
+      type: 'note',
+      description: `Invoice ${invoiceId} created from Quote Q-${quote.id}`,
+      due_date: new Date().toISOString(),
+      completed: true
+    });
+
+    if (currentView === 'quotes') renderQuotes();
+    if (currentView === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
+  }
 };
 
 (window as any).approveQuote = (quoteId: string) => {
