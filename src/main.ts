@@ -554,13 +554,17 @@ function renderSectionPreviewContent(section: any) {
   });
 };
 
-function renderSitePage(slug: string) {
+function renderSitePage(slug: string, isPreview: boolean = false) {
   const page = mockPages.find(p => p.slug === slug);
-  if (!page) {
+  if (!page || (!isPreview && page.status !== 'published')) {
     app.innerHTML = `<div style="padding: 100px; text-align: center; font-family: sans-serif;">
       <h1 style="font-size: 4rem; color: #cbd5e0;">404</h1>
-      <h2 style="margin-bottom: 20px;">Page Not Found</h2>
-      <p style="color: #666; margin-bottom: 30px;">The requested URL "/site/${slug}" was not found on this server.</p>
+      <h2 style="margin-bottom: 20px;">${!page ? 'Page Not Found' : 'Draft Page'}</h2>
+      <p style="color: #666; margin-bottom: 30px;">
+        ${!page 
+          ? `The requested URL "/site/${slug}" was not found.` 
+          : 'This page is currently a draft and is not publicly accessible.'}
+      </p>
       <button class="btn-primary" onclick="window.navigateTo('dashboard')">Back to CRM</button>
     </div>`;
     return;
@@ -572,6 +576,7 @@ function renderSitePage(slug: string) {
 
   app.innerHTML = `
     <div class="public-site" style="min-height: 100vh; background: white;">
+      ${isPreview ? `<div style="background: #fdf2f2; color: #dc2626; padding: 10px; text-align: center; font-weight: 700; border-bottom: 1px solid #fee2e2;">PREVIEW MODE: You are viewing a draft version of "${page.name}"</div>` : ''}
       ${sections.map(section => renderSection(section.type, section.content, section.styles, section.id)).join('')}
       
       <!-- Public Footer -->
@@ -701,7 +706,10 @@ function renderPages() {
       </td>
       <td>
         <div style="display: flex; gap: 5px;">
-          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="window.navigateTo('site', '${page.slug}')">View</button>
+          ${page.status === 'published' 
+            ? `<button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="window.navigateTo('site', '${page.slug}')">View Live</button>`
+            : `<button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #ea580c;" onclick="window.navigateTo('preview', '${page.slug}')">Preview</button>`
+          }
           <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="window.navigateTo('page-sections', '${page.id}')">Sections</button>
           <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="alert('Edit Page: ${page.name}')">Edit</button>
           <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #6c757d;" onclick="alert('SEO Settings for: ${page.name}')">SEO</button>
@@ -1438,6 +1446,7 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   if (view === 'quote-preview' && id) renderQuotePreview(id);
   if (view === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
   if (view === 'site' && id) renderSitePage(id);
+  if (view === 'preview' && id) renderSitePage(id, true);
   else {
     document.title = 'Hansveer CRM'; // Restore admin title
     updateMetaTag('description', 'Professional CRM for Handyman Businesses');
