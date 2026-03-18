@@ -498,15 +498,17 @@ function renderSectionPreviewContent(section: any) {
   alert('All changes saved to database!');
 };
 
-(window as any).submitBuilderForm = (sectionId: string) => {
+(window as any).submitBuilderForm = (sectionId: string, isPublic: boolean = false) => {
   const section = mockPageSections.find(s => s.id === sectionId);
   if (!section) return;
 
-  // Collect data from the preview form inputs
-  const name = (document.getElementById(`pf-name-${sectionId}`) as HTMLInputElement)?.value;
-  const phone = (document.getElementById(`pf-phone-${sectionId}`) as HTMLInputElement)?.value;
-  const email = (document.getElementById(`pf-email-${sectionId}`) as HTMLInputElement)?.value;
-  const message = (document.getElementById(`pf-message-${sectionId}`) as HTMLInputElement)?.value;
+  const prefix = isPublic ? 'site-f-' : 'pf-';
+
+  // Collect data from the form inputs
+  const name = (document.getElementById(`${prefix}name-${sectionId}`) as HTMLInputElement)?.value;
+  const phone = (document.getElementById(`${prefix}phone-${sectionId}`) as HTMLInputElement)?.value;
+  const email = (document.getElementById(`${prefix}email-${sectionId}`) as HTMLInputElement)?.value;
+  const message = (document.getElementById(`${prefix}message-${sectionId}`) as HTMLInputElement)?.value;
 
   if (!name || !email) {
     alert('Please provide at least a name and email.');
@@ -547,10 +549,102 @@ function renderSectionPreviewContent(section: any) {
   
   // Clear form
   ['name', 'phone', 'email', 'message'].forEach(f => {
-    const el = document.getElementById(`pf-${f}-${sectionId}`) as HTMLInputElement;
+    const el = document.getElementById(`${prefix}${f}-${sectionId}`) as HTMLInputElement;
     if (el) el.value = '';
   });
 };
+
+function renderSitePage(slug: string) {
+  const page = mockPages.find(p => p.slug === slug);
+  if (!page) {
+    app.innerHTML = `<div style="padding: 100px; text-align: center; font-family: sans-serif;">
+      <h1 style="font-size: 4rem; color: #cbd5e0;">404</h1>
+      <h2 style="margin-bottom: 20px;">Page Not Found</h2>
+      <p style="color: #666; margin-bottom: 30px;">The requested URL "/site/${slug}" was not found on this server.</p>
+      <button class="btn-primary" onclick="window.navigateTo('dashboard')">Back to CRM</button>
+    </div>`;
+    return;
+  }
+
+  const sections = mockPageSections
+    .filter(s => s.page_id === page.id)
+    .sort((a, b) => a.order - b.order);
+
+  app.innerHTML = `
+    <div class="public-site" style="min-height: 100vh; background: white;">
+      ${sections.map(section => renderSection(section.type, section.content, section.styles, section.id)).join('')}
+      
+      <!-- Public Footer -->
+      <footer style="padding: 40px; text-align: center; background: #f8fafc; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 0.9rem;">
+        <p>&copy; 2026 ${page.name}. Built with Hansveer CRM Website Builder.</p>
+        <button onclick="window.navigateTo('dashboard')" style="margin-top: 20px; background: none; border: 1px solid #cbd5e0; padding: 5px 15px; border-radius: 4px; cursor: pointer; color: #64748b;">Admin Login</button>
+      </footer>
+    </div>
+  `;
+  
+  document.title = page.seo_title || page.name;
+}
+
+function renderSection(type: string, content: any, styles: any, id: string) {
+  return `
+    <section id="section-${id}" style="
+      padding: ${styles.padding || '60px 20px'};
+      text-align: ${styles.text_alignment || styles.alignment || styles.textAlign || 'left'};
+      background-image: ${content.background_image ? `url('${content.background_image}')` : 'none'};
+      background-size: cover;
+      background-position: center;
+      background-color: ${styles.background || styles.backgroundColor || 'transparent'};
+      color: ${styles.color || (content.background_image ? 'white' : 'inherit')};
+      width: ${styles.width || '100%'};
+      margin: 0 auto;
+      min-height: ${type === 'hero' ? '70vh' : 'auto'};
+      display: flex;
+      flex-direction: column;
+      justify-content: ${type === 'hero' ? 'center' : 'flex-start'};
+      position: relative;
+    ">
+      ${content.background_image ? `<div style="position: absolute; inset: 0; background: rgba(0,0,0,0.4);"></div>` : ''}
+      <div style="position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; width: 100%;">
+        ${renderSectionBody(type, content, styles, id)}
+      </div>
+    </section>
+  `;
+}
+
+function renderSectionBody(type: string, content: any, styles: any, id: string) {
+  switch (type) {
+    case 'hero':
+      return `
+        <h1 style="font-size: clamp(2.5rem, 8vw, 4rem); margin-bottom: 1.5rem; font-weight: 800; line-height: 1.1;">${content.heading || 'Hero Heading'}</h1>
+        <p style="font-size: clamp(1.1rem, 3vw, 1.5rem); opacity: 0.9; margin-bottom: 2.5rem; max-width: 700px; margin-left: ${styles.text_alignment === 'center' ? 'auto' : '0'}; margin-right: ${styles.text_alignment === 'center' ? 'auto' : '0'};">${content.subheading || 'Hero Subheading'}</p>
+        <a href="${content.button_link || '#'}" class="btn-primary" style="display: inline-block; text-decoration: none; padding: 18px 40px; font-size: 1.2rem; border-radius: 50px; text-align: center;">${content.button_text || 'Get Started'}</a>
+      `;
+    case 'text':
+      return `<div style="line-height: 1.8; font-size: ${styles.font_size || '1.1rem'}; max-width: 800px; margin: 0 auto;">${content.text || ''}</div>`;
+    case 'image':
+      return `<img src="${content.image_url}" alt="Site Image" style="width: 100%; height: auto; border-radius: ${styles.border_radius || '0'}; display: block; margin: 0 auto;">`;
+    case 'form':
+      return `
+        <div style="max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); color: #333; text-align: left;">
+          <h3 style="margin-bottom: 25px; font-size: 1.75rem; text-align: center;">${content.title || 'Contact Us'}</h3>
+          <div style="display: flex; flex-direction: column; gap: 20px;">
+            ${(content.fields || []).map((f: string) => `
+              <div class="form-group">
+                <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; color: #666;">${f.charAt(0).toUpperCase() + f.slice(1)}</label>
+                <input type="${f === 'email' ? 'email' : 'text'}" id="site-f-${f}-${id}" placeholder="Your ${f}" style="padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%;">
+              </div>
+            `).join('')}
+            <button class="btn-primary" style="padding: 16px; margin-top: 10px; font-size: 1.1rem;" onclick="window.submitBuilderForm('${id}', true)">Send Message</button>
+          </div>
+        </div>
+      `;
+    case 'button':
+      const sizeMap: any = { small: '10px 20px', medium: '15px 35px', large: '20px 50px' };
+      return `<a href="${content.link || '#'}" class="btn-primary" style="display: inline-block; text-decoration: none; background: ${styles.color || 'var(--primary-color)'}; padding: ${sizeMap[styles.size] || '15px 35px'}; border-radius: 8px; font-weight: 600; text-align: center;">${content.label || 'Click Here'}</a>`;
+    default:
+      return `<div>Component type "${type}" not implemented</div>`;
+  }
+}
 
 function renderReports() {
   app.innerHTML = `
@@ -595,6 +689,7 @@ function renderPages() {
       </td>
       <td>
         <div style="display: flex; gap: 5px;">
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="window.navigateTo('site', '${page.slug}')">View</button>
           <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="window.navigateTo('page-sections', '${page.id}')">Sections</button>
           <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="alert('Edit Page: ${page.name}')">Edit</button>
           <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #6c757d;" onclick="alert('SEO Settings for: ${page.name}')">SEO</button>
@@ -1327,6 +1422,7 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   if (view === 'quickstart') renderQuickstart();
   if (view === 'quote-preview' && id) renderQuotePreview(id);
   if (view === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
+  if (view === 'site' && id) renderSitePage(id);
 };
 
 (window as any).selectQuoteTier = (quoteId: string, tier: 'basic' | 'standard' | 'premium') => {
