@@ -8,6 +8,8 @@ export interface WebsiteTemplate {
     id: string;
     name: string;
     description: string;
+    category: string;
+    image: string;
     blocks: BuilderBlock[];
     theme: {
         primary: string;
@@ -21,6 +23,8 @@ export const templates: WebsiteTemplate[] = [
         id: 'residential-sparkle',
         name: 'Residential Sparkle',
         description: 'Perfect for soft washing and home exterior care specialist.',
+        category: 'Residential',
+        image: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&q=80&w=600',
         theme: {
             primary: '#00d2ff',
             secondary: '#3a7bd5',
@@ -57,6 +61,8 @@ export const templates: WebsiteTemplate[] = [
         id: 'commercial-pro',
         name: 'Commercial Pro',
         description: 'Industrial bold styling for large-scale concrete and fleet cleaning.',
+        category: 'Commercial',
+        image: 'https://images.unsplash.com/photo-1621905251189-08b45d6a269e?auto=format&fit=crop&q=80&w=600',
         theme: {
             primary: '#ff4b2b',
             secondary: '#ff416c',
@@ -94,6 +100,8 @@ export const templates: WebsiteTemplate[] = [
         id: 'trust-proof',
         name: 'The Trust Proof',
         description: 'Heavy focus on before/after galleries and client testimonials.',
+        category: 'Conversion',
+        image: 'https://images.unsplash.com/photo-1599839619722-39751411ea63?auto=format&fit=crop&q=80&w=600',
         theme: {
             primary: '#11998e',
             secondary: '#38ef7d',

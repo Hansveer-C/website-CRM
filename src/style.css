@@ -117,6 +117,18 @@ body {
     border-bottom: 1px solid #eee;
 }
 
+.clients-table tbody tr {
+    transition: background-color 0.15s ease;
+}
+
+.clients-table tbody tr.clickable-row {
+    cursor: pointer;
+}
+
+.clients-table tbody tr.clickable-row:hover {
+    background-color: #f1f5f9;
+}
+
 .clients-table th {
     background-color: #f1f3f5;
     color: var(--secondary-color);

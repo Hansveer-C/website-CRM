@@ -1,4 +1,5 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia } from './db';
+import { templates } from './templates';
 import { Activity } from './types';
 import { runAutomations, checkOverdueInvoices } from './automation';
 
@@ -17,6 +18,42 @@ let invoiceStatusFilter: string = 'all';
 let builderPageId: string = mockPages[0]?.id || '';
 let builderSelectedSectionId: string | null = null;
 let builderInsertOrder: number | null = null;
+let compSearchQuery: string = '';
+let compCategoryFilter: string = 'all';
+
+let mockGlobalSettings = {
+  businessName: 'PressurePro Cleaning',
+  logoUrl: '',
+  phone: '1-800-CLEAN-IT',
+  seoTitleFormat: '{page_name} | {business_name}',
+  seoDescriptionFallback: 'Professional pressure washing and exterior cleaning services.',
+  fbPixelId: '',
+  gtmId: ''
+};
+
+(window as any).updateGlobalSettings = (key: string, value: string) => {
+  (mockGlobalSettings as any)[key] = value;
+};
+
+(window as any).saveGlobalSettings = () => {
+  alert('Global Website Settings saved successfully! All pages updated.');
+  renderWebsiteSettings();
+};
+
+(window as any).setCompCategory = (cat: string) => {
+  compCategoryFilter = cat;
+  renderComponents();
+};
+
+(window as any).setCompSearch = (val: string) => {
+  compSearchQuery = val.toLowerCase();
+  renderComponents();
+};
+
+(window as any).cancelComponentPicker = () => {
+  builderInsertOrder = null;
+  (window as any).navigateTo('builder');
+};
 
 // New Quote State
 let newQuoteLineItems: { service: string, description: string, quantity: number, price: number, tier: 'basic' | 'standard' | 'premium' }[] = [
@@ -93,6 +130,11 @@ function renderDashboard() {
   // 3. Overdue Tasks
   const overdueTasks = mockActivities.filter((a: Activity) => !a.completed && new Date(a.due_date) < now);
 
+  // 4. Website Performance Metrics
+  const websiteLeads = mockContacts.filter(c => c.source.toLowerCase().includes('website') || c.source.toLowerCase().includes('search') || c.source.toLowerCase().includes('ad')).length;
+  const formSubmissions = mockContacts.length > 0 ? Math.floor(websiteLeads * 1.5) + 3 : 0; 
+  const topPageName = mockPages.length > 0 ? mockPages[Math.floor(Math.random() * Math.min(mockPages.length, 3))].name : 'Home';
+  
   app.innerHTML = `
     ${renderSidebar('dashboard')}
     <main class="main-content">
@@ -156,6 +198,29 @@ function renderDashboard() {
             `).join('')}
           </div>
         </div>
+        
+        <div class="card" style="display: flex; flex-direction: column;">
+          <h3>Website Performance</h3>
+          <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 20px; flex: 1;">
+            
+            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid var(--primary-color);">
+              <small style="color: #64748b; font-weight: 600; text-transform: uppercase;">Total Leads Acquired</small>
+              <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b; margin-top: 5px;">${websiteLeads}</div>
+            </div>
+
+            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid #10b981;">
+              <small style="color: #64748b; font-weight: 600; text-transform: uppercase;">Form Submissions</small>
+              <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b; margin-top: 5px;">${formSubmissions}</div>
+            </div>
+
+            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+              <small style="color: #64748b; font-weight: 600; text-transform: uppercase;">Top Converting Page</small>
+              <div style="font-size: 1.2rem; font-weight: 700; color: #1e293b; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${topPageName}</div>
+            </div>
+
+          </div>
+        </div>
+
       </div>
 
       ${overdueTasks.length > 0 ? `
@@ -292,6 +357,11 @@ function renderClients() {
     page.status = page.status === 'published' ? 'draft' : 'published';
     (page as any).updated_at = new Date().toISOString();
     renderBuilder();
+    if (page.status === 'published') {
+      (window as any).showToast('Page published');
+    } else {
+      (window as any).showToast('Page unpublished');
+    }
   }
 };
 
@@ -344,9 +414,8 @@ function _renderBuilder() {
   const selectedSection = sections.find(s => s.id === builderSelectedSectionId);
 
   app.innerHTML = `
-    ${renderSidebar('builder')}
-    <main class="main-content" style="padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column;">
-      <header style="background: #111; border-bottom: 1px solid #333; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; z-index: 100; flex-shrink: 0;">
+    <main style="width: 100vw; padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column; background: #1a1a1a;">
+      <header style="background: #111; border-bottom: 1px solid #333; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; z-index: 100; flex-shrink: 0; height: 60px; box-sizing: border-box;">
         <div style="display: flex; align-items: center; gap: 15px;">
           <button class="btn-primary" style="background: transparent; border: 1px solid #333; color: #888; padding: 6px 12px; font-size: 0.8rem;" onclick="window.navigateTo('pages')">← Back to List</button>
           <input type="text" value="${page.name}" onchange="window.updatePageName('${page.id}', this.value)" style="background: transparent; border: 1px solid transparent; color: white; font-size: 1.1rem; font-weight: 600; padding: 4px 8px; border-radius: 4px; transition: border-color 0.2s; outline: none; width: 300px;" onfocus="this.style.borderColor='#333'; this.style.background='#000'" onblur="this.style.borderColor='transparent'; this.style.background='transparent'" title="Edit Page Name">
@@ -355,6 +424,7 @@ function _renderBuilder() {
           <span id="pb-autosave-indicator" style="color: #888; font-size: 0.8rem; margin-right: 15px; display: flex; align-items: center; gap: 6px; font-weight: 600;">
             <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: ${isAutoSaving ? '#ffc107' : '#28a745'}; box-shadow: ${isAutoSaving ? '0 0 5px #ffc107' : 'none'};"></span> ${isAutoSaving ? 'Saving...' : 'Saved'}
           </span>
+          <button class="btn-primary" style="background: #28a745; border: none; padding: 6px 15px; font-size: 0.85rem;" onclick="window.savePageSections()">Save</button>
           <button class="btn-primary" style="background: #222; border: 1px solid #444; padding: 6px 15px; font-size: 0.85rem;" onclick="window.navigateTo('preview', '${page.slug}')">Preview</button>
           <div style="width: 1px; height: 20px; background: #333; margin: 0 5px;"></div>
           <button class="btn-primary" style="background: ${page.status === 'published' ? '#ea580c' : 'var(--primary-color)'}; padding: 6px 15px; font-size: 0.85rem;" onclick="window.togglePublishFromBuilder('${page.id}')">${page.status === 'published' ? 'Unpublish' : 'Publish'}</button>
@@ -669,11 +739,7 @@ function renderSectionPreviewContent(section: any) {
 
 (window as any).showComponentPickerAt = (order: string) => {
   builderInsertOrder = parseFloat(order);
-  const leftPanel = document.querySelector('.pb-left-panel');
-  if (leftPanel) {
-    leftPanel.setAttribute('style', 'box-shadow: 0 0 0 3px var(--primary-color) inset; transition: box-shadow 0.2s; border-right: none;');
-    setTimeout(() => leftPanel.removeAttribute('style'), 1500);
-  }
+  (window as any).navigateTo('components');
 };
 (window as any).duplicateBuilderSection = (id: string) => {
   const section = mockPageSections.find(s => s.id === id);
@@ -715,8 +781,8 @@ function renderSectionPreviewContent(section: any) {
 
   mockPageSections.push(newSection);
   builderSelectedSectionId = newSection.id;
-  renderBuilder();
   (window as any).triggerAutoSave();
+  (window as any).navigateTo('builder');
 };
 
 (window as any).removeSection = (id: string) => {
@@ -763,8 +829,42 @@ function renderSectionPreviewContent(section: any) {
   }
 };
 
+(window as any).showToast = (message: string) => {
+  const toast = document.createElement('div');
+  toast.innerText = message;
+  toast.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #111;
+    color: #fff;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    z-index: 10000;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    border: 1px solid #333;
+  `;
+  document.body.appendChild(toast);
+  
+  setTimeout(() => {
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateY(0)';
+  }, 10);
+  
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(20px)';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+};
+
 (window as any).savePageSections = () => {
-  alert('All changes saved to database!');
+  (window as any).showToast('Page saved');
 };
 
 (window as any).submitBuilderForm = (sectionId: string, isPublic: boolean = false) => {
@@ -854,15 +954,37 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
       
       <!-- Public Footer -->
       <footer style="padding: 40px; text-align: center; background: #f8fafc; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 0.9rem;">
-        <p>&copy; 2026 ${page.name}. Built with Hansveer CRM Website Builder.</p>
+        <p>&copy; 2026 ${mockGlobalSettings.businessName}. Built with Hansveer CRM Website Builder.</p>
         <button onclick="window.navigateTo('dashboard')" style="margin-top: 20px; background: none; border: 1px solid #cbd5e0; padding: 5px 15px; border-radius: 4px; cursor: pointer; color: #64748b;">Admin Login</button>
       </footer>
     </div>
   `;
   
-  document.title = page.seo_title || page.name;
-  updateMetaTag('description', page.seo_description);
+  const finalTitle = mockGlobalSettings.seoTitleFormat
+      .replace('{page_name}', page.seo_title || page.name)
+      .replace('{business_name}', mockGlobalSettings.businessName);
+  document.title = finalTitle;
+  updateMetaTag('description', page.seo_description || mockGlobalSettings.seoDescriptionFallback);
   updateMetaTag('keywords', (page.seo_keywords || []).join(', '));
+
+  if (mockGlobalSettings.fbPixelId) {
+    if (!document.getElementById('fb-pixel-sim')) {
+       console.log('Injecting FB Pixel: ' + mockGlobalSettings.fbPixelId);
+       const t = document.createElement('script');
+       t.id = 'fb-pixel-sim';
+       t.innerHTML = `console.log("FB Pixel [${mockGlobalSettings.fbPixelId}] Initialized"); window.fbq = function() { console.log('fbq:', arguments); };`;
+       document.head.appendChild(t);
+    }
+  }
+  if (mockGlobalSettings.gtmId) {
+    if (!document.getElementById('gtm-sim')) {
+       console.log('Injecting GTM: ' + mockGlobalSettings.gtmId);
+       const t = document.createElement('script');
+       t.id = 'gtm-sim';
+       t.innerHTML = `console.log("GTM [${mockGlobalSettings.gtmId}] Initialized"); window.dataLayer = window.dataLayer || [];`;
+       document.head.appendChild(t);
+    }
+  }
 }
 
 function updateMetaTag(name: string, content: string) {
@@ -963,33 +1085,46 @@ function renderReports() {
   `;
 }
 
-(window as any).createNewPage = () => {
-   const modal = document.createElement('div');
-   modal.id = 'new-page-modal';
-   modal.innerHTML = `
-      <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;">
-        <div style="background: white; padding: 40px; border-radius: 12px; width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
-          <h2 style="margin-top: 0; margin-bottom: 20px; font-size: 1.5rem;">Create New Page</h2>
-          <p style="color: #666; margin-bottom: 30px;">Choose how you want to start your new page.</p>
-          
-          <div style="display: flex; flex-direction: column; gap: 15px;">
-             <button onclick="window.createPageFromSelection('blank')" style="padding: 15px; border: 2px solid #e2e8f0; border-radius: 8px; background: white; text-align: left; cursor: pointer; font-size: 1rem; font-weight: 600; transition: border-color 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#e2e8f0'">📄 Blank Page</button>
-             <button onclick="window.createPageFromSelection('template')" style="padding: 15px; border: 2px solid #e2e8f0; border-radius: 8px; background: white; text-align: left; cursor: pointer; font-size: 1rem; font-weight: 600; transition: border-color 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#e2e8f0'">✨ Use Template</button>
-             <button onclick="window.createPageFromSelection('ai')" style="padding: 15px; border: 2px solid #e2e8f0; border-radius: 8px; background: white; text-align: left; cursor: pointer; font-size: 1rem; font-weight: 600; transition: border-color 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#e2e8f0'">🤖 Generate with AI</button>
-          </div>
-          <button onclick="document.getElementById('new-page-modal').remove()" style="margin-top: 25px; width: 100%; padding: 10px; border: none; background: transparent; color: #888; cursor: pointer;">Cancel</button>
+(window as any).openNewPageModal = (type: string) => {
+  if (type === 'template') {
+    (window as any).navigateTo('templates');
+    return;
+  }
+  const titles: Record<string, string> = {
+    'blank': 'Create Blank Page',
+    'ai': 'Generate Page with AI'
+  };
+  
+  const modal = document.createElement('div');
+  modal.id = 'page-name-modal';
+  modal.innerHTML = `
+    <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+      <div style="background: white; padding: 40px; border-radius: 12px; width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+        <h2 style="margin-top: 0; margin-bottom: 20px; font-size: 1.5rem;">${titles[type]}</h2>
+        <div class="form-group" style="margin-bottom: 20px;">
+          <label style="display: block; font-weight: 600; margin-bottom: 8px;">Page Name</label>
+          <input type="text" id="new_page_name_input" placeholder="e.g. About Us" style="padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; box-sizing: border-box;" onkeydown="if(event.key === 'Enter') window.submitNewPage('${type}')">
+        </div>
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+          <button onclick="document.getElementById('page-name-modal').remove()" style="padding: 10px 20px; border: 1px solid #e2e8f0; background: white; border-radius: 8px; cursor: pointer; font-weight: 600; color: #666;">Cancel</button>
+          <button onclick="window.submitNewPage('${type}')" class="btn-primary" style="padding: 10px 20px;">Create Page</button>
         </div>
       </div>
-   `;
-   document.body.appendChild(modal);
+    </div>
+  `;
+  document.body.appendChild(modal);
+  setTimeout(() => document.getElementById('new_page_name_input')?.focus(), 100);
 };
 
-(window as any).createPageFromSelection = (type: string) => {
-   const modal = document.getElementById('new-page-modal');
-   if (modal) modal.remove();
-
-   const newName = prompt('Enter new page name:');
-   if (!newName) return;
+(window as any).submitNewPage = (type: string) => {
+   const input = document.getElementById('new_page_name_input') as HTMLInputElement;
+   const newName = input.value.trim();
+   if (!newName) {
+     alert('Please enter a page name');
+     return;
+   }
+   
+   document.getElementById('page-name-modal')?.remove();
    
    const slug = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
    const newPage = {
@@ -1096,7 +1231,7 @@ function renderPages() {
   const tableRows = mockPages.map(page => {
     const lastEdited = (page as any).updated_at ? new Date((page as any).updated_at).toLocaleDateString() : new Date(page.created_at).toLocaleDateString();
     return `
-    <tr>
+    <tr class="clickable-row" onclick="window.switchBuilderPage('${page.id}'); window.navigateTo('builder');">
       <td style="font-weight: 600; color: var(--primary-color);">${page.name}</td>
       <td><code>/${page.slug}</code></td>
       <td><span class="badge badge-${page.status}">${page.status}</span></td>
@@ -1111,11 +1246,11 @@ function renderPages() {
       </td>
       <td>
         <div style="display: flex; gap: 5px; flex-wrap: wrap; max-width: 380px;">
-          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="window.switchBuilderPage('${page.id}'); window.navigateTo('builder');">Edit</button>
-          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #6c757d;" onclick="window.duplicatePage('${page.id}')">Duplicate</button>
-          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: ${page.status === 'published' ? '#ea580c' : '#28a745'};" onclick="window.togglePublish('${page.id}')">${page.status === 'published' ? 'Unpublish' : 'Publish'}</button>
-          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #8a2be2;" onclick="window.generatePageWithAI('${page.id}')">✨ AI Gen</button>
-          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #17a2b8;" onclick="window.applyTemplate('${page.id}')">Template</button>
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="event.stopPropagation(); window.switchBuilderPage('${page.id}'); window.navigateTo('builder');">Edit</button>
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #6c757d;" onclick="event.stopPropagation(); window.duplicatePage('${page.id}')">Duplicate</button>
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: ${page.status === 'published' ? '#ea580c' : '#28a745'};" onclick="event.stopPropagation(); window.togglePublish('${page.id}')">${page.status === 'published' ? 'Unpublish' : 'Publish'}</button>
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #8a2be2;" onclick="event.stopPropagation(); window.generatePageWithAI('${page.id}')">✨ AI Gen</button>
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #17a2b8;" onclick="event.stopPropagation(); window.applyTemplate('${page.id}')">Template</button>
         </div>
       </td>
     </tr>
@@ -1130,7 +1265,11 @@ function renderPages() {
           <h2>Website Pages</h2>
           <button class="btn-primary" style="background: #6c757d; padding: 5px 15px; font-size: 0.85rem;" onclick="window.downloadSitemap()">Export sitemap.xml</button>
         </div>
-        <button class="btn-primary" onclick="window.createNewPage()">+ New Page</button>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <button class="btn-primary" style="background: #8a2be2;" onclick="window.openNewPageModal('ai')">✨ Generate with AI</button>
+          <button class="btn-primary" style="background: #17a2b8;" onclick="window.openNewPageModal('template')">📄 Use Template</button>
+          <button class="btn-primary" onclick="window.openNewPageModal('blank')">+ New Page</button>
+        </div>
       </header>
 
       <div class="card" style="padding: 0; overflow: hidden;">
@@ -1243,7 +1382,20 @@ function renderPageSections(pageId: string) {
 }
 
 function renderComponents() {
-  const gridItems = mockComponents.map(comp => `
+  const isPickerMode = builderInsertOrder !== null;
+
+  let filtered = mockComponents;
+  if (compSearchQuery) {
+    filtered = filtered.filter(c => c.name.toLowerCase().includes(compSearchQuery) || c.type.toLowerCase().includes(compSearchQuery));
+  }
+  if (compCategoryFilter !== 'all') {
+    if (compCategoryFilter === 'basic') filtered = filtered.filter(c => ['text', 'button', 'image'].includes(c.type));
+    else if (compCategoryFilter === 'layout') filtered = filtered.filter(c => ['hero', 'section'].includes(c.type));
+    else if (compCategoryFilter === 'forms') filtered = filtered.filter(c => ['form'].includes(c.type));
+    else if (compCategoryFilter === 'advanced') filtered = filtered.filter(c => !['text', 'button', 'image', 'hero', 'section', 'form'].includes(c.type));
+  }
+
+  const gridItems = filtered.map(comp => `
     <div class="card" style="display: flex; flex-direction: column; gap: 15px;">
       <!-- Visual Preview -->
       <div style="width: 100%; height: 250px; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 8px; position: relative; background: #f8fafc;">
@@ -1260,10 +1412,15 @@ function renderComponents() {
       
       <!-- Actions -->
       <div style="display: flex; gap: 10px;">
-        <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 0.85rem; background: #222;" onclick="alert('Edit Content for ${comp.name}')">Edit Content</button>
-        <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 0.85rem; background: #222;" onclick="alert('Edit Styles for ${comp.name}')">Edit Styles</button>
+        ${isPickerMode ? `
+          <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 0.85rem; background: var(--primary-color);" onclick="window.addSectionToPage('${comp.id}')">Insert</button>
+        ` : `
+          <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 0.85rem; background: #222;" onclick="alert('Edit Content for ${comp.name}')">Edit Content</button>
+          <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 0.85rem; background: #222;" onclick="alert('Edit Styles for ${comp.name}')">Edit Styles</button>
+        `}
       </div>
       
+      ${!isPickerMode ? `
       <!-- Advanced JSON -->
       <details style="background: #f8f9fa; border-radius: 6px; padding: 10px; border: 1px solid #e2e8f0;">
         <summary style="cursor: pointer; font-size: 0.8rem; font-weight: 600; color: #666; outline: none;">Advanced JSON</summary>
@@ -1277,22 +1434,41 @@ function renderComponents() {
             <pre style="font-size: 0.7rem; background: #1e1e1e; color: #d4d4d4; padding: 10px; border-radius: 4px; overflow-x: auto; margin: 0;">${JSON.stringify(comp.default_styles, null, 2)}</pre>
           </div>
         </div>
-      </details>
+      </details>` : ''}
     </div>
   `).join('');
 
   app.innerHTML = `
-    ${renderSidebar('components')}
-    <main class="main-content">
-      <header class="view-header">
-        <h2>Component Library</h2>
-        <button class="btn-primary" onclick="alert('Register New Component')">+ New Component</button>
+    ${isPickerMode ? '' : renderSidebar('components')}
+    <main class="${isPickerMode ? '' : 'main-content'}" style="${isPickerMode ? 'width: 100vw; height: 100vh; overflow-y: auto; padding: 20px;' : ''}">
+      <header class="view-header" style="${isPickerMode ? 'border-bottom: 1px solid #eee; padding-bottom: 20px; display: flex; flex-direction: column; gap: 15px;' : ''}">
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+          <h2>${isPickerMode ? 'Select Component to Insert' : 'Component Library'}</h2>
+          <div>
+            ${isPickerMode ? `
+              <button class="btn-primary" style="background: transparent; color: #666; border: 1px solid #ccc; margin-right: 10px;" onclick="window.cancelComponentPicker()">Cancel</button>
+            ` : `
+              <button class="btn-primary" onclick="alert('Register New Component')">+ New Component</button>
+            `}
+          </div>
+        </div>
+        
+        <!-- Search and Filter Bar -->
+        <div style="display: flex; gap: 20px; align-items: center; width: 100%; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; flex-wrap: wrap;">
+          <input type="text" placeholder="Search components by name or type..." value="${compSearchQuery}" oninput="window.setCompSearch(this.value)" style="flex: 1; min-width: 250px; padding: 10px 15px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.95rem; outline: none;">
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            ${['all', 'basic', 'layout', 'forms', 'advanced'].map(cat => `
+              <button onclick="window.setCompCategory('${cat}')" style="padding: 8px 16px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; border: 1px solid ${compCategoryFilter === cat ? 'var(--primary-color)' : '#e2e8f0'}; background: ${compCategoryFilter === cat ? 'var(--primary-color)' : 'white'}; color: ${compCategoryFilter === cat ? 'white' : '#64748b'};">${cat.charAt(0).toUpperCase() + cat.slice(1)}</button>
+            `).join('')}
+          </div>
+        </div>
       </header>
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 24px;">
-        ${gridItems || '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #666;">No components found</div>'}
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 24px; padding-top: 20px;">
+        ${gridItems || '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #666; font-size: 1.1rem;">No components match your search.</div>'}
       </div>
 
+      ${!isPickerMode ? `
       <div class="stats-grid" style="margin-top: 40px;">
         <div class="card">
           <h3>Collection: Components</h3>
@@ -1305,17 +1481,94 @@ function renderComponents() {
             <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>default_styles</strong>: JSON</li>
           </ul>
         </div>
-      </div>
+      </div>` : ''}
     </main>
   `;
 }
 
+(window as any).useTemplate = (templateId: string) => {
+  const template = templates.find((t: any) => t.id === templateId);
+  if (!template) return;
+
+  const newName = prompt('Enter new page name:', template.name + ' Copy');
+  if (!newName) return;
+  
+  const slug = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+  const newPage = {
+   id: `p${Date.now()}`,
+   name: newName,
+   slug: slug,
+   status: 'draft',
+   seo_title: newName,
+   seo_description: '',
+   seo_keywords: [],
+   created_at: new Date().toISOString(),
+   updated_at: new Date().toISOString()
+  };
+  mockPages.push(newPage as any);
+
+  template.blocks.forEach((block: any, index: number) => {
+    let mappedContent = { ...block.data };
+    let mappedStyles: any = { 
+       background: '#ffffff',
+       color: '#333333'
+    };
+    
+    if (block.type === 'hero') {
+       mappedContent = { heading: block.data.title, subheading: block.data.subtitle, button_text: block.data.buttonText };
+       mappedStyles = { background: template.theme.primary, color: 'white', text_alignment: 'center', padding: '100px 20px' };
+    } else if (block.type === 'services') {
+       mappedContent = { heading: block.data.title, items: block.data.items };
+       mappedStyles = { background: '#f8fafc', color: '#333', padding: '80px 20px' };
+    } else if (block.type === 'trust') {
+       mappedContent = { heading: block.data.title, logos: block.data.logos, testimonials: block.data.testimonials };
+       mappedStyles = { background: 'white', color: '#333', padding: '60px 20px' };
+    } else if (block.type === 'gallery') {
+       mappedContent = { heading: block.data.title, images: block.data.images };
+       mappedStyles = { background: '#fdfbfe', color: '#333', padding: '80px 20px' };
+    } else if (block.type === 'contact') {
+       mappedContent = { title: block.data.title, fields: ['name', 'email', 'phone', 'message'] };
+       mappedStyles = { background: template.theme.secondary, color: 'white', padding: '80px 20px' };
+    }
+
+    mockPageSections.push({
+      id: `ps-tpl-${Date.now()}-${index}`,
+      page_id: newPage.id,
+      type: block.type === 'services' || block.type === 'trust' || block.type === 'gallery' ? 'text' : (block.type === 'contact' ? 'form' : block.type),
+      content: mappedContent,
+      order: index + 1,
+      styles: mappedStyles
+    });
+  });
+
+  (window as any).switchBuilderPage(newPage.id);
+  (window as any).navigateTo('builder');
+};
+
 function renderTemplates() {
+  const cardsHtml = templates.map((t: any) => `
+    <div class="card" style="padding: 0; overflow: hidden; display: flex; flex-direction: column; height: 100%;">
+      <div style="height: 200px; width: 100%; background: #e2e8f0; background-image: url('${t.image}'); background-size: cover; background-position: center; border-bottom: 1px solid #e2e8f0;"></div>
+      <div style="padding: 24px; flex: 1; display: flex; flex-direction: column;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+          <h3 style="margin: 0; font-size: 1.25rem; color: var(--primary-color);">${t.name}</h3>
+          <span class="badge" style="background: #eef2f6; color: #64748b; font-size: 0.75rem;">${t.category}</span>
+        </div>
+        <p style="color: #666; font-size: 0.95rem; margin-bottom: 24px; flex: 1; line-height: 1.5;">${t.description}</p>
+        <button class="btn-primary" style="width: 100%; padding: 14px; font-weight: 600; font-size: 1rem; border-radius: 8px;" onclick="window.useTemplate('${t.id}')">Use Template</button>
+      </div>
+    </div>
+  `).join('');
+
   app.innerHTML = `
     ${renderSidebar('templates')}
     <main class="main-content">
-      <header class="view-header"><h2>Templates</h2></header>
-      <div style="padding: 40px; text-align: center; color: #666;">Templates library coming soon</div>
+      <header class="view-header">
+        <h2>Website Templates</h2>
+      </header>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 30px; padding: 10px;">
+        ${cardsHtml}
+      </div>
     </main>
   `;
 }
@@ -1324,8 +1577,54 @@ function renderWebsiteSettings() {
   app.innerHTML = `
     ${renderSidebar('website-settings')}
     <main class="main-content">
-      <header class="view-header"><h2>Website Settings</h2></header>
-      <div style="padding: 40px; text-align: center; color: #666;">Global site settings coming soon</div>
+      <header class="view-header">
+        <h2>Website Settings</h2>
+        <button class="btn-primary" style="background: var(--primary-color);" onclick="window.saveGlobalSettings()">Save Settings</button>
+      </header>
+      <div style="max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 30px; padding: 20px 0;">
+        
+        <div class="card" style="padding: 30px;">
+          <h3 style="margin-bottom: 20px; font-size: 1.25rem; border-bottom: 1px solid #eee; padding-bottom: 15px;">1. Branding</h3>
+          <div class="form-group" style="margin-bottom: 15px;">
+            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Business Name</label>
+            <input type="text" value="${mockGlobalSettings.businessName}" onchange="window.updateGlobalSettings('businessName', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none;">
+          </div>
+          <div class="form-group" style="margin-bottom: 15px;">
+            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Logo URL</label>
+            <input type="text" value="${mockGlobalSettings.logoUrl}" placeholder="https://..." onchange="window.updateGlobalSettings('logoUrl', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none;">
+          </div>
+          <div class="form-group">
+            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Phone Number</label>
+            <input type="text" value="${mockGlobalSettings.phone}" onchange="window.updateGlobalSettings('phone', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none;">
+          </div>
+        </div>
+
+        <div class="card" style="padding: 30px;">
+          <h3 style="margin-bottom: 20px; font-size: 1.25rem; border-bottom: 1px solid #eee; padding-bottom: 15px;">2. SEO Defaults</h3>
+          <p style="color: #666; font-size: 0.85rem; margin-bottom: 15px;">Variables allowed: <code>{page_name}</code>, <code>{business_name}</code></p>
+          <div class="form-group" style="margin-bottom: 15px;">
+            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Default Title Format</label>
+            <input type="text" value="${mockGlobalSettings.seoTitleFormat}" onchange="window.updateGlobalSettings('seoTitleFormat', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none;">
+          </div>
+          <div class="form-group">
+            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Default Description (Fallback)</label>
+            <textarea rows="3" onchange="window.updateGlobalSettings('seoDescriptionFallback', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none; font-family: inherit;">${mockGlobalSettings.seoDescriptionFallback}</textarea>
+          </div>
+        </div>
+
+        <div class="card" style="padding: 30px;">
+          <h3 style="margin-bottom: 20px; font-size: 1.25rem; border-bottom: 1px solid #eee; padding-bottom: 15px;">3. Tracking & Scripts</h3>
+          <div class="form-group" style="margin-bottom: 15px;">
+            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Facebook Pixel ID</label>
+            <input type="text" value="${mockGlobalSettings.fbPixelId}" placeholder="e.g. 123456789" onchange="window.updateGlobalSettings('fbPixelId', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none;">
+          </div>
+          <div class="form-group">
+            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Google Tag Manager ID</label>
+            <input type="text" value="${mockGlobalSettings.gtmId}" placeholder="e.g. GTM-XXXXXX" onchange="window.updateGlobalSettings('gtmId', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none;">
+          </div>
+        </div>
+
+      </div>
     </main>
   `;
 }
