@@ -17,7 +17,9 @@ let selectedContactId: string | null = null;
 let invoiceStatusFilter: string = 'all';
 
 // New Quote State
-let newQuoteLineItems: { service: string, description: string, quantity: number, price: number }[] = [{ service: '', description: '', quantity: 1, price: 0 }];
+let newQuoteLineItems: { service: string, description: string, quantity: number, price: number, tier: 'basic' | 'standard' | 'premium' }[] = [
+  { service: '', description: '', quantity: 1, price: 0, tier: 'basic' }
+];
 (window as any).newQuoteLineItems = newQuoteLineItems;
 let newQuoteContactId: string = '';
 (window as any).newQuoteContactId = newQuoteContactId;
@@ -634,6 +636,7 @@ function renderQuotes() {
         <td>${new Date(quote.created_at).toLocaleDateString()}</td>
         <td>
           <div style="display: flex; gap: 5px;">
+            <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="window.navigateTo('quote-preview', '${quote.id}')">Preview</button>
             <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;">View</button>
             ${quote.status === 'draft' ? `<button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="event.stopPropagation(); window.sendQuote('${quote.id}')">Send</button>` : ''}
             ${quote.status === 'sent' ? `
@@ -752,7 +755,51 @@ function renderNewQuote() {
     ? mockOpportunities.filter(o => o.contact_id === nqcId) 
     : [];
 
-  const total = nqItems.reduce((sum: number, item: any) => sum + (item.quantity * item.price), 0);
+  const renderTierGroup = (tier: 'basic' | 'standard' | 'premium') => {
+    const tierItems = nqItems.map((item: any, index: number) => ({ ...item, index })).filter((item: any) => item.tier === tier);
+    const tierTotal = tierItems.reduce((sum: number, item: any) => sum + (item.quantity * item.price), 0);
+    
+    return `
+      <div style="flex: 1; min-width: 320px; background: #fff; padding: 20px; border-radius: 12px; border: 1px solid #eef2f6; display: flex; flex-direction: column;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+          <h3 style="margin:0; text-transform: capitalize; color: var(--secondary-color); font-size: 1.1rem;">${tier} Option</h3>
+          <button class="btn-primary" style="padding: 4px 10px; font-size: 0.8rem; background: #f0f7ff; color: var(--primary-color); border: 1px solid var(--primary-color);" onclick="window.addLineItem('${tier}')">+ Add Item</button>
+        </div>
+        
+        <div style="flex: 1; overflow-y: auto; max-height: 500px;">
+          ${tierItems.map((item: any) => `
+            <div style="padding: 15px; border: 1px solid #f0f0f0; border-radius: 8px; margin-bottom: 15px; position: relative;">
+              <button onclick="window.removeLineItem(${item.index})" style="position: absolute; right: 8px; top: 8px; background: none; border: none; color: #ccc; cursor: pointer; font-size: 1.2rem;">×</button>
+              <div style="margin-bottom: 10px;">
+                <input type="text" placeholder="Service Name" value="${item.service}" style="width: 100%; border: none; font-weight: 600; font-size: 0.95rem; margin-bottom: 4px;" oninput="window.updateLineItem(${item.index}, 'service', this.value, false)">
+                <input type="text" placeholder="Short description" value="${item.description}" style="width: 100%; border: none; font-size: 0.85rem; color: #666;" oninput="window.updateLineItem(${item.index}, 'description', this.value, false)">
+              </div>
+              <div style="display: flex; gap: 10px; align-items: center; background: #f8fafc; padding: 10px; border-radius: 6px;">
+                <div style="flex: 1;">
+                  <label style="font-size: 0.7rem; color: #999; display: block;">QTY</label>
+                  <input type="number" value="${item.quantity}" style="width: 100%; border: 1px solid #e2e8f0; border-radius: 4px; padding: 4px;" oninput="window.updateLineItem(${item.index}, 'quantity', this.value, true)">
+                </div>
+                <div style="flex: 1;">
+                  <label style="font-size: 0.7rem; color: #999; display: block;">PRICE</label>
+                  <input type="number" value="${item.price}" style="width: 100%; border: 1px solid #e2e8f0; border-radius: 4px; padding: 4px;" oninput="window.updateLineItem(${item.index}, 'price', this.value, true)">
+                </div>
+                <div style="flex: 1; text-align: right;">
+                  <label style="font-size: 0.7rem; color: #999; display: block;">TOTAL</label>
+                  <span style="font-weight: 700; color: var(--primary-color);">$${(item.quantity * item.price).toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+          `).join('')}
+          ${tierItems.length === 0 ? '<div style="text-align: center; color: #ccc; padding: 20px; font-style: italic; border: 1px dashed #eee; border-radius: 8px;">No items in this tier</div>' : ''}
+        </div>
+
+        <div style="margin-top: 20px; padding-top: 15px; border-top: 2px solid #f1f5f9; text-align: right;">
+          <div style="font-size: 0.85rem; color: #64748b; font-weight: 500;">Option Total</div>
+          <div style="font-size: 1.5rem; font-weight: 800; color: #1e293b;">$${tierTotal.toLocaleString()}</div>
+        </div>
+      </div>
+    `;
+  };
 
   app.innerHTML = `
     ${renderSidebar('quotes')}
@@ -760,64 +807,40 @@ function renderNewQuote() {
       <header class="view-header">
         <div style="display: flex; align-items: center; gap: 15px;">
           <button onclick="window.navigateTo('quotes')" class="btn-primary" style="background: #eee; color: #333; padding: 5px 10px;">← Back</button>
-          <h2>Create New Quote</h2>
+          <h2>Create Multi-Tier Quote</h2>
         </div>
+        <button class="btn-primary" style="padding: 10px 25px;" onclick="window.saveQuote()">Create Quote</button>
       </header>
 
-      <div class="card" style="padding: 24px;">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
-          <div class="form-group">
-            <label>Select Contact</label>
-            <select id="quote-contact" style="width: 100%; padding: 10px;" onchange="window.updateNewQuoteContact(this.value)">
-              <option value="">-- Choose Contact --</option>
-              ${contacts.map(c => `<option value="${c.id}" ${nqcId === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Select Opportunity (Optional)</label>
-            <select id="quote-opportunity" style="width: 100%; padding: 10px;" onchange="window.newQuoteOpportunityId = this.value">
-              <option value="">-- No Opportunity --</option>
-              ${opportunities.map(o => `<option value="${o.id}" ${nqoId === o.id ? 'selected' : ''}>$${o.value} - ${o.pipeline_stage}</option>`).join('')}
-            </select>
-          </div>
-        </div>
-
-        <h3>Line Items</h3>
-        <table class="clients-table" style="box-shadow: none; border: 1px solid #eee; margin-top: 15px; margin-bottom: 15px;">
-          <thead>
-            <tr>
-              <th>Service</th>
-              <th>Description</th>
-              <th style="width: 80px;">Qty</th>
-              <th style="width: 120px;">Unit Price</th>
-              <th style="width: 120px;">Total</th>
-              <th style="width: 50px;"></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${nqItems.map((item: any, index: number) => `
-              <tr>
-                <td><input type="text" placeholder="Service Name" value="${item.service}" style="width: 100%; padding: 8px;" oninput="window.updateLineItem(${index}, 'service', this.value, false)"></td>
-                <td><input type="text" placeholder="Description" value="${item.description}" style="width: 100%; padding: 8px;" oninput="window.updateLineItem(${index}, 'description', this.value, false)"></td>
-                <td><input type="number" value="${item.quantity}" style="width: 100%; padding: 8px;" oninput="window.updateLineItem(${index}, 'quantity', this.value, true)"></td>
-                <td><input type="number" value="${item.price}" style="width: 100%; padding: 8px;" oninput="window.updateLineItem(${index}, 'price', this.value, true)"></td>
-                <td id="line-total-${index}" style="font-weight: 600;">$${(item.quantity * item.price).toLocaleString()}</td>
-                <td><button onclick="window.removeLineItem(${index})" style="background:none; border:none; color:#ff4444; cursor:pointer; font-size:1.2rem;">×</button></td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
-          <button class="btn-primary" style="background: #28a745;" onclick="window.addLineItem()">+ Add Line Item</button>
-          <div style="text-align: right;">
-            <div style="font-size: 0.9rem; color: #666;">Total Amount</div>
-            <div id="quote-running-total" style="font-size: 1.5rem; font-weight: 600; color: var(--primary-color);">$${total.toLocaleString()}</div>
+      <div style="padding: 24px;">
+        <div class="card" style="margin-bottom: 24px; padding: 20px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div class="form-group" style="margin: 0;">
+              <label>Select Contact</label>
+              <select id="quote-contact" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;" onchange="window.updateNewQuoteContact(this.value)">
+                <option value="">-- Choose Contact --</option>
+                ${contacts.map(c => `<option value="${c.id}" ${nqcId === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group" style="margin: 0;">
+              <label>Select Opportunity (Optional)</label>
+              <select id="quote-opportunity" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;" onchange="window.newQuoteOpportunityId = this.value">
+                <option value="">-- No Opportunity --</option>
+                ${opportunities.map(o => `<option value="${o.id}" ${nqoId === o.id ? 'selected' : ''}>$${o.value} - ${o.pipeline_stage}</option>`).join('')}
+              </select>
+            </div>
           </div>
         </div>
 
-        <div style="margin-top: 40px; border-top: 1px solid #eee; padding-top: 20px;">
-          <button class="btn-primary" style="width: 100%; padding: 15px; font-size: 1.1rem;" onclick="window.saveQuote()">Create Quote</button>
+        <div style="display: flex; gap: 24px; overflow-x: auto; padding-bottom: 10px;">
+          ${renderTierGroup('basic')}
+          ${renderTierGroup('standard')}
+          ${renderTierGroup('premium')}
+        </div>
+
+        <div class="card" style="margin-top: 24px; padding: 20px;">
+           <label>Add internal notes or terms</label>
+           <textarea id="quote-notes" style="width: 100%; height: 80px; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; font-family: inherit;" placeholder="e.g. Terms & conditions or specific project details..."></textarea>
         </div>
       </div>
     </main>
@@ -830,16 +853,13 @@ function renderNewQuote() {
   renderNewQuote();
 };
 
-(window as any).addLineItem = () => {
-  (window as any).newQuoteLineItems.push({ service: '', description: '', quantity: 1, price: 0 });
+(window as any).addLineItem = (tier: 'basic' | 'standard' | 'premium' = 'basic') => {
+  (window as any).newQuoteLineItems.push({ service: '', description: '', quantity: 1, price: 0, tier });
   renderNewQuote();
 };
 
 (window as any).removeLineItem = (index: number) => {
   (window as any).newQuoteLineItems.splice(index, 1);
-  if ((window as any).newQuoteLineItems.length === 0) {
-    (window as any).newQuoteLineItems.push({ service: '', description: '', quantity: 1, price: 0 });
-  }
   renderNewQuote();
 };
 
@@ -875,16 +895,21 @@ function renderNewQuote() {
     return;
   }
 
+  const notes = (document.getElementById('quote-notes') as HTMLTextAreaElement)?.value || '';
+
   const quoteId = 'q' + (mockQuotes.length + 1) + '-' + Math.floor(Math.random() * 100);
-  const total = nqItems.reduce((sum: number, item: any) => sum + (item.quantity * item.price), 0);
+  
+  // Default to Basic total initially
+  const basicTotal = nqItems.filter((i: any) => i.tier === 'basic').reduce((sum: number, item: any) => sum + (item.quantity * item.price), 0);
 
   mockQuotes.push({
     id: quoteId,
     contact_id: nqcId,
     opportunity_id: nqoId || '',
     status: 'draft',
-    total_amount: total,
-    notes: 'Created via New Quote page',
+    total_amount: basicTotal,
+    selected_tier: 'basic',
+    notes: notes,
     created_at: new Date().toISOString()
   });
 
@@ -896,11 +921,12 @@ function renderNewQuote() {
       description: item.description,
       quantity: item.quantity,
       unit_price: item.price,
-      total: item.quantity * item.price
+      total: item.quantity * item.price,
+      tier: item.tier
     });
   });
 
-  (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0 }];
+  (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0, tier: 'basic' }];
   (window as any).newQuoteContactId = '';
   (window as any).newQuoteOpportunityId = '';
 
@@ -966,8 +992,122 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   if (view === 'builder') renderBuilder();
   if (view === 'reports') renderReports();
   if (view === 'quickstart') renderQuickstart();
+  if (view === 'quote-preview' && id) renderQuotePreview(id);
   if (view === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
 };
+
+(window as any).selectQuoteTier = (quoteId: string, tier: 'basic' | 'standard' | 'premium') => {
+  const quote = mockQuotes.find(q => q.id === quoteId);
+  if (quote) {
+    quote.selected_tier = tier;
+    const tierItems = mockQuoteItems.filter(i => i.quote_id === quoteId && i.tier === tier);
+    quote.total_amount = tierItems.reduce((sum, item) => sum + item.total, 0);
+    renderQuotePreview(quoteId);
+  }
+};
+
+function renderQuotePreview(quoteId: string) {
+  const quote = mockQuotes.find(q => q.id === quoteId);
+  if (!quote) return;
+  const contact = mockContacts.find(c => c.id === quote.contact_id);
+  const allItems = mockQuoteItems.filter(i => i.quote_id === quoteId);
+
+  const renderTierColumn = (tier: 'basic' | 'standard' | 'premium') => {
+    // items that match tier or have no tier (defaulting old items to basic)
+    const tierItems = allItems.filter(i => i.tier === tier || (!i.tier && tier === 'basic'));
+    const tierTotal = tierItems.reduce((sum, item) => sum + item.total, 0);
+    const isSelected = quote.selected_tier === tier;
+
+    return `
+      <div style="flex: 1; min-width: 280px; border: 2px solid ${isSelected ? 'var(--primary-color)' : '#eef2f6'}; border-radius: 16px; padding: 30px; background: ${isSelected ? '#f0f7ff' : '#fff'}; display: flex; flex-direction: column; transition: all 0.2s; position: relative; ${isSelected ? 'box-shadow: 0 10px 25px -5px rgba(0, 123, 255, 0.1);' : ''}">
+        ${isSelected ? '<div style="position: absolute; top: -14px; left: 50%; transform: translateX(-50%); background: var(--primary-color); color: white; padding: 4px 16px; border-radius: 20px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">Recommended</div>' : ''}
+        
+        <h3 style="text-align: center; text-transform: capitalize; margin: 0 0 25px 0; color: #1e293b; font-size: 1.25rem;">${tier}</h3>
+        
+        <div style="flex: 1;">
+          <ul style="list-style: none; padding: 0; margin: 0;">
+            ${tierItems.map(item => `
+              <li style="padding: 12px 0; border-bottom: 1px solid ${isSelected ? '#d0e5ff' : '#f8fafc'};">
+                <div style="font-weight: 600; font-size: 0.95rem; color: #1e293b; margin-bottom: 2px;">${item.service_name}</div>
+                <div style="font-size: 0.85rem; color: #64748b; line-height: 1.4;">${item.description}</div>
+                <div style="text-align: right; font-weight: 700; color: #1e293b; margin-top: 8px; font-size: 0.95rem;">$${item.total.toLocaleString()}</div>
+              </li>
+            `).join('')}
+            ${tierItems.length === 0 ? '<li style="text-align: center; color: #94a3b8; padding: 40px 0; font-style: italic;">No items included</li>' : ''}
+          </ul>
+        </div>
+
+        <div style="margin-top: 30px; text-align: center; border-top: 2px dashed ${isSelected ? '#d0e5ff' : '#f1f5f9'}; padding-top: 25px;">
+          <div style="font-size: 2.25rem; font-weight: 900; color: #0f172a; margin-bottom: 20px;">$${tierTotal.toLocaleString()}</div>
+          <button class="btn-primary no-print" style="width: 100%; padding: 12px; border-radius: 8px; font-weight: 700; background: ${isSelected ? '#28a745' : 'var(--primary-color)'}; color: white; border: none; cursor: pointer;" onclick="window.selectQuoteTier('${quote.id}', '${tier}')">
+            ${isSelected ? '✓ Selected' : 'Choose ' + tier}
+          </button>
+        </div>
+      </div>
+    `;
+  };
+
+  app.innerHTML = `
+    ${renderSidebar('quotes')}
+    <main class="main-content no-print-sidebar">
+      <header class="view-header no-print">
+        <div style="display: flex; align-items: center; gap: 15px;">
+          <button onclick="window.navigateTo('quotes')" class="btn-primary" style="background: #eee; color: #333; padding: 5px 10px;">← Back</button>
+          <h2>Quote Preview</h2>
+        </div>
+        <button class="btn-primary" onclick="window.print()">Print Selected Option</button>
+      </header>
+
+      <div class="card quote-preview" style="padding: 60px; max-width: 1100px; margin: 20px auto; background: white; border-radius: 0; min-height: 1000px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 60px; border-bottom: 3px solid #f1f5f9; padding-bottom: 30px;">
+          <div>
+            <h1 style="margin: 0; color: var(--primary-color); font-size: 2rem; letter-spacing: -0.5px;">Handyman Hans Pressure Washing</h1>
+            <p style="margin: 8px 0 0 0; color: #64748b; font-size: 1.1rem;">Professional Exterior Cleaning Services</p>
+          </div>
+          <div style="text-align: right;">
+            <div style="text-transform: uppercase; letter-spacing: 2px; color: #94a3b8; font-size: 0.85rem; font-weight: 700; margin-bottom: 5px;">Quote Number</div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: #1e293b;">#Q-${quote.id}</div>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 60px; background: #f8fafc; padding: 30px; border-radius: 12px; border: 1px solid #e2e8f0;">
+          <div style="display: flex; gap: 60px;">
+            <div>
+              <div style="text-transform: uppercase; color: #94a3b8; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; margin-bottom: 12px;">Client Details</div>
+              <div style="font-weight: 700; font-size: 1.25rem; color: #1e293b; margin-bottom: 8px;">${contact ? contact.name : 'Valued Customer'}</div>
+              <div style="color: #64748b; line-height: 1.5;">
+                ${contact ? contact.address : ''}<br>
+                ${contact ? contact.email : ''}<br>
+                ${contact ? contact.phone : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 40px;">
+          <h2 style="font-size: 1.5rem; color: #1e293b; margin-bottom: 25px; text-align: center;">Choose Your Service Level</h2>
+          <div style="display: flex; gap: 20px; overflow-x: auto; padding-bottom: 10px; align-items: stretch;">
+            ${renderTierColumn('basic')}
+            ${renderTierColumn('standard')}
+            ${renderTierColumn('premium')}
+          </div>
+        </div>
+
+        ${quote.notes ? `
+          <div style="margin-top: 40px; border-top: 1px solid #f1f5f9; padding-top: 40px;">
+            <div style="text-transform: uppercase; color: #94a3b8; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; margin-bottom: 15px;">Additional Terms & Notes</div>
+            <div style="color: #475569; line-height: 1.8; font-size: 1rem; white-space: pre-wrap;">${quote.notes}</div>
+          </div>
+        ` : ''}
+
+        <div style="margin-top: 100px; text-align: center; border-top: 1px solid #f1f5f9; padding-top: 40px;">
+          <div style="font-size: 1.1rem; color: #1e293b; font-weight: 600; margin-bottom: 10px;">Ready to proceed?</div>
+          <p style="color: #64748b; font-size: 0.95rem;">Select your preferred option above. We look forward to working with you!</p>
+        </div>
+      </div>
+    </main>
+  `;
+}
 
 function renderContactDetail(contactId: string) {
   const contact = mockContacts.find(c => c.id === contactId);

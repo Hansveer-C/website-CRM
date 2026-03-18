@@ -573,3 +573,28 @@ body {
     background: #ffc9c9;
     color: #e03131;
 }
+
+/* Print Styles */
+@media print {
+    .sidebar, .no-print, .view-header, .no-print-sidebar {
+        display: none !important;
+    }
+    .main-content {
+        margin-left: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+    }
+    .card.quote-preview {
+        box-shadow: none !important;
+        border: none !important;
+        margin: 0 !important;
+        max-width: 100% !important;
+        padding: 20px !important;
+    }
+    body {
+        background: #fff !important;
+    }
+    .main-content.no-print-sidebar {
+        margin-left: 0 !important;
+    }
+}

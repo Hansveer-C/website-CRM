@@ -60,6 +60,7 @@ export interface Quote {
   opportunity_id: string;
   status: QuoteStatus;
   total_amount: number;
+  selected_tier?: 'basic' | 'standard' | 'premium';
   notes: string;
   created_at: string;
 }
@@ -72,6 +73,7 @@ export interface QuoteItem {
   quantity: number;
   unit_price: number;
   total: number;
+  tier?: 'basic' | 'standard' | 'premium';
 }
 
 export type InvoiceStatus = 'unpaid' | 'paid' | 'overdue';
