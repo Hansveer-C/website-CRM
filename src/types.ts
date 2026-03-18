@@ -12,6 +12,7 @@ export interface Contact {
   source: string;
   service?: string;
   status: ContactStatus;
+  notes?: string;
   created_at: string;
 }
 

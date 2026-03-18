@@ -162,37 +162,68 @@ export const mockPageSections: PageSection[] = [
 export const mockComponents: Component[] = [
   {
     id: 'comp1',
-    name: 'Standard Hero',
+    name: 'Advanced Hero',
     type: 'hero',
-    default_content: { title: 'New Hero', subtitle: 'Hero Subtitle' },
-    default_styles: { padding: '60px', textAlign: 'center' }
+    default_content: { 
+      heading: 'Experience the Power of Clean', 
+      subheading: 'Professional pressure washing for your home and business.',
+      button_text: 'Get a Free Quote',
+      button_link: '#contact',
+      background_image: 'https://images.unsplash.com/photo-1521791136064-7986c2959210?auto=format&fit=crop&w=1200&q=80'
+    },
+    default_styles: { 
+      padding: '100px 20px', 
+      text_alignment: 'center' 
+    }
   },
   {
     id: 'comp2',
     name: 'Rich Text Block',
     type: 'text',
-    default_content: { text: 'Lorem ipsum...' },
-    default_styles: { fontSize: '16px', lineHeight: '1.5' }
+    default_content: { 
+      text: '<p>Standard text block for your content. Supporting <b>bold</b> and <i>italic</i> styling where needed.</p>' 
+    },
+    default_styles: { 
+      font_size: '18px', 
+      alignment: 'left' 
+    }
   },
   {
     id: 'comp3',
-    name: 'Contact Form',
+    name: 'Lead Capture Form',
     type: 'form',
-    default_content: { fields: ['name', 'email', 'message'] },
-    default_styles: { border: '1px solid #ccc' }
+    default_content: { 
+      title: 'Get a Free Quote',
+      fields: ['name', 'phone', 'email', 'message'] 
+    },
+    default_styles: { 
+      padding: '30px', 
+      background: '#f8fafc' 
+    }
   },
   {
     id: 'comp4',
-    name: 'Featured Image',
+    name: 'Styled Image',
     type: 'image',
-    default_content: { url: 'https://via.placeholder.com/800x400', alt: 'Placeholder' },
-    default_styles: { borderRadius: '8px' }
+    default_content: { 
+      image_url: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80' 
+    },
+    default_styles: { 
+      width: '100%', 
+      border_radius: '12px' 
+    }
   },
   {
     id: 'comp5',
-    name: 'Call to Action',
+    name: 'Link Button',
     type: 'button',
-    default_content: { text: 'Get Started', link: '#' },
-    default_styles: { backgroundColor: '#007bff', color: 'white', padding: '12px 24px' }
+    default_content: { 
+      label: 'Visit Website', 
+      link: '#' 
+    },
+    default_styles: { 
+      color: '#007bff', 
+      size: 'medium' 
+    }
   }
 ];

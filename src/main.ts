@@ -316,11 +316,28 @@ function renderBuilder() {
           </header>
           
           ${sections.map(section => `
-            <div class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''}" 
+          <div class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''}" 
                  onclick="window.selectSectionForBuilder('${section.id}')">
               
-              <div style="padding: 40px; text-align: ${section.styles.textAlign || 'left'}; background: ${section.styles.background || section.styles.backgroundColor || 'white'}; color: ${section.styles.color || 'inherit'}; border-radius: 8px;">
-                ${renderSectionPreviewContent(section)}
+              <div style="padding: ${section.styles.padding || '40px'}; 
+                          text-align: ${section.styles.text_alignment || section.styles.alignment || section.styles.textAlign || 'left'}; 
+                          background-image: ${section.content.background_image ? `url('${section.content.background_image}')` : 'none'};
+                          background-size: cover;
+                          background-position: center;
+                          background-color: ${section.styles.background || section.styles.backgroundColor || 'white'}; 
+                          color: ${section.styles.color || (section.content.background_image ? 'white' : 'inherit')}; 
+                          border-radius: ${section.styles.border_radius || '8px'};
+                          width: ${section.styles.width || '100%'};
+                          margin-left: auto; margin-right: auto;
+                          min-height: ${section.type === 'hero' ? '400px' : 'auto'};
+                          display: flex;
+                          flex-direction: column;
+                          justify-content: ${section.type === 'hero' ? 'center' : 'flex-start'};
+                          position: relative;">
+                ${section.content.background_image ? `<div style="position: absolute; inset: 0; background: rgba(0,0,0,0.4); border-radius: inherit;"></div>` : ''}
+                <div style="position: relative; z-index: 1;">
+                  ${renderSectionPreviewContent(section)}
+                </div>
               </div>
 
               <div class="pb-section-controls">
@@ -368,24 +385,36 @@ function renderSectionPreviewContent(section: any) {
   switch (section.type) {
     case 'hero':
       return `
-        <h1 style="font-size: 2.5rem; margin-bottom: 1rem;">${content.title || 'Hero Title'}</h1>
-        <p style="font-size: 1.25rem; opacity: 0.8; margin-bottom: 2rem;">${content.subtitle || 'Hero Subtitle'}</p>
-        <button class="btn-primary">${content.buttonText || 'Action'}</button>
+        <h1 style="font-size: 3rem; margin-bottom: 1.5rem; font-weight: 800;">${content.heading || content.title || 'Hero Heading'}</h1>
+        <p style="font-size: 1.5rem; opacity: 0.9; margin-bottom: 2.5rem; max-width: 600px; margin-left: ${section.styles.text_alignment === 'center' ? 'auto' : '0'}; margin-right: ${section.styles.text_alignment === 'center' ? 'auto' : '0'};">${content.subheading || content.subtitle || 'Hero Subheading'}</p>
+        <button class="btn-primary" style="padding: 15px 30px; font-size: 1.1rem; border-radius: 50px;">${content.button_text || content.buttonText || 'Action'}</button>
       `;
     case 'text':
-      return `<div style="line-height: 1.6;">${content.text || 'Text content goes here...'}</div>`;
+      return `<div style="line-height: 1.6; font-size: ${section.styles.font_size || 'inherit'}">${content.text || 'Text content goes here...'}</div>`;
     case 'image':
-      return `<img src="${content.url}" alt="${content.alt}" style="width: 100%; height: auto; border-radius: inherit;">`;
+      return `<img src="${content.image_url || content.url}" alt="Image" style="width: 100%; height: auto; border-radius: inherit;">`;
     case 'form':
       return `
-        <h3>${content.title || 'Contact Form'}</h3>
-        <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 20px;">
-          ${(content.fields || ['name', 'email']).map((f: string) => `<input type="text" placeholder="${f.toUpperCase()}" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px;">`).join('')}
-          <button class="btn-primary">Submit</button>
+        <h3 style="margin-bottom: 20px; color: var(--primary-color);">${content.title || 'Contact Form'}</h3>
+        <div style="display: flex; flex-direction: column; gap: 15px;">
+          ${(content.fields || []).map((f: string) => `
+            <div class="form-group" style="margin-bottom: 0;">
+              <input type="${f === 'email' ? 'email' : 'text'}" 
+                     id="pf-${f}-${section.id}" 
+                     placeholder="Your ${f.charAt(0).toUpperCase() + f.slice(1)}" 
+                     style="padding: 12px; border: 1px solid #cbd5e0; border-radius: 6px; width: 100%; focus: border-color: var(--primary-color);">
+            </div>
+          `).join('')}
+          <button class="btn-primary" 
+                  style="padding: 14px; font-weight: 700; margin-top: 10px;" 
+                  onclick="window.submitBuilderForm('${section.id}')">
+            Submit Request
+          </button>
         </div>
       `;
     case 'button':
-      return `<button class="btn-primary" onclick="alert('Link: ${content.link}')">${content.text || 'Click Here'}</button>`;
+      const sizeMap: any = { small: '8px 16px', medium: '12px 24px', large: '16px 32px' };
+      return `<button class="btn-primary" style="background: ${section.styles.color || 'var(--primary-color)'}; padding: ${sizeMap[section.styles.size] || '12px 24px'}" onclick="alert('Link: ${content.link}')">${content.label || content.text || 'Click Here'}</button>`;
     default:
       return `<pre>${JSON.stringify(content, null, 2)}</pre>`;
   }
@@ -467,6 +496,60 @@ function renderSectionPreviewContent(section: any) {
 
 (window as any).savePageSections = () => {
   alert('All changes saved to database!');
+};
+
+(window as any).submitBuilderForm = (sectionId: string) => {
+  const section = mockPageSections.find(s => s.id === sectionId);
+  if (!section) return;
+
+  // Collect data from the preview form inputs
+  const name = (document.getElementById(`pf-name-${sectionId}`) as HTMLInputElement)?.value;
+  const phone = (document.getElementById(`pf-phone-${sectionId}`) as HTMLInputElement)?.value;
+  const email = (document.getElementById(`pf-email-${sectionId}`) as HTMLInputElement)?.value;
+  const message = (document.getElementById(`pf-message-${sectionId}`) as HTMLInputElement)?.value;
+
+  if (!name || !email) {
+    alert('Please provide at least a name and email.');
+    return;
+  }
+
+  // 1. Create Contact
+  const newContactId = `c-${Date.now()}`;
+  mockContacts.push({
+    id: newContactId,
+    name,
+    phone: phone || '---',
+    email,
+    address: 'From Website Form',
+    tags: ['web-lead'],
+    source: 'Website Form',
+    status: 'lead',
+    notes: message || '',
+    created_at: new Date().toISOString()
+  });
+
+  // 2. Create Opportunity (New Lead)
+  const newOpportunity = {
+    id: `opp-${Date.now()}`,
+    contact_id: newContactId,
+    pipeline_stage: 'New Lead',
+    value: 0,
+    assigned_to: 'Unassigned',
+    status: 'open' as any, // Use status: 'open' as typed in interface
+    created_at: new Date().toISOString()
+  };
+  mockOpportunities.push(newOpportunity);
+
+  // 3. Trigger Automations
+  runAutomations('OPPORTUNITY_CREATED', newOpportunity);
+
+  alert(`🚀 Form submitted successfully!\n\nNew Lead "${name}" has been added to your CRM pipeline.\n\nAutomations triggered!`);
+  
+  // Clear form
+  ['name', 'phone', 'email', 'message'].forEach(f => {
+    const el = document.getElementById(`pf-${f}-${sectionId}`) as HTMLInputElement;
+    if (el) el.value = '';
+  });
 };
 
 function renderReports() {
