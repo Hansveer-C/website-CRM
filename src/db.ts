@@ -1,4 +1,4 @@
-import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice } from './types';
+import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component } from './types';
 
 export const mockContacts: Contact[] = [
   {
@@ -107,4 +107,78 @@ export const mockInvoices: Invoice[] = [
     due_date: '2026-03-24T12:00:00Z',
     created_at: '2026-03-17T15:00:00Z',
   },
+];
+
+export const mockPages: Page[] = [
+  {
+    id: 'p1',
+    name: 'Home',
+    slug: 'home',
+    status: 'published',
+    seo_title: 'PressurePro - Professional Pressure Washing Services',
+    seo_description: 'High-quality pressure washing for residential and commercial properties.',
+    seo_keywords: ['pressure washing', 'exterior cleaning', 'roof cleaning'],
+    created_at: '2026-01-01T09:00:00Z',
+  },
+  {
+    id: 'p2',
+    name: 'About Us',
+    slug: 'about',
+    status: 'draft',
+    seo_title: 'About PressurePro | Our Story',
+    seo_description: 'Learn more about PressurePro and our commitment to excellence.',
+    seo_keywords: ['about us', 'quality service', 'professional cleaners'],
+    created_at: '2026-01-05T10:00:00Z',
+  }
+];
+
+export const mockPageSections: PageSection[] = [
+  {
+    id: 'ps1',
+    page_id: 'p1',
+    type: 'hero',
+    content: { title: 'Welcome to PressurePro', subtitle: 'Leading pressure washing experts in the Pacific Northwest.' },
+    order: 1,
+    styles: { backgroundColor: '#007bff', textColor: '#ffffff' }
+  },
+  {
+    id: 'ps2',
+    page_id: 'p1',
+    type: 'text',
+    content: { text: 'We offer professional cleaning for your driveway, roof, and more.' },
+    order: 2,
+    styles: { padding: '40px' }
+  },
+  {
+    id: 'ps3',
+    page_id: 'p2',
+    type: 'hero',
+    content: { title: 'About Us', subtitle: 'Founded in 2026 with a mission to clean up the world.' },
+    order: 1,
+    styles: { backgroundColor: '#333' }
+  }
+];
+
+export const mockComponents: Component[] = [
+  {
+    id: 'comp1',
+    name: 'Standard Hero',
+    type: 'hero',
+    default_content: { title: 'New Hero', subtitle: 'Hero Subtitle' },
+    default_styles: { padding: '60px', textAlign: 'center' }
+  },
+  {
+    id: 'comp2',
+    name: 'Rich Text Block',
+    type: 'text',
+    default_content: { text: 'Lorem ipsum...' },
+    default_styles: { fontSize: '16px', lineHeight: '1.5' }
+  },
+  {
+    id: 'comp3',
+    name: 'Contact Form',
+    type: 'form',
+    default_content: { fields: ['name', 'email', 'message'] },
+    default_styles: { border: '1px solid #ccc' }
+  }
 ];

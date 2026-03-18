@@ -87,3 +87,33 @@ export interface Invoice {
   due_date: string;
   created_at: string;
 }
+
+export type PageStatus = 'draft' | 'published';
+
+export interface Page {
+  id: string;
+  name: string;
+  slug: string; // unique
+  status: PageStatus;
+  seo_title: string;
+  seo_description: string;
+  seo_keywords: string[];
+  created_at: string;
+}
+
+export interface PageSection {
+  id: string;
+  page_id: string; // foreign key to Page.id
+  type: string; // hero, text, image, form, gallery, etc.
+  content: any; // JSON
+  order: number;
+  styles: any; // JSON
+}
+
+export interface Component {
+  id: string;
+  name: string;
+  type: string;
+  default_content: any; // JSON
+  default_styles: any; // JSON
+}

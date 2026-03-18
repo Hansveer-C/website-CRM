@@ -1,5 +1,5 @@
 import { templates, WebsiteTemplate, BuilderBlock } from './templates';
-import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices } from './db';
+import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents } from './db';
 import { Activity } from './types';
 import { runAutomations, checkOverdueInvoices } from './automation';
 
@@ -40,6 +40,8 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('lead-capture')" class="${activeView === 'lead-capture' ? 'active' : ''}">Lead Capture</li>
           <li onclick="window.navigateTo('builder')" class="${activeView === 'builder' ? 'active' : ''}">Website Builder</li>
           <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
+          <li onclick="window.navigateTo('pages')" class="${activeView === 'pages' || activeView === 'page-sections' ? 'active' : ''}">Pages</li>
+          <li onclick="window.navigateTo('components')" class="${activeView === 'components' ? 'active' : ''}">Components</li>
           <li onclick="window.navigateTo('quickstart')" class="${activeView === 'quickstart' ? 'active' : ''}">Quickstart Guide</li>
           <li>Payments</li>
           <li>Settings</li>
@@ -456,6 +458,205 @@ function renderReports() {
           <div class="report-item"><span>House Washing</span> <span>$5,200</span></div>
           <div class="report-item"><span>Gutter Cleaning</span> <span>$1,800</span></div>
           <div class="report-item"><span>Roof Cleaning</span> <span>$3,400</span></div>
+        </div>
+      </div>
+    </main>
+  `;
+}
+
+function renderPages() {
+  const tableRows = mockPages.map(page => `
+    <tr>
+      <td style="font-weight: 600; color: var(--primary-color);">${page.name}</td>
+      <td><code>/${page.slug}</code></td>
+      <td><span class="badge badge-${page.status}">${page.status}</span></td>
+      <td>
+        <div style="font-size: 0.85rem; color: #666; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${page.seo_title}">
+          ${page.seo_title}
+        </div>
+      </td>
+      <td style="text-align: center;">
+        <span class="badge" style="background: #eef2f6; color: #333;">${mockPageSections.filter(s => s.page_id === page.id).length}</span>
+      </td>
+      <td>
+        <div style="display: flex; gap: 5px;">
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="window.navigateTo('page-sections', '${page.id}')">Sections</button>
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="alert('Edit Page: ${page.name}')">Edit</button>
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #6c757d;" onclick="alert('SEO Settings for: ${page.name}')">SEO</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+
+  app.innerHTML = `
+    ${renderSidebar('pages')}
+    <main class="main-content">
+      <header class="view-header">
+        <h2>Website Pages</h2>
+        <button class="btn-primary" onclick="alert('Create New Page logic would go here')">+ New Page</button>
+      </header>
+
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <table class="clients-table" style="box-shadow: none; margin-top: 0;">
+          <thead>
+            <tr>
+              <th>Page Name</th>
+              <th>Slug</th>
+              <th>Status</th>
+              <th>SEO Title</th>
+              <th>Sections</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows || '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #666;">No pages found</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="stats-grid" style="margin-top: 30px;">
+        <div class="card">
+          <h3>Collection: Pages</h3>
+          <p style="color: #666; margin-bottom: 15px;">Schema defined with the following fields:</p>
+          <ul style="list-style: none; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>id</strong>: auto (string)</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>name</strong>: string</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>slug</strong>: string (unique)</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>status</strong>: draft | published</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>seo_title</strong>: string</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>seo_description</strong>: text</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>seo_keywords</strong>: array</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>created_at</strong>: timestamp</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Collection: PageSections</h3>
+          <p style="color: #666; margin-bottom: 15px;">Schema defined with the following fields:</p>
+          <ul style="list-style: none; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>id</strong>: auto (string)</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>page_id</strong>: relation to Pages</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>type</strong>: string (hero, text, etc.)</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>content</strong>: JSON</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>order</strong>: number</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>styles</strong>: JSON</li>
+          </ul>
+        </div>
+      </div>
+    </main>
+  `;
+}
+
+function renderPageSections(pageId: string) {
+  const page = mockPages.find(p => p.id === pageId);
+  if (!page) return;
+
+  const sections = mockPageSections
+    .filter(s => s.page_id === pageId)
+    .sort((a, b) => a.order - b.order);
+
+  const tableRows = sections.map(section => `
+    <tr>
+      <td style="font-weight: 600;">#${section.order}</td>
+      <td><span class="badge" style="background: #e9ecef; color: #495057;">${section.type.toUpperCase()}</span></td>
+      <td>
+        <pre style="font-size: 0.75rem; background: #f8f9fa; padding: 10px; border-radius: 4px; max-width: 300px; overflow: auto;">${JSON.stringify(section.content, null, 2)}</pre>
+      </td>
+      <td>
+        <pre style="font-size: 0.75rem; background: #f8f9fa; padding: 10px; border-radius: 4px; max-width: 300px; overflow: auto;">${JSON.stringify(section.styles, null, 2)}</pre>
+      </td>
+      <td>
+        <div style="display: flex; gap: 5px;">
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="alert('Edit Section: ${section.id}')">Edit</button>
+          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #dc3545;" onclick="alert('Delete Section: ${section.id}')">Delete</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+
+  app.innerHTML = `
+    ${renderSidebar('pages')}
+    <main class="main-content">
+      <header class="view-header">
+        <div style="display: flex; align-items: center; gap: 15px;">
+          <button onclick="window.navigateTo('pages')" class="btn-primary" style="background: #eee; color: #333; padding: 5px 10px;">← Back</button>
+          <h2>Sections for: ${page.name}</h2>
+        </div>
+        <button class="btn-primary">+ Add Section</button>
+      </header>
+
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <table class="clients-table" style="box-shadow: none; margin-top: 0;">
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Type</th>
+              <th>Content (JSON)</th>
+              <th>Styles (JSON)</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows || '<tr><td colspan="5" style="text-align: center; padding: 40px; color: #666;">No sections found for this page</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </main>
+  `;
+}
+
+function renderComponents() {
+  const tableRows = mockComponents.map(comp => `
+    <tr>
+      <td style="font-weight: 600; color: var(--primary-color);">${comp.name}</td>
+      <td><span class="badge" style="background: #e9ecef; color: #495057;">${comp.type.toUpperCase()}</span></td>
+      <td>
+        <pre style="font-size: 0.75rem; background: #f8f9fa; padding: 10px; border-radius: 4px; max-width: 300px; overflow: auto;">${JSON.stringify(comp.default_content, null, 2)}</pre>
+      </td>
+      <td>
+        <pre style="font-size: 0.75rem; background: #f8f9fa; padding: 10px; border-radius: 4px; max-width: 300px; overflow: auto;">${JSON.stringify(comp.default_styles, null, 2)}</pre>
+      </td>
+      <td>
+        <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="alert('Edit Component: ${comp.name}')">Edit</button>
+      </td>
+    </tr>
+  `).join('');
+
+  app.innerHTML = `
+    ${renderSidebar('components')}
+    <main class="main-content">
+      <header class="view-header">
+        <h2>System Components</h2>
+        <button class="btn-primary" onclick="alert('Register New Component')">+ New Component</button>
+      </header>
+
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <table class="clients-table" style="box-shadow: none; margin-top: 0;">
+          <thead>
+            <tr>
+              <th>Component Name</th>
+              <th>Type</th>
+              <th>Default Content</th>
+              <th>Default Styles</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows || '<tr><td colspan="5" style="text-align: center; padding: 40px; color: #666;">No components found</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="stats-grid" style="margin-top: 30px;">
+        <div class="card">
+          <h3>Collection: Components</h3>
+          <p style="color: #666; margin-bottom: 15px;">Schema defined with the following fields:</p>
+          <ul style="list-style: none; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>id</strong>: auto (string)</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>name</strong>: string</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>type</strong>: string</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>default_content</strong>: JSON</li>
+            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>default_styles</strong>: JSON</li>
+          </ul>
         </div>
       </div>
     </main>
@@ -1005,6 +1206,9 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   if (view === 'lead-capture') renderLeadCapture();
   if (view === 'builder') renderBuilder();
   if (view === 'reports') renderReports();
+  if (view === 'pages') renderPages();
+  if (view === 'page-sections' && id) renderPageSections(id);
+  if (view === 'components') renderComponents();
   if (view === 'quickstart') renderQuickstart();
   if (view === 'quote-preview' && id) renderQuotePreview(id);
   if (view === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
