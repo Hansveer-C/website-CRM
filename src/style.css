@@ -307,24 +307,37 @@ button:active {
 }
 
 .pb-component-item {
-    background: #222;
-    padding: 15px;
-    border-radius: 6px;
+    background: #1e1e1e;
+    padding: 12px;
+    border-radius: 8px;
     cursor: pointer;
     border: 1px solid #333;
-    transition: all 0.2s;
+    transition: all 150ms ease;
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-bottom: 10px;
-    color: #ddd;
+    margin-bottom: 12px;
+    color: #e0e0e0;
 }
 
 .pb-component-item:hover {
     background: #2a2a2a;
-    border-color: var(--primary-color);
-    transform: translateY(-2px);
+    border-color: #2563EB;
+    transform: translateX(4px);
     color: white;
+}
+
+.pb-component-icon {
+    width: 32px;
+    height: 32px;
+    background: #2d2d2d;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    color: #2563EB;
+    flex-shrink: 0;
 }
 
 .pb-canvas-area {
@@ -397,32 +410,38 @@ button:active {
 .pb-section-preview {
     position: relative;
     cursor: pointer;
-    transition: outline 0.1s;
-    outline: 2px solid transparent;
+    transition: all 0.1s ease;
+    border: 2px solid transparent;
+    margin-bottom: var(--space-lg); /* 24px gap between sections */
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05); /* iOS card style for sections */
+}
+
+.pb-section-preview:nth-child(even) {
+    background-color: #F9FAFB;
 }
 
 .pb-section-preview:hover {
-    outline: 2px dashed rgba(0, 123, 255, 0.5);
-    outline-offset: -2px;
+    border-color: #E5E7EB; /* light gray outline */
 }
 
 .pb-section-preview.active {
-    outline: 2px solid var(--primary-color);
-    outline-offset: -2px;
+    border-color: #2563EB; /* primary blue highlight */
     z-index: 10;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
 }
 
 .pb-section-preview.active::after {
     content: 'SELECTED SECTION';
     position: absolute;
-    top: -25px;
-    left: 0;
-    background: var(--primary-color);
+    top: -24px;
+    left: -2px;
+    background: #2563EB;
     color: white;
     font-size: 10px;
     font-weight: 800;
     padding: 2px 8px;
-    border-radius: 2px 2px 0 0;
+    border-radius: 4px 4px 0 0;
 }
 
 .pb-section-controls {
@@ -477,9 +496,53 @@ button:active {
 
 .pb-control-group label {
     display: block;
-    margin-bottom: 6px;
-    font-size: 0.85rem;
-    color: #bbb;
+    margin-bottom: 8px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.pb-collapsible-section {
+    border-bottom: 1px solid #222;
+    margin-bottom: 8px;
+}
+
+.pb-collapsible-trigger {
+    padding: 12px 20px;
+    background: #161616;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #ccc;
+    text-transform: uppercase;
+    transition: background 0.2s;
+}
+
+.pb-collapsible-trigger span {
+    transition: transform 0.2s;
+    font-size: 0.6rem;
+    opacity: 0.5;
+}
+
+.pb-collapsible-section.active .pb-collapsible-trigger span {
+    transform: rotate(180deg);
+}
+
+.pb-collapsible-content {
+    padding: 0 20px 20px 20px;
+    background: #111;
+    display: none;
+    border-top: 1px solid #1a1a1a;
+}
+
+.pb-collapsible-section.active .pb-collapsible-content {
+    display: block;
+    padding-top: 20px;
 }
 
 .pb-control-input {

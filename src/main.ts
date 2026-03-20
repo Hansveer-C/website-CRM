@@ -439,36 +439,22 @@ function _renderBuilder() {
           </div>
           
           <div class="pb-component-list">
-            <div style="font-size: 0.7rem; color: #555; margin-bottom: 10px; font-weight: 800; text-transform: uppercase;">Basic</div>
-            ${mockComponents.filter(c => ['text', 'button', 'image'].includes(c.type)).map(comp => `
-              <div class="pb-component-item" onclick="window.addSectionToPage('${comp.id}')">
-                <div style="width: 32px; height: 32px; background: #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">+</div>
-                <div><div style="font-weight: 600; font-size: 0.85rem;">${comp.name}</div></div>
-              </div>
-            `).join('')}
-
-            <div style="font-size: 0.7rem; color: #555; margin: 20px 0 10px 0; font-weight: 800; text-transform: uppercase;">Layout</div>
-            ${mockComponents.filter(c => ['hero', 'section'].includes(c.type)).map(comp => `
-              <div class="pb-component-item" onclick="window.addSectionToPage('${comp.id}')">
-                <div style="width: 32px; height: 32px; background: #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">+</div>
-                <div><div style="font-weight: 600; font-size: 0.85rem;">${comp.name}</div></div>
-              </div>
-            `).join('')}
-            
-            <div style="font-size: 0.7rem; color: #555; margin: 20px 0 10px 0; font-weight: 800; text-transform: uppercase;">Forms</div>
-            ${mockComponents.filter(c => ['form'].includes(c.type)).map(comp => `
-              <div class="pb-component-item" onclick="window.addSectionToPage('${comp.id}')">
-                <div style="width: 32px; height: 32px; background: #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">+</div>
-                <div><div style="font-weight: 600; font-size: 0.85rem;">${comp.name}</div></div>
-              </div>
-            `).join('')}
-
-            <div style="font-size: 0.7rem; color: #555; margin: 20px 0 10px 0; font-weight: 800; text-transform: uppercase;">Advanced</div>
-            ${mockComponents.filter(c => !['text', 'button', 'image', 'hero', 'section', 'form'].includes(c.type)).map(comp => `
-              <div class="pb-component-item" onclick="window.addSectionToPage('${comp.id}')">
-                <div style="width: 32px; height: 32px; background: #333; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">+</div>
-                <div><div style="font-weight: 600; font-size: 0.85rem;">${comp.name}</div></div>
-              </div>
+            ${[
+              { title: 'Basic', types: ['text', 'button', 'image'], icon: '📄' },
+              { title: 'Layout', types: ['hero', 'section'], icon: '🖼️' },
+              { title: 'Forms', types: ['form'], icon: '📝' },
+              { title: 'Advanced', types: ['cta', 'pricing', 'testimonial'], icon: '⚡' }
+            ].map(cat => `
+              <div style="font-size: 0.7rem; color: #888; margin: ${cat.title === 'Basic' ? '0 0 12px 0' : '24px 0 12px 0'}; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">${cat.title}</div>
+              ${mockComponents.filter(c => cat.types.includes(c.type)).map(comp => `
+                <div class="pb-component-item" onclick="window.addSectionToPage('${comp.id}')">
+                  <div class="pb-component-icon">${cat.icon}</div>
+                  <div>
+                    <div style="font-weight: 600; font-size: 0.8rem; color: white;">${comp.name}</div>
+                    <div style="font-size: 0.65rem; color: #666; text-transform: capitalize;">${comp.type}</div>
+                  </div>
+                </div>
+              `).join('')}
             `).join('')}
           </div>
           
@@ -495,10 +481,7 @@ function _renderBuilder() {
                 </div>
                 ${!isInitial ? `
                   <div class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''}" 
-                       style="position: relative; view-transition-name: section-${section.id}; ${builderSelectedSectionId === section.id ? 'outline: 3px solid var(--primary-color); outline-offset: -3px; box-shadow: 0 0 15px rgba(0,0,0,0.1);' : ''} transition: all 0.2s;"
-                       onclick="window.selectSectionForBuilder('${section.id}')"
-                       onmouseenter="this.querySelector('.pb-section-controls').style.opacity='1'"
-                       onmouseleave="this.querySelector('.pb-section-controls').style.opacity='0'">
+                       onclick="window.selectSectionForBuilder('${section.id}')">
                       
                       <div style="padding: ${section.styles.padding || '60px 20px'}; 
                                   text-align: ${section.styles.text_alignment || section.styles.alignment || section.styles.textAlign || 'left'}; 
@@ -521,7 +504,7 @@ function _renderBuilder() {
                         </div>
                       </div>
 
-                      <div class="pb-section-controls" style="opacity: 0; transition: opacity 0.2s; position: absolute; top: 10px; right: 10px; display: flex; gap: 5px; z-index: 10;">
+                      <div class="pb-section-controls">
                         <button title="Add section below" onclick="event.stopPropagation(); window.showComponentPickerAt('${order}')" style="background: #28a745; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: 600;">+ Add</button>
                         <button title="Duplicate section" onclick="event.stopPropagation(); window.duplicateBuilderSection('${section.id}')" style="background: #ffc107; color: #000; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: 600;">Copy</button>
                         <button title="Move Up" onclick="event.stopPropagation(); window.moveSection('${section.id}', -1)" style="background: #333; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: 600;">↑</button>
@@ -575,7 +558,15 @@ function renderSectionSettings(section: any) {
   `);
 
   if (isContent) {
-    settingsMarkup.push(`<div class="pb-settings-group">`);
+    settingsMarkup.push(`
+      <div class="pb-collapsible-section active">
+        <div class="pb-collapsible-trigger" onclick="this.parentElement.classList.toggle('active')">
+          Section Content
+          <span>▼</span>
+        </div>
+        <div class="pb-collapsible-content">
+    `);
+    
     for (const key in section.content) {
       const val = section.content[key];
       const isImageField = key === 'background_image' || key === 'image_url' || key === 'url' && section.type === 'image';
@@ -584,14 +575,14 @@ function renderSectionSettings(section: any) {
          settingsMarkup.push(`
            <div class="pb-control-group">
              <label>${key.replace(/_/g, ' ').toUpperCase()}</label>
-             <input type="text" class="pb-control-input" value="${val}" oninput="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)">
+             <input type="text" class="pb-control-input" value="${val.replace(/"/g, '&quot;')}" oninput="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)">
            </div>
          `);
       } else if (key === 'pipeline_id') {
          settingsMarkup.push(`
            <div class="pb-control-group">
-             <label>TARGET PIPELINE</label>
-             <select class="pb-control-input" onchange="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)" style="margin-top: 5px; padding: 8px; border-radius: 4px; background: #222; color: #fff; border: 1px solid #444; width: 100%;">
+             <label>Target Pipeline</label>
+             <select class="pb-control-input" onchange="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)">
                ${mockPipelines.map(p => `<option value="${p.id}" ${p.id === val ? 'selected' : ''}>${p.name}</option>`).join('')}
              </select>
            </div>
@@ -600,27 +591,35 @@ function renderSectionSettings(section: any) {
          settingsMarkup.push(`
            <div class="pb-control-group">
              <label>${key.replace(/_/g, ' ').toUpperCase()}</label>
-             <div class="pb-asset-grid">
+             <div class="pb-asset-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-bottom: 10px;">
                ${mockMedia.map(asset => `
                  <div class="pb-asset-thumb ${val === asset.url ? 'active' : ''}" 
-                      style="background-image: url('${asset.url}');" 
+                      style="width: 100%; aspect-ratio: 1; background-image: url('${asset.url}'); background-size: cover; background-position: center; border-radius: 4px; cursor: pointer; border: 2px solid ${val === asset.url ? '#2563EB' : 'transparent'};" 
                       title="${asset.name}"
                       onclick="window.updateSpecificField('${section.id}', 'content', '${key}', '${asset.url}')">
                  </div>
                `).join('')}
              </div>
-             <input type="text" class="pb-control-input" style="margin-top: 8px; font-size: 0.7rem;" value="${val}" 
+             <input type="text" class="pb-control-input" style="font-size: 0.7rem;" value="${val}" 
                     oninput="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)" 
                     placeholder="Or paste custom URL...">
            </div>
          `);
       }
     }
-    settingsMarkup.push(`</div>`);
+    settingsMarkup.push(`</div></div>`);
   }
 
   if (isStyles) {
-    settingsMarkup.push(`<div class="pb-settings-group">`);
+    settingsMarkup.push(`
+      <div class="pb-collapsible-section active">
+        <div class="pb-collapsible-trigger" onclick="this.parentElement.classList.toggle('active')">
+          Visual Styles
+          <span>▼</span>
+        </div>
+        <div class="pb-collapsible-content">
+    `);
+    
     const designFields = [
       { label: 'Background Color', key: 'background', type: 'color' },
       { label: 'Text Alignment', key: 'text_alignment', type: 'select', options: ['left', 'center', 'right'] },
@@ -642,7 +641,7 @@ function renderSectionSettings(section: any) {
         </div>
       `);
     });
-    settingsMarkup.push(`</div>`);
+    settingsMarkup.push(`</div></div>`);
   }
 
   return settingsMarkup.join('');
