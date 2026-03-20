@@ -15,6 +15,7 @@ export interface Contact {
   notes?: string;
   created_at: string;
   invalid_phone?: boolean;
+  lead_status?: string;
 }
 
 export interface Opportunity {

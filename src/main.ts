@@ -95,6 +95,29 @@ let mockGlobalSettings = {
 let newQuoteLineItems: { service: string, description: string, quantity: number, price: number, tier: 'basic' | 'standard' | 'premium' }[] = [
   { service: '', description: '', quantity: 1, price: 0, tier: 'basic' }
 ];
+
+// Error Logging System
+interface ErrorLog {
+  id: string;
+  timestamp: string;
+  message: string;
+  step: 'contact_creation' | 'opportunity_creation' | 'normalization' | 'form_submission';
+  inputData: any;
+}
+
+const mockErrorLogs: ErrorLog[] = [];
+
+function logError(step: ErrorLog['step'], message: string, inputData: any) {
+  const log: ErrorLog = {
+    id: `err-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    message,
+    step,
+    inputData: { ...inputData } // Basic sanitization/cloning
+  };
+  mockErrorLogs.push(log);
+  console.error(`[ERROR LOG - ${step.toUpperCase()}]`, log);
+}
 (window as any).newQuoteLineItems = newQuoteLineItems;
 let newQuoteContactId: string = '';
 (window as any).newQuoteContactId = newQuoteContactId;
@@ -925,6 +948,18 @@ function renderSectionPreviewContent(section: any) {
     if (existingContact) {
       contactIdToUse = existingContact.id;
       console.log(`Duplicate found: using existing contact ${contactIdToUse} instead of creating a new one.`);
+      
+      // BASIC PROTECTION: Skip new opportunity if one was created for this contact in the last 2 minutes
+      const recentOpp = mockOpportunities.find(opp => 
+        opp.contact_id === contactIdToUse && 
+        (new Date().getTime() - new Date(opp.created_at).getTime()) < 120000
+      );
+      
+      if (recentOpp) {
+        console.warn(`Duplicate submission window: Skipping new opportunity for ${contactIdToUse}.`);
+        alert("We have already received your submission. Thank you!");
+        return;
+      }
     } else {
       contactIdToUse = `c-${Date.now()}`;
       const newContact = {
@@ -945,7 +980,6 @@ function renderSectionPreviewContent(section: any) {
       mockContacts.push(newContact as any);
     }
 
-    // 2. Create Opportunity
     try {
       const newOpportunity = {
         id: `opp-${Date.now()}`,
@@ -965,19 +999,22 @@ function renderSectionPreviewContent(section: any) {
       // Trigger automations for the new opportunity
       runAutomations('OPPORTUNITY_CREATED', newOpportunity);
 
-    } catch (oppError) {
-      console.error('Atomic Transaction Failed: Opportunity creation skipped. Rolling back Contact.', oppError);
+    } catch (oppError: any) {
+      logError('opportunity_creation', oppError.message || 'Unknown error during opportunity creation', { name, phone, email, contactIdToUse });
       
-      // ROLLBACK: Remove the contact that was just added to prevent orphan records.
-      // NOTE: Only roll back if we actually created it in this transaction.
-      const contactIdx = mockContacts.findIndex(c => c.id === contactIdToUse && c.created_at === timestamp);
-      if (contactIdx !== -1) mockContacts.splice(contactIdx, 1);
+      // FALLBACK: Tag the newly created contact as "incomplete" instead of deleting it.
+      const contact = mockContacts.find(c => c.id === contactIdToUse);
+      if (contact) {
+        contact.lead_status = "incomplete";
+        console.warn(`Partial Failure: Contact ${contactIdToUse} preserved but marked as incomplete.`);
+      }
       
-      throw new Error('Form submission failed: Transaction could not be completed.');
+      alert('Something went wrong. Please try again.');
+      return; 
     }
 
     // alert for success
-    alert(`🚀 Form submitted successfully!\n\nNew Lead "${name}" has been recorded.`);
+    alert('Thanks! We’ve received your request.');
     
     // Clear form
     ['name', 'phone', 'email', 'address', 'service_type', 'message'].forEach(f => {
@@ -985,9 +1022,9 @@ function renderSectionPreviewContent(section: any) {
       if (el) el.value = '';
     });
 
-  } catch (error) {
-    console.error('Failed to create contact:', error);
-    alert('An error occurred. Please try again.');
+  } catch (error: any) {
+    logError('contact_creation', error.message || 'Unknown error during contact creation', { name, phone, email });
+    alert('Something went wrong. Please try again.');
   }
 };
 
@@ -1840,6 +1877,18 @@ function handleLeadCaptureSubmission(e: Event) {
     if (existingContact) {
       contactIdToUse = existingContact.id;
       console.log(`Duplicate found: using existing contact ${contactIdToUse} instead of creating a new one.`);
+
+      // BASIC PROTECTION: Skip new opportunity if one was created for this contact in the last 2 minutes
+      const recentOpp = mockOpportunities.find(opp => 
+        opp.contact_id === contactIdToUse && 
+        (new Date().getTime() - new Date(opp.created_at).getTime()) < 120000
+      );
+
+      if (recentOpp) {
+        console.warn(`Duplicate submission window: Skipping new opportunity for ${contactIdToUse}.`);
+        alert("A recent submission was already detected for this contact.");
+        return;
+      }
     } else {
       contactIdToUse = 'c' + Date.now();
       // 1. Create new contact FIRST
@@ -1858,7 +1907,6 @@ function handleLeadCaptureSubmission(e: Event) {
       });
     }
 
-    // 2. Create Opportunity
     try {
       const newOpportunity = {
         id: 'o' + Date.now(),
@@ -1878,15 +1926,18 @@ function handleLeadCaptureSubmission(e: Event) {
       // Trigger automations for the new opportunity
       runAutomations('OPPORTUNITY_CREATED', newOpportunity);
 
-    } catch (oppError) {
-      console.error('Atomic Transaction Failed: Opportunity creation skipped. Rolling back Contact.', oppError);
+    } catch (oppError: any) {
+      logError('opportunity_creation', oppError.message || 'Unknown error during manual lead capture', { name, phone, email, contactIdToUse });
       
-      // ROLLBACK: Remove the contact that was just added to prevent orphan records.
-      // NOTE: Only roll back if we actually created it in this transaction.
-      const contactIdx = mockContacts.findIndex(c => c.id === contactIdToUse && c.created_at === timestamp);
-      if (contactIdx !== -1) mockContacts.splice(contactIdx, 1);
+      // FALLBACK: Tag the newly created contact as "incomplete" instead of deleting it.
+      const contact = mockContacts.find(c => c.id === contactIdToUse);
+      if (contact) {
+        contact.lead_status = "incomplete";
+        console.warn(`Partial Failure: Contact ${contactIdToUse} preserved but marked as incomplete.`);
+      }
       
-      throw new Error('Manual lead capture failed: Transaction could not be completed.');
+      alert('Something went wrong. Please try again.');
+      return; 
     }
 
     const container = document.querySelector('.lead-form-container');
@@ -1895,15 +1946,15 @@ function handleLeadCaptureSubmission(e: Event) {
         <div style="text-align: center; padding: 40px 0;">
           <div style="font-size: 3rem; color: var(--primary-color); margin-bottom: 20px;">✓</div>
           <h2 style="margin-bottom: 10px;">Submission Received</h2>
-          <p style="font-size: 1.2rem; color: var(--secondary-color);">Thanks! We’ll contact you shortly.</p>
+          <p style="font-size: 1.2rem; color: var(--secondary-color);">Thanks! We’ve received your request.</p>
           <button onclick="window.navigateTo('lead-capture')" class="btn-primary" style="margin-top: 30px; background-color: var(--secondary-color);">Capture Another Lead</button>
           <button onclick="window.navigateTo('opportunities')" class="btn-primary" style="margin-top: 30px; margin-left:10px;">View Pipeline</button>
         </div>
       `;
     }
-  } catch (error) {
-    console.error('Failed to create contact:', error);
-    alert('An error occurred. Please try again.');
+  } catch (error: any) {
+    logError('contact_creation', error.message || 'Unknown error during manual lead capture', { name, phone, email });
+    alert('Something went wrong. Please try again.');
   }
 }
 
