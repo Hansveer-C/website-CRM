@@ -29,8 +29,9 @@
     --radius-lg: 16px;
 
     /* Shadows & Effects */
-    --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    --border-radius: var(--radius-sm);
+    --shadow-subtle: 0 1px 3px rgba(0,0,0,0.05);
+    --shadow: var(--shadow-subtle);
+    --border-radius: var(--radius-md);
 }
 
 * {
@@ -124,22 +125,25 @@ small, .badge, .nav-group-title {
 
 .main-content {
     flex: 1;
-    padding: 40px;
+    padding: var(--space-lg); /* 24px */
     overflow-y: auto;
+    background-color: var(--background);
 }
 
 .dashboard-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 20px;
+    gap: var(--space-lg); /* 24px */
+    margin-bottom: var(--space-lg);
 }
 
 .card {
     background-color: var(--card-bg);
-    padding: var(--space-lg);
+    padding: var(--space-md);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow);
+    box-shadow: var(--shadow-subtle);
     border: 1px solid var(--border);
+    margin-bottom: var(--space-md);
 }
 
 .card h3 {
@@ -155,11 +159,12 @@ small, .badge, .nav-group-title {
 .clients-table {
     width: 100%;
     border-collapse: collapse;
-    margin-top: 20px;
+    margin-top: var(--space-md);
     background: white;
-    border-radius: var(--border-radius);
+    border-radius: var(--radius-md);
     overflow: hidden;
-    box-shadow: var(--shadow);
+    box-shadow: var(--shadow-subtle);
+    border: 1px solid var(--border);
 }
 
 .clients-table th,
@@ -471,8 +476,8 @@ small, .badge, .nav-group-title {
 .stats-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    margin-top: 20px;
+    gap: var(--space-lg);
+    margin-top: var(--space-lg);
 }
 
 .chart-placeholder {
