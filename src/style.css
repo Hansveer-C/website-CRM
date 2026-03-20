@@ -226,20 +226,43 @@ small, .badge, .nav-group-title {
     margin-bottom: var(--space-xl);
 }
 
-.btn-primary {
-    background-color: var(--primary-color);
-    color: white;
-    padding: var(--space-sm) var(--space-lg);
+.btn-primary, .btn-secondary, button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 16px;
     border: none;
-    border-radius: var(--radius-sm);
+    border-radius: 10px;
     cursor: pointer;
-    font-weight: 600;
-    transition: all 0.2s ease;
+    font-weight: 500;
+    font-family: inherit;
+    font-size: 14px;
+    transition: all 150ms ease;
+    text-decoration: none;
+    gap: 8px;
+}
+
+.btn-primary {
+    background-color: #2563EB;
+    color: white;
 }
 
 .btn-primary:hover {
-    filter: brightness(1.1);
+    background-color: #1d4ed8;
     box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+
+.btn-secondary {
+    background-color: #F3F4F6;
+    color: #111827;
+}
+
+.btn-secondary:hover {
+    background-color: #E5E7EB;
+}
+
+button:active {
+    transform: scale(0.98);
 }
 
 /* Professional Builder Studio Styles */
