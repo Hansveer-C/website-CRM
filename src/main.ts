@@ -866,53 +866,74 @@ function renderSectionPreviewContent(section: any) {
   const service_type = (document.getElementById(`${prefix}service_type-${sectionId}`) as HTMLSelectElement)?.value;
   const message = (document.getElementById(`${prefix}message-${sectionId}`) as HTMLTextAreaElement)?.value;
 
-  if (!name || !email) {
-    alert('Please provide at least a name and email.');
+  // Validation: name is required. Phone and email are recorded if provided.
+  if (!name) {
+    alert('Please provide your name.');
     return;
   }
 
-  // 1. Create Contact
-  const newContactId = `c-${Date.now()}`;
-  mockContacts.push({
-    id: newContactId,
-    name,
-    phone: phone || '---',
-    email,
-    address: address || 'From Website Form',
-    tags: ['web-lead'],
-    source: 'Website Form',
-    service: service_type || undefined,
-    status: 'lead',
-    created_at: new Date().toISOString()
-  });
+  try {
+    // 1. Create Contact record FIRST
+    const newContactId = `c-${Date.now()}`;
+    const newContact = {
+      id: newContactId,
+      name,
+      phone: phone || '', 
+      email: email || '', 
+      address: address || 'From Website Form',
+      tags: ['web-lead'],
+      source: 'website', 
+      service: service_type || undefined,
+      status: 'lead', 
+      created_at: new Date().toISOString() 
+    };
 
-  // 2. Create Opportunity (New Lead)
-  const pipelineId = section.content?.pipeline_id || 'p1';
-  const targetPipeline = mockPipelines.find(p => p.id === pipelineId) || mockPipelines[0];
-  const initialStage = targetPipeline?.stages[0] || 'New Lead';
+    // Ensure Contact record is created first
+    mockContacts.push(newContact as any);
 
-  const newOpportunity = {
-    id: `opp-${Date.now()}`,
-    contact_id: newContactId,
-    pipeline_stage: initialStage,
-    value: 0,
-    assigned_to: 'Unassigned',
-    status: 'open' as any,
-    notes: `Service Type: ${service_type || 'N/A'}\nAddress: ${address || 'N/A'}\nMessage: ${message || 'N/A'}`,
-    created_at: new Date().toISOString()
-  };
-  mockOpportunities.push(newOpportunity);
+    // 2. Create Opportunity
+    try {
+      const newOpportunity = {
+        id: `opp-${Date.now()}`,
+        contact_id: newContactId,
+        pipeline_stage: 'New Lead',
+        value: 0,
+        assigned_to: 'Unassigned',
+        status: 'open' as any,
+        notes: `Service Type: ${service_type || 'N/A'}\nAddress: ${address || 'N/A'}\nMessage: ${message || 'N/A'}`,
+        created_at: new Date().toISOString()
+      };
+      
+      // ATOMIC BEHAVIOR: Opportunity creation MUST follow Contact creation.
+      // If it fails, roll back the Contact creation.
+      mockOpportunities.push(newOpportunity);
 
-  // 3. Trigger Automations
-  runAutomations('OPPORTUNITY_CREATED', newOpportunity);
+      // Trigger automations for the new opportunity
+      runAutomations('OPPORTUNITY_CREATED', newOpportunity);
 
-  alert(`🚀 Form submitted successfully!\n\nNew Lead "${name}" has been added to your CRM pipeline.\n\nAutomations triggered!`);
-  
-  // Clear form
-  ['name', 'phone', 'email', 'address', 'service_type', 'message'].forEach(f => {
-    const el = document.getElementById(`${prefix}${f}-${sectionId}`) as HTMLInputElement;
-    if (el) el.value = '';
-  });
+    } catch (oppError) {
+      console.error('Atomic Transaction Failed: Opportunity creation skipped. Rolling back Contact.', oppError);
+      
+      // ROLLBACK: Remove the contact that was just added to prevent orphan records.
+      const contactIdx = mockContacts.findIndex(c => c.id === newContactId);
+      if (contactIdx !== -1) mockContacts.splice(contactIdx, 1);
+      
+      throw new Error('Form submission failed: Transaction could not be completed.');
+    }
+
+    // alert for success
+    alert(`🚀 Form submitted successfully!\n\nNew Lead "${name}" has been recorded.`);
+    
+    // Clear form
+    ['name', 'phone', 'email', 'address', 'service_type', 'message'].forEach(f => {
+      const el = document.getElementById(`${prefix}${f}-${sectionId}`) as HTMLInputElement;
+      if (el) el.value = '';
+    });
+
+  } catch (error) {
+    console.error('Failed to create contact:', error);
+    alert('An error occurred. Please try again.');
+  }
 };
 
 function renderSitePage(slug: string, isPreview: boolean = false) {
@@ -1742,50 +1763,73 @@ function handleLeadCaptureSubmission(e: Event) {
   const service_type = (document.getElementById('lead_service_type') as HTMLSelectElement).value;
   const message = (document.getElementById('lead_message') as HTMLTextAreaElement).value;
 
-  const contact_id = 'c' + (mockContacts.length + 1);
-  const opp_id = 'o' + (mockOpportunities.length + 1);
+  if (!name) {
+    alert('Please provide at least a name.');
+    return;
+  }
 
-  // 1. Create new contact
-  mockContacts.push({
-    id: contact_id,
-    name,
-    phone,
-    email,
-    address,
-    tags: ['new-lead'],
-    source: 'Lead Capture Form',
-    service: service_type,
-    status: 'lead',
-    created_at: new Date().toISOString()
-  });
+  try {
+    const contact_id = 'c' + Date.now();
+    
+    // 1. Create new contact FIRST
+    mockContacts.push({
+      id: contact_id,
+      name,
+      phone: phone || '',
+      email: email || '',
+      address,
+      tags: ['new-lead'],
+      source: 'website', 
+      service: service_type,
+      status: 'lead',
+      created_at: new Date().toISOString()
+    });
 
-  // 2. Create new opportunity
-  const newOpp = {
-    id: opp_id,
-    contact_id,
-    pipeline_stage: 'New Lead',
-    value: 0, // Initial value
-    assigned_to: 'Hansveer',
-    status: 'open' as any,
-    notes: `Service: ${service_type}\nAddress: ${address}\nMessage: ${message}`,
-    created_at: new Date().toISOString()
-  };
-  mockOpportunities.push(newOpp);
+    // 2. Create Opportunity
+    try {
+      const newOpportunity = {
+        id: 'o' + Date.now(),
+        contact_id: contact_id,
+        pipeline_stage: 'New Lead',
+        value: 0,
+        assigned_to: 'Hansveer',
+        status: 'open' as any,
+        notes: `Service Type: ${service_type || 'N/A'}\nAddress: ${address || 'N/A'}\nMessage: ${message || 'N/A'}`,
+        created_at: new Date().toISOString()
+      };
 
-  // Trigger Automation
-  runAutomations('OPPORTUNITY_CREATED', newOpp);
+      // ATOMIC BEHAVIOR: Opportunity creation MUST follow Contact creation.
+      // If it fails, roll back the Contact creation.
+      mockOpportunities.push(newOpportunity);
 
-  const container = document.querySelector('.lead-form-container');
-  if (container) {
-    container.innerHTML = `
-      <div style="text-align: center; padding: 40px 0;">
-        <div style="font-size: 3rem; color: var(--primary-color); margin-bottom: 20px;">✓</div>
-        <h2 style="margin-bottom: 10px;">Submission Received</h2>
-        <p style="font-size: 1.2rem; color: var(--secondary-color);">Thanks! We’ll contact you shortly.</p>
-        <button onclick="window.navigateTo('lead-capture')" class="btn-primary" style="margin-top: 30px; background-color: var(--secondary-color);">Capture Another Lead</button>
-        <button onclick="window.navigateTo('opportunities')" class="btn-primary" style="margin-top: 30px; margin-left:10px;">View Pipeline</button>
-      </div>
-    `;
+      // Trigger automations for the new opportunity
+      runAutomations('OPPORTUNITY_CREATED', newOpportunity);
+
+    } catch (oppError) {
+      console.error('Atomic Transaction Failed: Opportunity creation skipped. Rolling back Contact.', oppError);
+      
+      // ROLLBACK: Remove the contact that was just added to prevent orphan records.
+      const contactIdx = mockContacts.findIndex(c => c.id === contact_id);
+      if (contactIdx !== -1) mockContacts.splice(contactIdx, 1);
+      
+      throw new Error('Manual lead capture failed: Transaction could not be completed.');
+    }
+
+    const container = document.querySelector('.lead-form-container');
+    if (container) {
+      container.innerHTML = `
+        <div style="text-align: center; padding: 40px 0;">
+          <div style="font-size: 3rem; color: var(--primary-color); margin-bottom: 20px;">✓</div>
+          <h2 style="margin-bottom: 10px;">Submission Received</h2>
+          <p style="font-size: 1.2rem; color: var(--secondary-color);">Thanks! We’ll contact you shortly.</p>
+          <button onclick="window.navigateTo('lead-capture')" class="btn-primary" style="margin-top: 30px; background-color: var(--secondary-color);">Capture Another Lead</button>
+          <button onclick="window.navigateTo('opportunities')" class="btn-primary" style="margin-top: 30px; margin-left:10px;">View Pipeline</button>
+        </div>
+      `;
+    }
+  } catch (error) {
+    console.error('Failed to create contact:', error);
+    alert('An error occurred. Please try again.');
   }
 }
 
