@@ -2908,4 +2908,17 @@ function renderContactDetail(contactId: string) {
 };
 
 checkOverdueInvoices();
-renderDashboard();
+
+// Basic Path Routing
+const path = window.location.pathname;
+const searchParams = new URLSearchParams(window.location.search);
+
+if (path.includes('/site/')) {
+    const slug = path.split('/site/')[1];
+    (window as any).navigateTo('site', slug);
+} else if (path.includes('/preview/')) {
+    const slug = path.split('/preview/')[1];
+     (window as any).navigateTo('preview', slug);
+} else {
+    renderDashboard();
+}

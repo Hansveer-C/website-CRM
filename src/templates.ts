@@ -142,6 +142,8 @@ export const templates: WebsiteTemplate[] = [
         id: 'quote-funnel',
         name: 'Quote Funnel Template',
         description: 'Conversion-focused layout specialized for high-quality lead generation and quote requests.',
+        category: 'Conversion',
+        image: 'https://images.unsplash.com/photo-1517646287270-a5a9ca602e5c?auto=format&fit=crop&q=80&w=600',
         theme: {
             primary: '#4f46e5',
             secondary: '#7c3aed',
