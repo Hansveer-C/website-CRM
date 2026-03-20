@@ -2,6 +2,7 @@ import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuo
 import { templates } from './templates';
 import { Activity } from './types';
 import { runAutomations, checkOverdueInvoices } from './automation';
+import { logEvent } from './events';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
@@ -996,6 +997,20 @@ function renderSectionPreviewContent(section: any) {
       // If it fails, roll back the Contact creation.
       mockOpportunities.push(newOpportunity);
 
+      // Emit form_submitted event
+      logEvent('form_submitted', {
+        contact_id: contactIdToUse,
+        opportunity_id: newOpportunity.id,
+        source: 'website'
+      });
+
+      // Emit lead_created event
+      logEvent('lead_created', {
+        contact_id: contactIdToUse,
+        opportunity_id: newOpportunity.id,
+        pipeline_stage: 'New Lead'
+      });
+
       // Trigger automations for the new opportunity
       runAutomations('OPPORTUNITY_CREATED', newOpportunity);
 
@@ -1922,6 +1937,20 @@ function handleLeadCaptureSubmission(e: Event) {
       // ATOMIC BEHAVIOR: Opportunity creation MUST follow Contact creation.
       // If it fails, roll back the Contact creation.
       mockOpportunities.push(newOpportunity);
+
+      // Emit form_submitted event
+      logEvent('form_submitted', {
+        contact_id: contactIdToUse,
+        opportunity_id: newOpportunity.id,
+        source: 'website'
+      });
+
+      // Emit lead_created event
+      logEvent('lead_created', {
+        contact_id: contactIdToUse,
+        opportunity_id: newOpportunity.id,
+        pipeline_stage: 'New Lead'
+      });
 
       // Trigger automations for the new opportunity
       runAutomations('OPPORTUNITY_CREATED', newOpportunity);
