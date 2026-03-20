@@ -704,22 +704,20 @@ function renderSectionPreviewContent(section: any) {
   
   if (!noSkeleton) {
     app.innerHTML = `
-      ${renderSidebar('builder')}
-      <style>@keyframes pbPulse { 0% { opacity: 0.8; } 50% { opacity: 0.4; } 100% { opacity: 0.8; } }</style>
-      <main class="main-content" style="padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column;">
-        <header style="background: #111; border-bottom: 1px solid #333; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; z-index: 100; flex-shrink: 0;">
-           <div style="width: 200px; height: 30px; background: #222; border-radius: 4px; animation: pbPulse 1.5s infinite;"></div>
-           <div style="width: 300px; height: 30px; background: #222; border-radius: 4px; animation: pbPulse 1.5s infinite;"></div>
+      <main style="width: 100vw; padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column; background: #1a1a1a;">
+        <header style="background: #111; border-bottom: 1px solid #333; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; z-index: 100; flex-shrink: 0; height: 60px; box-sizing: border-box;">
+           <div class="skeleton skeleton-title" style="width: 200px; margin: 0;"></div>
+           <div class="skeleton skeleton-title" style="width: 300px; margin: 0;"></div>
         </header>
         <div class="pb-layout" style="flex: 1; display: flex;">
-           <div style="width: 280px; background: #1a1a1a; padding: 20px;">
-              <div style="height: 40px; background: #222; border-radius: 4px; margin-bottom: 20px; animation: pbPulse 1.5s infinite;"></div>
-              <div style="height: 100px; background: #222; border-radius: 4px; margin-bottom: 20px; animation: pbPulse 1.5s infinite;"></div>
-              <div style="height: 100px; background: #222; border-radius: 4px; margin-bottom: 20px; animation: pbPulse 1.5s infinite;"></div>
+           <div style="width: 280px; background: #161616; padding: 20px; border-right: 1px solid #222;">
+              <div class="skeleton skeleton-row" style="margin-bottom: 20px;"></div>
+              <div class="skeleton skeleton-rect" style="height: 120px; margin-bottom: 20px;"></div>
+              <div class="skeleton skeleton-rect" style="height: 120px; margin-bottom: 20px;"></div>
            </div>
            <div style="flex: 1; padding: 40px; display: flex; flex-direction: column; gap: 30px; background: #000;">
-              <div style="height: 400px; background: #111; border-radius: 8px; animation: pbPulse 1.5s infinite;"></div>
-              <div style="height: 200px; background: #111; border-radius: 8px; animation: pbPulse 1.5s infinite;"></div>
+              <div class="skeleton skeleton-rect" style="height: 400px; border-radius: 8px;"></div>
+              <div class="skeleton skeleton-rect" style="height: 200px; border-radius: 8px;"></div>
            </div>
         </div>
       </main>
@@ -2259,13 +2257,59 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   }
 };
 
+function renderSkeleton(type: 'pages' | 'templates' | 'builder' | 'generic') {
+  if (type === 'pages') {
+    return `
+      <div class="skeleton-pages-list">
+        ${Array(8).fill(0).map(() => `<div class="skeleton skeleton-row"></div>`).join('')}
+      </div>
+    `;
+  }
+  if (type === 'templates') {
+    return `
+      <div class="skeleton-card-grid">
+        ${Array(6).fill(0).map(() => `
+          <div class="card" style="padding: 0; overflow: hidden; height: 350px;">
+            <div class="skeleton skeleton-rect" style="height: 180px;"></div>
+            <div style="padding: 20px;">
+              <div class="skeleton skeleton-title" style="width: 80%;"></div>
+              <div class="skeleton skeleton-text"></div>
+              <div class="skeleton skeleton-text" style="width: 40%;"></div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+  return `<div class="skeleton skeleton-rect" style="height: 100%; border-radius: 12px;"></div>`;
+}
+
 (window as any).navigateTo = (view: string, id?: string) => {
+  const previousView = currentView;
   currentView = view;
   if (id) selectedContactId = id;
   
-  // Automation: Check for overdue invoices on navigation
   checkOverdueInvoices();
 
+  // Show skeleton if switching to major data-heavy views
+  if (view !== previousView && ['pages', 'templates', 'builder'].includes(view)) {
+    const sidebar = (view === 'builder') ? '' : renderSidebar(view);
+    app.innerHTML = `
+      ${sidebar}
+      <main class="${view === 'builder' ? '' : 'main-content'}">
+        <header class="view-header">
+          <div class="skeleton skeleton-title" style="width: 300px; margin: 0;"></div>
+        </header>
+        ${renderSkeleton(view as any)}
+      </main>
+    `;
+    setTimeout(() => executeNavigation(view, id), 350);
+  } else {
+    executeNavigation(view, id);
+  }
+};
+
+function executeNavigation(view: string, id?: string) {
   if (view === 'dashboard') renderDashboard();
   if (view === 'clients') renderClients();
   if (view === 'opportunities') renderOpportunities();
@@ -2285,12 +2329,13 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   if (view === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
   if (view === 'site' && id) renderSitePage(id);
   if (view === 'preview' && id) renderSitePage(id, true);
-  else {
-    document.title = 'Hansveer CRM'; // Restore admin title
+  
+  if (!['site', 'preview'].includes(view)) {
+    document.title = 'Hansveer CRM';
     updateMetaTag('description', 'Professional CRM for Handyman Businesses');
     updateMetaTag('keywords', 'crm, handyman, pressure washing');
   }
-};
+}
 
 (window as any).downloadSitemap = () => {
     const publishedPages = mockPages.filter(p => p.status === 'published');

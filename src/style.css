@@ -32,6 +32,7 @@
     --shadow-subtle: 0 1px 3px rgba(0,0,0,0.05);
     --shadow: var(--shadow-subtle);
     --border-radius: var(--radius-md);
+    --transition: all 150ms ease;
 }
 
 * {
@@ -144,6 +145,13 @@ small, .badge, .nav-group-title {
     box-shadow: var(--shadow-subtle);
     border: 1px solid var(--border);
     margin-bottom: var(--space-md);
+    transition: var(--transition);
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    border-color: #cbd5e0;
 }
 
 .card h3 {
@@ -410,7 +418,7 @@ button:active {
 .pb-section-preview {
     position: relative;
     cursor: pointer;
-    transition: all 0.1s ease;
+    transition: var(--transition);
     border: 2px solid transparent;
     margin-bottom: var(--space-lg); /* 24px gap between sections */
     background: #fff;
@@ -428,20 +436,22 @@ button:active {
 .pb-section-preview.active {
     border-color: #2563EB; /* primary blue highlight */
     z-index: 10;
-    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+    box-shadow: 0 0 15px rgba(37, 99, 235, 0.2);
 }
 
 .pb-section-preview.active::after {
     content: 'SELECTED SECTION';
     position: absolute;
-    top: -24px;
-    left: -2px;
+    top: 5px;
+    left: 5px;
     background: #2563EB;
     color: white;
     font-size: 10px;
     font-weight: 800;
-    padding: 2px 8px;
-    border-radius: 4px 4px 0 0;
+    padding: 8px 12px;
+    border-radius: 6px;
+    transition: var(--transition);
+    z-index: 25;
 }
 
 .pb-section-controls {
@@ -558,6 +568,11 @@ button:active {
 .pb-control-input:focus {
     border-color: var(--primary-color);
     outline: none;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.pb-asset-thumb {
+    transition: var(--transition);
 }
 
 /* Reports & Analytics Styles */
@@ -995,4 +1010,61 @@ button:active {
 .mobile-preview section {
     padding-left: 15px !important;
     padding-right: 15px !important;
+}
+
+/* Skeleton Loading System */
+@keyframes skeletonPulse {
+    0% { background-color: #f1f3f5; }
+    50% { background-color: #e9ecef; }
+    100% { background-color: #f1f3f5; }
+}
+
+.skeleton {
+    animation: skeletonPulse 1.5s ease-in-out infinite;
+    background: #f1f3f5;
+    border-radius: 4px;
+}
+
+.skeleton-text {
+    height: 12px;
+    margin-bottom: 8px;
+    width: 100%;
+}
+
+.skeleton-title {
+    height: 24px;
+    margin-bottom: 15px;
+    width: 60%;
+}
+
+.skeleton-rect {
+    height: 100px;
+    width: 100%;
+}
+
+.skeleton-row {
+    height: 50px;
+    width: 100%;
+    margin-bottom: 1px;
+}
+
+.skeleton-circle {
+    height: 40px;
+    width: 40px;
+    border-radius: 50%;
+}
+
+.skeleton-pages-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: #eee;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.skeleton-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px;
 }
