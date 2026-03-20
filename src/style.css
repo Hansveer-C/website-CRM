@@ -167,29 +167,31 @@ small, .badge, .nav-group-title {
     border: 1px solid var(--border);
 }
 
-.clients-table th,
-.clients-table td {
-    padding: 16px;
-    text-align: left;
-    border-bottom: 1px solid #eee;
-}
-
 .clients-table tbody tr {
-    transition: background-color 0.15s ease;
-}
-
-.clients-table tbody tr.clickable-row {
+    transition: background-color 0.1s ease;
     cursor: pointer;
+    border-bottom: 1px solid var(--border);
 }
 
-.clients-table tbody tr.clickable-row:hover {
-    background-color: #f1f5f9;
+.clients-table tbody tr:hover {
+    background-color: var(--background); /* #F9FAFB */
+}
+
+.clients-table th, 
+.clients-table td {
+    padding: var(--space-md); /* 16px */
+    text-align: left;
+    border: none;
 }
 
 .clients-table th {
-    background-color: #f1f3f5;
-    color: var(--secondary-color);
-    font-weight: 600;
+    background-color: #F8F9FA;
+    color: var(--text-secondary);
+    font-weight: 500;
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
 }
 
 .badge {
