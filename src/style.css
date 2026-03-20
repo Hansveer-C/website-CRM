@@ -29,8 +29,11 @@
     --radius-lg: 16px;
 
     /* Shadows & Effects */
-    --shadow-subtle: 0 1px 3px rgba(0,0,0,0.05);
-    --shadow: var(--shadow-subtle);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    --shadow-subtle: var(--shadow-sm);
+    --shadow: var(--shadow-sm);
     --border-radius: var(--radius-md);
     --transition: all 150ms ease;
 }
@@ -259,7 +262,7 @@ small, .badge, .nav-group-title {
 
 .btn-primary:hover {
     background-color: #1d4ed8;
-    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+    box-shadow: var(--shadow-md);
 }
 
 .btn-secondary {
@@ -362,7 +365,7 @@ button:active {
     width: 100%;
     max-width: 1200px;
     background: white;
-    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    box-shadow: var(--shadow-lg);
     min-height: 800px;
     position: relative;
 }
@@ -397,7 +400,7 @@ button:active {
     justify-content: center;
     font-weight: bold;
     font-size: 20px;
-    box-shadow: 0 2px 10px rgba(0, 123, 255, 0.4);
+    box-shadow: var(--shadow-sm);
     position: relative;
 }
 
@@ -436,7 +439,7 @@ button:active {
 .pb-section-preview.active {
     border-color: #2563EB; /* primary blue highlight */
     z-index: 10;
-    box-shadow: 0 0 15px rgba(37, 99, 235, 0.2);
+    box-shadow: var(--shadow-md);
 }
 
 .pb-section-preview.active::after {
@@ -663,7 +666,7 @@ button:active {
     background: white;
     padding: var(--space-md);
     border-radius: var(--radius-sm);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    box-shadow: var(--shadow-sm);
     display: flex;
     flex-direction: column;
     gap: var(--space-sm);

@@ -451,7 +451,6 @@ function _renderBuilder() {
                   <div class="pb-component-icon">${cat.icon}</div>
                   <div>
                     <div style="font-weight: 600; font-size: 0.8rem; color: white;">${comp.name}</div>
-                    <div style="font-size: 0.65rem; color: #666; text-transform: capitalize;">${comp.type}</div>
                   </div>
                 </div>
               `).join('')}
@@ -459,8 +458,7 @@ function _renderBuilder() {
           </div>
           
           <div style="margin-top: auto; padding: 15px; background: #111; border-top: 1px solid #222;">
-             <label style="font-size: 0.65rem; color: #666; display: block; margin-bottom: 8px; text-transform: uppercase; font-weight: 800;">Acting on Page</label>
-             <select onchange="window.switchBuilderPage(this.value)" style="width: 100%; padding: 10px; border-radius: 4px; background: #000; border: 1px solid #333; color: white; font-size: 0.85rem;">
+             <select onchange="window.switchBuilderPage(this.value)" style="width: 100%; padding: 10px; border-radius: 6px; background: #000; border: 1px solid #333; color: white; font-size: 0.8rem; font-weight: 600;">
                 ${mockPages.map(p => `<option value="${p.id}" ${p.id === builderPageId ? 'selected' : ''}>${p.name}</option>`).join('')}
              </select>
           </div>
@@ -531,10 +529,10 @@ function _renderBuilder() {
           
           <div class="pb-settings-form">
             ${selectedSection ? renderSectionSettings(selectedSection) : `
-              <div style="height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #555; padding: 40px;">
-                <div style="font-size: 3rem; margin-bottom: 20px;">?</div>
-                <div style="font-weight: 700; color: #888; text-transform: uppercase; font-size: 0.75rem;">No Selection</div>
-                <p style="font-size: 0.85rem; margin-top: 10px;">Select a section on the canvas to configure settings</p>
+              <div style="height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #555; padding: 40px; border: 1px dashed #333; margin: 20px; border-radius: 8px;">
+                <div style="font-size: 2rem; margin-bottom: 15px; opacity: 0.3;">✨</div>
+                <div style="font-weight: 700; color: #666; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 1px;">Ready</div>
+                <p style="font-size: 0.75rem; margin-top: 10px; color: #444;">Select a page section to edit its content and appearance</p>
               </div>
             `}
           </div>
@@ -559,12 +557,7 @@ function renderSectionSettings(section: any) {
 
   if (isContent) {
     settingsMarkup.push(`
-      <div class="pb-collapsible-section active">
-        <div class="pb-collapsible-trigger" onclick="this.parentElement.classList.toggle('active')">
-          Section Content
-          <span>▼</span>
-        </div>
-        <div class="pb-collapsible-content">
+      <div style="display: flex; flex-direction: column; gap: 5px;">
     `);
     
     for (const key in section.content) {
@@ -607,17 +600,12 @@ function renderSectionSettings(section: any) {
          `);
       }
     }
-    settingsMarkup.push(`</div></div>`);
+    settingsMarkup.push(`</div>`);
   }
 
   if (isStyles) {
     settingsMarkup.push(`
-      <div class="pb-collapsible-section active">
-        <div class="pb-collapsible-trigger" onclick="this.parentElement.classList.toggle('active')">
-          Visual Styles
-          <span>▼</span>
-        </div>
-        <div class="pb-collapsible-content">
+      <div style="display: flex; flex-direction: column; gap: 5px;">
     `);
     
     const designFields = [
@@ -641,7 +629,7 @@ function renderSectionSettings(section: any) {
         </div>
       `);
     });
-    settingsMarkup.push(`</div></div>`);
+    settingsMarkup.push(`</div>`);
   }
 
   return settingsMarkup.join('');
@@ -1180,7 +1168,7 @@ function renderReports() {
   modal.id = 'page-name-modal';
   modal.innerHTML = `
     <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;">
-      <div style="background: white; padding: 40px; border-radius: 12px; width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+      <div style="background: white; padding: 40px; border-radius: 12px; width: 400px; box-shadow: var(--shadow-lg);">
         <h2 style="margin-top: 0; margin-bottom: 20px; font-size: 1.5rem;">${titles[type]}</h2>
         <div class="form-group" style="margin-bottom: 20px;">
           <label style="display: block; font-weight: 600; margin-bottom: 8px;">Page Name</label>
@@ -1372,33 +1360,6 @@ function renderPages() {
         </table>
       </div>
 
-      <div class="stats-grid" style="margin-top: 30px;">
-        <div class="card">
-          <h3>Collection: Pages</h3>
-          <p style="color: #666; margin-bottom: 15px;">Schema defined with the following fields:</p>
-          <ul style="list-style: none; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>id</strong>: auto (string)</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>name</strong>: string</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>slug</strong>: string (unique)</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>status</strong>: draft | published</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>seo_title</strong>: string</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>seo_description</strong>: text</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>seo_keywords</strong>: array</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>created_at</strong>: timestamp</li>
-          </ul>
-        </div>
-        <div class="card">
-          <h3>Collection: PageSections</h3>
-          <p style="color: #666; margin-bottom: 15px;">Schema defined with the following fields:</p>
-          <ul style="list-style: none; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>id</strong>: auto (string)</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>page_id</strong>: relation to Pages</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>type</strong>: string (hero, text, etc.)</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>content</strong>: JSON</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>order</strong>: number</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>styles</strong>: JSON</li>
-          </ul>
-        </div>
       </div>
     </main>
   `;
@@ -1549,20 +1510,7 @@ function renderComponents() {
         ${gridItems || '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #666; font-size: 1.1rem;">No components match your search.</div>'}
       </div>
 
-      ${!isPickerMode ? `
-      <div class="stats-grid" style="margin-top: 40px;">
-        <div class="card">
-          <h3>Collection: Components</h3>
-          <p style="color: #666; margin-bottom: 15px;">Schema defined with the following fields:</p>
-          <ul style="list-style: none; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>id</strong>: auto (string)</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>name</strong>: string</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>type</strong>: string</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>default_content</strong>: JSON</li>
-            <li style="padding: 8px; background: #f8fafc; border-radius: 4px;"><strong>default_styles</strong>: JSON</li>
-          </ul>
-        </div>
-      </div>` : ''}
+      </div>
     </main>
   `;
 }
@@ -1665,7 +1613,6 @@ function renderWebsiteSettings() {
       <div style="max-width: 800px;">
         <div class="card" style="margin-bottom: 24px;">
           <h3>Business Profile</h3>
-          <p style="color: #666; font-size: 0.9rem; margin-bottom: 20px;">This info is injected globally into your site headers and forms.</p>
           <div style="display: flex; flex-direction: column; gap: 15px;">
             <div class="form-group">
               <label>Business Name</label>
@@ -2955,7 +2902,6 @@ checkOverdueInvoices();
 
 // Basic Path Routing
 const path = window.location.pathname;
-const searchParams = new URLSearchParams(window.location.search);
 
 if (path.includes('/site/')) {
     const slug = path.split('/site/')[1];
