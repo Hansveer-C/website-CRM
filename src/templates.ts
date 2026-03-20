@@ -137,5 +137,53 @@ export const templates: WebsiteTemplate[] = [
                 }
             }
         ]
+    },
+    {
+        id: 'quote-funnel',
+        name: 'Quote Funnel Template',
+        description: 'Conversion-focused layout specialized for high-quality lead generation and quote requests.',
+        theme: {
+            primary: '#4f46e5',
+            secondary: '#7c3aed',
+            font: 'Inter'
+        },
+        blocks: [
+            {
+                id: 'qf-h1',
+                type: 'hero',
+                data: {
+                    heading: 'Get a Fast Quote',
+                    subheading: 'Tell us about your project',
+                    cta_text: 'Start Now'
+                }
+            },
+            {
+                id: 'qf-f1',
+                type: 'contact',
+                data: {
+                    title: 'Request Your Quote',
+                    fields: ['name', 'phone', 'address', 'service_type', 'message']
+                }
+            },
+            {
+                id: 'qf-t1',
+                type: 'trust',
+                data: {
+                    title: 'Trusted by local homeowners',
+                    testimonials: [
+                        { name: 'John D.', text: 'Fast response and very professional!' },
+                        { name: 'Sarah M.', text: 'Best service in town, highly recommend.' }
+                    ]
+                }
+            },
+            {
+                id: 'qf-c1',
+                type: 'hero',
+                data: {
+                    heading: 'Ready to get started?',
+                    cta_text: 'Request Quote'
+                }
+            }
+        ]
     }
 ];

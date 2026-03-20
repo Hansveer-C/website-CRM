@@ -1,4 +1,4 @@
-import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component, Asset } from './types';
+import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component, Asset, Template, WebsiteSettings } from './types';
 
 export const mockContacts: Contact[] = [
   {
@@ -240,7 +240,7 @@ export const mockComponents: Component[] = [
     type: 'form',
     default_content: { 
       title: 'Get a Free Quote',
-      fields: ['name', 'phone', 'email', 'message'],
+      fields: ['name', 'phone', 'email', 'address', 'service_type', 'message'],
       pipeline_id: 'p1'
     },
     default_styles: { 
@@ -271,6 +271,21 @@ export const mockComponents: Component[] = [
     default_styles: { 
       color: '#007bff', 
       size: 'medium' 
+    }
+  },
+  {
+    id: 'comp6',
+    name: 'Conversion CTA',
+    type: 'cta',
+    default_content: { 
+      heading: 'Ready to Transform Your Home?', 
+      subheading: 'Book your free estimate today and see the difference professional cleaning makes.',
+      button_text: 'Get My Free Quote',
+      button_link: '#form'
+    },
+    default_styles: { 
+      padding: '80px 20px', 
+      cta_background: '#4f46e5' 
     }
   }
 ];
@@ -312,3 +327,117 @@ export const mockMedia: Asset[] = [
     tags: ['commercial', 'brick', 'clean']
   }
 ];
+
+export const mockTemplates: Template[] = [
+  {
+    id: 'tpl1',
+    name: 'Standard Landing Page',
+    category: 'Landing Pages',
+    sections: [
+      {
+        type: 'hero',
+        content: { heading: 'Welcome to our Service', subheading: 'The best experience you ever had.' },
+        styles: { padding: '100px 20px', background: '#f8fafc', text_alignment: 'center' },
+        order: 1
+      },
+      {
+        type: 'text',
+        content: { heading: 'Our Features', body: 'Discover why thousands of users trust us every day.' },
+        styles: { padding: '60px 20px', background: '#ffffff' },
+        order: 2
+      },
+      {
+        type: 'form',
+        content: { title: 'Contact Us', fields: ['name', 'email', 'message'] },
+        styles: { padding: '60px 20px', background: '#f8fafc' },
+        order: 3
+      }
+    ],
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'tpl-generic',
+    name: 'Generic Service Template',
+    category: 'Landing Pages',
+    sections: [
+      {
+        type: 'hero',
+        content: { heading: '', subheading: '', button_text: '' },
+        styles: { padding: '100px 20px', background: '#f8fafc', text_alignment: 'center' },
+        order: 1
+      },
+      {
+        type: 'text',
+        content: { heading: 'Our Service', text: '' },
+        styles: { padding: '60px 20px', background: '#ffffff' },
+        order: 2
+      },
+      {
+        type: 'text',
+        content: { heading: 'Key Benefits', text: '' },
+        styles: { padding: '60px 20px', background: '#f1f5f9' },
+        order: 3
+      },
+      {
+        type: 'text',
+        content: { heading: 'Frequently Asked Questions', text: '' },
+        styles: { padding: '60px 20px', background: '#ffffff' },
+        order: 4
+      }
+    ],
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'tpl-quote-funnel',
+    name: 'Quote Funnel Template',
+    category: 'conversion',
+    sections: [
+      {
+        type: 'hero',
+        content: { heading: 'Expert Exterior Cleaning', subheading: 'Professional pressure washing for your home or business.', button_text: 'See Our Services' },
+        styles: { padding: '100px 20px', background: '#f8fafc', text_alignment: 'center' },
+        order: 1
+      },
+      {
+        type: 'cta',
+        content: { heading: 'Quick Price Check', subheading: 'Need an estimate fast? Fill out our form below.', button_text: 'Jump to Form' },
+        styles: { padding: '60px 20px', cta_background: '#f1f5f9' },
+        order: 2
+      },
+      {
+        type: 'form',
+        content: { title: 'Request Your Free Quote', fields: ['name', 'phone', 'address', 'service_type', 'message'] },
+        styles: { padding: '80px 20px', background: '#ffffff' },
+        order: 3
+      },
+      {
+        type: 'text',
+        content: { 
+          heading: 'Trusted by local homeowners', 
+          text: '<p style="text-align: center; max-width: 800px; margin: 0 auto;">We have helped over 500 families protect and beautify their homes with professional results and a local touch. Our specialized equipment ensures a deep clean without damaging your surfaces.</p>' 
+        },
+        styles: { padding: '60px 20px', background: '#f8fafc' },
+        order: 4
+      },
+      {
+        type: 'cta',
+        content: { heading: 'Start Your Project Today', subheading: 'Professional results are just a click away.', button_text: 'Get Started Now' },
+        styles: { padding: '100px 20px', cta_background: '#4f46e5' },
+        order: 5
+      }
+    ],
+    created_at: new Date().toISOString()
+  }
+];
+
+export const mockWebsiteSettings: WebsiteSettings = {
+  id: 'settings-001',
+  business_name: 'Handyman Hans Pressure Washing',
+  phone: '555-0199',
+  email: 'hans@example.com',
+  logo_url: 'https://images.unsplash.com/photo-1628177142898-93e36e4e3a50?q=80&w=200&h=200&auto=format&fit=crop',
+  primary_color: '#4f46e5',
+  facebook_pixel_id: '',
+  gtm_id: '',
+  created_at: new Date().toISOString()
+};

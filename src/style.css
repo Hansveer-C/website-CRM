@@ -818,3 +818,29 @@ body {
     border-color: var(--primary-color);
     box-shadow: 0 0 10px rgba(0, 123, 255, 0.5);
 }
+
+.mobile-preview {
+    max-width: 375px;
+    margin: 40px auto !important;
+    border: 12px solid #222 !important;
+    border-radius: 40px !important;
+    height: calc(100vh - 200px) !important;
+    min-height: 667px !important;
+    overflow-y: auto !important;
+    box-shadow: 0 0 50px rgba(0,0,0,0.4) !important;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    position: relative;
+    background: white;
+}
+
+/* Ensure canvas content inside mobile frame behaves correctly */
+.mobile-preview .pb-canvas-inner {
+    width: 100% !important;
+    box-shadow: none !important;
+    min-height: 100% !important;
+}
+
+.mobile-preview section {
+    padding-left: 15px !important;
+    padding-right: 15px !important;
+}

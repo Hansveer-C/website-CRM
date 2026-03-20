@@ -23,6 +23,7 @@ export interface Opportunity {
   value: number;
   assigned_to: string;
   status: OpportunityStatus;
+  notes?: string;
   created_at: string;
 }
 
@@ -125,4 +126,29 @@ export interface Asset {
   name: string;
   type: 'image' | 'video';
   tags: string[];
+}
+
+export interface Template {
+  id: string;
+  name: string;
+  category: string;
+  sections: {
+    type: string;
+    content: any;
+    styles?: any;
+    order: number;
+  }[];
+  created_at: string;
+}
+
+export interface WebsiteSettings {
+  id: string;
+  business_name: string;
+  phone: string;
+  email: string;
+  logo_url: string;
+  primary_color: string;
+  facebook_pixel_id?: string;
+  gtm_id?: string;
+  created_at: string;
 }

@@ -1,4 +1,4 @@
-import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia } from './db';
+import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings } from './db';
 import { templates } from './templates';
 import { Activity } from './types';
 import { runAutomations, checkOverdueInvoices } from './automation';
@@ -877,7 +877,9 @@ function renderSectionPreviewContent(section: any) {
   const name = (document.getElementById(`${prefix}name-${sectionId}`) as HTMLInputElement)?.value;
   const phone = (document.getElementById(`${prefix}phone-${sectionId}`) as HTMLInputElement)?.value;
   const email = (document.getElementById(`${prefix}email-${sectionId}`) as HTMLInputElement)?.value;
-  const message = (document.getElementById(`${prefix}message-${sectionId}`) as HTMLInputElement)?.value;
+  const address = (document.getElementById(`${prefix}address-${sectionId}`) as HTMLInputElement)?.value;
+  const service_type = (document.getElementById(`${prefix}service_type-${sectionId}`) as HTMLSelectElement)?.value;
+  const message = (document.getElementById(`${prefix}message-${sectionId}`) as HTMLTextAreaElement)?.value;
 
   if (!name || !email) {
     alert('Please provide at least a name and email.');
@@ -891,11 +893,11 @@ function renderSectionPreviewContent(section: any) {
     name,
     phone: phone || '---',
     email,
-    address: 'From Website Form',
+    address: address || 'From Website Form',
     tags: ['web-lead'],
     source: 'Website Form',
+    service: service_type || undefined,
     status: 'lead',
-    notes: message || '',
     created_at: new Date().toISOString()
   });
 
@@ -910,7 +912,8 @@ function renderSectionPreviewContent(section: any) {
     pipeline_stage: initialStage,
     value: 0,
     assigned_to: 'Unassigned',
-    status: 'open' as any, // Use status: 'open' as typed in interface
+    status: 'open' as any,
+    notes: `Service Type: ${service_type || 'N/A'}\nAddress: ${address || 'N/A'}\nMessage: ${message || 'N/A'}`,
     created_at: new Date().toISOString()
   };
   mockOpportunities.push(newOpportunity);
@@ -921,7 +924,7 @@ function renderSectionPreviewContent(section: any) {
   alert(`🚀 Form submitted successfully!\n\nNew Lead "${name}" has been added to your CRM pipeline.\n\nAutomations triggered!`);
   
   // Clear form
-  ['name', 'phone', 'email', 'message'].forEach(f => {
+  ['name', 'phone', 'email', 'address', 'service_type', 'message'].forEach(f => {
     const el = document.getElementById(`${prefix}${f}-${sectionId}`) as HTMLInputElement;
     if (el) el.value = '';
   });
@@ -943,15 +946,59 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
     return;
   }
 
+  const settings = mockWebsiteSettings;
   const sections = mockPageSections
     .filter(s => s.page_id === page.id)
     .sort((a, b) => a.order - b.order);
 
+  // Inject Tracking Scripts
+  if (!isPreview) {
+    if (settings.facebook_pixel_id) {
+        const script = document.createElement('script');
+        script.innerHTML = `
+          !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
+          fbq('init', '${settings.facebook_pixel_id}'); fbq('track', 'PageView');
+        `;
+        document.head.appendChild(script);
+    }
+    if (settings.gtm_id) {
+        const script = document.createElement('script');
+        script.innerHTML = `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s),j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','${settings.gtm_id}');`;
+        document.head.appendChild(script);
+    }
+  }
+
   app.innerHTML = `
-    <div class="public-site" style="min-height: 100vh; background: white;">
+    <div class="public-site" style="min-height: 100vh; background: white; font-family: 'Inter', sans-serif;">
       ${isPreview ? `<div style="background: #fdf2f2; color: #dc2626; padding: 10px; text-align: center; font-weight: 700; border-bottom: 1px solid #fee2e2;">PREVIEW MODE: You are viewing a draft version of "${page.name}"</div>` : ''}
-      ${sections.map(section => renderSection(section.type, section.content, section.styles, section.id)).join('')}
       
+      <!-- Site Header with Global Info -->
+      <header style="padding: 20px 40px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: rgba(255,255,255,0.9); backdrop-filter: blur(8px); z-index: 100;">
+        <div style="display: flex; align-items: center; gap: 15px;">
+           ${settings.logo_url ? `<img src="${settings.logo_url}" style="height: 40px; width: 40px; border-radius: 8px; object-fit: cover;">` : ''}
+           <span style="font-weight: 800; font-size: 1.25rem; color: #1e293b;">${settings.business_name}</span>
+        </div>
+        <div>
+           <a href="tel:${settings.phone}" style="color: var(--primary-color); font-weight: 700; text-decoration: none;">📞 ${settings.phone}</a>
+        </div>
+      </header>
+
+      ${sections.map(section => {
+          // Inject global variables into section content if needed
+          const content = {...section.content, business_name: settings.business_name, phone: settings.phone};
+          return renderSection(section.type, content, section.styles, section.id);
+      }).join('')}
+      
+      ${!isPreview ? `
+        <button id="sticky-cta" onclick="document.querySelector('.site-form-section')?.scrollIntoView({behavior: 'smooth'})" 
+          style="position: fixed; bottom: 25px; right: 25px; z-index: 9999; background: var(--primary-color); color: white; border: none; padding: 16px 32px; border-radius: 50px; font-weight: 700; box-shadow: 0 12px 30px rgba(0,0,0,0.25); cursor: pointer; display: flex; align-items: center; gap: 10px; font-size: 1.1rem; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"
+          onmouseover="this.style.transform='scale(1.1) translateY(-5px)'; this.style.boxShadow='0 15px 35px rgba(0,0,0,0.3)';"
+          onmouseout="this.style.transform='scale(1) translateY(0)'; this.style.boxShadow='0 12px 30px rgba(0,0,0,0.25)';">
+          <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+          Get Quote
+        </button>
+      ` : ''}
+
       <!-- Public Footer -->
       <footer style="padding: 40px; text-align: center; background: #f8fafc; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 0.9rem;">
         <p>&copy; 2026 ${mockGlobalSettings.businessName}. Built with Hansveer CRM Website Builder.</p>
@@ -1035,17 +1082,54 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
       return `<div style="line-height: 1.8; font-size: ${styles.font_size || '1.1rem'}; max-width: 800px; margin: 0 auto;">${content.text || ''}</div>`;
     case 'image':
       return `<img src="${content.image_url}" alt="Site Image" style="width: 100%; height: auto; border-radius: ${styles.border_radius || '0'}; display: block; margin: 0 auto;">`;
+    case 'cta':
+      return `
+        <div style="background: ${styles.cta_background || 'var(--primary-color)'}; color: white; padding: 60px 40px; border-radius: 20px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
+          <h2 style="font-size: clamp(2rem, 5vw, 3rem); margin-bottom: 1rem; font-weight: 800;">${content.heading || 'Ready to Start?'}</h2>
+          <p style="font-size: 1.25rem; opacity: 0.9; margin-bottom: 2.5rem; max-width: 600px; margin-left: auto; margin-right: auto;">${content.subheading || 'Join hundreds of happy customers today.'}</p>
+          <button class="btn-primary" 
+                  style="background: white; color: var(--primary-color); border: none; padding: 18px 45px; font-size: 1.2rem; border-radius: 50px; font-weight: 700; cursor: pointer; transition: transform 0.2s;"
+                  onmouseover="this.style.transform='scale(1.05)'"
+                  onmouseout="this.style.transform='scale(1)'"
+                  onclick="document.querySelector('.site-form-section')?.scrollIntoView({behavior: 'smooth'})">
+            ${content.button_text || 'Get Quote Now'}
+          </button>
+        </div>
+      `;
     case 'form':
       return `
-        <div style="max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); color: #333; text-align: left;">
+        <div class="site-form-section" style="max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); color: #333; text-align: left;">
           <h3 style="margin-bottom: 25px; font-size: 1.75rem; text-align: center;">${content.title || 'Contact Us'}</h3>
           <div style="display: flex; flex-direction: column; gap: 20px;">
-            ${(content.fields || []).map((f: string) => `
-              <div class="form-group">
-                <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; color: #666;">${f.charAt(0).toUpperCase() + f.slice(1)}</label>
-                <input type="${f === 'email' ? 'email' : 'text'}" id="site-f-${f}-${id}" placeholder="Your ${f}" style="padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%;">
-              </div>
-            `).join('')}
+            ${(content.fields || []).map((f: string) => {
+              if (f === 'message') {
+                return `
+                  <div class="form-group">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; color: #666;">Message</label>
+                    <textarea id="site-f-${f}-${id}" placeholder="Your message" style="padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; min-height: 100px; font-family: inherit; font-size: 1rem;"></textarea>
+                  </div>
+                `;
+              }
+              if (f === 'service_type') {
+                return `
+                  <div class="form-group">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; color: #666;">Service Type</label>
+                    <select id="site-f-${f}-${id}" style="padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; background: white; font-family: inherit; font-size: 1rem;">
+                        <option value="Residential">Residential Cleaning</option>
+                        <option value="Commercial">Commercial Washing</option>
+                        <option value="Roof/Gutter">Roof & Gutter</option>
+                        <option value="Other">Other Service</option>
+                    </select>
+                  </div>
+                `;
+              }
+              return `
+                <div class="form-group">
+                  <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; color: #666;">${f.charAt(0).toUpperCase() + f.slice(1).replace('_', ' ')}</label>
+                  <input type="${f === 'email' ? 'email' : f === 'phone' ? 'tel' : 'text'}" id="site-f-${f}-${id}" placeholder="Your ${f.replace('_', ' ')}" style="padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; font-family: inherit; font-size: 1rem;">
+                </div>
+              `;
+            }).join('')}
             <button class="btn-primary" style="padding: 16px; margin-top: 10px; font-size: 1.1rem;" onclick="window.submitBuilderForm('${id}', true)">Send Message</button>
           </div>
         </div>
@@ -1515,26 +1599,23 @@ function renderComponents() {
     };
     
     if (block.type === 'hero') {
-       mappedContent = { heading: block.data.title, subheading: block.data.subtitle, button_text: block.data.buttonText };
+       mappedContent = { heading: block.data.heading || block.data.title, subheading: block.data.subheading || block.data.subtitle, button_text: block.data.cta_text || block.data.buttonText };
        mappedStyles = { background: template.theme.primary, color: 'white', text_alignment: 'center', padding: '100px 20px' };
     } else if (block.type === 'services') {
        mappedContent = { heading: block.data.title, items: block.data.items };
-       mappedStyles = { background: '#f8fafc', color: '#333', padding: '80px 20px' };
-    } else if (block.type === 'trust') {
-       mappedContent = { heading: block.data.title, logos: block.data.logos, testimonials: block.data.testimonials };
-       mappedStyles = { background: 'white', color: '#333', padding: '60px 20px' };
+       mappedStyles = { background: '#ffffff', color: '#333', padding: '80px 20px' };
     } else if (block.type === 'gallery') {
        mappedContent = { heading: block.data.title, images: block.data.images };
        mappedStyles = { background: '#fdfbfe', color: '#333', padding: '80px 20px' };
     } else if (block.type === 'contact') {
-       mappedContent = { title: block.data.title, fields: ['name', 'email', 'phone', 'message'] };
+       mappedContent = { title: block.data.title, fields: block.data.fields || ['name', 'email', 'phone', 'message'] };
        mappedStyles = { background: template.theme.secondary, color: 'white', padding: '80px 20px' };
     }
 
     mockPageSections.push({
       id: `ps-tpl-${Date.now()}-${index}`,
       page_id: newPage.id,
-      type: block.type === 'services' || block.type === 'trust' || block.type === 'gallery' ? 'text' : (block.type === 'contact' ? 'form' : block.type),
+      type: block.type === 'services' || block.type === 'gallery' ? 'text' : (block.type === 'contact' ? 'form' : block.type),
       content: mappedContent,
       order: index + 1,
       styles: mappedStyles
@@ -1574,59 +1655,68 @@ function renderTemplates() {
 }
 
 function renderWebsiteSettings() {
+  const settings = mockWebsiteSettings;
   app.innerHTML = `
     ${renderSidebar('website-settings')}
     <main class="main-content">
       <header class="view-header">
-        <h2>Website Settings</h2>
-        <button class="btn-primary" style="background: var(--primary-color);" onclick="window.saveGlobalSettings()">Save Settings</button>
+        <h2>Website Branding & Tracking</h2>
+        <div style="display: flex; gap: 10px;">
+           <button class="btn-primary" style="background: var(--primary-color);" onclick="window.saveGlobalSettings()">Save Settings</button>
+        </div>
       </header>
-      <div style="max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 30px; padding: 20px 0;">
-        
-        <div class="card" style="padding: 30px;">
-          <h3 style="margin-bottom: 20px; font-size: 1.25rem; border-bottom: 1px solid #eee; padding-bottom: 15px;">1. Branding</h3>
-          <div class="form-group" style="margin-bottom: 15px;">
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Business Name</label>
-            <input type="text" value="${mockGlobalSettings.businessName}" onchange="window.updateGlobalSettings('businessName', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none;">
-          </div>
-          <div class="form-group" style="margin-bottom: 15px;">
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Logo URL</label>
-            <input type="text" value="${mockGlobalSettings.logoUrl}" placeholder="https://..." onchange="window.updateGlobalSettings('logoUrl', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none;">
-          </div>
-          <div class="form-group">
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Phone Number</label>
-            <input type="text" value="${mockGlobalSettings.phone}" onchange="window.updateGlobalSettings('phone', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none;">
-          </div>
-        </div>
-
-        <div class="card" style="padding: 30px;">
-          <h3 style="margin-bottom: 20px; font-size: 1.25rem; border-bottom: 1px solid #eee; padding-bottom: 15px;">2. SEO Defaults</h3>
-          <p style="color: #666; font-size: 0.85rem; margin-bottom: 15px;">Variables allowed: <code>{page_name}</code>, <code>{business_name}</code></p>
-          <div class="form-group" style="margin-bottom: 15px;">
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Default Title Format</label>
-            <input type="text" value="${mockGlobalSettings.seoTitleFormat}" onchange="window.updateGlobalSettings('seoTitleFormat', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none;">
-          </div>
-          <div class="form-group">
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Default Description (Fallback)</label>
-            <textarea rows="3" onchange="window.updateGlobalSettings('seoDescriptionFallback', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none; font-family: inherit;">${mockGlobalSettings.seoDescriptionFallback}</textarea>
+      <div style="max-width: 800px;">
+        <div class="card" style="margin-bottom: 24px;">
+          <h3>Business Profile</h3>
+          <p style="color: #666; font-size: 0.9rem; margin-bottom: 20px;">This info is injected globally into your site headers and forms.</p>
+          <div style="display: flex; flex-direction: column; gap: 15px;">
+            <div class="form-group">
+              <label>Business Name</label>
+              <input type="text" value="${settings.business_name}" onchange="window.updateSettingsField('business_name', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+               <div class="form-group">
+                 <label>Public Phone</label>
+                 <input type="text" value="${settings.phone}" onchange="window.updateSettingsField('phone', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+               </div>
+               <div class="form-group">
+                 <label>Public Email</label>
+                 <input type="email" value="${settings.email}" onchange="window.updateSettingsField('email', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+               </div>
+            </div>
+            <div class="form-group">
+              <label>Logo URL</label>
+              <div style="display: flex; gap: 10px;">
+                 <input type="text" value="${settings.logo_url}" onchange="window.updateSettingsField('logo_url', this.value)" style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                 ${settings.logo_url ? `<img src="${settings.logo_url}" style="height: 42px; width: 42px; border-radius: 4px; object-fit: cover; border: 1px solid #ddd;">` : ''}
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="card" style="padding: 30px;">
-          <h3 style="margin-bottom: 20px; font-size: 1.25rem; border-bottom: 1px solid #eee; padding-bottom: 15px;">3. Tracking & Scripts</h3>
-          <div class="form-group" style="margin-bottom: 15px;">
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Facebook Pixel ID</label>
-            <input type="text" value="${mockGlobalSettings.fbPixelId}" placeholder="e.g. 123456789" onchange="window.updateGlobalSettings('fbPixelId', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none;">
-          </div>
-          <div class="form-group">
-            <label style="display: block; font-weight: 600; margin-bottom: 5px; color: #333;">Google Tag Manager ID</label>
-            <input type="text" value="${mockGlobalSettings.gtmId}" placeholder="e.g. GTM-XXXXXX" onchange="window.updateGlobalSettings('gtmId', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none;">
+        <div class="card">
+          <h3>Tracking & Marketing</h3>
+          <p style="color: #666; font-size: 0.9rem; margin-bottom: 20px;">Connect your marketing tools for analytics and ad tracking.</p>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div class="form-group">
+              <label>Facebook Pixel ID</label>
+              <input type="text" placeholder="e.g. 1234567890" value="${settings.facebook_pixel_id || ''}" onchange="window.updateSettingsField('facebook_pixel_id', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <div class="form-group">
+              <label>GTM Container ID</label>
+              <input type="text" placeholder="e.g. GTM-XXXXXX" value="${settings.gtm_id || ''}" onchange="window.updateSettingsField('gtm_id', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
           </div>
         </div>
-
       </div>
     </main>
   `;
+
+  (window as any).updateSettingsField = (field: string, value: string) => {
+      (mockWebsiteSettings as any)[field] = value;
+      renderWebsiteSettings();
+      console.log('Settings updated:', field, value);
+  };
 }
 
 function renderQuickstart() {
@@ -1674,8 +1764,19 @@ function renderLeadCapture() {
             <input type="text" id="lead_address" placeholder="123 Main St, Anytown" required>
           </div>
           <div class="form-group">
-            <label for="lead_service">Service Needed</label>
-            <textarea id="lead_service" placeholder="Description of what needs cleaning..." required></textarea>
+            <label for="lead_service_type">Service Type</label>
+            <select id="lead_service_type" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; background: white;">
+              <option value="">Select a service...</option>
+              <option value="Residential Pressure Washing">Residential Pressure Washing</option>
+              <option value="Commercial Exterior Cleaning">Commercial Exterior Cleaning</option>
+              <option value="Roof & Gutter Cleaning">Roof & Gutter Cleaning</option>
+              <option value="Driveway & Walkway Restore">Driveway & Walkway Restore</option>
+              <option value="Deck & Patio Wash">Deck & Patio Wash</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="lead_message">Message / Details</label>
+            <textarea id="lead_message" placeholder="Description of what needs cleaning..." required></textarea>
           </div>
           <div class="form-footer">
             <button type="submit" class="btn-primary">Submit Lead Info</button>
@@ -1694,7 +1795,8 @@ function handleLeadCaptureSubmission(e: Event) {
   const phone = (document.getElementById('lead_phone') as HTMLInputElement).value;
   const email = (document.getElementById('lead_email') as HTMLInputElement).value;
   const address = (document.getElementById('lead_address') as HTMLInputElement).value;
-  const service = (document.getElementById('lead_service') as HTMLTextAreaElement).value;
+  const service_type = (document.getElementById('lead_service_type') as HTMLSelectElement).value;
+  const message = (document.getElementById('lead_message') as HTMLTextAreaElement).value;
 
   const contact_id = 'c' + (mockContacts.length + 1);
   const opp_id = 'o' + (mockOpportunities.length + 1);
@@ -1708,7 +1810,7 @@ function handleLeadCaptureSubmission(e: Event) {
     address,
     tags: ['new-lead'],
     source: 'Lead Capture Form',
-    service,
+    service: service_type,
     status: 'lead',
     created_at: new Date().toISOString()
   });
@@ -1721,6 +1823,7 @@ function handleLeadCaptureSubmission(e: Event) {
     value: 0, // Initial value
     assigned_to: 'Hansveer',
     status: 'open' as any,
+    notes: `Service: ${service_type}\nAddress: ${address}\nMessage: ${message}`,
     created_at: new Date().toISOString()
   };
   mockOpportunities.push(newOpp);
@@ -1751,7 +1854,7 @@ function renderOpportunities() {
     const cardsHtml = stageOpportunities.map(opp => {
       const contact = mockContacts.find(c => c.id === opp.contact_id);
       return `
-        <div class="kanban-card" draggable="true" ondragstart="drag(event, '${opp.id}')" onclick="window.navigateTo('contact-detail', '${opp.contact_id}')" style="cursor: pointer;">
+        <div class="kanban-card" draggable="true" ondragstart="drag(event, '${opp.id}')" onclick="window.navigateTo('contact-detail', '${opp.contact_id}')" style="cursor: pointer; display: flex; flex-direction: column; gap: 4px;">
           <div class="contact-name">${contact ? contact.name : 'Unknown Contact'}</div>
           <div class="opportunity-value" style="display: flex; align-items: center; gap: 4px;">
             <span>$</span>
@@ -1763,6 +1866,7 @@ function renderOpportunities() {
                    onchange="window.updateOpportunityField('${opp.id}', 'value', this.value)">
           </div>
           <div class="contact-phone">${contact ? contact.phone : 'N/A'}</div>
+          ${opp.notes ? `<div style="font-size: 0.7rem; color: #94a3b8; font-style: italic; border-top: 1px solid #f1f5f9; padding-top: 4px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${opp.notes.replace(/\n/g, ' ')}</div>` : ''}
         </div>
       `;
     }).join('');
@@ -2404,6 +2508,7 @@ function renderContactDetail(contactId: string) {
                   </div>
                   <span class="badge badge-${opp.status}" style="font-size: 0.7rem;">${opp.status}</span>
                 </div>
+                ${opp.notes ? `<div style="font-size: 0.8rem; color: #666; font-style: italic; margin: 10px 0 0 5px; padding-left: 8px; border-left: 2px solid #ddd; word-break: break-word;">${opp.notes.replace(/\n/g, '<br>')}</div>` : ''}
               `).join('') || '<p>No opportunities</p>'}
             </div>
           </div>
