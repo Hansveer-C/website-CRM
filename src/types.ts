@@ -6,7 +6,7 @@ export interface Contact {
   id: string;
   name: string;
   phone: string;
-  email: string;
+  email: string | null;
   address: string;
   tags: string[];
   source: string;
@@ -14,6 +14,7 @@ export interface Contact {
   status: ContactStatus;
   notes?: string;
   created_at: string;
+  invalid_phone?: boolean;
 }
 
 export interface Opportunity {

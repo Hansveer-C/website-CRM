@@ -5,6 +5,42 @@ import { runAutomations, checkOverdueInvoices } from './automation';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
+function normalizePhone(phone: string): { normalized: string; invalid: boolean } {
+  if (!phone) return { normalized: '', invalid: true };
+  
+  // Clean phone input: remove spaces, dashes, brackets, and ensure numeric format
+  const cleaned = phone.replace(/[\s\-\(\)\[\]\{\}\.\,\/]/g, '').replace(/\D/g, '');
+  
+  // Convert to standard format: +1XXXXXXXXXX (for North America)
+  if (cleaned.length === 10) {
+    return { normalized: `+1${cleaned}`, invalid: false };
+  } else if (cleaned.length === 11 && cleaned.startsWith('1')) {
+    return { normalized: `+${cleaned}`, invalid: false };
+  }
+  
+  // Do not block, but return cleaned format and flag as invalid
+  return { normalized: cleaned || phone, invalid: true };
+}
+
+function normalizeEmail(email: string | null | undefined): string | null {
+  if (!email || !email.trim()) return null;
+  return email.trim().toLowerCase();
+}
+
+function normalizeName(name: string): string {
+  if (!name) return '';
+  return name.trim().replace(/\s\s+/g, ' ');
+}
+
+// Normalize existing mock data
+mockContacts.forEach(c => {
+  const norm = normalizePhone(c.phone);
+  c.phone = norm.normalized;
+  if (norm.invalid) c.invalid_phone = true;
+  c.name = normalizeName(c.name);
+  c.email = normalizeEmail(c.email);
+});
+
 // State Management
 let currentView: string = 'dashboard';
 
@@ -873,35 +909,53 @@ function renderSectionPreviewContent(section: any) {
   }
 
   try {
-    // 1. Create Contact record FIRST
-    const newContactId = `c-${Date.now()}`;
-    const newContact = {
-      id: newContactId,
-      name,
-      phone: phone || '', 
-      email: email || '', 
-      address: address || 'From Website Form',
-      tags: ['web-lead'],
-      source: 'website', 
-      service: service_type || undefined,
-      status: 'lead', 
-      created_at: new Date().toISOString() 
-    };
+    const timestamp = new Date().toISOString();
+    const phoneNorm = normalizePhone(phone || '');
+    const emailNorm = normalizeEmail(email);
+    const normalizedName = normalizeName(name);
 
-    // Ensure Contact record is created first
-    mockContacts.push(newContact as any);
+    // Check if Contact exists with same phone OR same email
+    const existingContact = mockContacts.find(c => 
+      (phoneNorm.normalized && c.phone === phoneNorm.normalized) || 
+      (emailNorm && c.email === emailNorm)
+    );
+
+    let contactIdToUse: string;
+
+    if (existingContact) {
+      contactIdToUse = existingContact.id;
+      console.log(`Duplicate found: using existing contact ${contactIdToUse} instead of creating a new one.`);
+    } else {
+      contactIdToUse = `c-${Date.now()}`;
+      const newContact = {
+        id: contactIdToUse,
+        name: normalizedName,
+        phone: phoneNorm.normalized, 
+        email: emailNorm, 
+        address: address || 'From Website Form',
+        tags: ['web-lead'],
+        source: 'website', 
+        service: service_type || undefined,
+        status: 'lead', 
+        created_at: timestamp,
+        invalid_phone: phoneNorm.invalid || undefined
+      };
+
+      // Ensure Contact record is created first
+      mockContacts.push(newContact as any);
+    }
 
     // 2. Create Opportunity
     try {
       const newOpportunity = {
         id: `opp-${Date.now()}`,
-        contact_id: newContactId,
+        contact_id: contactIdToUse,
         pipeline_stage: 'New Lead',
         value: 0,
         assigned_to: 'Unassigned',
         status: 'open' as any,
         notes: `Service Type: ${service_type || 'N/A'}\nAddress: ${address || 'N/A'}\nMessage: ${message || 'N/A'}`,
-        created_at: new Date().toISOString()
+        created_at: timestamp
       };
       
       // ATOMIC BEHAVIOR: Opportunity creation MUST follow Contact creation.
@@ -915,7 +969,8 @@ function renderSectionPreviewContent(section: any) {
       console.error('Atomic Transaction Failed: Opportunity creation skipped. Rolling back Contact.', oppError);
       
       // ROLLBACK: Remove the contact that was just added to prevent orphan records.
-      const contactIdx = mockContacts.findIndex(c => c.id === newContactId);
+      // NOTE: Only roll back if we actually created it in this transaction.
+      const contactIdx = mockContacts.findIndex(c => c.id === contactIdToUse && c.created_at === timestamp);
       if (contactIdx !== -1) mockContacts.splice(contactIdx, 1);
       
       throw new Error('Form submission failed: Transaction could not be completed.');
@@ -1769,33 +1824,51 @@ function handleLeadCaptureSubmission(e: Event) {
   }
 
   try {
-    const contact_id = 'c' + Date.now();
-    
-    // 1. Create new contact FIRST
-    mockContacts.push({
-      id: contact_id,
-      name,
-      phone: phone || '',
-      email: email || '',
-      address,
-      tags: ['new-lead'],
-      source: 'website', 
-      service: service_type,
-      status: 'lead',
-      created_at: new Date().toISOString()
-    });
+    const timestamp = new Date().toISOString();
+    const phoneNorm = normalizePhone(phone || '');
+    const emailNorm = normalizeEmail(email);
+    const normalizedName = normalizeName(name);
+
+    // Check if Contact exists with same phone OR same email
+    const existingContact = mockContacts.find(c => 
+      (phoneNorm.normalized && c.phone === phoneNorm.normalized) || 
+      (emailNorm && c.email === emailNorm)
+    );
+
+    let contactIdToUse: string;
+
+    if (existingContact) {
+      contactIdToUse = existingContact.id;
+      console.log(`Duplicate found: using existing contact ${contactIdToUse} instead of creating a new one.`);
+    } else {
+      contactIdToUse = 'c' + Date.now();
+      // 1. Create new contact FIRST
+      mockContacts.push({
+        id: contactIdToUse,
+        name: normalizedName,
+        phone: phoneNorm.normalized,
+        email: emailNorm,
+        address,
+        tags: ['new-lead'],
+        source: 'website', 
+        service: service_type,
+        status: 'lead',
+        created_at: timestamp,
+        invalid_phone: phoneNorm.invalid || undefined
+      });
+    }
 
     // 2. Create Opportunity
     try {
       const newOpportunity = {
         id: 'o' + Date.now(),
-        contact_id: contact_id,
+        contact_id: contactIdToUse,
         pipeline_stage: 'New Lead',
         value: 0,
         assigned_to: 'Hansveer',
         status: 'open' as any,
         notes: `Service Type: ${service_type || 'N/A'}\nAddress: ${address || 'N/A'}\nMessage: ${message || 'N/A'}`,
-        created_at: new Date().toISOString()
+        created_at: timestamp
       };
 
       // ATOMIC BEHAVIOR: Opportunity creation MUST follow Contact creation.
@@ -1809,7 +1882,8 @@ function handleLeadCaptureSubmission(e: Event) {
       console.error('Atomic Transaction Failed: Opportunity creation skipped. Rolling back Contact.', oppError);
       
       // ROLLBACK: Remove the contact that was just added to prevent orphan records.
-      const contactIdx = mockContacts.findIndex(c => c.id === contact_id);
+      // NOTE: Only roll back if we actually created it in this transaction.
+      const contactIdx = mockContacts.findIndex(c => c.id === contactIdToUse && c.created_at === timestamp);
       if (contactIdx !== -1) mockContacts.splice(contactIdx, 1);
       
       throw new Error('Manual lead capture failed: Transaction could not be completed.');
@@ -2445,7 +2519,7 @@ function renderQuotePreview(quoteId: string) {
               <div style="font-weight: 700; font-size: 1.25rem; color: #1e293b; margin-bottom: 8px;">${contact ? contact.name : 'Valued Customer'}</div>
               <div style="color: #64748b; line-height: 1.5;">
                 ${contact ? contact.address : ''}<br>
-                ${contact ? contact.email : ''}<br>
+                ${contact ? contact.email || '' : ''}<br>
                 ${contact ? contact.phone : ''}
               </div>
             </div>
@@ -2517,7 +2591,7 @@ function renderContactDetail(contactId: string) {
               </div>
               <div>
                 <label style="display: block; font-size: 0.75rem; color: #666;">Email</label>
-                <input type="email" value="${contact.email}" class="inline-input" onchange="window.updateContactField('${contactId}', 'email', this.value)" style="width: 100%;">
+                <input type="email" value="${contact.email || ''}" class="inline-input" onchange="window.updateContactField('${contactId}', 'email', this.value)" style="width: 100%;">
               </div>
               <p><strong>Address:</strong> ${contact.address}</p>
               <p><strong>Source:</strong> ${contact.source}</p>
@@ -2720,7 +2794,17 @@ function renderContactDetail(contactId: string) {
 (window as any).updateContactField = (contactId: string, field: string, value: string) => {
   const contact = mockContacts.find(c => c.id === contactId);
   if (contact) {
-    (contact as any)[field] = value;
+    if (field === 'phone') {
+      const phoneNorm = normalizePhone(value);
+      contact.phone = phoneNorm.normalized;
+      contact.invalid_phone = phoneNorm.invalid || undefined;
+    } else if (field === 'email') {
+      contact.email = normalizeEmail(value);
+    } else if (field === 'name') {
+      contact.name = normalizeName(value);
+    } else {
+      (contact as any)[field] = value;
+    }
     (window as any).navigateTo(currentView, selectedContactId || undefined);
   }
 };
