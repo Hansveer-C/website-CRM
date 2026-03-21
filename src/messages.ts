@@ -35,6 +35,7 @@ export function saveMessage(message: Partial<Message> & { contact_id: string }):
     type: (message.type as 'sms') || 'sms',
     content: message.content || '',
     status: message.status || 'pending', // Default to 'pending'
+    source: message.source,
     created_at: message.created_at || new Date().toISOString()
   };
 

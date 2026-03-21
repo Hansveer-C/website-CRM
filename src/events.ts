@@ -1,4 +1,4 @@
-import { mockEventLogs, mockContacts, mockMessages } from './db';
+import { mockEventLogs, mockContacts, mockMessages, mockWebsiteSettings } from './db';
 import { getDefaultLeadReply, sendMessageToContact } from './sms';
 
 export interface AppEvent {
@@ -36,7 +36,7 @@ const eventLog: AppEvent[] = [];
 /**
  * Emits an event, saves it to EventLogs collection and logs to console.
  */
-export function emitEvent(name: string, payload: Record<string, any> = {}): AppEvent | null {
+export async function emitEvent(name: string, payload: Record<string, any> = {}): Promise<AppEvent | null> {
   // Simple Validation
   if (name === 'form_submitted' || name === 'lead_created') {
     if (!payload.contact_id || !payload.opportunity_id) {
@@ -63,15 +63,15 @@ export function emitEvent(name: string, payload: Record<string, any> = {}): AppE
 
   console.log('[Event Logged]:', event);
   
-  // Trigger Listeners
+  // Trigger Listeners (Synchronously awaiting to prevent race conditions in tests)
   if (listeners[name]) {
-    listeners[name].forEach(fn => {
+    for (const fn of listeners[name]) {
       try {
-        fn(payload);
+        await fn(payload);
       } catch (e) {
         console.error(`[Event Listener Error] ${name}:`, e);
       }
-    });
+    }
   }
 
   return event;
@@ -86,6 +86,12 @@ export function getEvents(): AppEvent[] {
 
 // --- Register Business Logic Listeners ---
 onEvent('lead_created', async (payload) => {
+  // Global Toggle Check
+  if (!mockWebsiteSettings.auto_lead_sms_enabled) {
+    console.log('Automated lead SMS skipped: auto-response disabled globally');
+    return;
+  }
+
   console.log('Lead created event received');
 
   const contact_id = payload.contact_id;
@@ -112,7 +118,8 @@ onEvent('lead_created', async (payload) => {
   }
 
   // Generate automated message
-  const message = getDefaultLeadReply(contact);
+  const template = mockWebsiteSettings.auto_lead_sms_template;
+  const message = getDefaultLeadReply(contact, template);
   
   // Prevent duplicate automated SMS (2 minute window)
   const now = Date.now();
@@ -137,7 +144,8 @@ onEvent('lead_created', async (payload) => {
   if (result.success) {
     console.log('Automated lead SMS sent');
   } else {
-    console.log('Automated lead SMS failed');
+    console.log('Auto SMS failed');
+    contact.follow_up_required = true;
   }
 });
 

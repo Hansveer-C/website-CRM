@@ -16,6 +16,7 @@ export interface Contact {
   created_at: string;
   invalid_phone?: boolean;
   lead_status?: string;
+  follow_up_required?: boolean;
 }
 
 export interface Opportunity {
@@ -152,6 +153,8 @@ export interface WebsiteSettings {
   primary_color: string;
   facebook_pixel_id?: string;
   gtm_id?: string;
+  auto_lead_sms_enabled: boolean;
+  auto_lead_sms_template: string;
   created_at: string;
 }
 

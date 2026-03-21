@@ -10,9 +10,9 @@ export interface TwilioConfig {
 }
 
 export const twilioConfig: TwilioConfig = {
-  account_sid: (import.meta as any).env.VITE_TWILIO_ACCOUNT_SID || '',
-  auth_token: (import.meta as any).env.VITE_TWILIO_AUTH_TOKEN || '',
-  sending_phone_number: (import.meta as any).env.VITE_TWILIO_PHONE_NUMBER || '',
+  account_sid: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_ACCOUNT_SID) || '',
+  auth_token: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_AUTH_TOKEN) || '',
+  sending_phone_number: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_PHONE_NUMBER) || '',
 };
 
 /**

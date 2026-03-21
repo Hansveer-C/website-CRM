@@ -4,14 +4,21 @@ import { saveMessage } from './messages';
 import { mockContacts, mockMessages } from './db';
 
 /**
- * Generates a default welcome SMS message for a newly created lead.
- * Includes a fallback if the contact name is missing.
+ * Generates a welcome SMS message for a newly created lead.
+ * Uses a provided template if available, otherwise falls back to the default message.
+ * Supports {name} placeholder.
  * 
  * @param contact The contact object (can be partial)
+ * @param template Optional custom message template
  * @returns Formatted SMS message string
  */
-export function getDefaultLeadReply(contact: Partial<Contact> | undefined | null): string {
-  const name = contact?.name?.trim();
+export function getDefaultLeadReply(contact: Partial<Contact> | undefined | null, template?: string): string {
+  const name = contact?.name?.trim() || '';
+  
+  if (template && template.trim()) {
+    return template.replace(/{name}/g, name || 'there');
+  }
+
   const greeting = name ? `Hey ${name}` : 'Hey there';
   return `${greeting}, thanks for reaching out! I got your request and will get back to you shortly.`;
 }

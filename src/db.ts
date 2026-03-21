@@ -439,6 +439,8 @@ export const mockWebsiteSettings: WebsiteSettings = {
   primary_color: '#4f46e5',
   facebook_pixel_id: '',
   gtm_id: '',
+  auto_lead_sms_enabled: true,
+  auto_lead_sms_template: '',
   created_at: new Date().toISOString()
 };
 
