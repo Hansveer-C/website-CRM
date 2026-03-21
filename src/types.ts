@@ -169,9 +169,19 @@ export type MessageStatus = 'pending' | 'sent' | 'failed';
 export interface Message {
   id: string;
   contact_id: string;
+  opportunity_id?: string;
   direction: MessageDirection;
   type: 'sms';
   content: string;
   status: MessageStatus;
   created_at: string;
+}
+
+export interface TimelineItem {
+  type: 'form_submission' | 'message' | 'event' | 'activity';
+  reference_id: string;
+  contact_id: string;
+  content: string;
+  created_at: string;
+  metadata?: Record<string, any>;
 }

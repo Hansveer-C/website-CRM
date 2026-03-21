@@ -1,4 +1,4 @@
-import { mockMessages, mockContacts } from './db';
+import { mockMessages, mockContacts, mockOpportunities } from './db';
 import { Message } from './types';
 
 /**
@@ -15,10 +15,22 @@ export function saveMessage(message: Partial<Message> & { contact_id: string }):
     return false;
   }
 
+  // OPTIONAL: Attach opportunity_id if one exists for the contact (Link to the latest open deal)
+  if (!message.opportunity_id) {
+    const latestOpp = mockOpportunities
+      .filter(o => o.contact_id === message.contact_id && o.status === 'open')
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+    
+    if (latestOpp) {
+      message.opportunity_id = latestOpp.id;
+    }
+  }
+
   // Build the complete Message object with defaults
   const finalMessage: Message = {
     id: message.id || `msg-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     contact_id: message.contact_id,
+    opportunity_id: message.opportunity_id,
     direction: message.direction || 'outbound',
     type: (message.type as 'sms') || 'sms',
     content: message.content || '',

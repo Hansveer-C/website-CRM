@@ -1,9 +1,10 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings } from './db';
 import { templates } from './templates';
-import { Activity } from './types';
+import { Activity, TimelineItem } from './types';
 import { runAutomations, checkOverdueInvoices } from './automation';
 import { emitEvent } from './events';
 import { mockEventLogs } from './db';
+import { getConversation } from './messages';
 
 (window as any).EventLogs = mockEventLogs;
 
@@ -2667,9 +2668,6 @@ function renderContactDetail(contactId: string) {
   if (!contact) return;
 
   const contactOpps = mockOpportunities.filter(opp => opp.contact_id === contactId);
-  const contactActivities = mockActivities
-    .filter(a => a.contact_id === contactId)
-    .sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime());
 
   app.innerHTML = `
     ${renderSidebar('clients')}
@@ -2739,20 +2737,81 @@ function renderContactDetail(contactId: string) {
           <div class="card">
             <h3>Activity Timeline</h3>
             <div class="timeline">
-              ${contactActivities.map(activity => `
-                <div class="timeline-item">
-                  <div class="timeline-dot" style="background: ${activity.completed ? '#28a745' : 'var(--primary-color)'}"></div>
-                  <div class="timeline-content">
-                    <div class="timeline-time">${new Date(activity.due_date).toLocaleString()}</div>
-                    <div style="display: flex; justify-content: space-between; align-items: start;">
-                      <div>
-                        <strong>${activity.type.toUpperCase()}</strong>: ${activity.description}
+              ${(() => {
+                const messages = getConversation(contactId);
+                const activities = mockActivities.filter(a => a.contact_id === contactId);
+                const relevantEvents = (window as any).EventLogs.filter((log: any) => log.payload.contact_id === contactId);
+                
+                // Unified Mapping
+                const unifiedTimeline: TimelineItem[] = [
+                  ...activities.map(a => ({
+                    type: 'activity' as const,
+                    reference_id: a.id,
+                    contact_id: contactId,
+                    content: `${a.type.toUpperCase()}: ${a.description}`,
+                    created_at: a.due_date,
+                    metadata: { completed: a.completed, activityType: a.type }
+                  })),
+                  ...messages.map(m => {
+                    const prefix = m.direction === 'outbound' ? 'Sent SMS: ' : 'Received SMS: ';
+                    const displayContent = m.content.length > 100 ? m.content.substring(0, 97) + '...' : m.content;
+                    return {
+                      type: 'message' as const,
+                      reference_id: m.id,
+                      contact_id: contactId,
+                      content: `${prefix}${displayContent}`,
+                      created_at: m.created_at,
+                      metadata: { direction: m.direction, status: m.status }
+                    };
+                  }),
+                  ...relevantEvents.map((e: any) => ({
+                    type: e.event_name === 'form_submitted' ? 'form_submission' as const : 'event' as const,
+                    reference_id: e.id,
+                    contact_id: contactId,
+                    content: `System Event: ${e.event_name.replace('_', ' ').toUpperCase()}`,
+                    created_at: e.created_at,
+                    metadata: { ...e.payload }
+                  }))
+                ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+                return unifiedTimeline.map(item => {
+                  let dotColor = '#6366f1'; // Default indigo
+                  let badge = '';
+
+                  if (item.type === 'activity') {
+                    dotColor = (item.metadata?.completed) ? '#28a745' : 'var(--primary-color)';
+                    badge = `<span style="font-size: 0.7rem; color: #94a3b8;">${item.metadata?.activityType?.toUpperCase() || ''}</span>`;
+                  } else if (item.type === 'message') {
+                    dotColor = '#818cf8';
+                    badge = `<span style="font-size: 0.7rem; color: #94a3b8;">SMS</span>`;
+                  } else if (item.type === 'form_submission') {
+                    dotColor = '#f59e0b'; // Amber
+                    badge = `<span style="font-size: 0.7rem; color: #94a3b8;">FORM</span>`;
+                  } else {
+                    dotColor = '#94a3b8'; // gray
+                    badge = `<span style="font-size: 0.7rem; color: #94a3b8;">EVENT</span>`;
+                  }
+
+                  return `
+                    <div class="timeline-item">
+                      <div class="timeline-dot" style="background: ${dotColor}"></div>
+                      <div class="timeline-content">
+                        <div class="timeline-time">${new Date(item.created_at).toLocaleString()}</div>
+                        <div style="display: flex; justify-content: space-between; align-items: start;">
+                          <div style="flex: 1;">
+                            <strong style="color: #1e293b;">${item.content}</strong>
+                            ${item.type === 'activity' && !item.metadata?.completed ? `
+                              <div style="margin-top: 8px;">
+                                <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.completeTask('${item.reference_id}')">Mark Complete</button>
+                              </div>` : ''}
+                          </div>
+                          ${badge}
+                        </div>
                       </div>
-                      ${!activity.completed ? `<button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.completeTask('${activity.id}')">Complete</button>` : '<span style="color: #28a745;">✓</span>'}
                     </div>
-                  </div>
-                </div>
-              `).join('') || '<p style="padding: 20px;">No activity logged.</p>'}
+                  `;
+                }).join('') || '<p style="padding: 20px;">No activity logged.</p>';
+              })()}
             </div>
           </div>
 
