@@ -32,9 +32,50 @@ export function saveMessage(message: Partial<Message> & { contact_id: string }):
 }
 
 /**
- * Retrieves all messages for a specific contact.
- * @param contactId - The ID of the contact to fetch messages for.
+ * Helper to sort any array of messages chronologically (ASC).
  */
-export function getMessagesByContact(contactId: string): Message[] {
-  return mockMessages.filter(m => m.contact_id === contactId);
+export function sortMessagesAsc(messages: Message[]): Message[] {
+  return [...messages].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+}
+
+/**
+ * Retrieves the full message history (conversation) for a specific contact,
+ * strictly ordered from oldest to newest (ASC).
+ * @param contactId - The ID of the contact.
+ * @returns { Message[] } - Chronologically sorted message list.
+ */
+export function getConversation(contactId: string): Message[] {
+  const filtered = mockMessages.filter(m => m.contact_id === contactId);
+  return sortMessagesAsc(filtered);
+}
+
+/**
+ * Retrieves all messages in the entire system, sorted chronologically (ASC).
+ * Useful for building global activity feeds or logs.
+ */
+export function getAllMessagesOrdered(): Message[] {
+  return sortMessagesAsc(mockMessages);
+}
+
+export interface ConversationSummary {
+  last_message_content: string;
+  last_message_timestamp: string;
+  last_message_direction: string;
+}
+
+/**
+ * Returns a summary of the most recent activity for a contact's conversation.
+ * @param contactId - The ID of the contact.
+ * @returns { ConversationSummary | null } - The summary or null if no messages exist.
+ */
+export function getConversationSummary(contactId: string): ConversationSummary | null {
+  const conversation = getConversation(contactId);
+  if (conversation.length === 0) return null;
+
+  const latest = conversation[conversation.length - 1]; // Already sorted ASC
+  return {
+    last_message_content: latest.content,
+    last_message_timestamp: latest.created_at,
+    last_message_direction: latest.direction
+  };
 }
