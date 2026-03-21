@@ -151,6 +151,7 @@ function renderSidebar(activeView: string) {
           <div class="nav-group-title">System</div>
           <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
           <li onclick="window.navigateTo('quickstart')" class="${activeView === 'quickstart' ? 'active' : ''}">Quickstart Guide</li>
+          <li onclick="window.navigateTo('event-logs')" class="${activeView === 'event-logs' ? 'active' : ''}">Event Logs</li>
           <li>Payments</li>
           <li>Settings</li>
         </ul>
@@ -2493,6 +2494,7 @@ function executeNavigation(view: string, id?: string) {
   if (view === 'lead-capture') renderLeadCapture();
   if (view === 'builder') renderBuilder();
   if (view === 'reports') renderReports();
+  if (view === 'event-logs') renderEventLogs();
   if (view === 'pages') renderPages();
   if (view === 'page-sections' && id) renderPageSections(id);
   if (view === 'components') renderComponents();
@@ -3134,6 +3136,53 @@ function renderContactDetail(contactId: string) {
 
   renderContactDetail(contactId);
 };
+
+function renderEventLogs() {
+  const sortedLogs = [...mockEventLogs].sort((a, b) => 
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+
+  const tableRows = sortedLogs.map(log => {
+    return `
+      <tr>
+        <td style="font-weight: 600; color: var(--primary-color);">${log.event_name}</td>
+        <td>${new Date(log.created_at).toLocaleString()}</td>
+        <td><span class="badge badge-${log.status === 'processed' ? 'approved' : 'draft'}">${log.status}</span></td>
+        <td>
+          <div style="font-size: 0.8rem; color: #666;">
+            <strong>Contact:</strong> ${log.payload.contact_id || 'N/A'}<br>
+            <strong>Opp:</strong> ${log.payload.opportunity_id || 'N/A'}
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  app.innerHTML = `
+    ${renderSidebar('event-logs')}
+    <main class="main-content">
+      <header class="view-header">
+        <h2>System Event Logs</h2>
+      </header>
+
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <table class="clients-table" style="box-shadow: none; border: none; margin-top: 0;">
+          <thead>
+            <tr>
+              <th>Event Name</th>
+              <th>Timestamp</th>
+              <th>Status</th>
+              <th>Key Payload Info</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows || '<tr><td colspan="4" style="text-align: center; padding: 40px; color: #666;">No system events recorded yet.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </main>
+  `;
+}
 
 checkOverdueInvoices();
 

@@ -159,5 +159,6 @@ export interface EventLog {
   id: string;
   event_name: string;
   payload: Record<string, any>;
+  status: string;
   created_at: string;
 }
