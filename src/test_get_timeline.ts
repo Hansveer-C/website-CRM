@@ -68,6 +68,7 @@ async function testTimeline() {
   console.log('--- Step 2: Call helper ---');
   const groupedTimeline = getContactTimeline(testContactId);
 
+  console.log('--- Step 3: Confirm content and highlighting ---');
   groupedTimeline.forEach(group => {
     console.log(`SECTION: ${group.label} (${group.items.length} items)`);
     group.items.forEach((item, index) => {
@@ -79,15 +80,15 @@ async function testTimeline() {
   const allItems = groupedTimeline.flatMap(g => g.items);
   const latestItem = allItems[allItems.length - 1];
 
-  if (latestItem && latestItem.is_latest) {
-    console.log('✅ SUCCESS: Latest activity correctly highlighted.');
-  } else {
-    console.error('❌ FAILURE: Latest activity not identified.');
-    process.exit(1);
+  if (!latestItem || !latestItem.is_latest) {
+    console.error('❌ FAILURE: Latest activity not identified correctly.');
+    throw new Error('Test failed: missing latest highlight');
   }
+
+  console.log('✅ SUCCESS: Milestone 1 Verification Complete.');
 }
 
 testTimeline().catch(err => {
-  console.error('Test Error:', err);
+  console.error('Test Error:', err.message);
   process.exit(1);
 });

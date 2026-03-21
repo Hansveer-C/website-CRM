@@ -106,7 +106,7 @@ onEvent('lead_created', async (payload) => {
   }
 
   if (!phone) {
-    console.log('Automated lead SMS skipped: no phone');
+    console.log('Automated lead SMS skipped: No phone available');
     return;
   }
 

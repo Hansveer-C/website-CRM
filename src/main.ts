@@ -38,32 +38,7 @@ validateTwilioConfig();
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
-function normalizePhone(phone: string): { normalized: string; invalid: boolean } {
-  if (!phone) return { normalized: '', invalid: true };
-  
-  // Clean phone input: remove spaces, dashes, brackets, and ensure numeric format
-  const cleaned = phone.replace(/[\s\-\(\)\[\]\{\}\.\,\/]/g, '').replace(/\D/g, '');
-  
-  // Convert to standard format: +1XXXXXXXXXX (for North America)
-  if (cleaned.length === 10) {
-    return { normalized: `+1${cleaned}`, invalid: false };
-  } else if (cleaned.length === 11 && cleaned.startsWith('1')) {
-    return { normalized: `+${cleaned}`, invalid: false };
-  }
-  
-  // Do not block, but return cleaned format and flag as invalid
-  return { normalized: cleaned || phone, invalid: true };
-}
-
-function normalizeEmail(email: string | null | undefined): string | null {
-  if (!email || !email.trim()) return null;
-  return email.trim().toLowerCase();
-}
-
-function normalizeName(name: string): string {
-  if (!name) return '';
-  return name.trim().replace(/\s\s+/g, ' ');
-}
+import { normalizePhone, normalizeEmail, normalizeName, createLead } from './leads_logic';
 
 // Normalize existing mock data
 mockContacts.forEach(c => {
@@ -945,146 +920,43 @@ function renderSectionPreviewContent(section: any) {
   (window as any).showToast('Page saved');
 };
 
-(window as any).submitBuilderForm = (sectionId: string, isPublic: boolean = false) => {
+// Attach to window for global access/testing
+(window as any).createLead = createLead;
+
+(window as any).submitBuilderForm = async (sectionId: string, isPublic: boolean = false) => {
   const section = mockPageSections.find(s => s.id === sectionId);
   if (!section) return;
 
   const prefix = isPublic ? 'site-f-' : 'pf-';
 
-  // Collect data from the form inputs
-  const name = (document.getElementById(`${prefix}name-${sectionId}`) as HTMLInputElement)?.value;
-  const phone = (document.getElementById(`${prefix}phone-${sectionId}`) as HTMLInputElement)?.value;
-  const email = (document.getElementById(`${prefix}email-${sectionId}`) as HTMLInputElement)?.value;
-  const address = (document.getElementById(`${prefix}address-${sectionId}`) as HTMLInputElement)?.value;
-  const service_type = (document.getElementById(`${prefix}service_type-${sectionId}`) as HTMLSelectElement)?.value;
-  const message = (document.getElementById(`${prefix}message-${sectionId}`) as HTMLTextAreaElement)?.value;
-
-  // Validation: name is required. Phone and email are recorded if provided.
-  if (!name) {
-    alert('Please provide your name.');
-    return;
-  }
+  const nameInput = document.getElementById(`${prefix}name-${sectionId}`) as HTMLInputElement;
+  const phoneInput = document.getElementById(`${prefix}phone-${sectionId}`) as HTMLInputElement;
+  const emailInput = document.getElementById(`${prefix}email-${sectionId}`) as HTMLInputElement;
+  const addressInput = document.getElementById(`${prefix}address-${sectionId}`) as HTMLInputElement;
+  const serviceInput = document.getElementById(`${prefix}service_type-${sectionId}`) as HTMLSelectElement;
+  const messageInput = document.getElementById(`${prefix}message-${sectionId}`) as HTMLTextAreaElement;
 
   try {
-    const timestamp = new Date().toISOString();
-    const phoneNorm = normalizePhone(phone || '');
-    const emailNorm = normalizeEmail(email);
-    const normalizedName = normalizeName(name);
+    const res = await createLead({
+      name: nameInput?.value || '',
+      phone: phoneInput?.value,
+      email: emailInput?.value,
+      address: addressInput?.value,
+      service_type: serviceInput?.value,
+      message: messageInput?.value,
+      source: 'website'
+    });
 
-    // Check if Contact exists with same phone OR same email
-    const existingContact = mockContacts.find(c => 
-      (phoneNorm.normalized && c.phone === phoneNorm.normalized) || 
-      (emailNorm && c.email === emailNorm)
-    );
-
-    let contactIdToUse: string;
-
-    if (existingContact) {
-      contactIdToUse = existingContact.id;
-      console.log(`Duplicate found: using existing contact ${contactIdToUse} instead of creating a new one.`);
-      
-      // BASIC PROTECTION: Skip new opportunity if one was created for this contact in the last 2 minutes
-      const recentOpp = mockOpportunities.find(opp => 
-        opp.contact_id === contactIdToUse && 
-        (new Date().getTime() - new Date(opp.created_at).getTime()) < 120000
-      );
-      
-      if (recentOpp) {
-        console.warn(`Duplicate submission window: Skipping new opportunity for ${contactIdToUse}.`);
-        alert("We have already received your submission. Thank you!");
-        return;
-      }
-    } else {
-      contactIdToUse = `c-${Date.now()}`;
-      const newContact = {
-        id: contactIdToUse,
-        name: normalizedName,
-        phone: phoneNorm.normalized, 
-        email: emailNorm, 
-        address: address || 'From Website Form',
-        tags: ['web-lead'],
-        source: 'website', 
-        service: service_type || undefined,
-        status: 'lead', 
-        created_at: timestamp,
-        invalid_phone: phoneNorm.invalid || undefined
-      };
-
-      // Ensure Contact record is created first
-      mockContacts.push(newContact as any);
-    }
-
-    try {
-      const newOpportunity = {
-        id: `opp-${Date.now()}`,
-        contact_id: contactIdToUse,
-        pipeline_stage: 'New Lead',
-        value: 0,
-        assigned_to: 'Unassigned',
-        status: 'open' as any,
-        notes: `Service Type: ${service_type || 'N/A'}\nAddress: ${address || 'N/A'}\nMessage: ${message || 'N/A'}`,
-        created_at: timestamp
-      };
-      
-      // ATOMIC BEHAVIOR: Opportunity creation MUST follow Contact creation.
-      // If it fails, roll back the Contact creation.
-      mockOpportunities.push(newOpportunity);
-
-      const emissionsInThisCycle = new Set<string>();
-      const guardedEmit = (name: string, payload: any) => {
-        if (!emissionsInThisCycle.has(name)) {
-          emitEvent(name, payload);
-          emissionsInThisCycle.add(name);
-        }
-      };
-
-      // Emit form_submitted event
-      guardedEmit('form_submitted', {
-        contact_id: contactIdToUse,
-        opportunity_id: newOpportunity.id,
-        phone: phoneNorm.normalized,
-        email: emailNorm,
-        source: 'website'
-      });
-
-      // Emit lead_created event
-      guardedEmit('lead_created', {
-        contact_id: contactIdToUse,
-        opportunity_id: newOpportunity.id,
-        phone: phoneNorm.normalized,
-        email: emailNorm,
-        pipeline_stage: 'New Lead',
-        source: 'website'
-      });
-
-      // Trigger automations for the new opportunity
-      runAutomations('OPPORTUNITY_CREATED', newOpportunity);
-
-    } catch (oppError: any) {
-      logError('opportunity_creation', oppError.message || 'Unknown error during opportunity creation', { name, phone, email, contactIdToUse });
-      
-      // FALLBACK: Tag the newly created contact as "incomplete" instead of deleting it.
-      const contact = mockContacts.find(c => c.id === contactIdToUse);
-      if (contact) {
-        contact.lead_status = "incomplete";
-        console.warn(`Partial Failure: Contact ${contactIdToUse} preserved but marked as incomplete.`);
-      }
-      
-      alert('Something went wrong. Please try again.');
-      return; 
-    }
-
-    // alert for success
+    console.log("Lead created:", res);
     alert('Thanks! We’ve received your request.');
     
     // Clear form
-    ['name', 'phone', 'email', 'address', 'service_type', 'message'].forEach(f => {
-      const el = document.getElementById(`${prefix}${f}-${sectionId}`) as HTMLInputElement;
+    [nameInput, phoneInput, emailInput, addressInput, serviceInput, messageInput].forEach(el => {
       if (el) el.value = '';
     });
 
   } catch (error: any) {
-    logError('contact_creation', error.message || 'Unknown error during contact creation', { name, phone, email });
+    console.error("Lead submission failed:", error);
     alert('Something went wrong. Please try again.');
   }
 };
