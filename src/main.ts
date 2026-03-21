@@ -2,7 +2,10 @@ import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuo
 import { templates } from './templates';
 import { Activity } from './types';
 import { runAutomations, checkOverdueInvoices } from './automation';
-import { logEvent } from './events';
+import { emitEvent } from './events';
+import { mockEventLogs } from './db';
+
+(window as any).EventLogs = mockEventLogs;
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
@@ -997,18 +1000,31 @@ function renderSectionPreviewContent(section: any) {
       // If it fails, roll back the Contact creation.
       mockOpportunities.push(newOpportunity);
 
+      const emissionsInThisCycle = new Set<string>();
+      const guardedEmit = (name: string, payload: any) => {
+        if (!emissionsInThisCycle.has(name)) {
+          emitEvent(name, payload);
+          emissionsInThisCycle.add(name);
+        }
+      };
+
       // Emit form_submitted event
-      logEvent('form_submitted', {
+      guardedEmit('form_submitted', {
         contact_id: contactIdToUse,
         opportunity_id: newOpportunity.id,
+        phone: phoneNorm.normalized,
+        email: emailNorm,
         source: 'website'
       });
 
       // Emit lead_created event
-      logEvent('lead_created', {
+      guardedEmit('lead_created', {
         contact_id: contactIdToUse,
         opportunity_id: newOpportunity.id,
-        pipeline_stage: 'New Lead'
+        phone: phoneNorm.normalized,
+        email: emailNorm,
+        pipeline_stage: 'New Lead',
+        source: 'website'
       });
 
       // Trigger automations for the new opportunity
@@ -1938,18 +1954,31 @@ function handleLeadCaptureSubmission(e: Event) {
       // If it fails, roll back the Contact creation.
       mockOpportunities.push(newOpportunity);
 
+      const emissionsInThisCycle = new Set<string>();
+      const guardedEmit = (name: string, payload: any) => {
+        if (!emissionsInThisCycle.has(name)) {
+          emitEvent(name, payload);
+          emissionsInThisCycle.add(name);
+        }
+      };
+
       // Emit form_submitted event
-      logEvent('form_submitted', {
+      guardedEmit('form_submitted', {
         contact_id: contactIdToUse,
         opportunity_id: newOpportunity.id,
+        phone: phoneNorm.normalized,
+        email: emailNorm,
         source: 'website'
       });
 
       // Emit lead_created event
-      logEvent('lead_created', {
+      guardedEmit('lead_created', {
         contact_id: contactIdToUse,
         opportunity_id: newOpportunity.id,
-        pipeline_stage: 'New Lead'
+        phone: phoneNorm.normalized,
+        email: emailNorm,
+        pipeline_stage: 'New Lead',
+        source: 'website'
       });
 
       // Trigger automations for the new opportunity

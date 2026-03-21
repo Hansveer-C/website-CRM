@@ -1,3 +1,5 @@
+import { mockEventLogs } from './db';
+
 export interface AppEvent {
   event_name: string;
   payload: Record<string, any>;
@@ -21,11 +23,20 @@ export function createEvent(name: string, payload: Record<string, any> = {}): Ap
 const eventLog: AppEvent[] = [];
 
 /**
- * Logs an event to the in-memory store and to the console.
+ * Emits an event, saves it to EventLogs collection and logs to console.
  */
-export function logEvent(name: string, payload: Record<string, any> = {}): AppEvent {
+export function emitEvent(name: string, payload: Record<string, any> = {}): AppEvent {
   const event = createEvent(name, payload);
   eventLog.push(event);
+
+  // Persist to EventLogs collection
+  mockEventLogs.push({
+    id: `ev-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    event_name: event.event_name,
+    payload: event.payload,
+    created_at: event.created_at
+  });
+
   console.log('[Event Logged]:', event);
   return event;
 }

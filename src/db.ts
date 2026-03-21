@@ -1,4 +1,4 @@
-import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component, Asset, Template, WebsiteSettings } from './types';
+import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component, Asset, Template, WebsiteSettings, EventLog } from './types';
 
 export const mockContacts: Contact[] = [
   {
@@ -441,3 +441,5 @@ export const mockWebsiteSettings: WebsiteSettings = {
   gtm_id: '',
   created_at: new Date().toISOString()
 };
+
+export const mockEventLogs: EventLog[] = [];

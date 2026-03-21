@@ -154,3 +154,10 @@ export interface WebsiteSettings {
   gtm_id?: string;
   created_at: string;
 }
+
+export interface EventLog {
+  id: string;
+  event_name: string;
+  payload: Record<string, any>;
+  created_at: string;
+}
