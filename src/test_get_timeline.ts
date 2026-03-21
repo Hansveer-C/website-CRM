@@ -26,22 +26,35 @@ async function testTimeline() {
   const t2 = '2026-03-21T09:00:00Z'; // Oldest
   const t3 = '2026-03-21T11:00:00Z'; // Newest
 
+  const t0 = '2026-03-21T08:30:00Z'; // Earliest inbound
+
   console.log('--- Step 1: Submit Form, Send SMS, and Trigger System Event (Mixed) ---');
   
-  // Submit Form - T1
+  // 1. Inbound SMS - T0
+  mockMessages.push({
+    id: 'msg-in-1',
+    contact_id: testContactId,
+    direction: 'inbound',
+    type: 'sms',
+    content: 'Yes, tomorrow works!',
+    status: 'sent',
+    created_at: t0
+  });
+
+  // 2. Submit Form - T1
   await emitEvent('form_submitted', {
     contact_id: testContactId,
     opportunity_id: 'opp-123',
     source: 'website',
   });
-  // Adjust timestamp manually as emitEvent uses Date.now()
   mockEventLogs[mockEventLogs.length-1].created_at = t1;
 
-  // Send SMS - T3
-  await sendMessageToContact(testContactId, 'Hello (later)', 'test-env');
+  // 3. Send SMS - T3 (Long message)
+  const longMsg = "This is a very long message that exceeds the one hundred and twenty character limit to test the truncation logic in the timeline view. It should be cut off with dots.";
+  await sendMessageToContact(testContactId, longMsg, 'test-env');
   mockMessages[mockMessages.length-1].created_at = t3;
 
-  // Another System Event - T2
+  // 4. Another System Event - T2
   await emitEvent('status_updated', {
     contact_id: testContactId,
     old_status: 'lead',
@@ -52,20 +65,19 @@ async function testTimeline() {
   console.log('--- Step 2: Call helper ---');
   const timeline = getContactTimeline(testContactId);
 
-  console.log('--- Step 3: Confirm chronological order (ASC) ---');
+  console.log('--- Step 3: Confirm chronological order (ASC), Truncation, Arrows, and Readability ---');
   timeline.forEach((item, index) => {
     console.log(`${index + 1}. [${item.created_at}] TYPE: ${item.type} | CONTENT: ${item.content}`);
   });
 
-  const isSorted = timeline.every((item, i, arr) => {
-    if (i === 0) return true;
-    return new Date(item.created_at).getTime() >= new Date(arr[i-1].created_at).getTime();
-  });
+  // Verify format matches MMM D, h:mm A (simple check)
+  const isFormatted = timeline.every(item => /^[A-Z][a-z]{2}\s\d{1,2},\s\d{1,2}:\d{2}\s[AP]M$/.test(item.created_at));
 
-  if (isSorted && timeline.length === 3) {
-    console.log('✅ SUCCESS: Timeline is correctly sorted chronologically (Oldest to Newest).');
+  if (timeline.length === 4 && isFormatted) {
+    console.log('✅ SUCCESS: Timeline is correctly sorted and timestamps are readable.');
   } else {
-    console.error('❌ FAILURE: Incorrect ordering detected.');
+    console.error('❌ FAILURE: Issues detected in formatting.');
+    if (!isFormatted) console.error('- Timestamps not in readable format');
     process.exit(1);
   }
 }

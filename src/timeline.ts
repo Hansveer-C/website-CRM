@@ -15,14 +15,20 @@ export function getContactTimeline(contact_id: string): TimelineItem[] {
   const activities = mockActivities.filter(a => a.contact_id === contact_id);
 
   // 2. Map Messages
-  const messageItems = messages.map(m => ({
-    type: 'message' as const,
-    content: `SMS (${m.direction.toUpperCase()}): ${m.content}`,
-    created_at: m.created_at,
-    reference_id: m.id,
-    contact_id: m.contact_id,
-    metadata: { direction: m.direction, status: m.status }
-  }));
+  const messageItems = messages.map(m => {
+    const isOutbound = m.direction === 'outbound';
+    const arrow = isOutbound ? '→' : '←';
+    const prefix = isOutbound ? 'Sent SMS' : 'Received SMS';
+    const displayContent = m.content.length > 120 ? m.content.substring(0, 117) + '...' : m.content;
+    return {
+      type: 'message' as const,
+      content: `${arrow} ${prefix}: ${displayContent}`,
+      created_at: m.created_at,
+      reference_id: m.id,
+      contact_id: m.contact_id,
+      metadata: { direction: m.direction, status: m.status }
+    };
+  });
 
   // 3. Map EventLogs
   const eventItems = eventLogs.map(e => {
@@ -34,10 +40,7 @@ export function getContactTimeline(contact_id: string): TimelineItem[] {
       content = 'Form submitted via website';
     } else {
       type = 'event';
-      content = e.event_name
-        .split('_')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join(' ');
+      content = `Event: ${e.event_name}`;
     }
 
     return {
@@ -53,15 +56,40 @@ export function getContactTimeline(contact_id: string): TimelineItem[] {
   // 4. Map Activities (mapped to "event" as per prompt's "system events -> event" instruction)
   const activityItems = activities.map(a => ({
     type: 'event' as const,
-    content: `${a.type.toUpperCase()}: ${a.description}`,
+    content: `Event: ${a.type.toUpperCase()}`,
     created_at: a.due_date,
     reference_id: a.id,
     contact_id: a.contact_id,
-    metadata: { completed: a.completed, activityType: a.type }
+    metadata: { completed: a.completed, activityType: a.type, description: a.description }
   }));
 
-  // 5. Combine and Sort (Temporal Order - Oldest First)
-  return [...messageItems, ...eventItems, ...activityItems].sort((a, b) => 
+  // 5. Combine and Sort (Oldest First)
+  const items = [...messageItems, ...eventItems, ...activityItems].sort((a, b) => 
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   );
+
+  // 6. Format timestamps for display (as requested by Prompt 7)
+  return items.map(item => ({
+    ...item,
+    created_at: formatTimelineTime(item.created_at)
+  }));
+}
+
+/**
+ * Formats a raw timestamp into a human-readable display string.
+ * Example: "Mar 21, 2:45 PM"
+ */
+function formatTimelineTime(timestamp: string): string {
+  try {
+    const date = new Date(timestamp);
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    }).format(date);
+  } catch (e) {
+    return timestamp; // Fallback to raw if invalid
+  }
 }
