@@ -5,6 +5,29 @@ import { runAutomations, checkOverdueInvoices } from './automation';
 import { emitEvent } from './events';
 import { mockEventLogs } from './db';
 import { getConversation } from './messages';
+import { validateTwilioConfig, twilioConfig } from './config';
+import { sendSMS } from './sms';
+
+// Initialize and Validate Configs
+validateTwilioConfig();
+
+// Global for manual testing (Phase 1.2)
+(window as any).sendSMS = sendSMS;
+
+(window as any).checkTwilioStatus = () => {
+    const isValid = validateTwilioConfig();
+    return {
+        isValid,
+        config: {
+            account_sid: twilioConfig.account_sid ? '✓ Loaded' : '✗ Missing',
+            has_token: !!twilioConfig.auth_token,
+            phone: twilioConfig.sending_phone_number || '✗ Missing'
+        },
+        actions: {
+            sendTestSMS: (to: string, msg: string) => sendSMS(to, msg)
+        }
+    };
+};
 
 (window as any).EventLogs = mockEventLogs;
 
