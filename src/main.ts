@@ -1,13 +1,13 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings } from './db';
 import { templates } from './templates';
-import { Activity, TimelineItem } from './types';
+import { Activity } from './types';
 import { runAutomations, checkOverdueInvoices } from './automation';
 import { emitEvent } from './events';
 import { mockEventLogs } from './db';
-import { getConversation } from './messages';
 import { validateTwilioConfig, twilioConfig } from './config';
 import { sendSMS, dispatchSMS, sendMessageToContact, retryMessage } from './sms';
 import { mockMessages } from './db';
+import { getContactTimeline } from './timeline';
 
 // Initialize and Validate Configs
 validateTwilioConfig();
@@ -2766,58 +2766,28 @@ function renderContactDetail(contactId: string) {
             <h3>Activity Timeline</h3>
             <div class="timeline">
               ${(() => {
-                const messages = getConversation(contactId);
-                const activities = mockActivities.filter(a => a.contact_id === contactId);
-                const relevantEvents = (window as any).EventLogs.filter((log: any) => log.payload.contact_id === contactId);
-                
-                // Unified Mapping
-                const unifiedTimeline: TimelineItem[] = [
-                  ...activities.map(a => ({
-                    type: 'activity' as const,
-                    reference_id: a.id,
-                    contact_id: contactId,
-                    content: `${a.type.toUpperCase()}: ${a.description}`,
-                    created_at: a.due_date,
-                    metadata: { completed: a.completed, activityType: a.type }
-                  })),
-                  ...messages.map(m => {
-                    const prefix = m.direction === 'outbound' ? 'Sent SMS: ' : 'Received SMS: ';
-                    const displayContent = m.content.length > 100 ? m.content.substring(0, 97) + '...' : m.content;
-                    return {
-                      type: 'message' as const,
-                      reference_id: m.id,
-                      contact_id: contactId,
-                      content: `${prefix}${displayContent}`,
-                      created_at: m.created_at,
-                      metadata: { direction: m.direction, status: m.status }
-                    };
-                  }),
-                  ...relevantEvents.map((e: any) => ({
-                    type: e.event_name === 'form_submitted' ? 'form_submission' as const : 'event' as const,
-                    reference_id: e.id,
-                    contact_id: contactId,
-                    content: `System Event: ${e.event_name.replace('_', ' ').toUpperCase()}`,
-                    created_at: e.created_at,
-                    metadata: { ...e.payload }
-                  }))
-                ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                const unifiedTimeline = getContactTimeline(contactId);
 
                 return unifiedTimeline.map(item => {
-                  let dotColor = '#6366f1'; // Default indigo
+                  let dotColor = '#94a3b8'; // Default gray
                   let badge = '';
 
-                  if (item.type === 'activity') {
-                    dotColor = (item.metadata?.completed) ? '#28a745' : 'var(--primary-color)';
-                    badge = `<span style="font-size: 0.7rem; color: #94a3b8;">${item.metadata?.activityType?.toUpperCase() || ''}</span>`;
-                  } else if (item.type === 'message') {
+                  if (item.type === 'message') {
                     dotColor = '#818cf8';
                     badge = `<span style="font-size: 0.7rem; color: #94a3b8;">SMS</span>`;
                   } else if (item.type === 'form_submission') {
                     dotColor = '#f59e0b'; // Amber
                     badge = `<span style="font-size: 0.7rem; color: #94a3b8;">FORM</span>`;
-                  } else {
-                    dotColor = '#94a3b8'; // gray
-                    badge = `<span style="font-size: 0.7rem; color: #94a3b8;">EVENT</span>`;
+                  } else if (item.type === 'event') {
+                    // Check if it's an activity disguised as an event
+                    const isActivity = !!(item.metadata as any)?.activityType;
+                    if (isActivity) {
+                        dotColor = ((item.metadata as any)?.completed) ? '#28a745' : 'var(--primary-color)';
+                        badge = `<span style="font-size: 0.7rem; color: #94a3b8;">${(item.metadata as any)?.activityType?.toUpperCase()}</span>`;
+                    } else {
+                        dotColor = '#94a3b8';
+                        badge = `<span style="font-size: 0.7rem; color: #94a3b8;">EVENT</span>`;
+                    }
                   }
 
                   return `
@@ -2828,9 +2798,9 @@ function renderContactDetail(contactId: string) {
                         <div style="display: flex; justify-content: space-between; align-items: start;">
                           <div style="flex: 1;">
                             <strong style="color: #1e293b;">${item.content}</strong>
-                            ${item.type === 'activity' && !item.metadata?.completed ? `
+                            ${item.type === 'event' && (item.metadata as any)?.activityType && !(item.metadata as any)?.completed ? `
                               <div style="margin-top: 8px;">
-                                <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.completeTask('${item.reference_id}')">Mark Complete</button>
+                                <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.completeTask('${(item as any).reference_id}')">Mark Complete</button>
                               </div>` : ''}
                           </div>
                           ${badge}
