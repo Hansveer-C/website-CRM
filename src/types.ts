@@ -162,3 +162,16 @@ export interface EventLog {
   status: string;
   created_at: string;
 }
+
+export type MessageDirection = 'outbound' | 'inbound';
+export type MessageStatus = 'pending' | 'sent' | 'failed';
+
+export interface Message {
+  id: string;
+  contact_id: string;
+  direction: MessageDirection;
+  type: 'sms';
+  content: string;
+  status: MessageStatus;
+  created_at: string;
+}

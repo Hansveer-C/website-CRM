@@ -1,4 +1,4 @@
-import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component, Asset, Template, WebsiteSettings, EventLog } from './types';
+import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component, Asset, Template, WebsiteSettings, EventLog, Message } from './types';
 
 export const mockContacts: Contact[] = [
   {
@@ -443,3 +443,5 @@ export const mockWebsiteSettings: WebsiteSettings = {
 };
 
 export const mockEventLogs: EventLog[] = [];
+
+export const mockMessages: Message[] = [];
