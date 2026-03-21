@@ -174,6 +174,7 @@ export interface Message {
   type: 'sms';
   content: string;
   status: MessageStatus;
+  provider_message_id?: string;
   created_at: string;
 }
 

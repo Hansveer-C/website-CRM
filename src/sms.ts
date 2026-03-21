@@ -1,4 +1,7 @@
 import { twilioConfig } from './config';
+import { Message } from './types';
+import { saveMessage } from './messages';
+import { mockContacts } from './db';
 
 /**
  * Sends an SMS message using the Twilio REST API.
@@ -69,4 +72,95 @@ export async function sendSMS(phone: string, message: string): Promise<{ success
       error: error instanceof Error ? error.message : String(error) 
     };
   }
+}
+
+/**
+ * Orchestrates the full SMS sending workflow.
+ * 
+ * Step 1: Create a record of the message in the "Message" table with status "pending".
+ * Step 2: Trigger the actual API call to Twilio via sendSMS().
+ * 
+ * @returns The created internal message ID and the Twilio API result
+ */
+export async function dispatchSMS(
+  contact_id: string, 
+  phone: string, 
+  messageText: string, 
+  opportunity_id?: string
+): Promise<{ internal_id: string; twilio_result: any }> {
+  
+  // Step 1: Create Message record using shared saveMessage utility
+  // This automatically handles opportunity linking and contact validation.
+  const newMessage: Message = {
+    id: `msg-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    contact_id,
+    opportunity_id,
+    direction: 'outbound',
+    type: 'sms',
+    content: messageText,
+    status: 'pending',
+    created_at: new Date().toISOString()
+  };
+
+  saveMessage(newMessage);
+  console.log(`[DISPATCH] Message record created with status "pending": ${newMessage.id}`);
+
+  // Step 2: Call sendSMS()
+  const result = await sendSMS(phone, messageText);
+  
+  // Update status based on result
+  if (result.success) {
+    newMessage.status = 'sent';
+    newMessage.provider_message_id = result.provider_message_id;
+    console.log(`✅ [DISPATCH] Message ${newMessage.id} marked as 'sent'. Provider ID: ${result.provider_message_id}`);
+  } else {
+    newMessage.status = 'failed';
+    console.error(`❌ [DISPATCH] Message ${newMessage.id} marked as 'failed'. Error: ${result.error}`);
+  }
+  
+  return { 
+    internal_id: newMessage.id, 
+    twilio_result: result 
+  };
+}
+
+/**
+ * Convenience helper to send an SMS directly to a CRM Contact by their ID.
+ * Handles the full lifecycle: Contact Lookup -> Phone Validation -> Dispatch -> State Update.
+ * 
+ * @param contact_id Unique ID of the contact in the CRM
+ * @param messageText SMS body text
+ * @returns Result of the dispatch, or failure if contact/phone is missing
+ */
+export async function sendMessageToContact(
+  contact_id: string, 
+  messageText: string
+): Promise<{ success: boolean; internal_id?: string; error?: string }> {
+  
+  // Locate the contact
+  const contact = mockContacts.find(c => c.id === contact_id);
+  
+  if (!contact) {
+    const errorMsg = `Contact lookup failed: ID ${contact_id} not found in database.`;
+    console.error(`[CONTACT HELPER] ${errorMsg}`);
+    return { success: false, error: errorMsg };
+  }
+
+  // Validate phone existence
+  if (!contact.phone) {
+    const errorMsg = `SMS Aborted: Contact ${contact.name} (${contact_id}) has no phone number recorded.`;
+    console.error(`[CONTACT HELPER] ${errorMsg}`);
+    return { success: false, error: errorMsg };
+  }
+
+  console.log(`[CONTACT HELPER] Initializing SMS lifecycle for ${contact.name}...`);
+  
+  // Call the core dispatcher to handle Step 1 (Message Record) and Step 2 (Twilio Send)
+  const result = await dispatchSMS(contact_id, contact.phone, messageText);
+  
+  return {
+    success: result.twilio_result.success,
+    internal_id: result.internal_id,
+    error: result.twilio_result.error
+  };
 }

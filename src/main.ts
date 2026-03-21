@@ -6,13 +6,17 @@ import { emitEvent } from './events';
 import { mockEventLogs } from './db';
 import { getConversation } from './messages';
 import { validateTwilioConfig, twilioConfig } from './config';
-import { sendSMS } from './sms';
+import { sendSMS, dispatchSMS, sendMessageToContact } from './sms';
+import { mockMessages } from './db';
 
 // Initialize and Validate Configs
 validateTwilioConfig();
 
-// Global for manual testing (Phase 1.2)
+// Globals for Phase testing
 (window as any).sendSMS = sendSMS;
+(window as any).dispatchSMS = dispatchSMS;
+(window as any).sendMessageToContact = sendMessageToContact;
+(window as any).mockMessages = mockMessages;
 
 (window as any).checkTwilioStatus = () => {
     const isValid = validateTwilioConfig();
