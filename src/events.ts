@@ -1,9 +1,19 @@
-import { mockEventLogs } from './db';
+import { mockEventLogs, mockContacts } from './db';
 
 export interface AppEvent {
   event_name: string;
   payload: Record<string, any>;
   created_at: string; // ISO 8601 timestamp
+}
+
+export type EventListener = (payload: Record<string, any>) => void;
+const listeners: Record<string, EventListener[]> = {};
+
+export function onEvent(name: string, callback: EventListener) {
+  if (!listeners[name]) {
+    listeners[name] = [];
+  }
+  listeners[name].push(callback);
 }
 
 /**
@@ -51,6 +61,18 @@ export function emitEvent(name: string, payload: Record<string, any> = {}): AppE
   logEntry.status = 'processed';
 
   console.log('[Event Logged]:', event);
+  
+  // Trigger Listeners
+  if (listeners[name]) {
+    listeners[name].forEach(fn => {
+      try {
+        fn(payload);
+      } catch (e) {
+        console.error(`[Event Listener Error] ${name}:`, e);
+      }
+    });
+  }
+
   return event;
 }
 
@@ -60,3 +82,27 @@ export function emitEvent(name: string, payload: Record<string, any> = {}): AppE
 export function getEvents(): AppEvent[] {
   return [...eventLog];
 }
+
+// --- Register Business Logic Listeners ---
+onEvent('lead_created', (payload) => {
+  console.log('Lead created event received');
+
+  const contact_id = payload.contact_id;
+  let phone = payload.phone;
+
+  // If no phone in payload, fallback to DB
+  if (!phone && contact_id) {
+    const contact = mockContacts.find(c => c.id === contact_id);
+    if (contact && contact.phone) {
+      phone = contact.phone;
+    }
+  }
+
+  if (!phone) {
+    console.log('No phone available for SMS');
+    return;
+  }
+
+  // Ready for SMS operations (no SMS triggered yet)
+});
+

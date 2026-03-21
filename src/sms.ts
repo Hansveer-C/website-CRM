@@ -1,7 +1,20 @@
 import { twilioConfig } from './config';
-import { Message } from './types';
+import { Message, Contact } from './types';
 import { saveMessage } from './messages';
 import { mockContacts, mockMessages } from './db';
+
+/**
+ * Generates a default welcome SMS message for a newly created lead.
+ * Includes a fallback if the contact name is missing.
+ * 
+ * @param contact The contact object (can be partial)
+ * @returns Formatted SMS message string
+ */
+export function getDefaultLeadReply(contact: Partial<Contact> | undefined | null): string {
+  const name = contact?.name?.trim();
+  const greeting = name ? `Hey ${name}` : 'Hey there';
+  return `${greeting}, thanks for reaching out! I got your request and will get back to you shortly.`;
+}
 
 /**
  * Sends an SMS message using the Twilio REST API.
