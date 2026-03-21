@@ -1,7 +1,7 @@
 import { twilioConfig } from './config';
 import { Message } from './types';
 import { saveMessage } from './messages';
-import { mockContacts } from './db';
+import { mockContacts, mockMessages } from './db';
 
 /**
  * Sends an SMS message using the Twilio REST API.
@@ -108,14 +108,21 @@ export async function dispatchSMS(
   // Step 2: Call sendSMS()
   const result = await sendSMS(phone, messageText);
   
-  // Update status based on result
-  if (result.success) {
-    newMessage.status = 'sent';
-    newMessage.provider_message_id = result.provider_message_id;
-    console.log(`✅ [DISPATCH] Message ${newMessage.id} marked as 'sent'. Provider ID: ${result.provider_message_id}`);
-  } else {
-    newMessage.status = 'failed';
-    console.error(`❌ [DISPATCH] Message ${newMessage.id} marked as 'failed'. Error: ${result.error}`);
+  // Locate the actual saved record in the mock database to apply mutations
+  const dbRecord = mockMessages.find(m => m.id === newMessage.id);
+  
+  if (dbRecord) {
+    // Update status based on result
+    if (result.success) {
+      dbRecord.status = 'sent';
+      dbRecord.retryable = false;
+      dbRecord.provider_message_id = result.provider_message_id;
+      console.log(`✅ [DISPATCH] Message ${dbRecord.id} marked as 'sent'. Provider ID: ${result.provider_message_id}`);
+    } else {
+      dbRecord.status = 'failed';
+      dbRecord.retryable = true;
+      console.error(`❌ [DISPATCH] Message ${dbRecord.id} marked as 'failed'. Error: ${result.error}`);
+    }
   }
   
   return { 
@@ -153,6 +160,34 @@ export async function sendMessageToContact(
     return { success: false, error: errorMsg };
   }
 
+  // Prevent duplicate SMS sends
+  const now = new Date().getTime();
+  const isDuplicate = mockMessages.some(m => 
+    m.contact_id === contact_id &&
+    m.direction === 'outbound' &&
+    m.content === messageText &&
+    (now - new Date(m.created_at).getTime()) < 60000
+  );
+
+  if (isDuplicate) {
+    const errorMsg = `Duplicate SMS prevented`;
+    console.warn(`[CONTACT HELPER] ${errorMsg}: '${messageText}' was already sent to ${contact.name} within the last 60 seconds.`);
+    return { success: false, error: errorMsg };
+  }
+
+  // Rate limiting: Max 3 messages per contact per minute
+  const recentMessagesCount = mockMessages.filter(m =>
+    m.contact_id === contact_id &&
+    m.direction === 'outbound' &&
+    (now - new Date(m.created_at).getTime()) < 60000
+  ).length;
+
+  if (recentMessagesCount >= 3) {
+    const errorMsg = `Rate limit hit`;
+    console.warn(`[CONTACT HELPER] ${errorMsg}: Contact ${contact.name} has already received 3 messages in the last minute.`);
+    return { success: false, error: errorMsg };
+  }
+
   console.log(`[CONTACT HELPER] Initializing SMS lifecycle for ${contact.name}...`);
   
   // Call the core dispatcher to handle Step 1 (Message Record) and Step 2 (Twilio Send)
@@ -162,5 +197,61 @@ export async function sendMessageToContact(
     success: result.twilio_result.success,
     internal_id: result.internal_id,
     error: result.twilio_result.error
+  };
+}
+
+/**
+ * Manually retries sending a failed SMS message.
+ * 
+ * @param message_id The internal ID of the failed message
+ * @returns Result of the retry attempt
+ */
+export async function retryMessage(message_id: string): Promise<{ success: boolean; error?: string }> {
+  // Locate the message
+  const msg = mockMessages.find(m => m.id === message_id);
+  
+  if (!msg) {
+    const errorMsg = `Retry aborted: Message ID ${message_id} not found.`;
+    console.error(`[RETRY HELPER] ${errorMsg}`);
+    return { success: false, error: errorMsg };
+  }
+
+  // Validate state
+  if (msg.status !== 'failed' || !msg.retryable) {
+    const errorMsg = `Retry aborted: Message ${message_id} is not marked as failed/retryable (Status: ${msg.status}).`;
+    console.warn(`[RETRY HELPER] ${errorMsg}`);
+    return { success: false, error: errorMsg };
+  }
+
+  // Locate the contact to get the current phone number
+  const contact = mockContacts.find(c => c.id === msg.contact_id);
+  
+  if (!contact || !contact.phone) {
+    const errorMsg = `Retry aborted: Contact ${msg.contact_id} not found or missing a phone number.`;
+    console.error(`[RETRY HELPER] ${errorMsg}`);
+    return { success: false, error: errorMsg };
+  }
+
+  console.log(`[RETRY HELPER] Retrying message ${message_id} to ${contact.name}...`);
+  
+  // Call sendSMS again
+  const result = await sendSMS(contact.phone, msg.content);
+  
+  // Update state
+  if (result.success) {
+    msg.status = 'sent';
+    msg.retryable = false;
+    msg.provider_message_id = result.provider_message_id;
+    console.log(`✅ [RETRY HELPER] Message ${message_id} successfully retried and marked as 'sent'. Provider ID: ${result.provider_message_id}`);
+  } else {
+    // Keep it failed and retryable
+    msg.status = 'failed';
+    msg.retryable = true;
+    console.error(`❌ [RETRY HELPER] Retry for message ${message_id} failed. Error: ${result.error}`);
+  }
+  
+  return {
+    success: result.success,
+    error: result.error
   };
 }
