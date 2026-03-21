@@ -817,7 +817,7 @@ button:active {
 
 .timeline-item {
     position: relative;
-    padding-bottom: 24px;
+    padding-bottom: 12px;
 }
 
 .timeline-dot {

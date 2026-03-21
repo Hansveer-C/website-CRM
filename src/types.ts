@@ -190,4 +190,5 @@ export interface TimelineItem {
   content: string;
   created_at: string;
   metadata?: Record<string, any>;
+  is_latest?: boolean;
 }

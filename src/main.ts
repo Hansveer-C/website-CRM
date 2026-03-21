@@ -2766,48 +2766,56 @@ function renderContactDetail(contactId: string) {
             <h3>Activity Timeline</h3>
             <div class="timeline">
               ${(() => {
-                const unifiedTimeline = getContactTimeline(contactId);
+                const groupedTimeline = getContactTimeline(contactId);
 
-                return unifiedTimeline.map(item => {
-                  let dotColor = '#94a3b8'; // Default gray
-                  let badge = '';
+                return groupedTimeline.map(group => {
+                  if (group.items.length === 0) return '';
+                  
+                  const header = `<div class="timeline-group-label" style="padding: 24px 0 8px 10px; font-weight: 600; color: #64748b; font-size: 0.85rem;">${group.label}</div>`;
+                  
+                  const itemsHtml = group.items.map(item => {
+                    let dotColor = '#94a3b8'; // Default gray
+                    let badge = '';
 
-                  if (item.type === 'message') {
-                    dotColor = '#818cf8';
-                    badge = `<span style="font-size: 0.7rem; color: #94a3b8;">SMS</span>`;
-                  } else if (item.type === 'form_submission') {
-                    dotColor = '#f59e0b'; // Amber
-                    badge = `<span style="font-size: 0.7rem; color: #94a3b8;">FORM</span>`;
-                  } else if (item.type === 'event') {
-                    // Check if it's an activity disguised as an event
-                    const isActivity = !!(item.metadata as any)?.activityType;
-                    if (isActivity) {
-                        dotColor = ((item.metadata as any)?.completed) ? '#28a745' : 'var(--primary-color)';
-                        badge = `<span style="font-size: 0.7rem; color: #94a3b8;">${(item.metadata as any)?.activityType?.toUpperCase()}</span>`;
-                    } else {
-                        dotColor = '#94a3b8';
-                        badge = `<span style="font-size: 0.7rem; color: #94a3b8;">EVENT</span>`;
+                    if (item.type === 'message') {
+                      dotColor = '#818cf8';
+                      badge = `<span style="font-size: 0.7rem; color: #94a3b8;">SMS</span>`;
+                    } else if (item.type === 'form_submission') {
+                      dotColor = '#f59e0b'; // Amber
+                      badge = `<span style="font-size: 0.7rem; color: #94a3b8;">FORM</span>`;
+                    } else if (item.type === 'event') {
+                      // Check if it's an activity disguised as an event
+                      const isActivity = !!(item.metadata as any)?.activityType;
+                      if (isActivity) {
+                          dotColor = ((item.metadata as any)?.completed) ? '#28a745' : 'var(--primary-color)';
+                          badge = `<span style="font-size: 0.7rem; color: #94a3b8;">${(item.metadata as any)?.activityType?.toUpperCase()}</span>`;
+                      } else {
+                          dotColor = '#94a3b8';
+                          badge = `<span style="font-size: 0.7rem; color: #94a3b8;">EVENT</span>`;
+                      }
                     }
-                  }
 
-                  return `
-                    <div class="timeline-item">
-                      <div class="timeline-dot" style="background: ${dotColor}"></div>
-                      <div class="timeline-content">
-                        <div class="timeline-time">${new Date(item.created_at).toLocaleString()}</div>
-                        <div style="display: flex; justify-content: space-between; align-items: start;">
-                          <div style="flex: 1;">
-                            <strong style="color: #1e293b;">${item.content}</strong>
-                            ${item.type === 'event' && (item.metadata as any)?.activityType && !(item.metadata as any)?.completed ? `
-                              <div style="margin-top: 8px;">
-                                <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.completeTask('${(item as any).reference_id}')">Mark Complete</button>
-                              </div>` : ''}
+                    return `
+                      <div class="timeline-item ${item.is_latest ? 'latest-activity' : ''}" style="${item.is_latest ? 'background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 12px; padding: 10px;' : ''}">
+                        <div class="timeline-dot" style="background: ${dotColor}"></div>
+                        <div class="timeline-content">
+                          <div class="timeline-time">${item.created_at} ${item.is_latest ? '<span style="color: var(--primary-color); font-weight: 700; margin-left: 8px;">(Latest activity)</span>' : ''}</div>
+                          <div style="display: flex; justify-content: space-between; align-items: start;">
+                            <div style="flex: 1;">
+                              <strong style="color: #1e293b;">${item.content}</strong>
+                              ${item.type === 'event' && (item.metadata as any)?.activityType && !(item.metadata as any)?.completed ? `
+                                <div style="margin-top: 8px;">
+                                  <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.completeTask('${(item as any).reference_id}')">Mark Complete</button>
+                                </div>` : ''}
+                            </div>
+                            ${badge}
                           </div>
-                          ${badge}
                         </div>
                       </div>
-                    </div>
-                  `;
+                    `;
+                  }).join('');
+                  
+                  return header + itemsHtml;
                 }).join('') || '<p style="padding: 20px;">No activity logged.</p>';
               })()}
             </div>

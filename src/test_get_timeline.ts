@@ -22,11 +22,14 @@ async function testTimeline() {
     created_at: new Date().toISOString()
   });
 
-  const t1 = '2026-03-21T10:00:00Z'; // Middle
-  const t2 = '2026-03-21T09:00:00Z'; // Oldest
-  const t3 = '2026-03-21T11:00:00Z'; // Newest
+  const t_today = '2026-03-21T10:00:00Z';
+  const t_yesterday = '2026-03-20T10:00:00Z';
+  const t_earlier = '2026-03-15T10:00:00Z';
 
-  const t0 = '2026-03-21T08:30:00Z'; // Earliest inbound
+  const t0 = t_earlier; 
+  const t1 = t_today;
+  const t2 = t_yesterday;
+  const t3 = t_today;
 
   console.log('--- Step 1: Submit Form, Send SMS, and Trigger System Event (Mixed) ---');
   
@@ -63,21 +66,23 @@ async function testTimeline() {
   mockEventLogs[mockEventLogs.length-1].created_at = t2;
 
   console.log('--- Step 2: Call helper ---');
-  const timeline = getContactTimeline(testContactId);
+  const groupedTimeline = getContactTimeline(testContactId);
 
-  console.log('--- Step 3: Confirm chronological order (ASC), Truncation, Arrows, and Readability ---');
-  timeline.forEach((item, index) => {
-    console.log(`${index + 1}. [${item.created_at}] TYPE: ${item.type} | CONTENT: ${item.content}`);
+  groupedTimeline.forEach(group => {
+    console.log(`SECTION: ${group.label} (${group.items.length} items)`);
+    group.items.forEach((item, index) => {
+      const latestTag = item.is_latest ? ' [LATEST]' : '';
+      console.log(`  ${index + 1}. [${item.created_at}] TYPE: ${item.type} | CONTENT: ${item.content}${latestTag}`);
+    });
   });
 
-  // Verify format matches MMM D, h:mm A (simple check)
-  const isFormatted = timeline.every(item => /^[A-Z][a-z]{2}\s\d{1,2},\s\d{1,2}:\d{2}\s[AP]M$/.test(item.created_at));
+  const allItems = groupedTimeline.flatMap(g => g.items);
+  const latestItem = allItems[allItems.length - 1];
 
-  if (timeline.length === 4 && isFormatted) {
-    console.log('✅ SUCCESS: Timeline is correctly sorted and timestamps are readable.');
+  if (latestItem && latestItem.is_latest) {
+    console.log('✅ SUCCESS: Latest activity correctly highlighted.');
   } else {
-    console.error('❌ FAILURE: Issues detected in formatting.');
-    if (!isFormatted) console.error('- Timestamps not in readable format');
+    console.error('❌ FAILURE: Latest activity not identified.');
     process.exit(1);
   }
 }

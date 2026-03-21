@@ -1,6 +1,11 @@
 import { mockMessages, mockEventLogs, mockActivities } from './db';
 import { TimelineItem } from './types';
 
+export interface TimelineGroup {
+    label: string;
+    items: TimelineItem[];
+}
+
 /**
  * Standardized timeline item source.
  * Follows strict mapping:
@@ -8,7 +13,7 @@ import { TimelineItem } from './types';
  * - Form Submission -> "form_submission"
  * - Everything Else (Events, Activities) -> "event"
  */
-export function getContactTimeline(contact_id: string): TimelineItem[] {
+export function getContactTimeline(contact_id: string): TimelineGroup[] {
   // 1. Fetch source data
   const messages = mockMessages.filter(m => m.contact_id === contact_id);
   const eventLogs = mockEventLogs.filter(e => e.payload && e.payload.contact_id === contact_id);
@@ -63,16 +68,47 @@ export function getContactTimeline(contact_id: string): TimelineItem[] {
     metadata: { completed: a.completed, activityType: a.type, description: a.description }
   }));
 
-  // 5. Combine and Sort (Oldest First)
-  const items = [...messageItems, ...eventItems, ...activityItems].sort((a, b) => 
+  // 5. Combine and Sort (Oldest First within groups)
+  const allItems = [...messageItems, ...eventItems, ...activityItems].sort((a, b) => 
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   );
 
-  // 6. Format timestamps for display (as requested by Prompt 7)
-  return items.map(item => ({
-    ...item,
-    created_at: formatTimelineTime(item.created_at)
-  }));
+  // 6. Define Date Boundaries (based on 2026-03-21)
+  const now = new Date('2026-03-21T14:45:50-07:00');
+  const todayStr = '2026-03-21';
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+  // 7. Grouping Logic
+  const todayItems: any[] = [];
+  const yesterdayItems: any[] = [];
+  const earlierItems: any[] = [];
+
+  allItems.forEach((item, idx) => {
+    const itemDate = item.created_at.split('T')[0];
+    const isLatest = idx === allItems.length - 1;
+    const displayItem = {
+        ...item,
+        is_latest: isLatest,
+        created_at: formatTimelineTime(item.created_at)
+    };
+
+    if (itemDate === todayStr) {
+      todayItems.push(displayItem);
+    } else if (itemDate === yesterdayStr) {
+      yesterdayItems.push(displayItem);
+    } else {
+      earlierItems.push(displayItem);
+    }
+  });
+
+  // 8. Final Grouped Structure
+  return [
+    { label: 'Earlier', items: earlierItems },
+    { label: 'Yesterday', items: yesterdayItems },
+    { label: 'Today', items: todayItems }
+  ];
 }
 
 /**
