@@ -1,4 +1,5 @@
-import { mockEventLogs, mockContacts } from './db';
+import { mockEventLogs, mockContacts, mockMessages } from './db';
+import { getDefaultLeadReply, sendMessageToContact } from './sms';
 
 export interface AppEvent {
   event_name: string;
@@ -6,7 +7,7 @@ export interface AppEvent {
   created_at: string; // ISO 8601 timestamp
 }
 
-export type EventListener = (payload: Record<string, any>) => void;
+export type EventListener = (payload: Record<string, any>) => Promise<void> | void;
 const listeners: Record<string, EventListener[]> = {};
 
 export function onEvent(name: string, callback: EventListener) {
@@ -84,7 +85,7 @@ export function getEvents(): AppEvent[] {
 }
 
 // --- Register Business Logic Listeners ---
-onEvent('lead_created', (payload) => {
+onEvent('lead_created', async (payload) => {
   console.log('Lead created event received');
 
   const contact_id = payload.contact_id;
@@ -99,10 +100,44 @@ onEvent('lead_created', (payload) => {
   }
 
   if (!phone) {
-    console.log('No phone available for SMS');
+    console.log('Automated lead SMS skipped: no phone');
     return;
   }
 
-  // Ready for SMS operations (no SMS triggered yet)
+  // Fetch full contact object
+  const contact = mockContacts.find(c => c.id === contact_id);
+  if (!contact) {
+    console.log('Contact not found for SMS');
+    return;
+  }
+
+  // Generate automated message
+  const message = getDefaultLeadReply(contact);
+  
+  // Prevent duplicate automated SMS (2 minute window)
+  const now = Date.now();
+  const twoMinutesAgo = now - (2 * 60 * 1000);
+  
+  const alreadySent = mockMessages.some(m => 
+    m.contact_id === contact_id &&
+    m.direction === 'outbound' &&
+    new Date(m.created_at).getTime() >= twoMinutesAgo &&
+    (m.content === message || m.content.includes("thanks for reaching out"))
+  );
+
+  if (alreadySent) {
+    console.log('Automated lead SMS skipped: duplicate prevented');
+    return;
+  }
+
+  // Trigger SMS
+  console.log(`[AUTOMATION] Triggering automated SMS for lead: ${contact.name}`);
+  const result = await sendMessageToContact(contact_id, message, 'automation');
+  
+  if (result.success) {
+    console.log('Automated lead SMS sent');
+  } else {
+    console.log('Automated lead SMS failed');
+  }
 });
 

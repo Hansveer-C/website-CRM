@@ -99,7 +99,8 @@ export async function dispatchSMS(
   contact_id: string, 
   phone: string, 
   messageText: string, 
-  opportunity_id?: string
+  opportunity_id?: string,
+  source?: string
 ): Promise<{ internal_id: string; twilio_result: any }> {
   
   // Step 1: Create Message record using shared saveMessage utility
@@ -112,6 +113,7 @@ export async function dispatchSMS(
     type: 'sms',
     content: messageText,
     status: 'pending',
+    source,
     created_at: new Date().toISOString()
   };
 
@@ -154,7 +156,8 @@ export async function dispatchSMS(
  */
 export async function sendMessageToContact(
   contact_id: string, 
-  messageText: string
+  messageText: string,
+  source?: string
 ): Promise<{ success: boolean; internal_id?: string; error?: string }> {
   
   // Locate the contact
@@ -204,7 +207,7 @@ export async function sendMessageToContact(
   console.log(`[CONTACT HELPER] Initializing SMS lifecycle for ${contact.name}...`);
   
   // Call the core dispatcher to handle Step 1 (Message Record) and Step 2 (Twilio Send)
-  const result = await dispatchSMS(contact_id, contact.phone, messageText);
+  const result = await dispatchSMS(contact_id, contact.phone, messageText, undefined, source);
   
   return {
     success: result.twilio_result.success,

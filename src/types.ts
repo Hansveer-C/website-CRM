@@ -176,6 +176,7 @@ export interface Message {
   status: MessageStatus;
   provider_message_id?: string;
   retryable?: boolean;
+  source?: string; // e.g. 'automation'
   created_at: string;
 }
 
