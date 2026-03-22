@@ -1,4 +1,4 @@
-import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings, mockEventLogs, mockMessages } from './db';
+import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings, mockEventLogs, mockMessages, mockCalls } from './db';
 import { templates } from './templates';
 import { Activity } from './types';
 import { runAutomations, checkOverdueInvoices } from './automation';
@@ -69,6 +69,7 @@ let builderInsertOrder: number | null = null;
 let compSearchQuery: string = '';
 let compCategoryFilter: string = 'all';
 let contactTimelineState: any[] = [];
+let lastContactCount = mockContacts.length;
 
 let mockGlobalSettings = {
   businessName: 'PressurePro Cleaning',
@@ -145,7 +146,14 @@ function renderSidebar(activeView: string) {
         <ul>
           <div class="nav-group-title" style="margin-top: 0;">Main Menu</div>
           <li onclick="window.navigateTo('dashboard')" class="${activeView === 'dashboard' ? 'active' : ''}">Dashboard</li>
-          <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}">Clients & Leads</li>
+          <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Clients & Leads</span>
+            ${(() => {
+              const now = new Date('2026-03-22T09:04:02-07:00').getTime();
+              const newLeads = mockContacts.filter(c => (now - new Date(c.created_at).getTime()) < (24 * 60 * 60 * 1000)).length;
+              return newLeads > 0 ? `<span class="badge" style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 800;">${newLeads}</span>` : '';
+            })()}
+          </li>
           <li onclick="window.navigateTo('opportunities')" class="${activeView === 'opportunities' ? 'active' : ''}">Opportunities</li>
           <li onclick="window.navigateTo('quotes')" class="${activeView === 'quotes' ? 'active' : ''}">Quotes</li>
           <li onclick="window.navigateTo('invoices')" class="${activeView === 'invoices' ? 'active' : ''}">Invoices</li>
@@ -340,7 +348,22 @@ function renderClients() {
 
   const tableRows = filteredContacts.map(contact => {
     const latest = getLatestActivity(contact.id);
-    
+    const needsAttention = (() => {
+      if (contact.follow_up_required) return true;
+      
+      const hasFailedSMS = mockMessages.some(m => m.contact_id === contact.id && m.status === 'failed');
+      if (hasFailedSMS) return true;
+      
+      const now = new Date('2026-03-22T09:09:42-07:00').getTime();
+      const recentMissedCall = mockCalls.find(c => 
+        c.contact_id === contact.id && 
+        c.status === 'missed' &&
+        (now - new Date(c.created_at).getTime()) < (2 * 60 * 60 * 1000) // 2 hours
+      );
+      
+      return !!recentMissedCall;
+    })();
+
     const isNew = (() => {
       const now = new Date('2026-03-22T09:01:46-07:00').getTime();
       const createdAt = new Date(contact.created_at).getTime();
@@ -359,9 +382,10 @@ function renderClients() {
     return `
       <tr onclick="window.navigateTo('contact-detail', '${contact.id}')" style="cursor: pointer; border-bottom: 1px solid #f1f5f9; transition: background 0.1s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
         <td style="padding: 16px 24px;">
-          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px; flex-wrap: wrap;">
             <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${contact.name}</div>
             ${isNew ? `<span style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">New</span>` : ''}
+            ${needsAttention ? `<span style="background: #fee2e2; color: #991b1b; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid #fecaca;">⚠️ Needs Attention</span>` : ''}
           </div>
           <div style="font-size: 0.75rem; color: #64748b; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 250px;">
             ${latest ? `<span style="color: #94a3b8; font-weight: 600;">Last:</span> ${latest.content}` : '<span style="color: #cbd5e1; font-style: italic;">No activity yet</span>'}
@@ -3251,3 +3275,31 @@ if (path.includes('/site/')) {
 } else {
     renderDashboard();
 }
+
+// Auto-refresh Sidebar Counts & New Lead Alerts (PROMPT 8, 9, 10)
+setInterval(() => {
+    let changeDetected = false;
+
+    // 1. Detect New Leads (Global Alert)
+    if (mockContacts.length > lastContactCount) {
+        const diff = mockContacts.length - lastContactCount;
+        (window as any).showToast(diff === 1 ? 'New lead received' : `${diff} new leads received`);
+        lastContactCount = mockContacts.length;
+        changeDetected = true;
+    }
+
+    // 2. Refresh UI (only in standard app views)
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar && !['builder', 'preview', 'site'].includes(currentView)) {
+        console.log('[POLLING] Refreshing UI state...');
+        
+        // Always refresh sidebar for badge counts
+        sidebar.outerHTML = renderSidebar(currentView);
+
+        // If a new lead was detected, re-render the active view to show it immediately
+        if (changeDetected) {
+            if (currentView === 'clients') renderClients();
+            if (currentView === 'dashboard') renderDashboard();
+        }
+    }
+}, 30000);
