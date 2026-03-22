@@ -192,3 +192,10 @@ export interface TimelineItem {
   metadata?: Record<string, any>;
   is_latest?: boolean;
 }
+
+export interface Call {
+  id: string;
+  phone: string;
+  status: 'received' | 'missed' | 'answered';
+  created_at: string;
+}
