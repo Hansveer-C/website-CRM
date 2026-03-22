@@ -18,18 +18,18 @@ validateTwilioConfig();
 (window as any).mockMessages = mockMessages;
 
 (window as any).checkTwilioStatus = () => {
-    const isValid = validateTwilioConfig();
-    return {
-        isValid,
-        config: {
-            account_sid: twilioConfig.account_sid ? '✓ Loaded' : '✗ Missing',
-            has_token: !!twilioConfig.auth_token,
-            phone: twilioConfig.sending_phone_number || '✗ Missing'
-        },
-        actions: {
-            sendTestSMS: (to: string, msg: string) => sendSMS(to, msg)
-        }
-    };
+  const isValid = validateTwilioConfig();
+  return {
+    isValid,
+    config: {
+      account_sid: twilioConfig.account_sid ? '✓ Loaded' : '✗ Missing',
+      has_token: !!twilioConfig.auth_token,
+      phone: twilioConfig.sending_phone_number || '✗ Missing'
+    },
+    actions: {
+      sendTestSMS: (to: string, msg: string) => sendSMS(to, msg)
+    }
+  };
 };
 
 (window as any).EventLogs = mockEventLogs;
@@ -149,10 +149,10 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}" style="display: flex; justify-content: space-between; align-items: center;">
             <span>Clients & Leads</span>
             ${(() => {
-              const now = new Date('2026-03-22T09:04:02-07:00').getTime();
-              const newLeads = mockContacts.filter(c => (now - new Date(c.created_at).getTime()) < (24 * 60 * 60 * 1000)).length;
-              return newLeads > 0 ? `<span class="badge" style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 800;">${newLeads}</span>` : '';
-            })()}
+      const now = new Date('2026-03-22T09:04:02-07:00').getTime();
+      const newLeads = mockContacts.filter(c => (now - new Date(c.created_at).getTime()) < (24 * 60 * 60 * 1000)).length;
+      return newLeads > 0 ? `<span class="badge" style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 800;">${newLeads}</span>` : '';
+    })()}
           </li>
           <li onclick="window.navigateTo('opportunities')" class="${activeView === 'opportunities' ? 'active' : ''}">Opportunities</li>
           <li onclick="window.navigateTo('quotes')" class="${activeView === 'quotes' ? 'active' : ''}">Quotes</li>
@@ -179,12 +179,12 @@ function renderSidebar(activeView: string) {
 
 function renderDashboard() {
   const now = new Date();
-  
+
   // Top Level Metrics
   const openOpportunities = mockOpportunities.filter(o => o.status === 'open');
   const pipelineValue = openOpportunities.reduce((sum, o) => sum + o.value, 0);
   const openCount = openOpportunities.length;
-  
+
   const totalCount = mockOpportunities.length;
   const wonCount = mockOpportunities.filter(o => o.status === 'won').length;
   const conversionRate = totalCount > 0 ? (wonCount / totalCount) * 100 : 0;
@@ -197,7 +197,7 @@ function renderDashboard() {
       .reduce((sum, o) => sum + o.value, 0);
     return { stage, value };
   }).filter(s => s.value > 0);
-  
+
   const maxRevenue = Math.max(...revenueByStage.map(s => s.value), 1);
 
   // 2. Leads by Source
@@ -213,9 +213,9 @@ function renderDashboard() {
 
   // 4. Website Performance Metrics
   const websiteLeads = mockContacts.filter(c => c.source.toLowerCase().includes('website') || c.source.toLowerCase().includes('search') || c.source.toLowerCase().includes('ad')).length;
-  const formSubmissions = mockContacts.length > 0 ? Math.floor(websiteLeads * 1.5) + 3 : 0; 
+  const formSubmissions = mockContacts.length > 0 ? Math.floor(websiteLeads * 1.5) + 3 : 0;
   const topPageName = mockPages.length > 0 ? mockPages[Math.floor(Math.random() * Math.min(mockPages.length, 3))].name : 'Home';
-  
+
   app.innerHTML = `
     ${renderSidebar('dashboard')}
     <main class="main-content">
@@ -320,8 +320,8 @@ function renderDashboard() {
             </thead>
             <tbody>
               ${overdueTasks.map((task: Activity) => {
-                const contact = mockContacts.find(c => c.id === task.contact_id);
-                return `
+    const contact = mockContacts.find(c => c.id === task.contact_id);
+    return `
                   <tr style="background: #fffafa;">
                     <td style="font-weight: 600;">${contact ? contact.name : 'Unknown'}</td>
                     <td>${task.description}</td>
@@ -329,7 +329,7 @@ function renderDashboard() {
                     <td><button class="btn-primary" style="padding: 6px 12px; font-size: 0.8rem; background: #ff4444; border-radius: 4px;">Resolve</button></td>
                   </tr>
                 `;
-              }).join('')}
+  }).join('')}
             </tbody>
           </table>
         </div>
@@ -340,8 +340,8 @@ function renderDashboard() {
 
 function renderClients() {
   const filteredContacts = mockContacts.filter(contact => {
-    const matchesSearch = contact.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) || 
-                         contact.phone.includes(clientSearchQuery);
+    const matchesSearch = contact.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
+      contact.phone.includes(clientSearchQuery);
     const matchesFilter = clientStatusFilter === 'all' || contact.status === clientStatusFilter;
     return matchesSearch && matchesFilter;
   });
@@ -350,32 +350,32 @@ function renderClients() {
     const latest = getLatestActivity(contact.id);
     const needsAttention = (() => {
       if (contact.follow_up_required) return true;
-      
+
       const hasFailedSMS = mockMessages.some(m => m.contact_id === contact.id && m.status === 'failed');
       if (hasFailedSMS) return true;
-      
-      const now = new Date('2026-03-22T09:09:42-07:00').getTime();
-      const recentMissedCall = mockCalls.find(c => 
-        c.contact_id === contact.id && 
+
+      const now = new Date('2026-03-22T09:11:53-07:00').getTime();
+      const recentMissedCall = mockCalls.find(c =>
+        c.contact_id === contact.id &&
         c.status === 'missed' &&
         (now - new Date(c.created_at).getTime()) < (2 * 60 * 60 * 1000) // 2 hours
       );
-      
+
       return !!recentMissedCall;
     })();
 
     const isNew = (() => {
-      const now = new Date('2026-03-22T09:01:46-07:00').getTime();
+      const now = new Date('2026-03-22T09:11:53-07:00').getTime();
       const createdAt = new Date(contact.created_at).getTime();
       const isRecent = (now - createdAt) < (24 * 60 * 60 * 1000);
-      
+
       // Also check for recent lead_created event
-      const recentLeadEvent = mockEventLogs.find(e => 
-        e.event_name === 'lead_created' && 
+      const recentLeadEvent = mockEventLogs.find(e =>
+        e.event_name === 'lead_created' &&
         e.payload.contact_id === contact.id &&
         (now - new Date(e.created_at).getTime()) < (24 * 60 * 60 * 1000)
       );
-      
+
       return isRecent || !!recentLeadEvent;
     })();
 
@@ -395,7 +395,17 @@ function renderClients() {
         <td><span class="badge badge-${contact.status}" style="font-size: 0.7rem;">${contact.status}</span></td>
         <td><span style="font-size: 0.8rem; color: #64748b;">${contact.source}</span></td>
         <td style="font-size: 0.8rem; color: #64748b;">${latest ? latest.created_at : '-'}</td>
-        <td><button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${contact.id}')">View</button></td>
+        <td>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${contact.id}')">View</button>
+            <button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #6366f1;" onclick="event.stopPropagation(); window.textContact('${contact.id}')">💬 Text</button>
+            ${(contact.status === 'lead' && isNew) ? `
+              <a href="tel:${contact.phone}" class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #10b981; text-decoration: none; display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation();">
+                📞 Call Now
+              </a>
+            ` : ''}
+          </div>
+        </td>
       </tr>
     `;
   }).join('');
@@ -456,6 +466,24 @@ function renderClients() {
   }
 }
 
+(window as any).textContact = async (contactId: string) => {
+  const contact = mockContacts.find(c => c.id === contactId);
+  if (!contact) return;
+
+  const content = prompt(`Quick Text to ${contact.name}:`, "Hey, I saw your request—how can I help?");
+  if (content === null || content.trim() === "") return;
+
+  try {
+    (window as any).showToast('Sending SMS...', 2000);
+    await sendMessageToContact(contactId, content);
+    (window as any).showToast('Message sent! Timeline updated.');
+    renderClients(); // Refresh to update "Last activity" snippet
+  } catch (err) {
+    console.error('Text Back Error:', err);
+    (window as any).showToast('Error: Could not send SMS', 5000);
+  }
+};
+
 (window as any).filterClients = (status: string) => {
   clientStatusFilter = status;
   renderClients();
@@ -496,10 +524,10 @@ let autoSaveTimeout: any;
   autoSaveTimeout = setTimeout(() => {
     isAutoSaving = false;
     const page = mockPages.find(p => p.id === builderPageId);
-    if(page) (page as any).updated_at = new Date().toISOString();
+    if (page) (page as any).updated_at = new Date().toISOString();
     const ind = document.getElementById('pb-autosave-indicator');
-    if(ind) {
-       ind.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #28a745;"></span> Saved`;
+    if (ind) {
+      ind.innerHTML = `<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #28a745;"></span> Saved`;
     }
   }, 1000);
 };
@@ -558,11 +586,11 @@ function _renderBuilder() {
           
           <div class="pb-component-list">
             ${[
-              { title: 'Basic', types: ['text', 'button', 'image'], icon: '📄' },
-              { title: 'Layout', types: ['hero', 'section'], icon: '🖼️' },
-              { title: 'Forms', types: ['form'], icon: '📝' },
-              { title: 'Advanced', types: ['cta', 'pricing', 'testimonial'], icon: '⚡' }
-            ].map(cat => `
+      { title: 'Basic', types: ['text', 'button', 'image'], icon: '📄' },
+      { title: 'Layout', types: ['hero', 'section'], icon: '🖼️' },
+      { title: 'Forms', types: ['form'], icon: '📝' },
+      { title: 'Advanced', types: ['cta', 'pricing', 'testimonial'], icon: '⚡' }
+    ].map(cat => `
               <div style="font-size: 0.7rem; color: #888; margin: ${cat.title === 'Basic' ? '0 0 12px 0' : '24px 0 12px 0'}; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">${cat.title}</div>
               ${mockComponents.filter(c => cat.types.includes(c.type)).map(comp => `
                 <div class="pb-component-item" onclick="window.addSectionToPage('${comp.id}')">
@@ -587,11 +615,11 @@ function _renderBuilder() {
           
           <div class="pb-canvas-inner" style="padding-top: 25px;">
             ${['Add Initial', ...sections].map((item) => {
-              const isInitial = item === 'Add Initial';
-              const section = isInitial ? null : (item as any);
-              const order = isInitial ? 0 : section.order + 0.5;
-              
-              return `
+      const isInitial = item === 'Add Initial';
+      const section = isInitial ? null : (item as any);
+      const order = isInitial ? 0 : section.order + 0.5;
+
+      return `
                 <div class="pb-add-between" onclick="window.showComponentPickerAt('${order}')">
                    <div class="pb-add-btn">+</div>
                 </div>
@@ -630,7 +658,7 @@ function _renderBuilder() {
                   </div>
                 ` : ''}
               `;
-            }).join('') || `
+    }).join('') || `
               <div style="padding: 100px 40px; text-align: center; color: #999; border: 2px dashed #eee; margin: 40px;">
                 <h3 style="margin-bottom: 10px;">Your Canvas is Empty</h3>
                 <p>Click components on the left to start building your page.</p>
@@ -665,7 +693,7 @@ function renderSectionSettings(section: any) {
   const isStyles = builderRightPanelTab === 'styles';
 
   const settingsMarkup = [];
-  
+
   settingsMarkup.push(`
     <div style="display: flex; border-bottom: 1px solid #333; margin-bottom: 20px;">
       <button style="flex: 1; padding: 10px; background: ${isContent ? '#222' : 'transparent'}; border: none; color: ${isContent ? 'white' : '#888'}; cursor: pointer; border-bottom: ${isContent ? '2px solid var(--primary-color)' : 'none'}; font-weight: 600;" onclick="window.setBuilderTab('content')">Content</button>
@@ -677,20 +705,20 @@ function renderSectionSettings(section: any) {
     settingsMarkup.push(`
       <div style="display: flex; flex-direction: column; gap: 5px;">
     `);
-    
+
     for (const key in section.content) {
       const val = section.content[key];
       const isImageField = key === 'background_image' || key === 'image_url' || key === 'url' && section.type === 'image';
-      
+
       if (typeof val === 'string' && !isImageField && key !== 'pipeline_id') {
-         settingsMarkup.push(`
+        settingsMarkup.push(`
            <div class="pb-control-group">
              <label>${key.replace(/_/g, ' ').toUpperCase()}</label>
              <input type="text" class="pb-control-input" value="${val.replace(/"/g, '&quot;')}" oninput="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)">
            </div>
          `);
       } else if (key === 'pipeline_id') {
-         settingsMarkup.push(`
+        settingsMarkup.push(`
            <div class="pb-control-group">
              <label>Target Pipeline</label>
              <select class="pb-control-input" onchange="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)">
@@ -699,7 +727,7 @@ function renderSectionSettings(section: any) {
            </div>
          `);
       } else if (isImageField) {
-         settingsMarkup.push(`
+        settingsMarkup.push(`
            <div class="pb-control-group">
              <label>${key.replace(/_/g, ' ').toUpperCase()}</label>
              <div class="pb-asset-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-bottom: 10px;">
@@ -725,7 +753,7 @@ function renderSectionSettings(section: any) {
     settingsMarkup.push(`
       <div style="display: flex; flex-direction: column; gap: 5px;">
     `);
-    
+
     const designFields = [
       { label: 'Background Color', key: 'background', type: 'color' },
       { label: 'Text Alignment', key: 'text_alignment', type: 'select', options: ['left', 'center', 'right'] },
@@ -738,12 +766,12 @@ function renderSectionSettings(section: any) {
       settingsMarkup.push(`
         <div class="pb-control-group">
           <label>${field.label.toUpperCase()}</label>
-          ${field.type === 'select' 
-            ? `<select class="pb-control-input" onchange="window.updateSpecificField('${section.id}', 'styles', '${field.key}', this.value)">
+          ${field.type === 'select'
+          ? `<select class="pb-control-input" onchange="window.updateSpecificField('${section.id}', 'styles', '${field.key}', this.value)">
                 ${field.options!.map(opt => `<option value="${opt}" ${opt === val ? 'selected' : ''}>${opt.toUpperCase()}</option>`).join('')}
                </select>`
-            : `<input type="${field.type}" class="pb-control-input" value="${val}" oninput="window.updateSpecificField('${section.id}', 'styles', '${field.key}', this.value)">`
-          }
+          : `<input type="${field.type}" class="pb-control-input" value="${val}" oninput="window.updateSpecificField('${section.id}', 'styles', '${field.key}', this.value)">`
+        }
         </div>
       `);
     });
@@ -807,7 +835,7 @@ function renderSectionPreviewContent(section: any) {
   builderPageId = id;
   builderSelectedSectionId = null;
   builderInsertOrder = null;
-  
+
   if (!noSkeleton) {
     app.innerHTML = `
       <main style="width: 100vw; padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column; background: #1a1a1a;">
@@ -865,12 +893,12 @@ function renderSectionPreviewContent(section: any) {
 
   const currentSections = mockPageSections.filter(s => s.page_id === builderPageId);
   let orderToInsertAt = 0;
-  
+
   if (builderInsertOrder !== null) {
-      orderToInsertAt = builderInsertOrder;
-      builderInsertOrder = null; // reset
+    orderToInsertAt = builderInsertOrder;
+    builderInsertOrder = null; // reset
   } else {
-      orderToInsertAt = Math.max(...currentSections.map(s => s.order), 0) + 1;
+    orderToInsertAt = Math.max(...currentSections.map(s => s.order), 0) + 1;
   }
 
   const newSection = {
@@ -903,18 +931,18 @@ function renderSectionPreviewContent(section: any) {
   const pageSections = mockPageSections
     .filter(s => s.page_id === builderPageId)
     .sort((a, b) => a.order - b.order);
-  
+
   const index = pageSections.findIndex(s => s.id === id);
   const newIndex = index + direction;
-  
+
   if (newIndex >= 0 && newIndex < pageSections.length) {
     const section1 = pageSections[index];
     const section2 = pageSections[newIndex];
-    
+
     const tempOrder = section1.order;
     section1.order = section2.order;
     section2.order = tempOrder;
-    
+
     renderBuilder();
     (window as any).triggerAutoSave();
   }
@@ -953,12 +981,12 @@ function renderSectionPreviewContent(section: any) {
     border: 1px solid #333;
   `;
   document.body.appendChild(toast);
-  
+
   setTimeout(() => {
     toast.style.opacity = '1';
     toast.style.transform = 'translateY(0)';
   }, 10);
-  
+
   setTimeout(() => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateY(20px)';
@@ -999,7 +1027,7 @@ function renderSectionPreviewContent(section: any) {
 
     console.log("Lead created:", res);
     alert('Thanks! We’ve received your request.');
-    
+
     // Clear form
     [nameInput, phoneInput, emailInput, addressInput, serviceInput, messageInput].forEach(el => {
       if (el) el.value = '';
@@ -1018,9 +1046,9 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
       <h1 style="font-size: 4rem; color: #cbd5e0;">404</h1>
       <h2 style="margin-bottom: 20px;">${!page ? 'Page Not Found' : 'Draft Page'}</h2>
       <p style="color: #666; margin-bottom: 30px;">
-        ${!page 
-          ? `The requested URL "/site/${slug}" was not found.` 
-          : 'This page is currently a draft and is not publicly accessible.'}
+        ${!page
+        ? `The requested URL "/site/${slug}" was not found.`
+        : 'This page is currently a draft and is not publicly accessible.'}
       </p>
       <button class="btn-primary" onclick="window.navigateTo('dashboard')">Back to CRM</button>
     </div>`;
@@ -1035,17 +1063,17 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
   // Inject Tracking Scripts
   if (!isPreview) {
     if (settings.facebook_pixel_id) {
-        const script = document.createElement('script');
-        script.innerHTML = `
+      const script = document.createElement('script');
+      script.innerHTML = `
           !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');
           fbq('init', '${settings.facebook_pixel_id}'); fbq('track', 'PageView');
         `;
-        document.head.appendChild(script);
+      document.head.appendChild(script);
     }
     if (settings.gtm_id) {
-        const script = document.createElement('script');
-        script.innerHTML = `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s),j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','${settings.gtm_id}');`;
-        document.head.appendChild(script);
+      const script = document.createElement('script');
+      script.innerHTML = `(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s),j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','${settings.gtm_id}');`;
+      document.head.appendChild(script);
     }
   }
 
@@ -1065,10 +1093,10 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
       </header>
 
       ${sections.map(section => {
-          // Inject global variables into section content if needed
-          const content = {...section.content, business_name: settings.business_name, phone: settings.phone};
-          return renderSection(section.type, content, section.styles, section.id);
-      }).join('')}
+    // Inject global variables into section content if needed
+    const content = { ...section.content, business_name: settings.business_name, phone: settings.phone };
+    return renderSection(section.type, content, section.styles, section.id);
+  }).join('')}
       
       ${!isPreview ? `
         <button id="sticky-cta" onclick="document.querySelector('.site-form-section')?.scrollIntoView({behavior: 'smooth'})" 
@@ -1087,30 +1115,30 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
       </footer>
     </div>
   `;
-  
+
   const finalTitle = mockGlobalSettings.seoTitleFormat
-      .replace('{page_name}', page.seo_title || page.name)
-      .replace('{business_name}', mockGlobalSettings.businessName);
+    .replace('{page_name}', page.seo_title || page.name)
+    .replace('{business_name}', mockGlobalSettings.businessName);
   document.title = finalTitle;
   updateMetaTag('description', page.seo_description || mockGlobalSettings.seoDescriptionFallback);
   updateMetaTag('keywords', (page.seo_keywords || []).join(', '));
 
   if (mockGlobalSettings.fbPixelId) {
     if (!document.getElementById('fb-pixel-sim')) {
-       console.log('Injecting FB Pixel: ' + mockGlobalSettings.fbPixelId);
-       const t = document.createElement('script');
-       t.id = 'fb-pixel-sim';
-       t.innerHTML = `console.log("FB Pixel [${mockGlobalSettings.fbPixelId}] Initialized"); window.fbq = function() { console.log('fbq:', arguments); };`;
-       document.head.appendChild(t);
+      console.log('Injecting FB Pixel: ' + mockGlobalSettings.fbPixelId);
+      const t = document.createElement('script');
+      t.id = 'fb-pixel-sim';
+      t.innerHTML = `console.log("FB Pixel [${mockGlobalSettings.fbPixelId}] Initialized"); window.fbq = function() { console.log('fbq:', arguments); };`;
+      document.head.appendChild(t);
     }
   }
   if (mockGlobalSettings.gtmId) {
     if (!document.getElementById('gtm-sim')) {
-       console.log('Injecting GTM: ' + mockGlobalSettings.gtmId);
-       const t = document.createElement('script');
-       t.id = 'gtm-sim';
-       t.innerHTML = `console.log("GTM [${mockGlobalSettings.gtmId}] Initialized"); window.dataLayer = window.dataLayer || [];`;
-       document.head.appendChild(t);
+      console.log('Injecting GTM: ' + mockGlobalSettings.gtmId);
+      const t = document.createElement('script');
+      t.id = 'gtm-sim';
+      t.innerHTML = `console.log("GTM [${mockGlobalSettings.gtmId}] Initialized"); window.dataLayer = window.dataLayer || [];`;
+      document.head.appendChild(t);
     }
   }
 }
@@ -1183,16 +1211,16 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
           <h3 style="margin-bottom: 25px; font-size: 1.75rem; text-align: center;">${content.title || 'Contact Us'}</h3>
           <div style="display: flex; flex-direction: column; gap: 20px;">
             ${(content.fields || []).map((f: string) => {
-              if (f === 'message') {
-                return `
+        if (f === 'message') {
+          return `
                   <div class="form-group">
                     <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; color: #666;">Message</label>
                     <textarea id="site-f-${f}-${id}" placeholder="Your message" style="padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; min-height: 100px; font-family: inherit; font-size: 1rem;"></textarea>
                   </div>
                 `;
-              }
-              if (f === 'service_type') {
-                return `
+        }
+        if (f === 'service_type') {
+          return `
                   <div class="form-group">
                     <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; color: #666;">Service Type</label>
                     <select id="site-f-${f}-${id}" style="padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; background: white; font-family: inherit; font-size: 1rem;">
@@ -1203,14 +1231,14 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
                     </select>
                   </div>
                 `;
-              }
-              return `
+        }
+        return `
                 <div class="form-group">
                   <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; color: #666;">${f.charAt(0).toUpperCase() + f.slice(1).replace('_', ' ')}</label>
                   <input type="${f === 'email' ? 'email' : f === 'phone' ? 'tel' : 'text'}" id="site-f-${f}-${id}" placeholder="Your ${f.replace('_', ' ')}" style="padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; font-family: inherit; font-size: 1rem;">
                 </div>
               `;
-            }).join('')}
+      }).join('')}
             <button class="btn-primary" style="padding: 16px; margin-top: 10px; font-size: 1.1rem;" onclick="window.submitBuilderForm('${id}', true)">Send Message</button>
           </div>
         </div>
@@ -1259,7 +1287,7 @@ function renderReports() {
     'blank': 'Create Blank Page',
     'ai': 'Generate Page with AI'
   };
-  
+
   const modal = document.createElement('div');
   modal.id = 'page-name-modal';
   modal.innerHTML = `
@@ -1282,17 +1310,17 @@ function renderReports() {
 };
 
 (window as any).submitNewPage = (type: string) => {
-   const input = document.getElementById('new_page_name_input') as HTMLInputElement;
-   const newName = input.value.trim();
-   if (!newName) {
-     alert('Please enter a page name');
-     return;
-   }
-   
-   document.getElementById('page-name-modal')?.remove();
-   
-   const slug = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-   const newPage = {
+  const input = document.getElementById('new_page_name_input') as HTMLInputElement;
+  const newName = input.value.trim();
+  if (!newName) {
+    alert('Please enter a page name');
+    return;
+  }
+
+  document.getElementById('page-name-modal')?.remove();
+
+  const slug = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+  const newPage = {
     id: `p${Date.now()}`,
     name: newName,
     slug: slug,
@@ -1302,31 +1330,31 @@ function renderReports() {
     seo_keywords: [],
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
-   };
-   mockPages.push(newPage as any);
+  };
+  mockPages.push(newPage as any);
 
-   if (type === 'template') {
-     mockPageSections.push({
-        id: `ps-tpl-${Date.now()}`,
-        page_id: newPage.id,
-        type: 'hero',
-        content: { heading: 'Stunning Template Applied', subheading: 'Ready for you to customize visually!' },
-        order: 1,
-        styles: { background: '#2c3e50', color: '#ffffff' }
-     });
-   } else if (type === 'ai') {
-     mockPageSections.push({
-        id: `ps-ai-${Date.now()}`,
-        page_id: newPage.id,
-        type: 'text',
-        content: { text: '✨ This content was generated by AI specifically for ' + newName },
-        order: 1,
-        styles: { padding: '40px', background: '#fdfbfe' }
-     });
-   }
-   
-   (window as any).switchBuilderPage(newPage.id);
-   (window as any).navigateTo('builder');
+  if (type === 'template') {
+    mockPageSections.push({
+      id: `ps-tpl-${Date.now()}`,
+      page_id: newPage.id,
+      type: 'hero',
+      content: { heading: 'Stunning Template Applied', subheading: 'Ready for you to customize visually!' },
+      order: 1,
+      styles: { background: '#2c3e50', color: '#ffffff' }
+    });
+  } else if (type === 'ai') {
+    mockPageSections.push({
+      id: `ps-ai-${Date.now()}`,
+      page_id: newPage.id,
+      type: 'text',
+      content: { text: '✨ This content was generated by AI specifically for ' + newName },
+      order: 1,
+      styles: { padding: '40px', background: '#fdfbfe' }
+    });
+  }
+
+  (window as any).switchBuilderPage(newPage.id);
+  (window as any).navigateTo('builder');
 };
 
 (window as any).duplicatePage = (id: string) => {
@@ -1342,12 +1370,12 @@ function renderReports() {
     updated_at: new Date().toISOString()
   };
   mockPages.push(newPage as any);
-  
+
   const sections = mockPageSections.filter(s => s.page_id === id);
   sections.forEach(s => {
     mockPageSections.push({
       ...s,
-      id: `ps${Date.now()}-${Math.random().toString().slice(2,6)}`,
+      id: `ps${Date.now()}-${Math.random().toString().slice(2, 6)}`,
       page_id: newPage.id
     });
   });
@@ -1617,40 +1645,40 @@ function renderComponents() {
 
   const newName = prompt('Enter new page name:', template.name + ' Copy');
   if (!newName) return;
-  
+
   const slug = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
   const newPage = {
-   id: `p${Date.now()}`,
-   name: newName,
-   slug: slug,
-   status: 'draft',
-   seo_title: newName,
-   seo_description: '',
-   seo_keywords: [],
-   created_at: new Date().toISOString(),
-   updated_at: new Date().toISOString()
+    id: `p${Date.now()}`,
+    name: newName,
+    slug: slug,
+    status: 'draft',
+    seo_title: newName,
+    seo_description: '',
+    seo_keywords: [],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
   };
   mockPages.push(newPage as any);
 
   template.blocks.forEach((block: any, index: number) => {
     let mappedContent = { ...block.data };
-    let mappedStyles: any = { 
-       background: '#ffffff',
-       color: '#333333'
+    let mappedStyles: any = {
+      background: '#ffffff',
+      color: '#333333'
     };
-    
+
     if (block.type === 'hero') {
-       mappedContent = { heading: block.data.heading || block.data.title, subheading: block.data.subheading || block.data.subtitle, button_text: block.data.cta_text || block.data.buttonText };
-       mappedStyles = { background: template.theme.primary, color: 'white', text_alignment: 'center', padding: '100px 20px' };
+      mappedContent = { heading: block.data.heading || block.data.title, subheading: block.data.subheading || block.data.subtitle, button_text: block.data.cta_text || block.data.buttonText };
+      mappedStyles = { background: template.theme.primary, color: 'white', text_alignment: 'center', padding: '100px 20px' };
     } else if (block.type === 'services') {
-       mappedContent = { heading: block.data.title, items: block.data.items };
-       mappedStyles = { background: '#ffffff', color: '#333', padding: '80px 20px' };
+      mappedContent = { heading: block.data.title, items: block.data.items };
+      mappedStyles = { background: '#ffffff', color: '#333', padding: '80px 20px' };
     } else if (block.type === 'gallery') {
-       mappedContent = { heading: block.data.title, images: block.data.images };
-       mappedStyles = { background: '#fdfbfe', color: '#333', padding: '80px 20px' };
+      mappedContent = { heading: block.data.title, images: block.data.images };
+      mappedStyles = { background: '#fdfbfe', color: '#333', padding: '80px 20px' };
     } else if (block.type === 'contact') {
-       mappedContent = { title: block.data.title, fields: block.data.fields || ['name', 'email', 'phone', 'message'] };
-       mappedStyles = { background: template.theme.secondary, color: 'white', padding: '80px 20px' };
+      mappedContent = { title: block.data.title, fields: block.data.fields || ['name', 'email', 'phone', 'message'] };
+      mappedStyles = { background: template.theme.secondary, color: 'white', padding: '80px 20px' };
     }
 
     mockPageSections.push({
@@ -1753,9 +1781,9 @@ function renderWebsiteSettings() {
   `;
 
   (window as any).updateSettingsField = (field: string, value: string) => {
-      (mockWebsiteSettings as any)[field] = value;
-      renderWebsiteSettings();
-      console.log('Settings updated:', field, value);
+    (mockWebsiteSettings as any)[field] = value;
+    renderWebsiteSettings();
+    console.log('Settings updated:', field, value);
   };
 }
 
@@ -1850,8 +1878,8 @@ function handleLeadCaptureSubmission(e: Event) {
     const normalizedName = normalizeName(name);
 
     // Check if Contact exists with same phone OR same email
-    const existingContact = mockContacts.find(c => 
-      (phoneNorm.normalized && c.phone === phoneNorm.normalized) || 
+    const existingContact = mockContacts.find(c =>
+      (phoneNorm.normalized && c.phone === phoneNorm.normalized) ||
       (emailNorm && c.email === emailNorm)
     );
 
@@ -1862,8 +1890,8 @@ function handleLeadCaptureSubmission(e: Event) {
       console.log(`Duplicate found: using existing contact ${contactIdToUse} instead of creating a new one.`);
 
       // BASIC PROTECTION: Skip new opportunity if one was created for this contact in the last 2 minutes
-      const recentOpp = mockOpportunities.find(opp => 
-        opp.contact_id === contactIdToUse && 
+      const recentOpp = mockOpportunities.find(opp =>
+        opp.contact_id === contactIdToUse &&
         (new Date().getTime() - new Date(opp.created_at).getTime()) < 120000
       );
 
@@ -1882,7 +1910,7 @@ function handleLeadCaptureSubmission(e: Event) {
         email: emailNorm,
         address,
         tags: ['new-lead'],
-        source: 'website', 
+        source: 'website',
         service: service_type,
         status: 'lead',
         created_at: timestamp,
@@ -1938,16 +1966,16 @@ function handleLeadCaptureSubmission(e: Event) {
 
     } catch (oppError: any) {
       logError('opportunity_creation', oppError.message || 'Unknown error during manual lead capture', { name, phone, email, contactIdToUse });
-      
+
       // FALLBACK: Tag the newly created contact as "incomplete" instead of deleting it.
       const contact = mockContacts.find(c => c.id === contactIdToUse);
       if (contact) {
         contact.lead_status = "incomplete";
         console.warn(`Partial Failure: Contact ${contactIdToUse} preserved but marked as incomplete.`);
       }
-      
+
       alert('Something went wrong. Please try again.');
-      return; 
+      return;
     }
 
     const container = document.querySelector('.lead-form-container');
@@ -1971,7 +1999,7 @@ function handleLeadCaptureSubmission(e: Event) {
 function renderOpportunities() {
   const defaultPipeline = mockPipelines[0];
   const stages = defaultPipeline.stages;
-  
+
   const columnsHtml = stages.map(stage => {
     const stageOpportunities = mockOpportunities.filter(opp => opp.pipeline_stage === stage);
     const cardsHtml = stageOpportunities.map(opp => {
@@ -2145,14 +2173,14 @@ function renderNewQuote() {
   const nqoId = (window as any).newQuoteOpportunityId;
   const nqItems = (window as any).newQuoteLineItems;
 
-  const opportunities = nqcId 
-    ? mockOpportunities.filter(o => o.contact_id === nqcId) 
+  const opportunities = nqcId
+    ? mockOpportunities.filter(o => o.contact_id === nqcId)
     : [];
 
   const renderTierGroup = (tier: 'basic' | 'standard' | 'premium') => {
     const tierItems = nqItems.map((item: any, index: number) => ({ ...item, index })).filter((item: any) => item.tier === tier);
     const tierTotal = tierItems.reduce((sum: number, item: any) => sum + (item.quantity * item.price), 0);
-    
+
     return `
       <div style="flex: 1; min-width: 320px; background: #fff; padding: 20px; border-radius: 12px; border: 1px solid #eef2f6; display: flex; flex-direction: column;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -2271,13 +2299,13 @@ function renderNewQuote() {
     if (lineTotalEl) {
       lineTotalEl.textContent = `$${(item.quantity * item.price).toLocaleString()}`;
     }
-    
+
     // Update the tier total
     const tier = item.tier;
     const tierTotal = nqItems
       .filter((i: any) => i.tier === tier)
       .reduce((sum: number, i: any) => sum + (i.quantity * i.price), 0);
-    
+
     const tierTotalEl = document.getElementById(`tier-total-${tier}`);
     if (tierTotalEl) {
       tierTotalEl.textContent = `$${tierTotal.toLocaleString()}`;
@@ -2298,7 +2326,7 @@ function renderNewQuote() {
   const notes = (document.getElementById('quote-notes') as HTMLTextAreaElement)?.value || '';
 
   const quoteId = 'q' + (mockQuotes.length + 1) + '-' + Math.floor(Math.random() * 100);
-  
+
   // Default to Basic total initially
   const basicTotal = nqItems.filter((i: any) => i.tier === 'basic').reduce((sum: number, item: any) => sum + (item.quantity * item.price), 0);
 
@@ -2345,7 +2373,7 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   const opp = mockOpportunities.find(o => o.id === opportunity_id);
   if (opp) {
     opp.pipeline_stage = new_stage;
-    
+
     // Simple logic to update status based on stage
     if (new_stage === 'Completed' || new_stage === 'Paid') {
       opp.status = 'won';
@@ -2354,11 +2382,11 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
     } else {
       opp.status = 'open';
     }
-    
+
     // UI Refresh without reload
     (window as any).navigateTo(currentView, selectedContactId || undefined);
     console.log(`Opportunity ${opportunity_id} updated: Stage=[${new_stage}], Status=[${opp.status}]`);
-    
+
     // Trigger Automation
     runAutomations('OPPORTUNITY_STAGE_UPDATED', opp);
   }
@@ -2414,7 +2442,7 @@ function renderSkeleton(type: 'pages' | 'templates' | 'builder' | 'generic') {
   const previousView = currentView;
   currentView = view;
   if (id) selectedContactId = id;
-  
+
   checkOverdueInvoices();
 
   // Show skeleton if switching to major data-heavy views
@@ -2456,7 +2484,7 @@ function executeNavigation(view: string, id?: string) {
   if (view === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
   if (view === 'site' && id) renderSitePage(id);
   if (view === 'preview' && id) renderSitePage(id, true);
-  
+
   if (!['site', 'preview'].includes(view)) {
     document.title = 'Hansveer CRM';
     updateMetaTag('description', 'Professional CRM for Handyman Businesses');
@@ -2465,10 +2493,10 @@ function executeNavigation(view: string, id?: string) {
 }
 
 (window as any).downloadSitemap = () => {
-    const publishedPages = mockPages.filter(p => p.status === 'published');
-    const baseUrl = 'https://hanssays.com/site'; // Hypothetical production base URL
+  const publishedPages = mockPages.filter(p => p.status === 'published');
+  const baseUrl = 'https://hanssays.com/site'; // Hypothetical production base URL
 
-    const sitemapContent = `<?xml version="1.0" encoding="UTF-8"?>
+  const sitemapContent = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${publishedPages.map(page => `  <url>
     <loc>${baseUrl}/${page.slug}</loc>
@@ -2478,17 +2506,17 @@ ${publishedPages.map(page => `  <url>
   </url>`).join('\n')}
 </urlset>`;
 
-    const blob = new Blob([sitemapContent], { type: 'application/xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'sitemap.xml';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    alert('Dynamic Sitemap generated and downloaded for ' + publishedPages.length + ' published pages.');
+  const blob = new Blob([sitemapContent], { type: 'application/xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'sitemap.xml';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  alert('Dynamic Sitemap generated and downloaded for ' + publishedPages.length + ' published pages.');
 };
 
 (window as any).selectQuoteTier = (quoteId: string, tier: 'basic' | 'standard' | 'premium') => {
@@ -2618,61 +2646,61 @@ function renderQuotePreview(quoteId: string) {
  * GET /api/contacts/:id/timeline
  */
 async function loadTimeline(contactId: string) {
-    console.log(`[API] GET /api/contacts/${contactId}/timeline`);
-    
-    // FETCH: In a real system we would use fetch()
-    const timeline = getContactTimeline(contactId);
-    
-    // STATE: Store response in local state
-    contactTimelineState = timeline;
+  console.log(`[API] GET /api/contacts/${contactId}/timeline`);
 
-    // RENDER: Simple list (no heavy styling yet)
-    const timelineContainer = document.getElementById('api-timeline-list');
-    if (timelineContainer) {
-        timelineContainer.innerHTML = contactTimelineState.map(group => `
+  // FETCH: In a real system we would use fetch()
+  const timeline = getContactTimeline(contactId);
+
+  // STATE: Store response in local state
+  contactTimelineState = timeline;
+
+  // RENDER: Simple list (no heavy styling yet)
+  const timelineContainer = document.getElementById('api-timeline-list');
+  if (timelineContainer) {
+    timelineContainer.innerHTML = contactTimelineState.map(group => `
             <div style="margin-bottom: 25px;">
                 <div style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">${group.label}</div>
                 <div style="display: flex; flex-direction: column; gap: 4px;">
                     ${group.items.map((item: any) => {
-                        const isMissed = item.type === 'call_missed';
-                        const color = isMissed ? '#dc2626' : '#1e293b';
-                        const borderColor = isMissed ? '#fca5a5' : '#e2e8f0';
+      const isMissed = item.type === 'call_missed';
+      const color = isMissed ? '#dc2626' : '#1e293b';
+      const borderColor = isMissed ? '#fca5a5' : '#e2e8f0';
 
-                        return `
+      return `
                             <div style="background: #fff; border-radius: 8px; padding: 12px 15px; border-left: 3px solid ${borderColor}; margin-bottom: 4px;">
                                 <div style="font-size: 0.95rem; color: ${color}; font-weight: ${isMissed ? '600' : '500'}; margin-bottom: 4px;">${item.content}</div>
                                 <div style="font-size: 0.8rem; color: #64748b;">${item.created_at}</div>
                             </div>
                         `;
-                    }).join('')}
+    }).join('')}
                     ${group.items.length === 0 ? '<p style="color: #94a3b8; font-style: italic; padding: 10px;">No activities recorded.</p>' : ''}
                 </div>
             </div>
         `).join('') || '<p style="padding: 20px; color: #94a3b8;">No timeline entries found.</p>';
-    }
+  }
 }
 
 (window as any).loadTimeline = loadTimeline;
 
 async function sendQuickSMS(contactId: string) {
-    const contact = mockContacts.find(c => c.id === contactId);
-    if (!contact) return;
+  const contact = mockContacts.find(c => c.id === contactId);
+  if (!contact) return;
 
-    const message = prompt(`Send a quick SMS to ${contact.name}:`);
-    if (!message || !message.trim()) return;
+  const message = prompt(`Send a quick SMS to ${contact.name}:`);
+  if (!message || !message.trim()) return;
 
-    console.log(`[ACTION] Sending Quick SMS to ${contact.name}...`);
-    
-    // Simulate POST /api/messages/send
-    const result = await sendMessageToContact(contactId, message, 'manual_followup');
-    
-    if (result.success) {
-        alert('SMS Sent successfully!');
-        // PROMPT: message created + timeline updates
-        await loadTimeline(contactId);
-    } else {
-        alert(`Failed to send SMS: ${result.error}`);
-    }
+  console.log(`[ACTION] Sending Quick SMS to ${contact.name}...`);
+
+  // Simulate POST /api/messages/send
+  const result = await sendMessageToContact(contactId, message, 'manual_followup');
+
+  if (result.success) {
+    alert('SMS Sent successfully!');
+    // PROMPT: message created + timeline updates
+    await loadTimeline(contactId);
+  } else {
+    alert(`Failed to send SMS: ${result.error}`);
+  }
 }
 
 (window as any).sendQuickSMS = sendQuickSMS;
@@ -2682,224 +2710,106 @@ function renderContactDetail(contactId: string) {
   if (!contact) return;
 
   const contactOpps = mockOpportunities.filter(opp => opp.contact_id === contactId);
+  const contactQuotes = mockQuotes.filter(q => q.contact_id === contactId);
+  const contactInvoices = mockInvoices.filter(i => i.contact_id === contactId);
 
   app.innerHTML = `
     ${renderSidebar('clients')}
-    <main class="main-content">
-      <header class="view-header">
-        <div style="display: flex; align-items: center; gap: 15px;">
-          <button onclick="window.navigateTo('clients')" class="btn-primary" style="background: #eee; color: #333; padding: 5px 10px;">← Back</button>
-          <h2>${contact.name}</h2>
-          <span class="badge badge-${contact.status}">${contact.status}</span>
+    <main class="main-content" style="padding: 24px; max-width: 1100px; margin: 0 auto; background: #fff;">
+      <!-- Header -->
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <button onclick="window.navigateTo('clients')" style="background: #f1f5f9; border: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; color: #475569; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+            <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+            Back
+          </button>
+          <h2 style="margin: 0; font-size: 1.6rem; font-weight: 800; color: #0f172a;">${contact.name}</h2>
+          <span class="badge badge-${contact.status}" style="font-size: 0.75rem; padding: 4px 10px;">${contact.status}</span>
         </div>
-      </header>
-
-      <!-- Quick Actions (PROMPT 4) -->
-      <div class="card" style="margin-bottom: 24px; display: flex; align-items: center; gap: 24px; padding: 20px 24px; background: #f8fafc; border: 1px dashed #cbd5e1;">
-        <div style="font-weight: 800; color: #475569; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 1px;">Quick Actions</div>
-        <div style="display: flex; gap: 12px; align-items: center;">
-          ${contact.phone ? `
-            <a href="tel:${contact.phone}" class="btn-primary" style="background: #22c55e; text-decoration: none; display: flex; align-items: center; gap: 8px;">
-              📞 Call
-            </a>
-            <button class="btn-primary" onclick="window.sendQuickSMS('${contact.id}')" style="background: #6366f1; display: flex; align-items: center; gap: 8px;">
-              💬 Send SMS
-            </button>
-          ` : `
-            <span style="color: #94a3b8; font-size: 0.9rem; font-style: italic;">No phone number available for quick actions.</span>
-          `}
+        <div style="display: flex; gap: 8px;">
+          <button class="btn-primary" style="background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; font-size: 0.8rem; padding: 8px 16px;" onclick="window.addNote('${contactId}')">📝 Note</button>
+          <button class="btn-primary" style="font-size: 0.8rem; padding: 8px 16px;" onclick="window.createOpportunity('${contactId}')">💰 New Opportunity</button>
         </div>
       </div>
 
-      <div class="action-bar">
-        <button class="btn-primary" onclick="window.logCall('${contactId}')">📞 Log Call</button>
-        <button class="btn-primary" onclick="window.addNote('${contactId}')" style="background: var(--secondary-color);">📝 Add Note</button>
-        <button class="btn-primary" onclick="window.createOpportunity('${contactId}')" style="background: #28a745;">💰 New Opportunity</button>
-        <button class="btn-primary" onclick="window.createQuote('${contactId}')" style="background: #17a2b8;">📄 Create Quote</button>
-        <button class="btn-primary" onclick="window.createInvoice('${contactId}')" style="background: #e67e22;">💳 Create Invoice</button>
+      <!-- 1. High-Density Contact Info Grid -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 20px;">
+         <div>
+           <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Phone</div>
+           <input type="text" value="${contact.phone}" onchange="window.updateContactField('${contactId}', 'phone', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
+         </div>
+         <div>
+           <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Email</div>
+           <input type="email" value="${contact.email || ''}" placeholder="Add email..." onchange="window.updateContactField('${contactId}', 'email', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
+         </div>
+         <div>
+           <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Source</div>
+           <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${contact.source}</div>
+         </div>
+         <div>
+           <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Address</div>
+           <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${contact.address}">${contact.address}</div>
+         </div>
       </div>
 
-      <div class="detail-container">
-        <!-- Sidebar Info -->
-        <aside class="detail-sidebar">
-          <div class="card">
-            <h3>Contact Information</h3>
-            <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px;">
-              <div>
-                <label style="display: block; font-size: 0.75rem; color: #666;">Phone</label>
-                <input type="text" value="${contact.phone}" class="inline-input" onchange="window.updateContactField('${contactId}', 'phone', this.value)" style="width: 100%;">
+      <!-- 2. Priority Quick Actions -->
+      <div style="display: flex; gap: 12px; margin-bottom: 30px;">
+        ${contact.phone ? `
+          <a href="tel:${contact.phone}" class="btn-primary" style="background: #10b981; flex: 1; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
+            📞 Call Lead Now
+          </a>
+          <button class="btn-primary" onclick="window.sendQuickSMS('${contact.id}')" style="background: #6366f1; flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);">
+            💬 Send Quick Text
+          </button>
+        ` : '<div style="flex: 1; color: #64748b; font-style: italic; background: #f8fafc; padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #e2e8f0;">No phone number provided for quick actions</div>'}
+      </div>
+
+      <!-- 3. Main Content Split -->
+      <div class="detail-container" style="display: grid; grid-template-columns: 1.6fr 1fr; gap: 24px; align-items: start;">
+        
+        <!-- Left Column: Timeline -->
+        <section>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+            <h3 style="margin: 0; font-size: 0.85rem; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Activity Timeline</h3>
+            <button onclick="window.logCall('${contactId}')" style="background: transparent; border: 1px solid #e2e8f0; color: #64748b; font-size: 0.75rem; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-weight: 600;">Log Item +</button>
+          </div>
+          <div class="card" style="padding: 0; border: 1px solid #e2e8f0; box-shadow: none;">
+            <div id="api-timeline-list" style="max-height: 600px; overflow-y: auto;">
+              <div style="padding: 40px; text-align: center; color: #94a3b8;">
+                 <div class="skeleton-row" style="width: 60%; margin: 10px auto;"></div>
+                 <div class="skeleton-row" style="width: 40%; margin: 10px auto;"></div>
+                 <p style="font-size: 0.85rem; margin-top: 15px;">Retrieving history...</p>
               </div>
-              <div>
-                <label style="display: block; font-size: 0.75rem; color: #666;">Email</label>
-                <input type="email" value="${contact.email || ''}" class="inline-input" onchange="window.updateContactField('${contactId}', 'email', this.value)" style="width: 100%;">
-              </div>
-              <p><strong>Address:</strong> ${contact.address}</p>
-              <p><strong>Source:</strong> ${contact.source}</p>
-              <p><strong>Created:</strong> ${new Date(contact.created_at).toLocaleDateString()}</p>
             </div>
-            
-            <h3 style="margin-top: 25px;">Active Opportunities</h3>
-            <div style="margin-top: 15px;">
+          </div>
+        </section>
+
+        <!-- Right Column: Financials & Deals -->
+        <aside style="display: flex; flex-direction: column; gap: 24px;">
+          
+          <!-- Opportunities -->
+          <div>
+            <h3 style="margin: 0 0 12px 0; font-size: 0.85rem; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Active Opportunities</h3>
+            <div class="card" style="padding: 12px; border: 1px solid #e2e8f0; box-shadow: none;">
               ${contactOpps.map(opp => `
-                <div class="opportunity-strip">
-                  <div style="flex: 1;">
-                    <div style="display: flex; align-items: center;">
-                      <span>$</span>
-                      <input type="number" 
-                             value="${opp.value}" 
-                             class="inline-input" 
-                             onchange="window.updateOpportunityField('${opp.id}', 'value', this.value)" 
-                             style="width: 80px; font-weight: 600;">
-                    </div>
-                    <select class="inline-select" onchange="window.updateOpportunityStage('${opp.id}', this.value)">
-                      ${mockPipelines[0].stages.map(s => `<option value="${s}" ${s === opp.pipeline_stage ? 'selected' : ''}>${s}</option>`).join('')}
-                    </select>
+                <div style="padding: 10px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center;">
+                  <div>
+                    <div style="font-weight: 700; color: #1e293b; font-size: 0.9rem;">$${opp.value.toLocaleString()}</div>
+                    <div style="font-size: 0.75rem; color: #64748b;">${opp.pipeline_stage}</div>
                   </div>
-                  <span class="badge badge-${opp.status}" style="font-size: 0.7rem;">${opp.status}</span>
+                  <span class="badge badge-${opp.status}" style="font-size: 0.65rem;">${opp.status}</span>
                 </div>
-                ${opp.notes ? `<div style="font-size: 0.8rem; color: #666; font-style: italic; margin: 10px 0 0 5px; padding-left: 8px; border-left: 2px solid #ddd; word-break: break-word;">${opp.notes.replace(/\n/g, '<br>')}</div>` : ''}
-              `).join('') || '<p>No opportunities</p>'}
+              `).join('') || '<div style="padding: 10px; color: #94a3b8; font-size: 0.85rem; text-align: center; font-style: italic;">No active opportunities</div>'}
             </div>
           </div>
+
+          <!-- Quotes & Invoices Summary -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div class="card" style="padding: 16px; border: 1px solid #e2e8f0; box-shadow: none; text-align: center;">
+              <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; margin-bottom: 4px;">Quotes</div>
+              <div style="font-size: 1.25rem; font-weight: 800; color: #1e293b;">${contactQuotes.length}</div>
+
         </aside>
-
-        <!-- Main Column -->
-        <div class="timeline-container">
-          <div class="card" style="margin-bottom: 24px;">
-            <h3>Activity Timeline</h3>
-            <div id="api-timeline-list">
-              <p style="padding: 20px; color: #666;">Loading activity...</p>
-            </div>
-          </div>
-
-          <div class="card" style="display: none;">
-            <h3>Activity Timeline (Legacy)</h3>
-            <div class="timeline">
-              ${(() => {
-                const groupedTimeline = getContactTimeline(contactId);
-
-                return groupedTimeline.map(group => {
-                  if (group.items.length === 0) return '';
-                  
-                  const header = `<div class="timeline-group-label" style="padding: 24px 0 8px 10px; font-weight: 600; color: #64748b; font-size: 0.85rem;">${group.label}</div>`;
-                  
-                  const itemsHtml = group.items.map(item => {
-                    let dotColor = '#94a3b8'; // Default gray
-                    let badge = '';
-
-                    if (item.type === 'message') {
-                      dotColor = '#818cf8';
-                      badge = `<span style="font-size: 0.7rem; color: #94a3b8;">SMS</span>`;
-                    } else if (item.type === 'form_submission') {
-                      dotColor = '#f59e0b'; // Amber
-                      badge = `<span style="font-size: 0.7rem; color: #94a3b8;">FORM</span>`;
-                    } else if (item.type === 'event') {
-                      // Check if it's an activity disguised as an event
-                      const isActivity = !!(item.metadata as any)?.activityType;
-                      if (isActivity) {
-                          dotColor = ((item.metadata as any)?.completed) ? '#28a745' : 'var(--primary-color)';
-                          badge = `<span style="font-size: 0.7rem; color: #94a3b8;">${(item.metadata as any)?.activityType?.toUpperCase()}</span>`;
-                      } else {
-                          dotColor = '#94a3b8';
-                          badge = `<span style="font-size: 0.7rem; color: #94a3b8;">EVENT</span>`;
-                      }
-                    }
-
-                    return `
-                      <div class="timeline-item ${item.is_latest ? 'latest-activity' : ''}" style="${item.is_latest ? 'background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 12px; padding: 10px;' : ''}">
-                        <div class="timeline-dot" style="background: ${dotColor}"></div>
-                        <div class="timeline-content">
-                          <div class="timeline-time">${item.created_at} ${item.is_latest ? '<span style="color: var(--primary-color); font-weight: 700; margin-left: 8px;">(Latest activity)</span>' : ''}</div>
-                          <div style="display: flex; justify-content: space-between; align-items: start;">
-                            <div style="flex: 1;">
-                              <strong style="color: #1e293b;">${item.content}</strong>
-                              ${item.type === 'event' && (item.metadata as any)?.activityType && !(item.metadata as any)?.completed ? `
-                                <div style="margin-top: 8px;">
-                                  <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="window.completeTask('${(item as any).reference_id}')">Mark Complete</button>
-                                </div>` : ''}
-                            </div>
-                            ${badge}
-                          </div>
-                        </div>
-                      </div>
-                    `;
-                  }).join('');
-                  
-                  return header + itemsHtml;
-                }).join('') || '<p style="padding: 20px;">No activity logged.</p>';
-              })()}
-            </div>
-          </div>
-
-          <div class="card" style="margin-top: 24px;">
-            <h3>Quotes</h3>
-            <div style="margin-top: 15px;">
-              <table class="clients-table" style="box-shadow: none; border: 1px solid #eee;">
-                <thead>
-                  <tr>
-                    <th>Quote #</th>
-                    <th>Status</th>
-                    <th>Total</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${mockQuotes.filter(q => q.contact_id === contactId).map(quote => `
-                    <tr>
-                      <td style="font-weight: 600;">Q-${quote.id}</td>
-                      <td><span class="badge badge-${quote.status}">${quote.status}</span></td>
-                      <td>$${quote.total_amount.toLocaleString()}</td>
-                      <td>
-                        <div style="display: flex; gap: 5px;">
-                          <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="event.stopPropagation(); window.navigateTo('quote-preview', '${quote.id}')">Preview</button>
-                          <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${quote.contact_id}')">View</button>
-                          ${quote.status === 'draft' ? `<button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="event.stopPropagation(); window.sendQuote('${quote.id}')">Send</button>` : ''}
-                          ${quote.status === 'sent' ? `
-                            <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="event.stopPropagation(); window.approveQuote('${quote.id}')">Approve</button>
-                            <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #dc3545;" onclick="event.stopPropagation(); window.rejectQuote('${quote.id}')">Reject</button>
-                          ` : ''}
-                        </div>
-                      </td>
-                    </tr>
-                  `).join('') || '<tr><td colspan="4" style="text-align: center; color: #666; padding: 20px;">No quotes created.</td></tr>'}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="card" style="margin-top: 24px;">
-            <h3>Invoices</h3>
-            <div style="margin-top: 15px;">
-              <table class="clients-table" style="box-shadow: none; border: 1px solid #eee;">
-                <thead>
-                  <tr>
-                    <th>Invoice #</th>
-                    <th>Status</th>
-                    <th>Total</th>
-                    <th>Due Date</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${mockInvoices.filter(i => i.contact_id === contactId).map(invoice => `
-                    <tr>
-                      <td style="font-weight: 600;">INV-${invoice.id}</td>
-                      <td><span class="badge badge-${invoice.status}">${invoice.status}</span></td>
-                      <td>$${invoice.amount.toLocaleString()}</td>
-                      <td>${new Date(invoice.due_date).toLocaleDateString()}</td>
-                      <td>
-                        <div style="display: flex; gap: 5px;">
-                          <button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${invoice.contact_id}')">View</button>
-                          ${invoice.status !== 'paid' ? `<button class="btn-primary" style="padding: 4px 8px; font-size: 0.75rem; background: #28a745;" onclick="event.stopPropagation(); window.markAsPaid('${invoice.id}')">Mark as Paid</button>` : ''}
-                        </div>
-                      </td>
-                    </tr>
-                  `).join('') || '<tr><td colspan="5" style="text-align: center; color: #666; padding: 20px;">No invoices created.</td></tr>'}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
       </div>
     </main>
   `;
@@ -2960,10 +2870,10 @@ function renderContactDetail(contactId: string) {
   };
 
   mockOpportunities.push(newOpp);
-  
+
   // Trigger automation
   runAutomations('OPPORTUNITY_CREATED', newOpp);
-  
+
   renderContactDetail(contactId);
 };
 
@@ -2999,12 +2909,12 @@ function renderContactDetail(contactId: string) {
 
 (window as any).createQuote = (contactId: string) => {
   (window as any).newQuoteContactId = contactId;
-  
+
   // Try to find the latest open opportunity for this contact
   const activeOpp = mockOpportunities
     .filter(o => o.contact_id === contactId && o.status === 'open')
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-    
+
   (window as any).newQuoteOpportunityId = activeOpp ? activeOpp.id : '';
   (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0, tier: 'basic' }];
   (window as any).navigateTo('new-quote');
@@ -3014,7 +2924,7 @@ function renderContactDetail(contactId: string) {
   const invoice = mockInvoices.find(i => i.id === invoiceId);
   if (invoice) {
     invoice.status = 'paid';
-    
+
     // Update linked opportunity
     const quote = mockQuotes.find(q => q.id === invoice.quote_id);
     if (quote && quote.opportunity_id) {
@@ -3085,7 +2995,7 @@ function renderContactDetail(contactId: string) {
       opportunity.pipeline_stage = 'Scheduled';
       opportunity.value = quote.total_amount; // Update value to reflect actual quote
     }
-    
+
     mockActivities.push({
       id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
       contact_id: quote.contact_id,
@@ -3132,7 +3042,7 @@ function renderContactDetail(contactId: string) {
     quote.status = 'rejected';
     const opportunity = mockOpportunities.find(o => o.id === quote.opportunity_id);
     if (opportunity) {
-       opportunity.status = 'lost';
+      opportunity.status = 'lost';
     }
 
     mockActivities.push({
@@ -3154,7 +3064,7 @@ function renderContactDetail(contactId: string) {
   if (quote) {
     quote.status = 'sent';
     console.log(`Sending Quote Q-${quote.id} to client...`);
-    
+
     // Log Activity
     mockActivities.push({
       id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
@@ -3191,13 +3101,13 @@ function renderContactDetail(contactId: string) {
 
   // Use the most recent quote by default for simulation
   const latestQuote = contactQuotes[contactQuotes.length - 1];
-  
+
   const amountStr = prompt("Enter Invoice Amount:", latestQuote.total_amount.toString());
   const amount = parseFloat(amountStr || "0");
   if (isNaN(amount)) return;
 
   const invoiceId = 'i' + (mockInvoices.length + 1) + '-' + Math.floor(Math.random() * 100);
-  
+
   const dueDate = new Date();
   dueDate.setDate(dueDate.getDate() + 7); // Due in 7 days
 
@@ -3215,7 +3125,7 @@ function renderContactDetail(contactId: string) {
 };
 
 function renderEventLogs() {
-  const sortedLogs = [...mockEventLogs].sort((a, b) => 
+  const sortedLogs = [...mockEventLogs].sort((a, b) =>
     new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
 
@@ -3267,39 +3177,39 @@ checkOverdueInvoices();
 const path = window.location.pathname;
 
 if (path.includes('/site/')) {
-    const slug = path.split('/site/')[1];
-    (window as any).navigateTo('site', slug);
+  const slug = path.split('/site/')[1];
+  (window as any).navigateTo('site', slug);
 } else if (path.includes('/preview/')) {
-    const slug = path.split('/preview/')[1];
-     (window as any).navigateTo('preview', slug);
+  const slug = path.split('/preview/')[1];
+  (window as any).navigateTo('preview', slug);
 } else {
-    renderDashboard();
+  renderDashboard();
 }
 
 // Auto-refresh Sidebar Counts & New Lead Alerts (PROMPT 8, 9, 10)
 setInterval(() => {
-    let changeDetected = false;
+  let changeDetected = false;
 
-    // 1. Detect New Leads (Global Alert)
-    if (mockContacts.length > lastContactCount) {
-        const diff = mockContacts.length - lastContactCount;
-        (window as any).showToast(diff === 1 ? 'New lead received' : `${diff} new leads received`);
-        lastContactCount = mockContacts.length;
-        changeDetected = true;
+  // 1. Detect New Leads (Global Alert)
+  if (mockContacts.length > lastContactCount) {
+    const diff = mockContacts.length - lastContactCount;
+    (window as any).showToast(diff === 1 ? 'New lead received' : `${diff} new leads received`);
+    lastContactCount = mockContacts.length;
+    changeDetected = true;
+  }
+
+  // 2. Refresh UI (only in standard app views)
+  const sidebar = document.querySelector('.sidebar');
+  if (sidebar && !['builder', 'preview', 'site'].includes(currentView)) {
+    console.log('[POLLING] Refreshing UI state...');
+
+    // Always refresh sidebar for badge counts
+    sidebar.outerHTML = renderSidebar(currentView);
+
+    // If a new lead was detected, re-render the active view to show it immediately
+    if (changeDetected) {
+      if (currentView === 'clients') renderClients();
+      if (currentView === 'dashboard') renderDashboard();
     }
-
-    // 2. Refresh UI (only in standard app views)
-    const sidebar = document.querySelector('.sidebar');
-    if (sidebar && !['builder', 'preview', 'site'].includes(currentView)) {
-        console.log('[POLLING] Refreshing UI state...');
-        
-        // Always refresh sidebar for badge counts
-        sidebar.outerHTML = renderSidebar(currentView);
-
-        // If a new lead was detected, re-render the active view to show it immediately
-        if (changeDetected) {
-            if (currentView === 'clients') renderClients();
-            if (currentView === 'dashboard') renderDashboard();
-        }
-    }
+  }
 }, 30000);

@@ -1071,3 +1071,136 @@ button:active {
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 24px;
 }
+
+/* Mobile Usability Fixes (PROMPT 16) */
+@media (max-width: 768px) {
+    #app {
+        flex-direction: column;
+        height: auto;
+    }
+
+    .sidebar {
+        width: 100% !important;
+        height: auto !important;
+        padding: 12px 20px !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        overflow-x: auto !important;
+        white-space: nowrap !important;
+        position: sticky !important;
+        top: 0 !important;
+        z-index: 1000 !important;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+        border-bottom: 1px solid #333 !important;
+    }
+
+    .sidebar h1 {
+        margin-bottom: 0 !important;
+        margin-right: 24px !important;
+        font-size: 1.1rem !important;
+    }
+
+    .sidebar nav {
+        display: inline-block !important;
+    }
+
+    .sidebar nav ul {
+        display: flex !important;
+        gap: 20px !important;
+        margin-bottom: 0 !important;
+        padding: 0 !important;
+        list-style: none !important;
+    }
+
+    .sidebar nav ul li {
+        margin-bottom: 0 !important;
+        padding: 12px 4px !important;
+        font-size: 0.95rem !important;
+        display: inline-block !important;
+    }
+
+    .sidebar .nav-group-title {
+        display: none !important;
+    }
+
+    .main-content {
+        padding: 16px !important;
+        width: 100% !important;
+        overflow-x: hidden !important;
+    }
+
+    .view-header {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 16px !important;
+        margin-bottom: 24px !important;
+    }
+
+    /* Buttons min-height 44px for touch targets */
+    .btn-primary, .btn-secondary, button, a.btn-primary {
+        min-height: 48px !important;
+        padding: 12px 20px !important;
+        font-size: 16px !important;
+        width: auto !important;
+    }
+
+    /* Table and Grid Responsiveness */
+    .card {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        padding: 16px !important;
+    }
+
+    .clients-table {
+        min-width: 700px !important; /* Forces scroll instead of squishing */
+    }
+
+    /* Dashboard grids */
+    .dashboard-grid, .stats-grid, .skeleton-card-grid {
+        grid-template-columns: 1fr !important;
+        gap: 16px !important;
+    }
+
+    /* Contact Detail Optimization */
+    .detail-container {
+        grid-template-columns: 1fr !important;
+        gap: 20px !important;
+    }
+    
+    .detail-sidebar {
+        position: static !important;
+        width: 100% !important;
+    }
+
+    /* Timeline touch optimization */
+    #api-timeline-list {
+        max-height: none !important;
+        overflow-y: visible !important;
+        scroll-behavior: smooth !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+
+    .timeline-item {
+        padding-bottom: 16px !important;
+    }
+    
+    .timeline-content {
+        padding: 16px !important;
+    }
+
+    /* Quick Actions Row */
+    .action-bar {
+        flex-direction: column !important;
+        gap: 12px !important;
+    }
+    
+    .action-bar button {
+        width: 100% !important;
+        justify-content: flex-start !important;
+    }
+}
+
+/* Global scroll smoothing */
+html {
+    scroll-behavior: smooth;
+}
