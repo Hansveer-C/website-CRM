@@ -49,3 +49,59 @@ export async function handleInboundCall(data: { phone: string }) {
     timestamp
   };
 }
+
+/**
+ * End Call (Simulated POST /api/calls/end)
+ * 
+ * Instructions:
+ * - Fetch call by ID
+ * - Update status based on answered flag
+ * - Log result
+ */
+export async function endCall(data: { call_id: string; answered: boolean }) {
+  if (!data || !data.call_id) {
+    throw new Error('call_id is required to end a call.');
+  }
+
+  const call = mockCalls.find(c => c.id === data.call_id);
+  
+  if (!call) {
+    const errorMsg = `Call with ID ${data.call_id} not found.`;
+    console.error(`[API ERROR] ${errorMsg}`);
+    throw new Error(errorMsg);
+  }
+
+  // PROMPT 7: Prevent duplicate call end handling
+  if (call.status === 'answered' || call.status === 'missed') {
+    console.log(`Call already processed: ${call.status}`);
+    return {
+      status: 'ignored',
+      callId: call.id,
+      currentStatus: call.status,
+      message: 'Call already processed'
+    };
+  }
+
+  // Update status
+  call.status = data.answered ? 'answered' : 'missed';
+  const timestamp = new Date().toISOString();
+  
+  // Requirement: Log: "Call ended: answered/missed"
+  console.log(`Call ended: ${call.status}`);
+
+  // PROMPT 6: Emit "call_missed" if not answered
+  if (!data.answered) {
+    await emitEvent('call_missed', {
+      phone: call.phone,
+      call_id: call.id,
+      timestamp
+    });
+  }
+
+  return {
+    status: 'updated',
+    callId: call.id,
+    newStatus: call.status,
+    timestamp
+  };
+}

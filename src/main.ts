@@ -39,10 +39,11 @@ validateTwilioConfig();
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
 import { normalizePhone, normalizeEmail, normalizeName, createLead } from './leads_logic';
-import { handleInboundCall } from './calls_logic';
+import { handleInboundCall, endCall } from './calls_logic';
 
 // Simulated API exposed to window (Phase 1.8.1)
 (window as any).handleInboundCall = handleInboundCall;
+(window as any).endCall = endCall;
 
 
 // Normalize existing mock data

@@ -196,6 +196,6 @@ export interface TimelineItem {
 export interface Call {
   id: string;
   phone: string;
-  status: 'received' | 'missed' | 'answered';
+  status: 'received' | 'answered' | 'missed' | 'ended';
   created_at: string;
 }
