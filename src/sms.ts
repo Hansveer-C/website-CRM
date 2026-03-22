@@ -28,12 +28,17 @@ export function getDefaultLeadReply(contact: Partial<Contact> | undefined | null
  * Uses a conversational fallback if the caller is unknown.
  * 
  * @param contact The contact object (can be partial)
+ * @param template Optional custom message template
  * @returns Formatted SMS message string
  */
-export function getMissedCallReply(contact: Partial<Contact> | undefined | null): string {
-  const name = contact?.name?.trim() || '';
+export function getMissedCallReply(contact: Partial<Contact> | undefined | null, template?: string): string {
+  const name = (contact?.name?.trim() || '').replace('Unknown Caller', '');
   
-  if (!name || name === 'Unknown Caller') {
+  if (template && template.trim()) {
+    return template.replace(/{name}/g, name || 'there');
+  }
+
+  if (!name) {
     return 'Hey, sorry I missed your call. How can I help?';
   }
   

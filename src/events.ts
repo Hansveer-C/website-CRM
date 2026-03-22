@@ -154,6 +154,13 @@ import { normalizePhone } from './leads_logic';
 // --- Match Inbound Call to Contact (Phase 1.8.2) ---
 onEvent('call_missed', async (payload) => {
   console.log('call_missed event received');
+  
+  // PROMPT 19: Global Toggle
+  if (!mockWebsiteSettings.missed_call_sms_enabled) {
+    console.log('Missed call SMS disabled');
+    return;
+  }
+
   const { phone, call_id } = payload;
   
   if (!phone) {
@@ -196,8 +203,37 @@ onEvent('call_missed', async (payload) => {
   
   console.log(`[SMS PREP] Target contact resolved: ${targetContact.name} (${targetContact.id})`);
 
+  // PROMPT 17: Extra Duplicate Protection (2-minute window)
+  const now = Date.now();
+  const recentAutomation = mockMessages.find(m => 
+    m.contact_id === targetContact.id && 
+    m.source === 'missed_call_automation' &&
+    (now - new Date(m.created_at).getTime()) < 120000 // 2 minutes
+  );
+
+  if (recentAutomation) {
+    console.log('Missed call SMS already sent');
+    console.log(`[SMS SKIPPED] Prevented duplicate follow-up within 2-minute window for ${targetContact.name}`);
+    return;
+  }
+
+  // PROMPT 18: 5-minute Rate Limit (Max 2 messages)
+  const fiveMinutesAgo = now - 300000;
+  const recentCount = mockMessages.filter(m => 
+    m.contact_id === targetContact.id && 
+    m.source === 'missed_call_automation' &&
+    new Date(m.created_at).getTime() > fiveMinutesAgo
+  ).length;
+
+  if (recentCount >= 2) {
+    console.log('Missed call SMS rate limited');
+    console.warn(`[SMS SKIPPED] Rate limit of 2 messages reached within 5 minutes for ${targetContact.name}`);
+    return;
+  }
+
   // Send SMS (PROMPT 15)
-  const smsMessage = getMissedCallReply(targetContact);
+  const smsMessage = getMissedCallReply(targetContact, mockWebsiteSettings.missed_call_sms_template);
+  console.log(`[SMS PREP] Message prepared: "${smsMessage}"`);
   const smsResult = await sendMessageToContact(targetContact.id, smsMessage, 'missed_call_automation');
   
   if (smsResult.success) {
@@ -209,6 +245,7 @@ onEvent('call_missed', async (payload) => {
   } else {
     console.log('Missed call SMS failed');
     console.error(`[SMS FAILURE] Could not send reply to ${targetContact.name}: ${smsResult.error}`);
+    targetContact.follow_up_required = true;
   }
 
   // Create Opportunity (PROMPT 10)

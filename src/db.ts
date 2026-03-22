@@ -440,7 +440,9 @@ export const mockWebsiteSettings: WebsiteSettings = {
   facebook_pixel_id: '',
   gtm_id: '',
   auto_lead_sms_enabled: true,
-  auto_lead_sms_template: '',
+  auto_lead_sms_template: "Hey {name}, thanks for reaching out! I'll get back to you ASAP.",
+  missed_call_sms_enabled: true,
+  missed_call_sms_template: '',
   created_at: new Date().toISOString()
 };
 

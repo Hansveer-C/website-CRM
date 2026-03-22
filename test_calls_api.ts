@@ -1,6 +1,6 @@
 // d:\Website-CRM\test_calls_api.ts
 import { handleInboundCall, endCall } from './src/calls_logic';
-import { mockEventLogs, mockCalls, mockContacts, mockOpportunities, mockMessages } from './src/db';
+import { mockEventLogs, mockCalls, mockContacts, mockOpportunities, mockMessages, mockWebsiteSettings } from './src/db';
 
 async function testInboundCall() {
   console.log('=== Test: Inbound Call & Event Lifecycle ===');
@@ -75,10 +75,10 @@ async function testInboundCall() {
   
   const unknownContact = mockContacts.find(c => c.phone === '+19876543210' && c.name === 'Unknown Caller');
   
-  if (unknownContact) {
-    console.log('✅ Unknown Caller contact created successfully.');
+  if (unknownContact && unknownContact.follow_up_required === true) {
+    console.log('✅ Unknown Caller contact created successfully with follow_up_required: true.');
   } else {
-    throw new Error('FAILED Step 4: Unknown caller contact not created.');
+    throw new Error('FAILED Step 4: Unknown caller contact check failed. follow_up=' + unknownContact?.follow_up_required);
   }
 
   // 5. Test Duplicate End (PROMPT 7)
@@ -100,11 +100,49 @@ async function testInboundCall() {
     console.log('✅ Validation caught empty phone.');
   }
 
-  // 6. Test SMS Skipping (PROMPT 16)
-  console.log('--- Step 6: Test SMS Skip (Duplicate Automation) ---');
-  const call4 = await handleInboundCall({ phone: "+16041234567" });
-  await endCall({ call_id: call4.callId!, answered: false });
-  // This should trigger "Missed call SMS skipped" because it's same message same contact within 60s
+  // 7. Test Global Toggle (PROMPT 19)
+  console.log('--- Step 7: Test Global Toggle (Disabled) ---');
+  mockWebsiteSettings.missed_call_sms_enabled = false;
+  
+  const call5 = await handleInboundCall({ phone: "+16041112222" });
+  await endCall({ call_id: call5.callId!, answered: false });
+  // Should log "Missed call SMS disabled"
+  
+  mockWebsiteSettings.missed_call_sms_enabled = true; // reset
+  
+  // 8. Test Custom Template (PROMPT 20)
+  console.log('--- Step 8: Test Custom Template ---');
+  mockWebsiteSettings.missed_call_sms_template = "Hi {name}, I'll call you back soon!";
+  
+  const call6 = await handleInboundCall({ phone: "+16043334444" });
+  await endCall({ call_id: call6.callId!, answered: false });
+  // Should log SMS content with "Hi Unknown Caller, I'll call you back soon!" (wait, name is empty for unknown?)
+  // Actually, getMissedCallReply for unknown name uses "there".
+  
+  mockWebsiteSettings.missed_call_sms_template = ""; // reset
+  
+  // 9. Test Custom Template (Known Name)
+  console.log('--- Step 9: Test Custom Template (Known Name) ---');
+  mockWebsiteSettings.missed_call_sms_template = "Hi {name}, see you soon!";
+  
+  const janePhone = "+16040001111";
+  mockContacts.push({
+    id: 'c-jane',
+    name: 'Jane Doe',
+    phone: janePhone,
+    email: 'jane@test.com',
+    source: 'test',
+    status: 'lead',
+    address: '456 Test Ave',
+    tags: [],
+    created_at: new Date().toISOString()
+  });
+
+  const call7 = await handleInboundCall({ phone: janePhone });
+  await endCall({ call_id: call7.callId!, answered: false });
+  // Should log "Hi Jane Doe, see you soon!"
+  
+  mockWebsiteSettings.missed_call_sms_template = ""; // reset
   
   console.log('\n🌟 ALL TESTS PASSED: Call system and event triggers are correct.');
 }

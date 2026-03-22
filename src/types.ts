@@ -156,6 +156,8 @@ export interface WebsiteSettings {
   gtm_id?: string;
   auto_lead_sms_enabled: boolean;
   auto_lead_sms_template: string;
+  missed_call_sms_enabled: boolean;
+  missed_call_sms_template: string;
   created_at: string;
 }
 
