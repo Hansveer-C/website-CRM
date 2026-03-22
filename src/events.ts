@@ -1,4 +1,4 @@
-import { mockEventLogs, mockContacts, mockMessages, mockWebsiteSettings } from './db';
+import { mockEventLogs, mockContacts, mockMessages, mockWebsiteSettings, mockOpportunities, mockCalls } from './db';
 import { getDefaultLeadReply, sendMessageToContact } from './sms';
 
 export interface AppEvent {
@@ -146,6 +146,70 @@ onEvent('lead_created', async (payload) => {
   } else {
     console.log('Auto SMS failed');
     contact.follow_up_required = true;
+  }
+});
+
+import { normalizePhone } from './leads_logic';
+
+// --- Match Inbound Call to Contact (Phase 1.8.2) ---
+onEvent('call_missed', async (payload) => {
+  const { phone } = payload;
+  
+  if (!phone) {
+    console.log('No phone provided in call_missed event');
+    return;
+  }
+
+  const phoneNorm = normalizePhone(phone);
+  
+  // Search Contacts: match by phone
+  const existingContact = mockContacts.find(c => c.phone === phoneNorm.normalized);
+
+  let contactIdToUse: string;
+
+  if (existingContact) {
+    console.log(`Contact matched: ${existingContact.name} (${existingContact.id})`);
+    contactIdToUse = existingContact.id;
+  } else {
+    const newContact = {
+      id: `c-${Date.now()}`,
+      name: 'Unknown Caller',
+      phone: phoneNorm.normalized,
+      email: null,
+      address: 'New lead from missed call',
+      tags: ['missed-call'],
+      source: 'missed_call',
+      status: 'lead' as const,
+      created_at: new Date().toISOString()
+    };
+    mockContacts.push(newContact);
+    console.log('New contact created from missed call');
+    contactIdToUse = newContact.id;
+  }
+
+  // Create Opportunity (PROMPT 10)
+  const newOpportunity = {
+    id: `opp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    contact_id: contactIdToUse,
+    pipeline_stage: 'New Lead',
+    status: 'open' as const,
+    value: 0,
+    assigned_to: 'Unassigned',
+    source: 'missed_call',
+    created_at: new Date().toISOString()
+  };
+  mockOpportunities.push(newOpportunity);
+  console.log(`Opportunity created for contact ${contactIdToUse}`);
+
+  // Link Call record (PROMPT 11)
+  const call_id = payload.call_id;
+  if (call_id) {
+    const callRecord = mockCalls.find(c => c.id === call_id);
+    if (callRecord) {
+      callRecord.contact_id = contactIdToUse;
+      callRecord.opportunity_id = newOpportunity.id;
+      console.log(`Call record ${call_id} linked to contact ${contactIdToUse} and opportunity ${newOpportunity.id}`);
+    }
   }
 });
 

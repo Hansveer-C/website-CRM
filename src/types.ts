@@ -27,6 +27,7 @@ export interface Opportunity {
   assigned_to: string;
   status: OpportunityStatus;
   notes?: string;
+  source?: string;
   created_at: string;
 }
 
@@ -197,5 +198,7 @@ export interface Call {
   id: string;
   phone: string;
   status: 'received' | 'answered' | 'missed' | 'ended';
+  contact_id?: string;
+  opportunity_id?: string;
   created_at: string;
 }

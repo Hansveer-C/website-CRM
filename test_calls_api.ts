@@ -1,12 +1,26 @@
 // d:\Website-CRM\test_calls_api.ts
 import { handleInboundCall, endCall } from './src/calls_logic';
-import { mockEventLogs, mockCalls } from './src/db';
+import { mockEventLogs, mockCalls, mockContacts, mockOpportunities } from './src/db';
 
 async function testInboundCall() {
   console.log('=== Test: Inbound Call & Event Lifecycle ===');
   
   // 1. Inbound call received
-  console.log('--- Step 1: Inbound Call (Success case) ---');
+  console.log('--- Step 1: Create Mock Contact for matching ---');
+  mockContacts.push({
+    id: 'c-match-test',
+    name: 'Matched John',
+    phone: '+16041234567',
+    email: 'john@matched.com',
+    source: 'test',
+    status: 'lead',
+    address: '123 Test St',
+    tags: [],
+    created_at: new Date().toISOString()
+  });
+  console.log('   Contact created with phone: +16041234567');
+
+  console.log('--- Step 2: Inbound Call (From Matched Number) ---');
   const call1 = await handleInboundCall({ phone: "+16041234567" });
   console.log('   Call ID:', call1.callId);
 
@@ -25,11 +39,13 @@ async function testInboundCall() {
   
   const record1_ended = mockCalls.find(c => c.id === call1.callId);
   const missedEvent = mockEventLogs.find(e => e.event_name === 'call_missed' && e.payload.call_id === call1.callId);
+  
+  const opp1 = mockOpportunities.find(o => o.contact_id === 'c-match-test' && o.source === 'missed_call');
 
-  if (record1_ended?.status === 'missed' && missedEvent) {
-    console.log('✅ call_missed event verified.');
+  if (record1_ended?.status === 'missed' && missedEvent && opp1 && record1_ended.contact_id === 'c-match-test' && record1_ended.opportunity_id === opp1.id) {
+    console.log('✅ call_missed event, opportunity, and RECORD LINKAGE verified.');
   } else {
-    throw new Error('FAILED Step 2: missedEvent=' + !!missedEvent + ', status=' + record1_ended?.status);
+    throw new Error(`FAILED Step 2: missedEvent=${!!missedEvent}, opp=${!!opp1}, link_c=${record1_ended?.contact_id === 'c-match-test'}, link_o=${!!record1_ended?.opportunity_id}`);
   }
 
   // 3. End as answered (answered=true)
@@ -48,8 +64,22 @@ async function testInboundCall() {
     throw new Error('FAILED Step 3: status=' + record2_ended?.status + ', events=' + (afterCount - beforeCount));
   }
 
-  // 4. Test Duplicate End (PROMPT 7)
-  console.log('--- Step 4: End same call twice (Duplicate handling) ---');
+  // 4. Unknown Caller Contact Creation (PROMPT 9)
+  console.log('--- Step 4: Unknown Caller (Missed Call) ---');
+  const newNumber = '9876543210';
+  const call3 = await handleInboundCall({ phone: newNumber });
+  await endCall({ call_id: call3.callId!, answered: false });
+  
+  const unknownContact = mockContacts.find(c => c.phone === '+19876543210' && c.name === 'Unknown Caller');
+  
+  if (unknownContact) {
+    console.log('✅ Unknown Caller contact created successfully.');
+  } else {
+    throw new Error('FAILED Step 4: Unknown caller contact not created.');
+  }
+
+  // 5. Test Duplicate End (PROMPT 7)
+  console.log('--- Step 5: End same call twice (Duplicate handling) ---');
   const doubleEndRes = await endCall({ call_id: call2.callId!, answered: false });
   
   if (doubleEndRes.status === 'ignored' && doubleEndRes.message === 'Call already processed') {
