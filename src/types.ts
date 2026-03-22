@@ -199,7 +199,9 @@ export interface TimelineItem {
 export interface Call {
   id: string;
   phone: string;
-  status: 'received' | 'answered' | 'missed' | 'ended';
+  direction: 'inbound' | 'outbound';
+  status: 'received' | 'answered' | 'missed' | 'failed' | 'ended';
+  duration?: number;
   contact_id?: string;
   opportunity_id?: string;
   created_at: string;

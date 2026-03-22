@@ -30,6 +30,7 @@ export async function handleInboundCall(data: { phone: string }) {
   const callRecord = {
     id: `call-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     phone: phoneNorm.normalized,
+    direction: 'inbound' as const,
     status: 'received' as const,
     created_at: timestamp
   };

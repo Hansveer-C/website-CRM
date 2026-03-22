@@ -1,4 +1,4 @@
-import { mockMessages, mockEventLogs, mockActivities } from './db';
+import { mockMessages, mockEventLogs, mockActivities, mockCalls, mockContacts } from './db';
 import { TimelineItem } from './types';
 
 export interface TimelineGroup {
@@ -14,10 +14,17 @@ export interface TimelineGroup {
  * - Everything Else (Events, Activities) -> "event"
  */
 export function getContactTimeline(contact_id: string): TimelineGroup[] {
+  const contact = mockContacts.find(c => c.id === contact_id);
+  const phone = contact?.phone;
+
   // 1. Fetch source data
   const messages = mockMessages.filter(m => m.contact_id === contact_id);
-  const eventLogs = mockEventLogs.filter(e => e.payload && e.payload.contact_id === contact_id);
+  const eventLogs = mockEventLogs.filter(e => {
+    if (!e.payload) return false;
+    return e.payload.contact_id === contact_id || (phone && e.payload.phone === phone);
+  });
   const activities = mockActivities.filter(a => a.contact_id === contact_id);
+  const calls = mockCalls.filter(c => c.contact_id === contact_id || (phone && c.phone === phone));
 
   // 2. Map Messages
   const messageItems = messages.map(m => {
@@ -43,6 +50,12 @@ export function getContactTimeline(contact_id: string): TimelineGroup[] {
     if (e.event_name === 'form_submitted' || e.event_name === 'form_submission') {
       type = 'form_submission';
       content = 'Form submitted via website';
+    } else if (e.event_name === 'call_received') {
+      type = 'event';
+      content = '📞 Inbound call: STARTED';
+    } else if (e.event_name === 'call_missed') {
+      type = 'event';
+      content = '📞 Inbound call: MISSED';
     } else {
       type = 'event';
       content = `Event: ${e.event_name}`;
@@ -58,7 +71,25 @@ export function getContactTimeline(contact_id: string): TimelineGroup[] {
     };
   });
 
-  // 4. Map Activities (mapped to "event" as per prompt's "system events -> event" instruction)
+  // 4. Map Calls (Phase 2.1.3)
+  const callItems = calls.map(c => {
+    const direction = c.direction === 'inbound' ? 'Inbound call' : 'Outbound call';
+    let content = `📞 ${direction}: ${c.status.toUpperCase()}`;
+    if (c.duration && c.duration > 0) {
+      content += ` (${c.duration}s)`;
+    }
+    
+    return {
+      type: 'event' as const,
+      content,
+      created_at: c.created_at,
+      reference_id: c.id,
+      contact_id: contact_id,
+      metadata: { status: c.status, direction: c.direction, duration: c.duration || 0 }
+    };
+  });
+
+  // 5. Map Activities (mapped to "event" as per prompt's "system events -> event" instruction)
   const activityItems = activities.map(a => ({
     type: 'event' as const,
     content: `Event: ${a.type.toUpperCase()}`,
@@ -68,8 +99,8 @@ export function getContactTimeline(contact_id: string): TimelineGroup[] {
     metadata: { completed: a.completed, activityType: a.type, description: a.description }
   }));
 
-  // 5. Combine and Sort (Oldest First within groups)
-  const allItems = [...messageItems, ...eventItems, ...activityItems].sort((a, b) => 
+  // 6. Combine and Sort (Oldest First within groups)
+  const allItems = [...messageItems, ...eventItems, ...callItems, ...activityItems].sort((a, b) => 
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   );
 

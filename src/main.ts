@@ -70,6 +70,7 @@ let builderSelectedSectionId: string | null = null;
 let builderInsertOrder: number | null = null;
 let compSearchQuery: string = '';
 let compCategoryFilter: string = 'all';
+let contactTimelineState: any[] = [];
 
 let mockGlobalSettings = {
   businessName: 'PressurePro Cleaning',
@@ -2569,6 +2570,41 @@ function renderQuotePreview(quoteId: string) {
   `;
 }
 
+/**
+ * Simulated API for CRM Activity Timeline
+ * GET /api/contacts/:id/timeline
+ */
+async function loadTimeline(contactId: string) {
+    console.log(`[API] GET /api/contacts/${contactId}/timeline`);
+    
+    // FETCH: In a real system we would use fetch()
+    const timeline = getContactTimeline(contactId);
+    
+    // STATE: Store response in local state
+    contactTimelineState = timeline;
+
+    // RENDER: Simple list (no heavy styling yet)
+    const timelineContainer = document.getElementById('api-timeline-list');
+    if (timelineContainer) {
+        timelineContainer.innerHTML = contactTimelineState.map(group => `
+            <div style="margin-bottom: 25px;">
+                <div style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">${group.label}</div>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    ${group.items.map((item: any) => `
+                        <div style="background: #fff; border-radius: 8px; padding: 12px 15px; border-left: 3px solid #e2e8f0; margin-bottom: 4px;">
+                            <div style="font-size: 0.95rem; color: #1e293b; font-weight: 500; margin-bottom: 4px;">${item.content}</div>
+                            <div style="font-size: 0.8rem; color: #64748b;">${item.created_at}</div>
+                        </div>
+                    `).join('')}
+                    ${group.items.length === 0 ? '<p style="color: #94a3b8; font-style: italic; padding: 10px;">No activities recorded.</p>' : ''}
+                </div>
+            </div>
+        `).join('') || '<p style="padding: 20px; color: #94a3b8;">No timeline entries found.</p>';
+    }
+}
+
+(window as any).loadTimeline = loadTimeline;
+
 function renderContactDetail(contactId: string) {
   const contact = mockContacts.find(c => c.id === contactId);
   if (!contact) return;
@@ -2638,10 +2674,17 @@ function renderContactDetail(contactId: string) {
           </div>
         </aside>
 
-        <!-- Main Timeline -->
+        <!-- Main Column -->
         <div class="timeline-container">
-          <div class="card">
+          <div class="card" style="margin-bottom: 24px;">
             <h3>Activity Timeline</h3>
+            <div id="api-timeline-list">
+              <p style="padding: 20px; color: #666;">Loading activity...</p>
+            </div>
+          </div>
+
+          <div class="card" style="display: none;">
+            <h3>Activity Timeline (Legacy)</h3>
             <div class="timeline">
               ${(() => {
                 const groupedTimeline = getContactTimeline(contactId);
@@ -2771,6 +2814,8 @@ function renderContactDetail(contactId: string) {
       </div>
     </main>
   `;
+
+  loadTimeline(contactId);
 }
 
 (window as any).logCall = (contactId: string) => {
