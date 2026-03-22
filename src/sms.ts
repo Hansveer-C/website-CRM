@@ -24,6 +24,23 @@ export function getDefaultLeadReply(contact: Partial<Contact> | undefined | null
 }
 
 /**
+ * Generates an SMS reply for a missed call.
+ * Uses a conversational fallback if the caller is unknown.
+ * 
+ * @param contact The contact object (can be partial)
+ * @returns Formatted SMS message string
+ */
+export function getMissedCallReply(contact: Partial<Contact> | undefined | null): string {
+  const name = contact?.name?.trim() || '';
+  
+  if (!name || name === 'Unknown Caller') {
+    return 'Hey, sorry I missed your call. How can I help?';
+  }
+  
+  return `Hey ${name}, sorry I missed your call. How can I help?`;
+}
+
+/**
  * Sends an SMS message using the Twilio REST API.
  * 
  * Note: If called from a browser environment, this request may trigger 

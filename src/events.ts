@@ -1,5 +1,5 @@
 import { mockEventLogs, mockContacts, mockMessages, mockWebsiteSettings, mockOpportunities, mockCalls } from './db';
-import { getDefaultLeadReply, sendMessageToContact } from './sms';
+import { getDefaultLeadReply, sendMessageToContact, getMissedCallReply } from './sms';
 
 export interface AppEvent {
   event_name: string;
@@ -153,10 +153,11 @@ import { normalizePhone } from './leads_logic';
 
 // --- Match Inbound Call to Contact (Phase 1.8.2) ---
 onEvent('call_missed', async (payload) => {
-  const { phone } = payload;
+  console.log('call_missed event received');
+  const { phone, call_id } = payload;
   
   if (!phone) {
-    console.log('No phone provided in call_missed event');
+    console.log('[SMS PREP] No phone provided, exiting');
     return;
   }
 
@@ -187,6 +188,29 @@ onEvent('call_missed', async (payload) => {
     contactIdToUse = newContact.id;
   }
 
+  const targetContact = mockContacts.find(c => c.id === contactIdToUse);
+  if (!targetContact) {
+    console.log('[SMS PREP] No contact resolved, exiting');
+    return;
+  }
+  
+  console.log(`[SMS PREP] Target contact resolved: ${targetContact.name} (${targetContact.id})`);
+
+  // Send SMS (PROMPT 15)
+  const smsMessage = getMissedCallReply(targetContact);
+  const smsResult = await sendMessageToContact(targetContact.id, smsMessage, 'missed_call_automation');
+  
+  if (smsResult.success) {
+    console.log('Missed call SMS sent');
+    console.log(`[SMS SUCCESS] Automated reply sent to ${targetContact.name}: "${smsMessage}"`);
+  } else if (smsResult.error === 'Duplicate SMS prevented' || smsResult.error === 'Rate limit hit') {
+    console.log('Missed call SMS skipped');
+    console.warn(`[SMS SKIPPED] ${smsResult.error} for ${targetContact.name}`);
+  } else {
+    console.log('Missed call SMS failed');
+    console.error(`[SMS FAILURE] Could not send reply to ${targetContact.name}: ${smsResult.error}`);
+  }
+
   // Create Opportunity (PROMPT 10)
   const newOpportunity = {
     id: `opp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -202,7 +226,6 @@ onEvent('call_missed', async (payload) => {
   console.log(`Opportunity created for contact ${contactIdToUse}`);
 
   // Link Call record (PROMPT 11)
-  const call_id = payload.call_id;
   if (call_id) {
     const callRecord = mockCalls.find(c => c.id === call_id);
     if (callRecord) {

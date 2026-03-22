@@ -1,6 +1,6 @@
 // d:\Website-CRM\test_calls_api.ts
 import { handleInboundCall, endCall } from './src/calls_logic';
-import { mockEventLogs, mockCalls, mockContacts, mockOpportunities } from './src/db';
+import { mockEventLogs, mockCalls, mockContacts, mockOpportunities, mockMessages } from './src/db';
 
 async function testInboundCall() {
   console.log('=== Test: Inbound Call & Event Lifecycle ===');
@@ -41,11 +41,14 @@ async function testInboundCall() {
   const missedEvent = mockEventLogs.find(e => e.event_name === 'call_missed' && e.payload.call_id === call1.callId);
   
   const opp1 = mockOpportunities.find(o => o.contact_id === 'c-match-test' && o.source === 'missed_call');
+  
+  // Check for SMS (PROMPT 15)
+  const sms1 = mockMessages.find(m => m.contact_id === 'c-match-test' && m.source === 'missed_call_automation');
 
-  if (record1_ended?.status === 'missed' && missedEvent && opp1 && record1_ended.contact_id === 'c-match-test' && record1_ended.opportunity_id === opp1.id) {
-    console.log('✅ call_missed event, opportunity, and RECORD LINKAGE verified.');
+  if (record1_ended?.status === 'missed' && missedEvent && opp1 && record1_ended.contact_id === 'c-match-test' && record1_ended.opportunity_id === opp1.id && sms1) {
+    console.log('✅ call_missed event, opportunity, linkage, and SMS verified.');
   } else {
-    throw new Error(`FAILED Step 2: missedEvent=${!!missedEvent}, opp=${!!opp1}, link_c=${record1_ended?.contact_id === 'c-match-test'}, link_o=${!!record1_ended?.opportunity_id}`);
+    throw new Error(`FAILED Step 2: missedEvent=${!!missedEvent}, opp=${!!opp1}, link_c=${record1_ended?.contact_id === 'c-match-test'}, sms=${!!sms1}`);
   }
 
   // 3. End as answered (answered=true)
@@ -97,6 +100,12 @@ async function testInboundCall() {
     console.log('✅ Validation caught empty phone.');
   }
 
+  // 6. Test SMS Skipping (PROMPT 16)
+  console.log('--- Step 6: Test SMS Skip (Duplicate Automation) ---');
+  const call4 = await handleInboundCall({ phone: "+16041234567" });
+  await endCall({ call_id: call4.callId!, answered: false });
+  // This should trigger "Missed call SMS skipped" because it's same message same contact within 60s
+  
   console.log('\n🌟 ALL TESTS PASSED: Call system and event triggers are correct.');
 }
 
