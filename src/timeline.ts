@@ -44,7 +44,7 @@ export function getContactTimeline(contact_id: string): TimelineGroup[] {
 
   // 3. Map EventLogs
   const eventItems = eventLogs.map(e => {
-    let type: 'form_submission' | 'event' = 'event';
+    let type: 'form_submission' | 'event' | 'call_missed' = 'event';
     let content = '';
 
     if (e.event_name === 'form_submitted' || e.event_name === 'form_submission') {
@@ -54,8 +54,8 @@ export function getContactTimeline(contact_id: string): TimelineGroup[] {
       type = 'event';
       content = '📞 Inbound call: STARTED';
     } else if (e.event_name === 'call_missed') {
-      type = 'event';
-      content = '📞 Inbound call: MISSED';
+      type = 'call_missed';
+      content = `[MISSED CALL] Incoming call from ${e.payload.phone || 'Unknown'}`;
     } else {
       type = 'event';
       content = `Event: ${e.event_name}`;
@@ -74,13 +74,17 @@ export function getContactTimeline(contact_id: string): TimelineGroup[] {
   // 4. Map Calls (Phase 2.1.3)
   const callItems = calls.map(c => {
     const direction = c.direction === 'inbound' ? 'Inbound call' : 'Outbound call';
-    let content = `📞 ${direction}: ${c.status.toUpperCase()}`;
+    const isMissed = c.status === 'missed';
+    let content = isMissed 
+        ? `[MISSED CALL] Incoming call from ${c.phone}` 
+        : `📞 ${direction}: ${c.status.toUpperCase()}`;
+    
     if (c.duration && c.duration > 0) {
       content += ` (${c.duration}s)`;
     }
     
     return {
-      type: 'event' as const,
+      type: (isMissed ? 'call_missed' : 'event') as any,
       content,
       created_at: c.created_at,
       reference_id: c.id,
@@ -159,4 +163,24 @@ function formatTimelineTime(timestamp: string): string {
   } catch (e) {
     return timestamp; // Fallback to raw if invalid
   }
+}
+
+/**
+ * Returns the single most recent activity for a contact across all groups.
+ */
+export function getLatestActivity(contact_id: string): TimelineItem | null {
+    const groups = getContactTimeline(contact_id);
+    
+    // Reverse priority (Today -> Yesterday -> Earlier)
+    const reversedGroups = [...groups].reverse();
+    
+    for (const group of reversedGroups) {
+        if (group.items.length > 0) {
+            // Within group, items are sorted oldest first (ASC)
+            // So last item is latest
+            return group.items[group.items.length - 1];
+        }
+    }
+    
+    return null;
 }

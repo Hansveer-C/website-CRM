@@ -187,7 +187,7 @@ export interface Message {
 }
 
 export interface TimelineItem {
-  type: 'form_submission' | 'message' | 'event';
+  type: 'form_submission' | 'message' | 'event' | 'call_missed';
   reference_id: string;
   contact_id: string;
   content: string;

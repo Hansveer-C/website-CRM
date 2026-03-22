@@ -1,13 +1,11 @@
-import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings } from './db';
+import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings, mockEventLogs, mockMessages } from './db';
 import { templates } from './templates';
 import { Activity } from './types';
 import { runAutomations, checkOverdueInvoices } from './automation';
 import { emitEvent } from './events';
-import { mockEventLogs } from './db';
 import { validateTwilioConfig, twilioConfig } from './config';
 import { sendSMS, dispatchSMS, sendMessageToContact, retryMessage } from './sms';
-import { mockMessages } from './db';
-import { getContactTimeline } from './timeline';
+import { getContactTimeline, getLatestActivity } from './timeline';
 
 // Initialize and Validate Configs
 validateTwilioConfig();
@@ -341,18 +339,39 @@ function renderClients() {
   });
 
   const tableRows = filteredContacts.map(contact => {
-    const lastActivity = mockActivities
-      .filter(a => a.contact_id === contact.id)
-      .sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime())[0];
+    const latest = getLatestActivity(contact.id);
     
+    const isNew = (() => {
+      const now = new Date('2026-03-22T09:01:46-07:00').getTime();
+      const createdAt = new Date(contact.created_at).getTime();
+      const isRecent = (now - createdAt) < (24 * 60 * 60 * 1000);
+      
+      // Also check for recent lead_created event
+      const recentLeadEvent = mockEventLogs.find(e => 
+        e.event_name === 'lead_created' && 
+        e.payload.contact_id === contact.id &&
+        (now - new Date(e.created_at).getTime()) < (24 * 60 * 60 * 1000)
+      );
+      
+      return isRecent || !!recentLeadEvent;
+    })();
+
     return `
-      <tr onclick="window.navigateTo('contact-detail', '${contact.id}')" style="cursor: pointer;">
-        <td style="font-weight: 600; color: var(--primary-color);">${contact.name}</td>
-        <td>${contact.phone}</td>
-        <td><span class="badge badge-${contact.status}">${contact.status}</span></td>
-        <td><span style="font-size: 0.85rem; color: #666;">${contact.source}</span></td>
-        <td>${lastActivity ? new Date(lastActivity.due_date).toLocaleDateString() : 'No activity'}</td>
-        <td><button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${contact.id}')">View</button></td>
+      <tr onclick="window.navigateTo('contact-detail', '${contact.id}')" style="cursor: pointer; border-bottom: 1px solid #f1f5f9; transition: background 0.1s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
+        <td style="padding: 16px 24px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
+            <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${contact.name}</div>
+            ${isNew ? `<span style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">New</span>` : ''}
+          </div>
+          <div style="font-size: 0.75rem; color: #64748b; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 250px;">
+            ${latest ? `<span style="color: #94a3b8; font-weight: 600;">Last:</span> ${latest.content}` : '<span style="color: #cbd5e1; font-style: italic;">No activity yet</span>'}
+          </div>
+        </td>
+        <td><div style="font-weight: 500; font-size: 0.9rem; color: #334155;">${contact.phone}</div></td>
+        <td><span class="badge badge-${contact.status}" style="font-size: 0.7rem;">${contact.status}</span></td>
+        <td><span style="font-size: 0.8rem; color: #64748b;">${contact.source}</span></td>
+        <td style="font-size: 0.8rem; color: #64748b;">${latest ? latest.created_at : '-'}</td>
+        <td><button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${contact.id}')">View</button></td>
       </tr>
     `;
   }).join('');
@@ -2590,12 +2609,18 @@ async function loadTimeline(contactId: string) {
             <div style="margin-bottom: 25px;">
                 <div style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">${group.label}</div>
                 <div style="display: flex; flex-direction: column; gap: 4px;">
-                    ${group.items.map((item: any) => `
-                        <div style="background: #fff; border-radius: 8px; padding: 12px 15px; border-left: 3px solid #e2e8f0; margin-bottom: 4px;">
-                            <div style="font-size: 0.95rem; color: #1e293b; font-weight: 500; margin-bottom: 4px;">${item.content}</div>
-                            <div style="font-size: 0.8rem; color: #64748b;">${item.created_at}</div>
-                        </div>
-                    `).join('')}
+                    ${group.items.map((item: any) => {
+                        const isMissed = item.type === 'call_missed';
+                        const color = isMissed ? '#dc2626' : '#1e293b';
+                        const borderColor = isMissed ? '#fca5a5' : '#e2e8f0';
+
+                        return `
+                            <div style="background: #fff; border-radius: 8px; padding: 12px 15px; border-left: 3px solid ${borderColor}; margin-bottom: 4px;">
+                                <div style="font-size: 0.95rem; color: ${color}; font-weight: ${isMissed ? '600' : '500'}; margin-bottom: 4px;">${item.content}</div>
+                                <div style="font-size: 0.8rem; color: #64748b;">${item.created_at}</div>
+                            </div>
+                        `;
+                    }).join('')}
                     ${group.items.length === 0 ? '<p style="color: #94a3b8; font-style: italic; padding: 10px;">No activities recorded.</p>' : ''}
                 </div>
             </div>
@@ -2604,6 +2629,29 @@ async function loadTimeline(contactId: string) {
 }
 
 (window as any).loadTimeline = loadTimeline;
+
+async function sendQuickSMS(contactId: string) {
+    const contact = mockContacts.find(c => c.id === contactId);
+    if (!contact) return;
+
+    const message = prompt(`Send a quick SMS to ${contact.name}:`);
+    if (!message || !message.trim()) return;
+
+    console.log(`[ACTION] Sending Quick SMS to ${contact.name}...`);
+    
+    // Simulate POST /api/messages/send
+    const result = await sendMessageToContact(contactId, message, 'manual_followup');
+    
+    if (result.success) {
+        alert('SMS Sent successfully!');
+        // PROMPT: message created + timeline updates
+        await loadTimeline(contactId);
+    } else {
+        alert(`Failed to send SMS: ${result.error}`);
+    }
+}
+
+(window as any).sendQuickSMS = sendQuickSMS;
 
 function renderContactDetail(contactId: string) {
   const contact = mockContacts.find(c => c.id === contactId);
@@ -2621,6 +2669,23 @@ function renderContactDetail(contactId: string) {
           <span class="badge badge-${contact.status}">${contact.status}</span>
         </div>
       </header>
+
+      <!-- Quick Actions (PROMPT 4) -->
+      <div class="card" style="margin-bottom: 24px; display: flex; align-items: center; gap: 24px; padding: 20px 24px; background: #f8fafc; border: 1px dashed #cbd5e1;">
+        <div style="font-weight: 800; color: #475569; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 1px;">Quick Actions</div>
+        <div style="display: flex; gap: 12px; align-items: center;">
+          ${contact.phone ? `
+            <a href="tel:${contact.phone}" class="btn-primary" style="background: #22c55e; text-decoration: none; display: flex; align-items: center; gap: 8px;">
+              📞 Call
+            </a>
+            <button class="btn-primary" onclick="window.sendQuickSMS('${contact.id}')" style="background: #6366f1; display: flex; align-items: center; gap: 8px;">
+              💬 Send SMS
+            </button>
+          ` : `
+            <span style="color: #94a3b8; font-size: 0.9rem; font-style: italic;">No phone number available for quick actions.</span>
+          `}
+        </div>
+      </div>
 
       <div class="action-bar">
         <button class="btn-primary" onclick="window.logCall('${contactId}')">📞 Log Call</button>
