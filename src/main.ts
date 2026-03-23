@@ -75,6 +75,11 @@ let lastContactCount = mockContacts.length;
 let isSmsComposerOpen: boolean = false;
 let smsComposerContactId: string | null = null;
 
+// QA Simulation State (Phase 3.3)
+let pendingSimulationCallId: string | null = null;
+let lastSimulationResult: any = null;
+let isProcessingSimulation: boolean = false;
+
 let mockGlobalSettings = {
   businessName: 'PressurePro Cleaning',
   logoUrl: '',
@@ -173,6 +178,7 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
           <li onclick="window.navigateTo('quickstart')" class="${activeView === 'quickstart' ? 'active' : ''}">Quickstart Guide</li>
           <li onclick="window.navigateTo('event-logs')" class="${activeView === 'event-logs' ? 'active' : ''}">Event Logs</li>
+          <li onclick="window.navigateTo('qa-tools')" class="${activeView === 'qa-tools' ? 'active' : ''}">QA Tools</li>
           <li>Payments</li>
           <li>Settings</li>
         </ul>
@@ -2555,6 +2561,7 @@ function executeNavigation(view: string, id?: string) {
   if (view === 'templates') renderTemplates();
   if (view === 'website-settings') renderWebsiteSettings();
   if (view === 'quickstart') renderQuickstart();
+  if (view === 'qa-tools') renderQATools();
   if (view === 'quote-preview' && id) renderQuotePreview(id);
   if (view === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
   if (view === 'site' && id) renderSitePage(id);
@@ -3228,6 +3235,160 @@ function renderEventLogs() {
     </main>
   `;
 }
+
+function renderQATools() {
+  app.innerHTML = `
+    ${renderSidebar('qa-tools')}
+    <main class="main-content">
+      <header class="view-header">
+        <h2>QA & Debug Tools</h2>
+      </header>
+      
+      <div class="card" style="padding: 24px;">
+        <h3 style="margin-top: 0;">Call Workflow Simulations</h3>
+        <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Manually trigger inbound call events to verify automated follow-ups and timeline logging.</p>
+        
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+          ${!pendingSimulationCallId ? `
+            <button class="btn-primary" onclick="window.startSimulationCall()" style="background: #10b981; border: none;">📞 Simulate Inbound Call</button>
+          ` : `
+            <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; width: 100%; display: flex; align-items: center; justify-content: space-between; border: 1px solid #e2e8f0;">
+              <div>
+                <span style="display: block; font-size: 0.7rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Pending Call ID</span>
+                <span style="font-weight: 700; color: #1e293b;">${pendingSimulationCallId}</span>
+              </div>
+              <div style="display: flex; gap: 10px;">
+                <button class="btn-primary" 
+                        onclick="window.completeSimulationCall(false)" 
+                        style="background: #ef4444; border: none; font-size: 0.8rem; padding: 8px 16px; ${isProcessingSimulation ? 'opacity: 0.5; pointer-events: none;' : ''}"
+                        ${isProcessingSimulation ? 'disabled' : ''}>📵 Mark as Missed</button>
+                <button class="btn-primary" 
+                        onclick="window.completeSimulationCall(true)" 
+                        style="background: #10b981; border: none; font-size: 0.8rem; padding: 8px 16px; ${isProcessingSimulation ? 'opacity: 0.5; pointer-events: none;' : ''}"
+                        ${isProcessingSimulation ? 'disabled' : ''}>✅ Answered</button>
+                <button class="btn-primary" 
+                        onclick="window.cancelSimulationCall()" 
+                        style="background: #64748b; border: none; font-size: 0.8rem; padding: 8px 16px; ${isProcessingSimulation ? 'opacity: 0.5; pointer-events: none;' : ''}"
+                        ${isProcessingSimulation ? 'disabled' : ''}>Cancel</button>
+              </div>
+            </div>
+          `}
+        </div>
+      </div>
+
+      ${lastSimulationResult ? `
+      <div class="card" style="margin-top: 24px; padding: 24px; border-left: 4px solid #3b82f6;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+          <h3 style="margin: 0; color: #1e293b;">Simulation Result</h3>
+          <button onclick="window.clearSimulationResult()" style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 0.8rem; text-decoration: underline;">Clear Results</button>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+          <div style="background: white; padding: 15px; border: 1px solid #e2e8f0; border-radius: 8px;">
+            <div style="font-size: 0.65rem; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 8px;">Contact</div>
+            <div style="font-weight: 700; color: #1e293b;">${lastSimulationResult.contact?.name || 'Unknown'}</div>
+            <div style="font-size: 0.8rem; color: #64748b; margin-top: 4px;">ID: ${lastSimulationResult.contact?.id || 'N/A'}</div>
+            ${lastSimulationResult.contact?.id ? `
+              <button onclick="window.navigateTo('contact-detail', '${lastSimulationResult.contact.id}')" style="margin-top: 10px; font-size: 0.75rem; color: #2563eb; background: none; border: none; padding: 0; cursor: pointer; font-weight: 600;">View Profile →</button>
+            ` : ''}
+          </div>
+
+          <div style="background: white; padding: 15px; border: 1px solid #e2e8f0; border-radius: 8px;">
+            <div style="font-size: 0.65rem; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 8px;">Opportunity</div>
+            <div style="font-weight: 700; color: #1e293b;">${lastSimulationResult.opportunity ? 'Created Successfully' : '<span style="color: #64748b;">Not Created</span>'}</div>
+            <div style="font-size: 0.8rem; color: #64748b; margin-top: 4px;">Stage: ${lastSimulationResult.opportunity?.pipeline_stage || 'N/A'}</div>
+          </div>
+
+          <div style="background: white; padding: 15px; border: 1px solid #e2e8f0; border-radius: 8px;">
+            <div style="font-size: 0.65rem; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 8px;">Automated SMS</div>
+            <div style="font-weight: 700; color: ${lastSimulationResult.sms?.status === 'sent' ? '#10b981' : '#f59e0b'};">
+              ${lastSimulationResult.sms ? (lastSimulationResult.sms.status === 'sent' ? 'Sent' : 'Failed/Skipped') : 'No SMS Logged'}
+            </div>
+            <div style="font-size: 0.75rem; color: #475569; margin-top: 6px; font-style: italic; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+              ${lastSimulationResult.sms?.content || 'No automated reply triggered.'}
+            </div>
+          </div>
+        </div>
+      </div>
+      ` : ''}
+
+      <div class="card" style="margin-top: 24px; padding: 24px; background: #f8fafc;">
+        <h4 style="margin: 0; color: #475569; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">Testing Notes</h4>
+        <ul style="margin: 10px 0 0 0; font-size: 0.85rem; color: #64748b; line-height: 1.6;">
+          <li>Simulating a missed call will trigger the "call_received" then "call_missed" sequence.</li>
+          <li>If the phone number matches an existing lead, it will update their timeline.</li>
+          <li>If the phone number is new, it will result in a generic event log.</li>
+        </ul>
+      </div>
+    </main>
+  `;
+}
+
+(window as any).startSimulationCall = async () => {
+  const phone = prompt("Enter phone number to simulate inbound call from:", "+15550109999");
+  if (!phone) return;
+  
+  try {
+    (window as any).showToast('Initiating mock inbound call...', 2000);
+    const inbound = await (window as any).handleInboundCall({ phone });
+    pendingSimulationCallId = inbound.callId;
+    renderQATools();
+    (window as any).showToast('Call active! Mark status below.', 3000);
+  } catch (err: any) {
+    console.error('Simulation Error:', err);
+    alert('Simulation failed: ' + err.message);
+  }
+};
+
+(window as any).completeSimulationCall = async (answered: boolean) => {
+  if (!pendingSimulationCallId || isProcessingSimulation) return;
+  
+  try {
+    isProcessingSimulation = true;
+    renderQATools(); // Show disabled states
+
+    const callId = pendingSimulationCallId;
+    (window as any).showToast(answered ? 'Marking as Answered...' : 'Marking as Missed...', 2000);
+    
+    // Call endCall API (already has status guards: answered/missed)
+    const result = await (window as any).endCall({ call_id: callId, answered });
+    
+    if (result.status === 'ignored') {
+      console.warn(`[SIMULATION] ${result.message}`);
+      (window as any).showToast('Call was already processed.', 3000);
+    } else if (!answered) {
+      // Extract CRM effects from mock DB for display (Phase 3.4)
+      const call = mockCalls.find(c => c.id === callId);
+      const contact = mockContacts.find(c => c.id === call?.contact_id);
+      const opportunity = mockOpportunities.find(o => o.contact_id === contact?.id && o.source === 'missed_call');
+      const sms = [...mockMessages].reverse().find(m => m.contact_id === contact?.id && m.source === 'missed_call_automation');
+      
+      lastSimulationResult = { contact, opportunity, sms, call };
+    } else {
+      lastSimulationResult = null;
+    }
+
+    pendingSimulationCallId = null;
+    isProcessingSimulation = false;
+    renderQATools();
+    (window as any).showToast(`Call status updated to ${answered ? 'answered' : 'missed'}!`, 3000);
+  } catch (err: any) {
+    isProcessingSimulation = false;
+    renderQATools();
+    console.error('Simulation Error:', err);
+    alert('Failed to update call: ' + err.message);
+  }
+};
+
+(window as any).clearSimulationResult = () => {
+  lastSimulationResult = null;
+  renderQATools();
+};
+
+(window as any).cancelSimulationCall = () => {
+  pendingSimulationCallId = null;
+  renderQATools();
+};
 
 checkOverdueInvoices();
 
