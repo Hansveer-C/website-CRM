@@ -128,9 +128,16 @@ function migrate(database: Database.Database) {
             missed_call_sms_template TEXT,
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
     `);
     
-    console.log('✅ [DB] Migrations completed: contacts, opportunities, messages, calls, event_logs, activities, and website_settings initialized.');
+    console.log('✅ [DB] Migrations completed: contacts, opportunities, messages, calls, event_logs, activities, website_settings, and users initialized.');
 }
 
 /**

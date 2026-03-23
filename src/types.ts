@@ -207,3 +207,10 @@ export interface Call {
   recording_url?: string;
   created_at: string;
 }
+
+export interface User {
+  id: string;
+  email: string;
+  password_hash: string;
+  created_at: string;
+}
