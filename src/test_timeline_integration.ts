@@ -12,7 +12,7 @@ mockActivities.push({
     contact_id: contactId,
     type: 'call',
     description: 'Initial discovery call',
-    due_date: '2026-03-21T09:00:00Z',
+    due_date: new Date().toISOString(),
     completed: true
 });
 
@@ -20,7 +20,7 @@ mockActivities.push({
 saveMessage({
     contact_id: contactId,
     content: 'Sending you the quote via SMS!',
-    created_at: '2026-03-21T10:00:00Z',
+    created_at: new Date().toISOString(),
     direction: 'outbound'
 });
 

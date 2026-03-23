@@ -108,12 +108,13 @@ export function getContactTimeline(contact_id: string): TimelineGroup[] {
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   );
 
-  // 6. Define Date Boundaries (based on 2026-03-21)
-  const now = new Date('2026-03-21T14:45:50-07:00');
-  const todayStr = '2026-03-21';
+  // 6. Define Date Boundaries (Recalculated each time)
+  const now = new Date();
+  const todayStr = formatDateForComparison(now);
+                   
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
-  const yesterdayStr = yesterday.toISOString().split('T')[0];
+  const yesterdayStr = formatDateForComparison(yesterday);
 
   // 7. Grouping Logic
   const todayItems: any[] = [];
@@ -121,7 +122,7 @@ export function getContactTimeline(contact_id: string): TimelineGroup[] {
   const earlierItems: any[] = [];
 
   allItems.forEach((item, idx) => {
-    const itemDate = item.created_at.split('T')[0];
+    const itemDate = formatDateForComparison(new Date(item.created_at));
     const isLatest = idx === allItems.length - 1;
     const displayItem = {
         ...item,
@@ -163,6 +164,15 @@ function formatTimelineTime(timestamp: string): string {
   } catch (e) {
     return timestamp; // Fallback to raw if invalid
   }
+}
+
+/**
+ * Helper to get YYYY-MM-DD in local time for consistent comparison.
+ */
+function formatDateForComparison(date: Date): string {
+  return date.getFullYear() + '-' + 
+         String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+         String(date.getDate()).padStart(2, '0');
 }
 
 /**

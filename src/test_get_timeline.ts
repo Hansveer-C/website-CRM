@@ -22,9 +22,16 @@ async function testTimeline() {
     created_at: new Date().toISOString()
   });
 
-  const t_today = '2026-03-21T10:00:00Z';
-  const t_yesterday = '2026-03-20T10:00:00Z';
-  const t_earlier = '2026-03-15T10:00:00Z';
+  const now = new Date();
+  const t_today = now.toISOString();
+  
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const t_yesterday = yesterday.toISOString();
+  
+  const earlier = new Date(now);
+  earlier.setDate(now.getDate() - 7);
+  const t_earlier = earlier.toISOString();
 
   const t0 = t_earlier; 
   const t1 = t_today;
@@ -90,5 +97,6 @@ async function testTimeline() {
 
 testTimeline().catch(err => {
   console.error('Test Error:', err.message);
+  // @ts-ignore
   process.exit(1);
 });
