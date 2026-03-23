@@ -71,6 +71,10 @@ let compCategoryFilter: string = 'all';
 let contactTimelineState: any[] = [];
 let lastContactCount = mockContacts.length;
 
+// SMS Composer State (Phase 2.1)
+let isSmsComposerOpen: boolean = false;
+let smsComposerContactId: string | null = null;
+
 let mockGlobalSettings = {
   businessName: 'PressurePro Cleaning',
   logoUrl: '',
@@ -466,22 +470,93 @@ function renderClients() {
   }
 }
 
-(window as any).textContact = async (contactId: string) => {
-  const contact = mockContacts.find(c => c.id === contactId);
-  if (!contact) return;
+(window as any).closeSmsComposer = () => {
+  isSmsComposerOpen = false;
+  smsComposerContactId = null;
+  document.getElementById('sms-composer-modal')?.remove();
+};
 
-  const content = prompt(`Quick Text to ${contact.name}:`, "Hey, I saw your request—how can I help?");
-  if (content === null || content.trim() === "") return;
+(window as any).sendSmsFromComposer = async (contactId: string) => {
+  const textarea = document.getElementById('sms-composer-text') as HTMLTextAreaElement;
+  const content = textarea?.value?.trim();
+  
+  if (!content) {
+    alert('Please enter a message.');
+    return;
+  }
 
   try {
     (window as any).showToast('Sending SMS...', 2000);
     await sendMessageToContact(contactId, content);
     (window as any).showToast('Message sent! Timeline updated.');
-    renderClients(); // Refresh to update "Last activity" snippet
+    (window as any).closeSmsComposer();
+    
+    // Refresh context if visible (Phase 2.5)
+    if (currentView === 'clients') {
+      renderClients();
+    } else if (currentView === 'contact-detail') {
+      (window as any).loadTimeline(contactId);
+    }
   } catch (err) {
     console.error('Text Back Error:', err);
     (window as any).showToast('Error: Could not send SMS', 5000);
   }
+};
+
+(window as any).openSmsComposer = (contactId: string) => {
+  const contact = mockContacts.find(c => c.id === contactId);
+  if (!contact) return;
+  
+  isSmsComposerOpen = true;
+  smsComposerContactId = contactId;
+
+  // Check for valid phone (Phase 2.6)
+  const hasPhone = contact.phone && contact.phone.trim().length > 0;
+
+  // Pre-fill with a default follow-up message (Phase 2.3)
+  const defaultMessage = "Hey, I saw your request—how can I help?";
+  
+  // Render lightweight modal UI
+  const modal = document.createElement('div');
+  modal.id = 'sms-composer-modal';
+  modal.style.cssText = `
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5); 
+    display: flex; align-items: center; justify-content: center; z-index: 9999;
+  `;
+  modal.innerHTML = `
+    <div style="background: white; padding: 30px; border-radius: 12px; width: 450px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); color: #333;">
+      <h3 style="margin-top: 0; margin-bottom: 5px;">Texting ${contact.name}</h3>
+      <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 20px;">
+        ${hasPhone 
+          ? `Recieving at: <span style="font-weight: 600;">${contact.phone}</span>` 
+          : `<span style="color: #dc2626; font-weight: 600;">🛑 No phone number available</span>`}
+      </p>
+      
+      <textarea id="sms-composer-text" 
+                style="width: 100%; height: 120px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-family: inherit; font-size: 1rem; box-sizing: border-box; resize: none; margin-bottom: 20px; ${!hasPhone ? 'background: #f8fafc; cursor: not-allowed;' : ''}" 
+                placeholder="${hasPhone ? 'Type your message here...' : 'Add a phone number to send messages.'}" 
+                ${!hasPhone ? 'disabled' : ''}>${hasPhone ? defaultMessage : ''}</textarea>
+      
+      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button onclick="window.closeSmsComposer()" style="padding: 10px 20px; border: 1px solid #e2e8f0; background: white; border-radius: 8px; cursor: pointer; font-weight: 600; color: #64748b;">Cancel</button>
+        <button onclick="${hasPhone ? `window.sendSmsFromComposer('${contact.id}')` : ''}" 
+                class="btn-primary" 
+                style="padding: 10px 25px; font-weight: 700; ${!hasPhone ? 'opacity: 0.4; cursor: not-allowed;' : ''}"
+                ${!hasPhone ? 'disabled' : ''}>Send SMS</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  const textarea = document.getElementById('sms-composer-text') as HTMLTextAreaElement;
+  if (textarea && hasPhone) {
+    textarea.focus();
+    // Select all text for easy replacement
+    textarea.setSelectionRange(0, textarea.value.length);
+  }
+};
+
+(window as any).textContact = (contactId: string) => {
+  (window as any).openSmsComposer(contactId);
 };
 
 (window as any).filterClients = (status: string) => {
@@ -2683,24 +2758,7 @@ async function loadTimeline(contactId: string) {
 (window as any).loadTimeline = loadTimeline;
 
 async function sendQuickSMS(contactId: string) {
-  const contact = mockContacts.find(c => c.id === contactId);
-  if (!contact) return;
-
-  const message = prompt(`Send a quick SMS to ${contact.name}:`);
-  if (!message || !message.trim()) return;
-
-  console.log(`[ACTION] Sending Quick SMS to ${contact.name}...`);
-
-  // Simulate POST /api/messages/send
-  const result = await sendMessageToContact(contactId, message, 'manual_followup');
-
-  if (result.success) {
-    alert('SMS Sent successfully!');
-    // PROMPT: message created + timeline updates
-    await loadTimeline(contactId);
-  } else {
-    alert(`Failed to send SMS: ${result.error}`);
-  }
+  (window as any).openSmsComposer(contactId);
 }
 
 (window as any).sendQuickSMS = sendQuickSMS;
