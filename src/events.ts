@@ -1,4 +1,8 @@
-import { mockEventLogs, mockContacts, mockMessages, mockWebsiteSettings, mockOpportunities, mockCalls } from './db';
+import { mockEventLogs, mockWebsiteSettings, mockCalls } from './db';
+import { checkDuplicateMessage, countRecentOutboundMessages } from './messages_repo';
+import { getContact, findContact, persistContact } from './contacts_repo';
+import { persistOpportunity } from './opportunities_repo';
+import { Opportunity } from './types';
 import { getDefaultLeadReply, sendMessageToContact, getMissedCallReply } from './sms';
 
 export interface AppEvent {
@@ -99,7 +103,7 @@ onEvent('lead_created', async (payload) => {
 
   // If no phone in payload, fallback to DB
   if (!phone && contact_id) {
-    const contact = mockContacts.find(c => c.id === contact_id);
+    const contact = getContact(contact_id);
     if (contact && contact.phone) {
       phone = contact.phone;
     }
@@ -111,7 +115,7 @@ onEvent('lead_created', async (payload) => {
   }
 
   // Fetch full contact object
-  const contact = mockContacts.find(c => c.id === contact_id);
+  const contact = getContact(contact_id);
   if (!contact) {
     console.log('Contact not found for SMS');
     return;
@@ -122,15 +126,8 @@ onEvent('lead_created', async (payload) => {
   const message = getDefaultLeadReply(contact, template);
   
   // Prevent duplicate automated SMS (2 minute window)
-  const now = Date.now();
-  const twoMinutesAgo = now - (2 * 60 * 1000);
-  
-  const alreadySent = mockMessages.some(m => 
-    m.contact_id === contact_id &&
-    m.direction === 'outbound' &&
-    new Date(m.created_at).getTime() >= twoMinutesAgo &&
-    (m.content === message || m.content.includes("thanks for reaching out"))
-  );
+  const sinceIso = new Date(Date.now() - 120000).toISOString();
+  const alreadySent = checkDuplicateMessage(contact_id, message, sinceIso);
 
   if (alreadySent) {
     console.log('Automated lead SMS skipped: duplicate prevented');
@@ -171,7 +168,7 @@ onEvent('call_missed', async (payload) => {
   const phoneNorm = normalizePhone(phone);
   
   // Search Contacts: match by phone
-  const existingContact = mockContacts.find(c => c.phone === phoneNorm.normalized);
+  let existingContact = findContact(phoneNorm.normalized, null);
 
   let contactIdToUse: string;
 
@@ -190,12 +187,12 @@ onEvent('call_missed', async (payload) => {
       status: 'lead' as const,
       created_at: new Date().toISOString()
     };
-    mockContacts.push(newContact);
+    persistContact(newContact);
     console.log('New contact created from missed call');
     contactIdToUse = newContact.id;
   }
 
-  const targetContact = mockContacts.find(c => c.id === contactIdToUse);
+  const targetContact = getContact(contactIdToUse);
   if (!targetContact) {
     console.log('[SMS PREP] No contact resolved, exiting');
     return;
@@ -203,27 +200,22 @@ onEvent('call_missed', async (payload) => {
   
   console.log(`[SMS PREP] Target contact resolved: ${targetContact.name} (${targetContact.id})`);
 
-  // PROMPT 17: Extra Duplicate Protection (2-minute window)
-  const now = Date.now();
-  const recentAutomation = mockMessages.find(m => 
-    m.contact_id === targetContact.id && 
-    m.source === 'missed_call_automation' &&
-    (now - new Date(m.created_at).getTime()) < 120000 // 2 minutes
-  );
+  // Prepare SMS message first so we can check for duplicates against the content
+  const smsMessage = getMissedCallReply(targetContact, mockWebsiteSettings.missed_call_sms_template);
 
-  if (recentAutomation) {
+  // PROMPT 17: Extra Duplicate Protection (2-minute window)
+  const twoMinutesAgo = new Date(Date.now() - 120000).toISOString();
+  const alreadySentMC = checkDuplicateMessage(targetContact.id, smsMessage, twoMinutesAgo);
+
+  if (alreadySentMC) {
     console.log('Missed call SMS already sent');
     console.log(`[SMS SKIPPED] Prevented duplicate follow-up within 2-minute window for ${targetContact.name}`);
     return;
   }
 
   // PROMPT 18: 5-minute Rate Limit (Max 2 messages)
-  const fiveMinutesAgo = now - 300000;
-  const recentCount = mockMessages.filter(m => 
-    m.contact_id === targetContact.id && 
-    m.source === 'missed_call_automation' &&
-    new Date(m.created_at).getTime() > fiveMinutesAgo
-  ).length;
+  const fiveMinAgo = new Date(Date.now() - 300000).toISOString();
+  const recentCount = countRecentOutboundMessages(targetContact.id, fiveMinAgo);
 
   if (recentCount >= 2) {
     console.log('Missed call SMS rate limited');
@@ -232,7 +224,6 @@ onEvent('call_missed', async (payload) => {
   }
 
   // Send SMS (PROMPT 15)
-  const smsMessage = getMissedCallReply(targetContact, mockWebsiteSettings.missed_call_sms_template);
   console.log(`[SMS PREP] Message prepared: "${smsMessage}"`);
   const smsResult = await sendMessageToContact(targetContact.id, smsMessage, 'missed_call_automation');
   
@@ -249,17 +240,17 @@ onEvent('call_missed', async (payload) => {
   }
 
   // Create Opportunity (PROMPT 10)
-  const newOpportunity = {
+  const newOpportunity: Opportunity = {
     id: `opp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     contact_id: contactIdToUse,
     pipeline_stage: 'New Lead',
-    status: 'open' as const,
+    status: 'open',
     value: 0,
     assigned_to: 'Unassigned',
     source: 'missed_call',
     created_at: new Date().toISOString()
   };
-  mockOpportunities.push(newOpportunity);
+  persistOpportunity(newOpportunity);
   console.log(`Opportunity created for contact ${contactIdToUse}`);
 
   // Link Call record (PROMPT 11)

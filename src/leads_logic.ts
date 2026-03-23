@@ -1,6 +1,8 @@
-import { mockContacts, mockOpportunities } from './db';
 import { emitEvent } from './events';
 import { runAutomations } from './automation';
+import { persistContact, findContact } from './contacts_repo';
+import { persistOpportunity, getOpportunitiesByContact } from './opportunities_repo';
+import { Contact, Opportunity } from './types';
 
 export function normalizePhone(phone: string): { normalized: string; invalid: boolean } {
   if (!phone) return { normalized: '', invalid: true };
@@ -47,11 +49,8 @@ export async function createLead(data: {
     throw new Error('Name is required for lead creation.');
   }
 
-  // 1. Check for Existing Contact (Duplicate Protection)
-  const existingContact = mockContacts.find(c => 
-    (phoneNorm.normalized && c.phone === phoneNorm.normalized) || 
-    (emailNorm && c.email === emailNorm)
-  );
+  // 1. Check for Existing Contact (Duplicate Protection - Persistently)
+  const existingContact = findContact(phoneNorm.normalized, emailNorm);
 
   let contactIdToUse: string;
 
@@ -60,8 +59,8 @@ export async function createLead(data: {
     console.log(`Duplicate lead found: using existing contact ${contactIdToUse}.`);
     
     // BASIC PROTECTION: Skip new opportunity if one was created for this contact in the last 2 minutes
-    const recentOpp = mockOpportunities.find(opp => 
-      opp.contact_id === contactIdToUse && 
+    const contactOpps = getOpportunitiesByContact(contactIdToUse);
+    const recentOpp = contactOpps.find(opp => 
       (new Date().getTime() - new Date(opp.created_at).getTime()) < 120000
     );
     
@@ -70,7 +69,7 @@ export async function createLead(data: {
     }
   } else {
     contactIdToUse = `c-${Date.now()}`;
-    const newContact = {
+    const newContact: Contact = {
       id: contactIdToUse,
       name: normalizedName,
       phone: phoneNorm.normalized, 
@@ -83,21 +82,26 @@ export async function createLead(data: {
       created_at: timestamp,
       invalid_phone: phoneNorm.invalid || undefined
     };
-    mockContacts.push(newContact as any);
+
+    // Save to DB
+    persistContact(newContact);
   }
 
   // 2. Create Opportunity
-  const newOpportunity = {
+  const newOpportunity: Opportunity = {
     id: `opp-${Date.now()}`,
     contact_id: contactIdToUse,
     pipeline_stage: 'New Lead',
     value: 0,
     assigned_to: 'Unassigned',
-    status: 'open' as any,
+    status: 'open',
     notes: `Service Type: ${data.service_type || 'N/A'}\nAddress: ${data.address || 'N/A'}\nMessage: ${data.message || 'N/A'}`,
+    source: data.source || 'api',
     created_at: timestamp
   };
-  mockOpportunities.push(newOpportunity);
+
+  // Save to DB
+  persistOpportunity(newOpportunity);
 
   // 3. Emit Events
   // Simulating atomic emissions

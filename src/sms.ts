@@ -1,7 +1,8 @@
 import { twilioConfig } from './config';
 import { Message, Contact } from './types';
 import { saveMessage } from './messages';
-import { mockContacts, mockMessages } from './db';
+import { getContact } from './contacts_repo';
+import { getMessage, updateMessageStatus, checkDuplicateMessage, countRecentOutboundMessages } from './messages_repo';
 
 /**
  * Generates a welcome SMS message for a newly created lead.
@@ -152,21 +153,13 @@ export async function dispatchSMS(
   // Step 2: Call sendSMS()
   const result = await sendSMS(phone, messageText);
   
-  // Locate the actual saved record in the mock database to apply mutations
-  const dbRecord = mockMessages.find(m => m.id === newMessage.id);
-  
-  if (dbRecord) {
-    // Update status based on result
-    if (result.success) {
-      dbRecord.status = 'sent';
-      dbRecord.retryable = false;
-      dbRecord.provider_message_id = result.provider_message_id;
-      console.log(`✅ [DISPATCH] Message ${dbRecord.id} marked as 'sent'. Provider ID: ${result.provider_message_id}`);
-    } else {
-      dbRecord.status = 'failed';
-      dbRecord.retryable = true;
-      console.error(`❌ [DISPATCH] Message ${dbRecord.id} marked as 'failed'. Error: ${result.error}`);
-    }
+  // Update status based on result
+  if (result.success) {
+    updateMessageStatus(newMessage.id, 'sent', result.provider_message_id, false);
+    console.log(`✅ [DISPATCH] Message ${newMessage.id} marked as 'sent'. Provider ID: ${result.provider_message_id}`);
+  } else {
+    updateMessageStatus(newMessage.id, 'failed', undefined, true);
+    console.error(`❌ [DISPATCH] Message ${newMessage.id} marked as 'failed'. Error: ${result.error}`);
   }
   
   return { 
@@ -190,7 +183,7 @@ export async function sendMessageToContact(
 ): Promise<{ success: boolean; internal_id?: string; error?: string }> {
   
   // Locate the contact
-  const contact = mockContacts.find(c => c.id === contact_id);
+  const contact = getContact(contact_id);
   
   if (!contact) {
     const errorMsg = `Contact lookup failed: ID ${contact_id} not found in database.`;
@@ -205,14 +198,9 @@ export async function sendMessageToContact(
     return { success: false, error: errorMsg };
   }
 
-  // Prevent duplicate SMS sends
-  const now = new Date().getTime();
-  const isDuplicate = mockMessages.some(m => 
-    m.contact_id === contact_id &&
-    m.direction === 'outbound' &&
-    m.content === messageText &&
-    (now - new Date(m.created_at).getTime()) < 60000
-  );
+  // Prevent duplicate SMS sends (within 60s)
+  const sinceIso = new Date(Date.now() - 60000).toISOString();
+  const isDuplicate = checkDuplicateMessage(contact_id, messageText, sinceIso);
 
   if (isDuplicate) {
     const errorMsg = `Duplicate SMS prevented`;
@@ -221,11 +209,7 @@ export async function sendMessageToContact(
   }
 
   // Rate limiting: Max 3 messages per contact per minute
-  const recentMessagesCount = mockMessages.filter(m =>
-    m.contact_id === contact_id &&
-    m.direction === 'outbound' &&
-    (now - new Date(m.created_at).getTime()) < 60000
-  ).length;
+  const recentMessagesCount = countRecentOutboundMessages(contact_id, sinceIso);
 
   if (recentMessagesCount >= 3) {
     const errorMsg = `Rate limit hit`;
@@ -253,7 +237,7 @@ export async function sendMessageToContact(
  */
 export async function retryMessage(message_id: string): Promise<{ success: boolean; error?: string }> {
   // Locate the message
-  const msg = mockMessages.find(m => m.id === message_id);
+  const msg = getMessage(message_id);
   
   if (!msg) {
     const errorMsg = `Retry aborted: Message ID ${message_id} not found.`;
@@ -269,7 +253,7 @@ export async function retryMessage(message_id: string): Promise<{ success: boole
   }
 
   // Locate the contact to get the current phone number
-  const contact = mockContacts.find(c => c.id === msg.contact_id);
+  const contact = getContact(msg.contact_id);
   
   if (!contact || !contact.phone) {
     const errorMsg = `Retry aborted: Contact ${msg.contact_id} not found or missing a phone number.`;
@@ -284,14 +268,11 @@ export async function retryMessage(message_id: string): Promise<{ success: boole
   
   // Update state
   if (result.success) {
-    msg.status = 'sent';
-    msg.retryable = false;
-    msg.provider_message_id = result.provider_message_id;
+    updateMessageStatus(message_id, 'sent', result.provider_message_id, false);
     console.log(`✅ [RETRY HELPER] Message ${message_id} successfully retried and marked as 'sent'. Provider ID: ${result.provider_message_id}`);
   } else {
     // Keep it failed and retryable
-    msg.status = 'failed';
-    msg.retryable = true;
+    updateMessageStatus(message_id, 'failed', undefined, true);
     console.error(`❌ [RETRY HELPER] Retry for message ${message_id} failed. Error: ${result.error}`);
   }
   

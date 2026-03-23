@@ -1,4 +1,6 @@
-import { mockMessages, mockEventLogs, mockActivities, mockCalls, mockContacts } from './db';
+import { mockEventLogs, mockActivities, mockCalls } from './db';
+import { getContact } from './contacts_repo';
+import { getMessagesByContact } from './messages_repo';
 import { TimelineItem } from './types';
 
 export interface TimelineGroup {
@@ -14,11 +16,11 @@ export interface TimelineGroup {
  * - Everything Else (Events, Activities) -> "event"
  */
 export function getContactTimeline(contact_id: string): TimelineGroup[] {
-  const contact = mockContacts.find(c => c.id === contact_id);
+  const contact = getContact(contact_id);
   const phone = contact?.phone;
 
   // 1. Fetch source data
-  const messages = mockMessages.filter(m => m.contact_id === contact_id);
+  const messages = getMessagesByContact(contact_id);
   const eventLogs = mockEventLogs.filter(e => {
     if (!e.payload) return false;
     return e.payload.contact_id === contact_id || (phone && e.payload.phone === phone);
