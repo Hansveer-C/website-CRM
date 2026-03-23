@@ -1,5 +1,8 @@
-import { mockMessages, mockContacts, mockOpportunities } from './db';
 import { Message } from './types';
+import { getContact } from './contacts_repo';
+import { getOpportunitiesByContact } from './opportunities_repo';
+import { persistMessage, getMessagesByContact } from './messages_repo';
+import { getDB } from './database';
 
 /**
  * Saves a new message to the database after validating the contact_id.
@@ -8,17 +11,17 @@ import { Message } from './types';
  */
 export function saveMessage(message: Partial<Message> & { contact_id: string }): boolean {
   // Validate contact_id exists
-  const contactExists = mockContacts.some(c => c.id === message.contact_id);
-
-  if (!contactExists) {
+  const contact = getContact(message.contact_id);
+  if (!contact) {
     console.error(`[Message Error] Invalid contact_id: ${message.contact_id}`);
     return false;
   }
 
   // OPTIONAL: Attach opportunity_id if one exists for the contact (Link to the latest open deal)
   if (!message.opportunity_id) {
-    const latestOpp = mockOpportunities
-      .filter(o => o.contact_id === message.contact_id && o.status === 'open')
+    const opps = getOpportunitiesByContact(message.contact_id);
+    const latestOpp = opps
+      .filter(o => o.status === 'open')
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
     
     if (latestOpp) {
@@ -39,7 +42,7 @@ export function saveMessage(message: Partial<Message> & { contact_id: string }):
     created_at: message.created_at || new Date().toISOString()
   };
 
-  mockMessages.push(finalMessage);
+  persistMessage(finalMessage);
   console.log(`[Message Saved]: ${finalMessage.id} with status "${finalMessage.status}" for contact ${finalMessage.contact_id}`);
   return true;
 }
@@ -58,8 +61,8 @@ export function sortMessagesAsc(messages: Message[]): Message[] {
  * @returns { Message[] } - Chronologically sorted message list.
  */
 export function getConversation(contactId: string): Message[] {
-  const filtered = mockMessages.filter(m => m.contact_id === contactId);
-  return sortMessagesAsc(filtered);
+  const messages = getMessagesByContact(contactId);
+  return sortMessagesAsc(messages);
 }
 
 /**
@@ -67,7 +70,13 @@ export function getConversation(contactId: string): Message[] {
  * Useful for building global activity feeds or logs.
  */
 export function getAllMessagesOrdered(): Message[] {
-  return sortMessagesAsc(mockMessages);
+  const db = getDB();
+  const rows = db.prepare('SELECT * FROM messages ORDER BY created_at ASC').all() as any[];
+  const messages = rows.map((row: any) => ({
+      ...row,
+      retryable: row.retryable === 1
+  }));
+  return messages;
 }
 
 export interface ConversationSummary {

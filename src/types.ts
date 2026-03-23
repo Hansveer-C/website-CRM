@@ -24,7 +24,7 @@ export interface Opportunity {
   contact_id: string;
   pipeline_stage: string;
   value: number;
-  assigned_to: string;
+  assigned_to?: string;
   status: OpportunityStatus;
   notes?: string;
   source?: string;
@@ -204,5 +204,6 @@ export interface Call {
   duration?: number;
   contact_id?: string;
   opportunity_id?: string;
+  recording_url?: string;
   created_at: string;
 }

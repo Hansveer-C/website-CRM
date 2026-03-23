@@ -1,30 +1,30 @@
-import { mockMessages, mockEventLogs, mockActivities, mockCalls, mockContacts } from './db';
-import { TimelineItem } from './types';
-
-export interface TimelineGroup {
-    label: string;
-    items: TimelineItem[];
-}
+import { mockWebsiteSettings } from './db';
+import { getContact } from './contacts_repo';
+import { getMessagesByContact } from './messages_repo';
+import { getAllEventLogs } from './event_logs_repo';
+import { getCallsForContact } from './calls_repo';
+import { getActivitiesByContact } from './activities_repo';
+import { TimelineItem, TimelineGroup } from './types';
 
 /**
  * Standardized timeline item source.
- * Follows strict mapping:
- * - Messages -> "message"
- * - Form Submission -> "form_submission"
- * - Everything Else (Events, Activities) -> "event"
+ * Fully DB-backed.
  */
 export function getContactTimeline(contact_id: string): TimelineGroup[] {
-  const contact = mockContacts.find(c => c.id === contact_id);
+  const contact = getContact(contact_id);
   const phone = contact?.phone;
 
-  // 1. Fetch source data
-  const messages = mockMessages.filter(m => m.contact_id === contact_id);
-  const eventLogs = mockEventLogs.filter(e => {
+  // 1. Fetch source data from DB repositories
+  const messages = getMessagesByContact(contact_id);
+  const allEventLogs = getAllEventLogs();
+  const activities = getActivitiesByContact(contact_id);
+  const calls = getCallsForContact(contact_id, phone);
+
+  // Filter event logs in JS for contact linkage (payload-based)
+  const eventLogs = allEventLogs.filter(e => {
     if (!e.payload) return false;
     return e.payload.contact_id === contact_id || (phone && e.payload.phone === phone);
   });
-  const activities = mockActivities.filter(a => a.contact_id === contact_id);
-  const calls = mockCalls.filter(c => c.contact_id === contact_id || (phone && c.phone === phone));
 
   // 2. Map Messages
   const messageItems = messages.map(m => {
@@ -71,7 +71,7 @@ export function getContactTimeline(contact_id: string): TimelineGroup[] {
     };
   });
 
-  // 4. Map Calls (Phase 2.1.3)
+  // 4. Map Calls
   const callItems = calls.map(c => {
     const direction = c.direction === 'inbound' ? 'Inbound call' : 'Outbound call';
     const isMissed = c.status === 'missed';
@@ -93,7 +93,7 @@ export function getContactTimeline(contact_id: string): TimelineGroup[] {
     };
   });
 
-  // 5. Map Activities (mapped to "event" as per prompt's "system events -> event" instruction)
+  // 5. Map Activities
   const activityItems = activities.map(a => ({
     type: 'event' as const,
     content: `Event: ${a.type.toUpperCase()}`,
@@ -108,15 +108,14 @@ export function getContactTimeline(contact_id: string): TimelineGroup[] {
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   );
 
-  // 6. Define Date Boundaries (Recalculated each time)
+  // 7. Define Date Boundaries (Recalculated each time)
   const now = new Date();
   const todayStr = formatDateForComparison(now);
-                   
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
   const yesterdayStr = formatDateForComparison(yesterday);
 
-  // 7. Grouping Logic
+  // 8. Grouping Logic
   const todayItems: any[] = [];
   const yesterdayItems: any[] = [];
   const earlierItems: any[] = [];
@@ -139,7 +138,7 @@ export function getContactTimeline(contact_id: string): TimelineGroup[] {
     }
   });
 
-  // 8. Final Grouped Structure
+  // 9. Final Grouped Structure
   return [
     { label: 'Earlier', items: earlierItems },
     { label: 'Yesterday', items: yesterdayItems },
@@ -149,7 +148,6 @@ export function getContactTimeline(contact_id: string): TimelineGroup[] {
 
 /**
  * Formats a raw timestamp into a human-readable display string.
- * Example: "Mar 21, 2:45 PM"
  */
 function formatTimelineTime(timestamp: string): string {
   try {
@@ -162,7 +160,7 @@ function formatTimelineTime(timestamp: string): string {
       hour12: true
     }).format(date);
   } catch (e) {
-    return timestamp; // Fallback to raw if invalid
+    return timestamp;
   }
 }
 
@@ -176,21 +174,15 @@ function formatDateForComparison(date: Date): string {
 }
 
 /**
- * Returns the single most recent activity for a contact across all groups.
+ * Returns the single most recent activity for a contact.
  */
-export function getLatestActivity(contact_id: string): TimelineItem | null {
+export function getLatestActivity(contact_id: string): any | null {
     const groups = getContactTimeline(contact_id);
-    
-    // Reverse priority (Today -> Yesterday -> Earlier)
     const reversedGroups = [...groups].reverse();
-    
     for (const group of reversedGroups) {
         if (group.items.length > 0) {
-            // Within group, items are sorted oldest first (ASC)
-            // So last item is latest
             return group.items[group.items.length - 1];
         }
     }
-    
     return null;
 }
