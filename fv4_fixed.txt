@@ -1,0 +1,78 @@
+--- FINAL VERIFICATION: FV4 Zero Silent Failure Assertions ---
+[DB INITIALIZATION] Opening database at ./crm.db...
+[DB] Running migrations...
+??? [DB] Migrations completed: contacts, opportunities, messages, calls, event_logs, activities, and website_settings initialized.
+??? [DB INITIALIZATION] SQLite connection active (WAL Mode).
+
+[FV4] TEST CASE 1: SMS Delivery Network Failure
+[DB: CONTACT] Persisting c-1774241995584 (Failure Tester A). follow_up_required: undefined
+[Event Logged]: {
+  event_name: 'lead_created',
+  payload: {
+    contact_id: 'c-1774241995584',
+    opportunity_id: 'opp-1774241995584',
+    phone: '+15554005582',
+    email: 'fv4_1774241995582@test.com',
+    pipeline_stage: 'New Lead',
+    source: 'fv4_1'
+  },
+  created_at: '2026-03-23T04:59:55.584Z'
+}
+Lead created event received
+[AUTOMATION] Triggering automated SMS for lead: Failure Tester A
+[CONTACT HELPER] Initializing SMS lifecycle for Failure Tester A...
+[Message Saved]: msg-1774241995590-282 with status "pending" for contact c-1774241995584
+[DISPATCH] Message record created with status "pending": msg-1774241995590-282
+node : [SMS SERVICE] Twilio credentials not fully configured in 
+environment variables.
+At line:1 char:1
++ node verify_fv4_failures.js 2>&1 | node -e "const fs = 
+require('fs'); ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([SMS SERVICE] T...ment v 
+   ariables.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[AUTOMATION: TASK CREATED] Call new lead ASAP
+??? [DISPATCH] Message msg-1774241995590-282 marked as 'failed'. 
+Error: Twilio credentials not fully configured in environment 
+variables.
+[FV4] Lead A Created. Contact ID: c-1774241995584
+--- FAILURE DEBUG ---
+Lead A ID: c-1774241995584
+Contact from DB: {
+  id: 'c-1774241995584',
+  name: 'Failure Tester A',
+  phone: '+15554005582',
+  email: 'fv4_1774241995582@test.com',
+  address: 'Lead API Submission',
+  tags: [ 'web-lead' ],
+  source: 'fv4_1',
+  service: null,
+  status: 'lead',
+  notes: null,
+  created_at: '2026-03-23T04:59:55.583Z',
+  invalid_phone: false,
+  lead_status: null,
+  follow_up_required: false
+}
+Messages for this Contact (Attempts: 0): [
+  {
+    id: 'msg-1774241995590-282',
+    contact_id: 'c-1774241995584',
+    opportunity_id: 'opp-1774241995584',
+    direction: 'outbound',
+    type: 'sms',
+    content: 'Modified Template 1774238190493: {business_name} says hello!',
+    status: 'failed',
+    source: 'automation',
+    retryable: true,
+    provider_message_id: null,
+    created_at: '2026-03-23T04:59:55.590Z'
+  }
+]
+??? VERIFICATION FAILED: Error: FAIL CASE 1: SMS Failure was silent 
+and ignored by contact record.
+    at verifyFV4 (D:\Website-CRM\verify_fv4_failures.js:1212:13)
+    at process.processTicksAndRejections 
+(node:internal/process/task_queues:95:5)

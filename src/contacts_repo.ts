@@ -7,10 +7,25 @@ import { Contact } from './types';
 export function persistContact(contact: Contact): Contact {
   const db = getDB();
   
+  console.log(`[DB: CONTACT] Persisting ${contact.id} (${contact.name}). follow_up_required: ${contact.follow_up_required}`);
   const stmt = db.prepare(`
-    INSERT OR REPLACE INTO contacts (
+    INSERT INTO contacts (
         id, name, phone, email, address, tags, source, service, status, notes, created_at, invalid_phone, lead_status, follow_up_required
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        phone = excluded.phone,
+        email = excluded.email,
+        address = excluded.address,
+        tags = excluded.tags,
+        source = excluded.source,
+        service = excluded.service,
+        status = excluded.status,
+        notes = excluded.notes,
+        created_at = excluded.created_at,
+        invalid_phone = excluded.invalid_phone,
+        lead_status = excluded.lead_status,
+        follow_up_required = excluded.follow_up_required
   `);
 
   stmt.run(

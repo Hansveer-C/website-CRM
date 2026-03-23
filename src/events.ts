@@ -135,12 +135,18 @@ onEvent('lead_created', async (payload) => {
 
   // Trigger SMS
   console.log(`[AUTOMATION] Triggering automated SMS for lead: ${contact.name}`);
-  const result = await sendMessageToContact(contact_id, message, 'automation');
-  
-  if (result.success) {
-    console.log('Automated lead SMS sent');
-  } else {
-    console.log('Auto SMS failed');
+  try {
+    const result = await sendMessageToContact(contact_id, message, 'automation');
+    
+    if (result.success) {
+      console.log('Automated lead SMS sent');
+    } else {
+      console.log(`Auto SMS failed: ${result.error}`);
+      contact.follow_up_required = true;
+      persistContact(contact);
+    }
+  } catch (err: any) {
+    console.error(`❌ [AUTOMATION ERROR] lead_created listener failed: ${err.message}`);
     contact.follow_up_required = true;
     persistContact(contact);
   }
