@@ -147,6 +147,40 @@ let newQuoteContactId: string = '';
 let newQuoteOpportunityId: string = '';
 (window as any).newQuoteOpportunityId = newQuoteOpportunityId;
 
+/**
+ * Standardized "New" badge logic (Phase 5.1)
+ * Returns true if the provided date string is within the last 24 hours.
+ */
+function isNew(dateStr: string): boolean {
+  if (!dateStr) return false;
+  const now = new Date().getTime();
+  const createdAt = new Date(dateStr).getTime();
+  return (now - createdAt) < (24 * 60 * 60 * 1000);
+}
+
+/**
+ * Standardized "Needs Attention" badge logic (Phase 5.2)
+ * Triggers on operational blockers like failed SMS, manual follow-up flags, 
+ * or recent unresolved missed calls.
+ */
+function needsAttention(contact: any): boolean {
+  if (contact.follow_up_required) return true;
+  
+  // Real-time check for failed SMS
+  const hasFailedSMS = mockMessages.some(m => m.contact_id === contact.id && m.status === 'failed');
+  if (hasFailedSMS) return true;
+  
+  // Recent missed call (last 2 hours) implies urgency
+  const now = new Date().getTime();
+  const recentMissedCall = mockCalls.find(c =>
+    c.contact_id === contact.id &&
+    c.status === 'missed' &&
+    (now - new Date(c.created_at).getTime()) < (2 * 60 * 60 * 1000)
+  );
+  
+  return !!recentMissedCall;
+}
+
 function renderSidebar(activeView: string) {
   return `
     <div class="sidebar">
@@ -158,9 +192,8 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}" style="display: flex; justify-content: space-between; align-items: center;">
             <span>Clients & Leads</span>
             ${(() => {
-      const now = new Date('2026-03-22T09:04:02-07:00').getTime();
-      const newLeads = mockContacts.filter(c => (now - new Date(c.created_at).getTime()) < (24 * 60 * 60 * 1000)).length;
-      return newLeads > 0 ? `<span class="badge" style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 800;">${newLeads}</span>` : '';
+      const newCount = mockContacts.filter(c => isNew(c.created_at)).length;
+      return newCount > 0 ? `<span class="badge" style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 800;">${newCount}</span>` : '';
     })()}
           </li>
           <li onclick="window.navigateTo('opportunities')" class="${activeView === 'opportunities' ? 'active' : ''}">Opportunities</li>
@@ -358,44 +391,19 @@ function renderClients() {
 
   const tableRows = filteredContacts.map(contact => {
     const latest = getLatestActivity(contact.id);
-    const needsAttention = (() => {
-      if (contact.follow_up_required) return true;
-
-      const hasFailedSMS = mockMessages.some(m => m.contact_id === contact.id && m.status === 'failed');
-      if (hasFailedSMS) return true;
-
-      const now = new Date('2026-03-22T09:11:53-07:00').getTime();
-      const recentMissedCall = mockCalls.find(c =>
-        c.contact_id === contact.id &&
-        c.status === 'missed' &&
-        (now - new Date(c.created_at).getTime()) < (2 * 60 * 60 * 1000) // 2 hours
-      );
-
-      return !!recentMissedCall;
-    })();
-
-    const isNew = (() => {
-      const now = new Date('2026-03-22T09:11:53-07:00').getTime();
-      const createdAt = new Date(contact.created_at).getTime();
-      const isRecent = (now - createdAt) < (24 * 60 * 60 * 1000);
-
-      // Also check for recent lead_created event
-      const recentLeadEvent = mockEventLogs.find(e =>
-        e.event_name === 'lead_created' &&
-        e.payload.contact_id === contact.id &&
-        (now - new Date(e.created_at).getTime()) < (24 * 60 * 60 * 1000)
-      );
-
-      return isRecent || !!recentLeadEvent;
-    })();
+    const hasAttentionFlag = needsAttention(contact);
+    const isNewLead = isNew(contact.created_at);
 
     return `
       <tr onclick="window.navigateTo('contact-detail', '${contact.id}')" style="cursor: pointer; border-bottom: 1px solid #f1f5f9; transition: background 0.1s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
         <td style="padding: 16px 24px;">
           <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px; flex-wrap: wrap;">
             <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${contact.name}</div>
-            ${isNew ? `<span style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">New</span>` : ''}
-            ${needsAttention ? `<span style="background: #fee2e2; color: #991b1b; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid #fecaca;">⚠️ Needs Attention</span>` : ''}
+            ${hasAttentionFlag ? `
+              <span style="background: #fee2e2; color: #991b1b; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid #fecaca;">⚠️ Needs Attention</span>
+            ` : (isNewLead ? `
+              <span style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">New</span>
+            ` : '')}
           </div>
           <div style="font-size: 0.75rem; color: #64748b; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 250px;">
             ${latest ? `<span style="color: #94a3b8; font-weight: 600;">Last:</span> ${latest.content}` : '<span style="color: #cbd5e1; font-style: italic;">No activity yet</span>'}
@@ -409,7 +417,7 @@ function renderClients() {
           <div style="display: flex; gap: 8px; align-items: center;">
             <button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${contact.id}')">View</button>
             <button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #6366f1;" onclick="event.stopPropagation(); window.textContact('${contact.id}')">💬 Text</button>
-            ${(contact.status === 'lead' && isNew) ? `
+            ${(contact.status === 'lead' && isNewLead) ? `
               <a href="tel:${contact.phone}" class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #10b981; text-decoration: none; display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation();">
                 📞 Call Now
               </a>
