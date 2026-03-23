@@ -1,6 +1,7 @@
 import { normalizePhone } from './leads_logic';
 import { emitEvent } from './events';
-import { mockCalls } from './db';
+import { persistCall, getCall } from './calls_repo';
+import { Call } from './types';
 
 /**
  * Handle Inbound Call (Simulated POST /api/calls/inbound)
@@ -27,14 +28,14 @@ export async function handleInboundCall(data: { phone: string }) {
   console.log(`Inbound call received from ${phoneNorm.normalized}`);
 
   // Create call record (PROMPT 3)
-  const callRecord = {
+  const callRecord: Call = {
     id: `call-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     phone: phoneNorm.normalized,
-    direction: 'inbound' as const,
-    status: 'received' as const,
+    direction: 'inbound',
+    status: 'received',
     created_at: timestamp
   };
-  mockCalls.push(callRecord);
+  persistCall(callRecord);
 
   // Emit "call_received" event
   await emitEvent('call_received', {
@@ -64,7 +65,7 @@ export async function endCall(data: { call_id: string; answered: boolean }) {
     throw new Error('call_id is required to end a call.');
   }
 
-  const call = mockCalls.find(c => c.id === data.call_id);
+  const call = getCall(data.call_id);
   
   if (!call) {
     const errorMsg = `Call with ID ${data.call_id} not found.`;
@@ -85,6 +86,9 @@ export async function endCall(data: { call_id: string; answered: boolean }) {
 
   // Update status
   call.status = data.answered ? 'answered' : 'missed';
+  call.duration = data.answered ? 60 : 0; // Simulate 1 minute call if answered
+  persistCall(call);
+  
   const timestamp = new Date().toISOString();
   
   // Requirement: Log: "Call ended: answered/missed"

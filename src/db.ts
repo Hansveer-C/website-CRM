@@ -446,8 +446,4 @@ export const mockWebsiteSettings: WebsiteSettings = {
   created_at: new Date().toISOString()
 };
 
-export const mockEventLogs: EventLog[] = [];
-
-export const mockMessages: Message[] = [];
-
-export const mockCalls: Call[] = [];
+// End of db.ts

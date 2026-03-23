@@ -39,3 +39,13 @@ export function getCallsForContact(contact_id: string, phone?: string): Call[] {
     
     return rows;
 }
+
+/**
+ * Retrieves a single call by ID.
+ */
+export function getCall(id: string): Call | null {
+    const db = getDB();
+    const row = db.prepare('SELECT * FROM calls WHERE id = ?').get(id) as any;
+    if (!row) return null;
+    return row as Call;
+}

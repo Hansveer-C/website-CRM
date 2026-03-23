@@ -13,9 +13,7 @@ export function initDB(): Database.Database {
   try {
     console.log(`[DB INITIALIZATION] Opening database at ${DB_PATH}...`);
     
-    db = new Database(DB_PATH, { 
-      verbose: console.log 
-    });
+    db = new Database(DB_PATH);
 
     // Pragma checks and basic optimization
     db.pragma('journal_mode = WAL');
@@ -114,9 +112,25 @@ function migrate(database: Database.Database) {
             completed INTEGER DEFAULT 0,
             FOREIGN KEY (contact_id) REFERENCES contacts (id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS website_settings (
+            id TEXT PRIMARY KEY,
+            business_name TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            email TEXT NOT NULL,
+            logo_url TEXT,
+            primary_color TEXT,
+            facebook_pixel_id TEXT,
+            gtm_id TEXT,
+            auto_lead_sms_enabled INTEGER DEFAULT 1,
+            auto_lead_sms_template TEXT,
+            missed_call_sms_enabled INTEGER DEFAULT 1,
+            missed_call_sms_template TEXT,
+            created_at TEXT NOT NULL
+        );
     `);
     
-    console.log('✅ [DB] Migrations completed: contacts, opportunities, messages, calls, event_logs, and activities initialized.');
+    console.log('✅ [DB] Migrations completed: contacts, opportunities, messages, calls, event_logs, activities, and website_settings initialized.');
 }
 
 /**

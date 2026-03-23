@@ -74,3 +74,18 @@ export function getContact(id: string): Contact | null {
     follow_up_required: !!row.follow_up_required
   };
 }
+
+/**
+ * Retrieves all contacts from the database.
+ */
+export function getAllContacts(): Contact[] {
+  const db = getDB();
+  const rows = db.prepare('SELECT * FROM contacts ORDER BY created_at ASC').all() as any[];
+  
+  return rows.map(row => ({
+    ...row,
+    tags: row.tags ? JSON.parse(row.tags) : [],
+    invalid_phone: !!row.invalid_phone,
+    follow_up_required: !!row.follow_up_required
+  }));
+}

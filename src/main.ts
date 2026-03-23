@@ -1,4 +1,8 @@
-import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings, mockEventLogs, mockMessages, mockCalls } from './db';
+import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, } from './db';
+import { getWebsiteSettings, persistWebsiteSettings } from './website_settings_repo';
+import { getEvents } from './events';
+import { getAllMessagesOrdered, getConversation } from './messages';
+import { getCallsForContact, getCall } from './calls_repo';
 import { templates } from './templates';
 import { Activity } from './types';
 import { runAutomations, checkOverdueInvoices } from './automation';
@@ -15,7 +19,7 @@ validateTwilioConfig();
 (window as any).dispatchSMS = dispatchSMS;
 (window as any).sendMessageToContact = sendMessageToContact;
 (window as any).retryMessage = retryMessage;
-(window as any).mockMessages = mockMessages;
+(window as any).getAllMessagesOrdered() = getAllMessagesOrdered();
 
 (window as any).checkTwilioStatus = () => {
   const isValid = validateTwilioConfig();
@@ -32,7 +36,7 @@ validateTwilioConfig();
   };
 };
 
-(window as any).EventLogs = mockEventLogs;
+(window as any).EventLogs = getEvents();
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
@@ -167,14 +171,12 @@ function needsAttention(contact: any): boolean {
   if (contact.follow_up_required) return true;
   
   // Real-time check for failed SMS
-  const hasFailedSMS = mockMessages.some(m => m.contact_id === contact.id && m.status === 'failed');
+  const hasFailedSMS = (getAllMessagesOrdered() || []).some(m => m.contact_id === contact.id && m.status === 'failed');
   if (hasFailedSMS) return true;
   
   // Recent missed call (last 2 hours) implies urgency
   const now = new Date().getTime();
-  const recentMissedCall = mockCalls.find(c =>
-    c.contact_id === contact.id &&
-    c.status === 'missed' &&
+  const recentMissedCall = getCallsForContact(contact.id).find(c => c.status === 'missed' &&
     (now - new Date(c.created_at).getTime()) < (2 * 60 * 60 * 1000)
   );
   
@@ -1144,7 +1146,7 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
     return;
   }
 
-  const settings = mockWebsiteSettings;
+  const settings = getWebsiteSettings();
   const sections = mockPageSections
     .filter(s => s.page_id === page.id)
     .sort((a, b) => a.order - b.order);
@@ -1813,7 +1815,7 @@ function renderTemplates() {
 }
 
 function renderWebsiteSettings() {
-  const settings = mockWebsiteSettings;
+  const settings = getWebsiteSettings();
   app.innerHTML = `
     ${renderSidebar('website-settings')}
     <main class="main-content">
@@ -1870,7 +1872,7 @@ function renderWebsiteSettings() {
   `;
 
   (window as any).updateSettingsField = (field: string, value: string) => {
-    (mockWebsiteSettings as any)[field] = value;
+    const s = getWebsiteSettings(); (s as any)[field] = value; require('./website_settings_repo').persistWebsiteSettings(s);
     renderWebsiteSettings();
     console.log('Settings updated:', field, value);
   };
@@ -3198,7 +3200,7 @@ function renderContactDetail(contactId: string) {
 };
 
 function renderEventLogs() {
-  const sortedLogs = [...mockEventLogs].sort((a, b) =>
+  const sortedLogs = [...getEvents()].sort((a, b) =>
     new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
 
@@ -3366,10 +3368,10 @@ function renderQATools() {
       (window as any).showToast('Call was already processed.', 3000);
     } else if (!answered) {
       // Extract CRM effects from mock DB for display (Phase 3.4)
-      const call = mockCalls.find(c => c.id === callId);
+      const call = getCall(callId);
       const contact = mockContacts.find(c => c.id === call?.contact_id);
       const opportunity = mockOpportunities.find(o => o.contact_id === contact?.id && o.source === 'missed_call');
-      const sms = [...mockMessages].reverse().find(m => m.contact_id === contact?.id && m.source === 'missed_call_automation');
+      const sms = [...getAllMessagesOrdered()].reverse().find(m => m.contact_id === contact?.id && m.source === 'missed_call_automation');
       
       lastSimulationResult = { contact, opportunity, sms, call };
     } else {

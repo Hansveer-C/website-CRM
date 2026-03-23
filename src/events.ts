@@ -1,8 +1,9 @@
-import { mockWebsiteSettings, mockCalls } from './db';
+import { getWebsiteSettings } from './website_settings_repo';
+import { getCall, persistCall } from './calls_repo';
 import { checkDuplicateMessage, countRecentOutboundMessages } from './messages_repo';
 import { getContact, findContact, persistContact } from './contacts_repo';
 import { persistOpportunity } from './opportunities_repo';
-import { persistEventLog } from './event_logs_repo';
+import { persistEventLog, getAllEventLogs } from './event_logs_repo';
 import { Opportunity } from './types';
 import { getDefaultLeadReply, sendMessageToContact, getMissedCallReply } from './sms';
 import { normalizePhone } from './leads_logic';
@@ -35,11 +36,6 @@ export function createEvent(name: string, payload: Record<string, any> = {}): Ap
 }
 
 /**
- * Simple in-memory storage for events.
- */
-const eventLog: AppEvent[] = [];
-
-/**
  * Emits an event, saves it to EventLogs collection and logs to console.
  */
 export async function emitEvent(name: string, payload: Record<string, any> = {}): Promise<AppEvent | null> {
@@ -52,7 +48,6 @@ export async function emitEvent(name: string, payload: Record<string, any> = {})
   }
 
   const event = createEvent(name, payload);
-  eventLog.push(event);
 
   // Persist to EventLogs table (Initial state: pending)
   const logEntry = {
@@ -88,13 +83,14 @@ export async function emitEvent(name: string, payload: Record<string, any> = {})
  * Returns all logged events.
  */
 export function getEvents(): AppEvent[] {
-  return [...eventLog];
+  return getAllEventLogs() as AppEvent[];
 }
 
 // --- Register Business Logic Listeners ---
 onEvent('lead_created', async (payload) => {
   // Global Toggle Check
-  if (!mockWebsiteSettings.auto_lead_sms_enabled) {
+  const settings = getWebsiteSettings();
+  if (!settings.auto_lead_sms_enabled) {
     console.log('Automated lead SMS skipped: auto-response disabled globally');
     return;
   }
@@ -125,7 +121,7 @@ onEvent('lead_created', async (payload) => {
   }
 
   // Generate automated message
-  const template = mockWebsiteSettings.auto_lead_sms_template;
+  const template = settings.auto_lead_sms_template;
   const message = getDefaultLeadReply(contact, template);
   
   // Prevent duplicate automated SMS (2 minute window)
@@ -146,6 +142,7 @@ onEvent('lead_created', async (payload) => {
   } else {
     console.log('Auto SMS failed');
     contact.follow_up_required = true;
+    persistContact(contact);
   }
 });
 
@@ -154,7 +151,8 @@ onEvent('call_missed', async (payload) => {
   console.log('call_missed event received');
   
   // PROMPT 19: Global Toggle
-  if (!mockWebsiteSettings.missed_call_sms_enabled) {
+  const settings = getWebsiteSettings();
+  if (!settings.missed_call_sms_enabled) {
     console.log('Missed call SMS disabled');
     return;
   }
@@ -202,7 +200,7 @@ onEvent('call_missed', async (payload) => {
   console.log(`[SMS PREP] Target contact resolved: ${targetContact.name} (${targetContact.id})`);
 
   // Prepare SMS message first so we can check for duplicates against the content
-  const smsMessage = getMissedCallReply(targetContact, mockWebsiteSettings.missed_call_sms_template);
+  const smsMessage = getMissedCallReply(targetContact, settings.missed_call_sms_template);
 
   // PROMPT 17: Extra Duplicate Protection (2-minute window)
   const twoMinutesAgo = new Date(Date.now() - 120000).toISOString();
@@ -238,6 +236,7 @@ onEvent('call_missed', async (payload) => {
     console.log('Missed call SMS failed');
     console.error(`[SMS FAILURE] Could not send reply to ${targetContact.name}: ${smsResult.error}`);
     targetContact.follow_up_required = true;
+    persistContact(targetContact);
   }
 
   // Create Opportunity (PROMPT 10)
@@ -255,10 +254,11 @@ onEvent('call_missed', async (payload) => {
 
   // Link Call record (PROMPT 11)
   if (call_id) {
-    const callRecord = mockCalls.find(c => c.id === call_id);
+    const callRecord = getCall(call_id);
     if (callRecord) {
       callRecord.contact_id = contactIdToUse;
       callRecord.opportunity_id = newOpportunity.id;
+      persistCall(callRecord);
       console.log(`Call record ${call_id} linked to contact ${contactIdToUse} and opportunity ${newOpportunity.id}`);
     }
   }

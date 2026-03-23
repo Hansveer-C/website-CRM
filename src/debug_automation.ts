@@ -1,14 +1,16 @@
 import { emitEvent } from './events';
-import { mockWebsiteSettings, mockMessages } from './db';
+import { getWebsiteSettings, persistWebsiteSettings } from './website_settings_repo';
+import { mockMessages } from './db';
 
 async function runDebug() {
     const contact_id = 'c2'; // Jane Smith
     console.log('--- DEBUG: Phase 1.5 Automation ---');
 
     // 1. Initial State
+    let settings = getWebsiteSettings();
     console.log('Default settings:', { 
-        enabled: mockWebsiteSettings.auto_lead_sms_enabled,
-        template: mockWebsiteSettings.auto_lead_sms_template 
+        enabled: settings.auto_lead_sms_enabled,
+        template: settings.auto_lead_sms_template 
     });
 
     // 2. Trigger Event (Standard Default Case)
@@ -21,13 +23,15 @@ async function runDebug() {
 
     // 4. Global Toggle Test
     console.log('\n- Disabling global auto SMS...');
-    mockWebsiteSettings.auto_lead_sms_enabled = false;
+    settings.auto_lead_sms_enabled = false;
+    persistWebsiteSettings(settings);
     await emitEvent('lead_created', { contact_id, opportunity_id: 'o1' });
 
     // 5. Custom Template Test
     console.log('\n- Re-enabling and setting custom template...');
-    mockWebsiteSettings.auto_lead_sms_enabled = true;
-    mockWebsiteSettings.auto_lead_sms_template = "Hello {name}, your personalized quote is ready!";
+    settings.auto_lead_sms_enabled = true;
+    settings.auto_lead_sms_template = "Hello {name}, your personalized quote is ready!";
+    persistWebsiteSettings(settings);
     
     // Using contact c1 for a fresh test
     const contact_id_2 = 'c1'; // John Doe
