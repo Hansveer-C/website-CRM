@@ -9,10 +9,21 @@ export interface TwilioConfig {
   sending_phone_number: string;
 }
 
+export interface AuthConfig {
+  jwt_secret: string;
+}
+
 export const twilioConfig: TwilioConfig = {
   account_sid: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_ACCOUNT_SID) || '',
   auth_token: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_AUTH_TOKEN) || '',
   sending_phone_number: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_PHONE_NUMBER) || '',
+};
+
+export const authConfig: AuthConfig = {
+  // If in browser, use VITE_ variable. In Node (tests), use process.env. Default to 'dev_secret' for easy testing.
+  jwt_secret: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_JWT_SECRET) || 
+               (typeof process !== 'undefined' && process.env.JWT_SECRET) || 
+               'antigravity_safe_default_secret_123'
 };
 
 /**
