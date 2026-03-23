@@ -11,14 +11,27 @@ async function testLoginAPI() {
     console.log(`Setting up test user: ${testEmail}...`);
     await createUserSafe(testEmail, password);
     
-    // 1. Test Valid Email + Correct Password -> Success (with token)
-    console.log('Testing login with valid credentials...');
+    // 1. Test Valid Email + Correct Password -> Success (cookie + no token in body)
+    console.log('Testing login with valid credentials (cookie check)...');
+    
+    // Simple mock for browser document.cookie
+    let mockCookies = '';
+    (global as any).document = {
+        set cookie(val: string) { mockCookies = val; },
+        get cookie() { return mockCookies; }
+    } as any;
+
     const result1 = await login({ email: testEmail, password });
-    if (result1.success && result1.token && typeof result1.token === 'string') {
-        console.log('✅ PASS: Login succeeded and returned a session token.');
-        console.log(`Token Snippet: ${result1.token.substring(0, 20)}...`);
+    
+    if (result1.success && !(result1 as any).token && mockCookies.includes('session=')) {
+        console.log('✅ PASS: Login succeeded, returned no token in body, and set "session" cookie.');
+        console.log(`Cookie set: ${mockCookies.substring(0, 40)}...`);
     } else {
-        console.error('❌ FAIL: Valid login was rejected or token is missing.', result1.error || 'Token missing');
+        console.error('❌ FAIL: Login did not set cookie or still returned token in body.', { 
+            success: result1.success, 
+            hasTokenInBody: !!(result1 as any).token,
+            cookie: mockCookies 
+        });
         process.exit(1);
     }
 

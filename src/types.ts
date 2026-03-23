@@ -214,3 +214,10 @@ export interface User {
   password_hash: string;
   created_at: string;
 }
+
+export interface ApiRequest {
+  cookies?: Record<string, string>;
+  user?: User | null;
+  // Payload for POST/PUT requests can be added as 'body' later
+  body?: any;
+}

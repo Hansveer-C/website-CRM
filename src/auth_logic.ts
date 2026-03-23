@@ -1,6 +1,6 @@
-import { getUserByEmail } from './users_repo';
+import { getUserByEmail, getUserById } from './users_repo';
 import { verifyPassword } from './password_utils';
-import { createSessionToken } from './session_utils';
+import { createSessionToken, decodeSessionToken } from './session_utils';
 import { emitEvent } from './events';
 
 /**
@@ -39,12 +39,48 @@ export async function login(data: { email: string, password?: string }) {
     // Generate session identifier
     const token = createSessionToken(user);
     
+    // Set secure HTTP-only cookie (simulated via document.cookie if in browser)
+    // Note: HttpOnly is only strictly enforced when set via HTTP headers from a server.
+    if (typeof document !== 'undefined') {
+        document.cookie = `session=${token}; path=/; HttpOnly; SameSite=Lax`;
+    }
+
     await emitEvent('user_logged_in', { email: normalizedEmail, user_id: user.id });
 
-    // Return success + user (no sensitive info) + session token
+    // Return success + user (no token in body for better security)
     return { 
         success: true, 
-        token,
         user: { id: user.id, email: user.email } 
     };
+}
+
+/**
+ * Resolves the current authenticated user from a request's cookies.
+ */
+export function getCurrentUser(request?: { cookies?: Record<string, string> }) {
+    let token: string | undefined;
+
+    // 1. Try to read from request cookies (server-side context)
+    if (request?.cookies?.session) {
+        token = request.cookies.session;
+    }
+    // 2. Fallback to document.cookie (client-side simulation)
+    else if (typeof document !== 'undefined') {
+        const cookies = document.cookie.split(';').map(c => c.trim());
+        const sessionCookie = cookies.find(c => c.startsWith('session='));
+        if (sessionCookie) {
+            token = sessionCookie.split('=')[1];
+        }
+    }
+
+    if (!token) return null;
+
+    // 3. Verify and decode token
+    const decoded = decodeSessionToken(token);
+    if (!decoded || !decoded.user_id) {
+        return null;
+    }
+
+    // 4. Fetch user from repository
+    return getUserById(decoded.user_id);
 }
