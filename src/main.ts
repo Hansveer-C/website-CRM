@@ -10,6 +10,8 @@ import { emitEvent } from './events';
 import { validateTwilioConfig, twilioConfig } from './config';
 import { sendSMS, dispatchSMS, sendMessageToContact, retryMessage } from './sms';
 import { getContactTimeline, getLatestActivity } from './timeline';
+import { normalizePhone, normalizeEmail, normalizeName, createLead } from './leads_logic';
+import { handleInboundCall, endCall } from './calls_logic';
 
 // Initialize and Validate Configs
 validateTwilioConfig();
@@ -19,7 +21,7 @@ validateTwilioConfig();
 (window as any).dispatchSMS = dispatchSMS;
 (window as any).sendMessageToContact = sendMessageToContact;
 (window as any).retryMessage = retryMessage;
-(window as any).getAllMessagesOrdered() = getAllMessagesOrdered();
+(window as any).getAllMessagesOrdered = getAllMessagesOrdered;
 
 (window as any).checkTwilioStatus = () => {
   const isValid = validateTwilioConfig();
@@ -40,8 +42,6 @@ validateTwilioConfig();
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
-import { normalizePhone, normalizeEmail, normalizeName, createLead } from './leads_logic';
-import { handleInboundCall, endCall } from './calls_logic';
 
 // Simulated API exposed to window (Phase 1.8.1)
 (window as any).handleInboundCall = handleInboundCall;
@@ -1996,6 +1996,7 @@ function handleLeadCaptureSubmission(e: Event) {
       // 1. Create new contact FIRST
       mockContacts.push({
         id: contactIdToUse,
+        user_id: 'system',
         name: normalizedName,
         phone: phoneNorm.normalized,
         email: emailNorm,
@@ -2012,6 +2013,7 @@ function handleLeadCaptureSubmission(e: Event) {
     try {
       const newOpportunity = {
         id: 'o' + Date.now(),
+        user_id: 'system',
         contact_id: contactIdToUse,
         pipeline_stage: 'New Lead',
         value: 0,
@@ -2936,6 +2938,7 @@ function renderContactDetail(contactId: string) {
 
   const newOpp = {
     id: 'o' + (mockOpportunities.length + 1) + '-' + Math.floor(Math.random() * 100),
+    user_id: 'system',
     contact_id: contactId,
     pipeline_stage: 'New Lead',
     value: isNaN(value) ? 0 : value,

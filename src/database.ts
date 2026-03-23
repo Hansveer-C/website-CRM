@@ -1,13 +1,24 @@
-import Database from 'better-sqlite3';
+// Browser-safe check for conditional imports
+const isBrowser = typeof window !== 'undefined';
+let Database: any = null;
+
+if (!isBrowser) {
+    Database = (await import('better-sqlite3')).default;
+}
 
 const DB_PATH = './crm.db';
 
-let db: Database.Database | null = null;
+let db: any = null;
 
 /**
  * Initializes the database connection and creates files if missing.
  */
-export function initDB(): Database.Database {
+export function initDB(): any {
+  if (isBrowser) {
+    console.warn('[DB] Skipping SQLite initialization in browser environment.');
+    return { exec: () => {}, prepare: () => ({ run: () => {}, get: () => {}, all: () => [] }), pragma: () => {} };
+  }
+  
   if (db) return db;
 
   try {
@@ -34,7 +45,7 @@ export function initDB(): Database.Database {
 /**
  * Creates tables if they don't exist.
  */
-function migrate(database: Database.Database) {
+function migrate(database: any) {
     console.log('[DB] Running migrations...');
     
     database.exec(`
@@ -174,7 +185,7 @@ function migrate(database: Database.Database) {
 /**
  * Returns the active DB connection.
  */
-export function getDB(): Database.Database {
+export function getDB(): any {
   if (!db) {
     return initDB();
   }

@@ -9,8 +9,10 @@ import { getDefaultLeadReply, sendMessageToContact, getMissedCallReply } from '.
 import { normalizePhone } from './leads_logic';
 
 export interface AppEvent {
+  user_id?: string;
   event_name: string;
   payload: Record<string, any>;
+  status?: string;
   created_at: string; // ISO 8601 timestamp
 }
 
