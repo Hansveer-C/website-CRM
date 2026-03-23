@@ -2,7 +2,7 @@ import { getWebsiteSettings } from './website_settings_repo';
 import { getCall, persistCall } from './calls_repo';
 import { checkDuplicateMessage, countRecentOutboundMessages } from './messages_repo';
 import { getContact, findContact, persistContact } from './contacts_repo';
-import { persistOpportunity } from './opportunities_repo';
+import { getOpportunity, persistOpportunity } from './opportunities_repo';
 import { persistEventLog, getAllEventLogs } from './event_logs_repo';
 import { Opportunity } from './types';
 import { getDefaultLeadReply, sendMessageToContact, getMissedCallReply } from './sms';
@@ -35,10 +35,11 @@ export function createEvent(name: string, payload: Record<string, any> = {}): Ap
   };
 }
 
+
 /**
  * Emits an event, saves it to EventLogs collection and logs to console.
  */
-export async function emitEvent(name: string, payload: Record<string, any> = {}): Promise<AppEvent | null> {
+export async function emitEvent(name: string, payload: Record<string, any> = {}, user_id?: string): Promise<AppEvent | null> {
   // Simple Validation
   if (name === 'form_submitted' || name === 'lead_created') {
     if (!payload.contact_id || !payload.opportunity_id) {
@@ -47,11 +48,28 @@ export async function emitEvent(name: string, payload: Record<string, any> = {})
     }
   }
 
+  // 1. Resolve User Ownership for Event Log
+  let finalUserId = user_id;
+  
+  if (!finalUserId) {
+    // If contact_id in payload, inherit owner
+    if (payload.contact_id) {
+       const contact = getContact(payload.contact_id);
+       if (contact) finalUserId = contact.user_id;
+    }
+    // Else try opportunity_id
+    else if (payload.opportunity_id) {
+       const opp = getOpportunity(payload.opportunity_id);
+       if (opp) finalUserId = opp.user_id;
+    }
+  }
+
   const event = createEvent(name, payload);
 
   // Persist to EventLogs table (Initial state: pending)
   const logEntry = {
     id: `ev-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    user_id: finalUserId || 'system',
     event_name: event.event_name,
     payload: event.payload,
     status: 'pending',
@@ -183,6 +201,7 @@ onEvent('call_missed', async (payload) => {
   } else {
     const newContact = {
       id: `c-${Date.now()}`,
+      user_id: 'system',
       name: 'Unknown Caller',
       phone: phoneNorm.normalized,
       email: null,
@@ -248,6 +267,7 @@ onEvent('call_missed', async (payload) => {
   // Create Opportunity (PROMPT 10)
   const newOpportunity: Opportunity = {
     id: `opp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    user_id: targetContact?.user_id || 'system',
     contact_id: contactIdToUse,
     pipeline_stage: 'New Lead',
     status: 'open',
@@ -264,6 +284,7 @@ onEvent('call_missed', async (payload) => {
     if (callRecord) {
       callRecord.contact_id = contactIdToUse;
       callRecord.opportunity_id = newOpportunity.id;
+      callRecord.user_id = targetContact?.user_id || 'system';
       persistCall(callRecord);
       console.log(`Call record ${call_id} linked to contact ${contactIdToUse} and opportunity ${newOpportunity.id}`);
     }

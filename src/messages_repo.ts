@@ -27,11 +27,12 @@ export function persistMessage(message: Message): Message {
     } else {
         db.prepare(`
             INSERT INTO messages (
-                id, contact_id, opportunity_id, direction, type, content, 
+                id, user_id, contact_id, opportunity_id, direction, type, content, 
                 status, source, retryable, provider_message_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             message.id,
+            message.user_id,
             message.contact_id,
             message.opportunity_id || null,
             message.direction,

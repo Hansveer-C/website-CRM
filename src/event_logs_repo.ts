@@ -9,10 +9,11 @@ export function persistEventLog(log: EventLog): EventLog {
     
     db.prepare(`
         INSERT OR REPLACE INTO event_logs (
-            id, event_name, payload, status, created_at
-        ) VALUES (?, ?, ?, ?, ?)
+            id, user_id, event_name, payload, status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
     `).run(
         log.id,
+        log.user_id,
         log.event_name,
         JSON.stringify(log.payload || {}),
         log.status,

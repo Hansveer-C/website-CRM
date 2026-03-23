@@ -10,9 +10,10 @@ export function persistContact(contact: Contact): Contact {
   console.log(`[DB: CONTACT] Persisting ${contact.id} (${contact.name}). follow_up_required: ${contact.follow_up_required}`);
   const stmt = db.prepare(`
     INSERT INTO contacts (
-        id, name, phone, email, address, tags, source, service, status, notes, created_at, invalid_phone, lead_status, follow_up_required
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, user_id, name, phone, email, address, tags, source, service, status, notes, created_at, invalid_phone, lead_status, follow_up_required
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
+        user_id = excluded.user_id,
         name = excluded.name,
         phone = excluded.phone,
         email = excluded.email,
@@ -30,6 +31,7 @@ export function persistContact(contact: Contact): Contact {
 
   stmt.run(
     contact.id,
+    contact.user_id,
     contact.name,
     contact.phone,
     contact.email,

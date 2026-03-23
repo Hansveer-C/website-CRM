@@ -2,7 +2,7 @@ import { emitEvent } from './events';
 import { runAutomations } from './automation';
 import { persistContact, findContact } from './contacts_repo';
 import { persistOpportunity, getOpportunitiesByContact } from './opportunities_repo';
-import { Contact, Opportunity } from './types';
+import { Contact, Opportunity, ApiRequest } from './types';
 
 export function normalizePhone(phone: string): { normalized: string; invalid: boolean } {
   if (!phone) return { normalized: '', invalid: true };
@@ -39,7 +39,8 @@ export async function createLead(data: {
   service_type?: string;
   message?: string;
   source?: string;
-}) {
+}, request?: ApiRequest) {
+  const user_id = request?.user?.id || 'system';
   const timestamp = new Date().toISOString();
   const phoneNorm = normalizePhone(data.phone || '');
   const emailNorm = normalizeEmail(data.email);
@@ -71,6 +72,7 @@ export async function createLead(data: {
     contactIdToUse = `c-${Date.now()}`;
     const newContact: Contact = {
       id: contactIdToUse,
+      user_id: user_id,
       name: normalizedName,
       phone: phoneNorm.normalized, 
       email: emailNorm, 
@@ -90,6 +92,7 @@ export async function createLead(data: {
   // 2. Create Opportunity
   const newOpportunity: Opportunity = {
     id: `opp-${Date.now()}`,
+    user_id: existingContact ? (existingContact.user_id || 'system') : user_id,
     contact_id: contactIdToUse,
     pipeline_stage: 'New Lead',
     value: 0,

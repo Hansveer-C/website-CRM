@@ -1,6 +1,7 @@
 import { normalizePhone } from './leads_logic';
 import { emitEvent } from './events';
 import { persistCall, getCall } from './calls_repo';
+import { findContact } from './contacts_repo';
 import { Call } from './types';
 
 /**
@@ -28,8 +29,10 @@ export async function handleInboundCall(data: { phone: string }) {
   console.log(`Inbound call received from ${phoneNorm.normalized}`);
 
   // Create call record (PROMPT 3)
+  const existingContact = findContact(phoneNorm.normalized, null);
   const callRecord: Call = {
     id: `call-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    user_id: existingContact?.user_id || 'system',
     phone: phoneNorm.normalized,
     direction: 'inbound',
     status: 'received',

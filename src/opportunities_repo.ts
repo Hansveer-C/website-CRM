@@ -9,12 +9,13 @@ export function persistOpportunity(opportunity: Opportunity): Opportunity {
   
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO opportunities (
-        id, contact_id, pipeline_stage, status, value, source, notes, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        id, user_id, contact_id, pipeline_stage, status, value, source, notes, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
     opportunity.id,
+    opportunity.user_id,
     opportunity.contact_id,
     opportunity.pipeline_stage,
     opportunity.status,

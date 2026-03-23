@@ -130,13 +130,15 @@ export async function dispatchSMS(
   phone: string, 
   messageText: string, 
   opportunity_id?: string,
-  source?: string
+  source?: string,
+  user_id?: string
 ): Promise<{ internal_id: string; twilio_result: any }> {
   
   // Step 1: Create Message record using shared saveMessage utility
   // This automatically handles opportunity linking and contact validation.
   const newMessage: Message = {
     id: `msg-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    user_id: user_id as any, // Will be resolved by saveMessage if missing
     contact_id,
     opportunity_id,
     direction: 'outbound',
@@ -179,7 +181,8 @@ export async function dispatchSMS(
 export async function sendMessageToContact(
   contact_id: string, 
   messageText: string,
-  source?: string
+  source?: string,
+  user_id?: string
 ): Promise<{ success: boolean; internal_id?: string; error?: string }> {
   
   // Locate the contact
@@ -220,7 +223,7 @@ export async function sendMessageToContact(
   console.log(`[CONTACT HELPER] Initializing SMS lifecycle for ${contact.name}...`);
   
   // Call the core dispatcher to handle Step 1 (Message Record) and Step 2 (Twilio Send)
-  const result = await dispatchSMS(contact_id, contact.phone, messageText, undefined, source);
+  const result = await dispatchSMS(contact_id, contact.phone, messageText, undefined, source, user_id);
   
   return {
     success: result.twilio_result.success,

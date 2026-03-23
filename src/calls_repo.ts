@@ -9,10 +9,11 @@ export function persistCall(call: Call): Call {
     
     db.prepare(`
         INSERT OR REPLACE INTO calls (
-            id, contact_id, opportunity_id, phone, direction, status, duration, recording_url, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            id, user_id, contact_id, opportunity_id, phone, direction, status, duration, recording_url, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         call.id,
+        call.user_id,
         call.contact_id || null,
         call.opportunity_id || null,
         call.phone,
