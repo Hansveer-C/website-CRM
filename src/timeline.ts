@@ -1,10 +1,14 @@
-import { mockWebsiteSettings } from './db';
 import { getContact } from './contacts_repo';
 import { getMessagesByContact } from './messages_repo';
 import { getAllEventLogs } from './event_logs_repo';
 import { getCallsForContact } from './calls_repo';
 import { getActivitiesByContact } from './activities_repo';
-import { TimelineItem, TimelineGroup } from './types';
+import { TimelineItem } from './types';
+
+export interface TimelineGroup {
+    label: string;
+    items: TimelineItem[];
+}
 
 /**
  * Standardized timeline item source.

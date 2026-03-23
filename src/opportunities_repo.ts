@@ -32,11 +32,12 @@ export function persistOpportunity(opportunity: Opportunity): Opportunity {
  */
 export function getOpportunitiesByContact(contact_id: string): Opportunity[] {
   const db = getDB();
-  const stmt = db.prepare('SELECT * FROM opportunities WHERE contact_id = ?');
+  const stmt = db.prepare('SELECT * FROM opportunities WHERE contact_id = ? ORDER BY created_at DESC');
   const rows = stmt.all(contact_id) as any[];
   
   return rows.map(row => ({
     ...row,
+    status: row.status as any,
     value: parseFloat(row.value) || 0
   }));
 }
@@ -52,6 +53,7 @@ export function getOpportunity(id: string): Opportunity | null {
 
   return {
     ...row,
+    status: row.status as any,
     value: parseFloat(row.value) || 0
   };
 }
@@ -61,11 +63,12 @@ export function getOpportunity(id: string): Opportunity | null {
  */
 export function getAllOpportunities(): Opportunity[] {
   const db = getDB();
-  const stmt = db.prepare('SELECT * FROM opportunities');
+  const stmt = db.prepare('SELECT * FROM opportunities ORDER BY created_at DESC');
   const rows = stmt.all() as any[];
   
   return rows.map(row => ({
     ...row,
+    status: row.status as any,
     value: parseFloat(row.value) || 0
   }));
 }

@@ -1,31 +1,43 @@
 import Database from 'better-sqlite3';
 
+const DB_PATH = './crm.db';
+
 let db: Database.Database | null = null;
 
 /**
- * Initializes the SQLite database and runs migrations.
+ * Initializes the database connection and creates files if missing.
  */
 export function initDB(): Database.Database {
-    if (db) return db;
+  if (db) return db;
 
-    console.log('[DB INITIALIZATION] Opening database at ./crm.db...');
-    db = new Database('./crm.db');
+  try {
+    console.log(`[DB INITIALIZATION] Opening database at ${DB_PATH}...`);
+    
+    db = new Database(DB_PATH, { 
+      verbose: console.log 
+    });
 
-    // Enable WAL for concurrency and foreign keys
+    // Pragma checks and basic optimization
     db.pragma('journal_mode = WAL');
     db.pragma('synchronous = NORMAL');
     db.pragma('foreign_keys = ON');
 
-    migrate();
+    // Run migrations
+    migrate(db);
 
+    console.log('✅ [DB INITIALIZATION] SQLite connection active (WAL Mode).');
     return db;
+  } catch (err) {
+    console.error('❌ [DB INITIALIZATION] Failed to initialize SQLite:', err);
+    throw err;
+  }
 }
 
 /**
  * Creates tables if they don't exist.
  */
-export function migrate() {
-    const database = getDB();
+function migrate(database: Database.Database) {
+    console.log('[DB] Running migrations...');
     
     database.exec(`
         CREATE TABLE IF NOT EXISTS contacts (
@@ -37,7 +49,7 @@ export function migrate() {
             tags TEXT,
             source TEXT,
             service TEXT,
-            status TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('lead', 'customer', 'lost')),
             notes TEXT,
             created_at TEXT NOT NULL,
             invalid_phone INTEGER DEFAULT 0,
@@ -104,7 +116,7 @@ export function migrate() {
         );
     `);
     
-    console.log('✅ [DB] Migrations completed: contacts, opportunities, and messages initialized.');
+    console.log('✅ [DB] Migrations completed: contacts, opportunities, messages, calls, event_logs, and activities initialized.');
 }
 
 /**
@@ -120,7 +132,7 @@ export function getDB(): Database.Database {
 /**
  * Closes the database connection safely.
  */
-export function closeDB() {
+export function closeDB(): void {
   if (db) {
     db.close();
     db = null;

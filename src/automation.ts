@@ -1,6 +1,6 @@
-import { Automation, TriggerType, Opportunity, Activity } from './types';
-import { mockActivities, mockContacts, mockInvoices } from './db';
-
+import { Automation, TriggerType, Opportunity, Activity, Contact } from './types';
+import { getContact } from './contacts_repo';
+import { mockActivities, mockInvoices } from './db';
 
 export function checkOverdueInvoices() {
   const now = new Date();
@@ -99,7 +99,7 @@ function executeAction(automation: Automation, context: any) {
 }
 
 function createTaskAction(params: any, context: Opportunity) {
-  const contact = mockContacts.find(c => c.id === context.contact_id);
+  const contact = getContact(context.contact_id);
   const contactName = contact ? contact.name : 'Unknown';
   
   const dueDate = new Date();
@@ -124,7 +124,7 @@ function createTaskAction(params: any, context: Opportunity) {
 }
 
 function sendNotificationAction(params: any, context: Opportunity) {
-  const contact = mockContacts.find(c => c.id === context.contact_id);
+  const contact = getContact(context.contact_id);
   const contactName = contact ? contact.name : 'Unknown';
   
   const message = params.message.replace('${contactName}', contactName);
@@ -133,5 +133,8 @@ function sendNotificationAction(params: any, context: Opportunity) {
   console.log(`%c[AUTOMATION: NOTIFICATION] ${message} (${contactName})`, "color: #007bff; font-weight: bold;");
   
   // Visual Feedback for user
-  alert(`Automation Notification: ${message}`);
+  // Avoid window.alert in pure Node tests
+  if (typeof window !== 'undefined') {
+    alert(`Automation Notification: ${message}`);
+  }
 }
