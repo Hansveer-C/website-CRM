@@ -3,7 +3,7 @@ import { getMessagesByContact } from './messages_repo';
 import { getAllEventLogs } from './event_logs_repo';
 import { getCallsForContact } from './calls_repo';
 import { getActivitiesByContact } from './activities_repo';
-import { TimelineItem } from './types';
+import { TimelineItem, User } from './types';
 
 export interface TimelineGroup {
     label: string;
@@ -14,15 +14,15 @@ export interface TimelineGroup {
  * Standardized timeline item source.
  * Fully DB-backed.
  */
-export function getContactTimeline(contact_id: string): TimelineGroup[] {
-  const contact = getContact(contact_id);
+export function getContactTimeline(contact_id: string, user?: User | string | null): TimelineGroup[] {
+  const contact = getContact(contact_id, user);
   const phone = contact?.phone;
 
   // 1. Fetch source data from DB repositories
-  const messages = getMessagesByContact(contact_id);
-  const allEventLogs = getAllEventLogs();
-  const activities = getActivitiesByContact(contact_id);
-  const calls = getCallsForContact(contact_id, phone);
+  const messages = getMessagesByContact(contact_id, user);
+  const allEventLogs = getAllEventLogs(user);
+  const activities = getActivitiesByContact(contact_id, user);
+  const calls = getCallsForContact(contact_id, phone, user);
 
   // Filter event logs in JS for contact linkage (payload-based)
   const eventLogs = allEventLogs.filter(e => {

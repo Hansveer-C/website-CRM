@@ -1,5 +1,6 @@
 import { getDB } from './database';
-import { Opportunity } from './types';
+import { Opportunity, User } from './types';
+import { applyUserScope } from './query_utils';
 
 /**
  * Persists an opportunity to the SQLite database.
@@ -31,10 +32,12 @@ export function persistOpportunity(opportunity: Opportunity): Opportunity {
 /**
  * Retrieves all opportunities associated with a specific contact.
  */
-export function getOpportunitiesByContact(contact_id: string): Opportunity[] {
+export function getOpportunitiesByContact(contact_id: string, user?: User | string | null): Opportunity[] {
   const db = getDB();
-  const stmt = db.prepare('SELECT * FROM opportunities WHERE contact_id = ? ORDER BY created_at DESC');
-  const rows = stmt.all(contact_id) as any[];
+  const baseQuery = 'SELECT * FROM opportunities WHERE contact_id = ?';
+  const scoped = applyUserScope(baseQuery, user);
+  const stmt = db.prepare(`${scoped.sql} ORDER BY created_at DESC`);
+  const rows = stmt.all(contact_id, ...scoped.params) as any[];
   
   return rows.map(row => ({
     ...row,
@@ -46,10 +49,12 @@ export function getOpportunitiesByContact(contact_id: string): Opportunity[] {
 /**
  * Retrieves a single opportunity by ID.
  */
-export function getOpportunity(id: string): Opportunity | null {
+export function getOpportunity(id: string, user?: User | string | null): Opportunity | null {
   const db = getDB();
-  const stmt = db.prepare('SELECT * FROM opportunities WHERE id = ?');
-  const row = stmt.get(id) as any;
+  const baseQuery = 'SELECT * FROM opportunities WHERE id = ?';
+  const scoped = applyUserScope(baseQuery, user);
+  const stmt = db.prepare(scoped.sql);
+  const row = stmt.get(id, ...scoped.params) as any;
   if (!row) return null;
 
   return {
@@ -62,10 +67,12 @@ export function getOpportunity(id: string): Opportunity | null {
 /**
  * Retrieves all opportunities in the system.
  */
-export function getAllOpportunities(): Opportunity[] {
+export function getAllOpportunities(user?: User | string | null): Opportunity[] {
   const db = getDB();
-  const stmt = db.prepare('SELECT * FROM opportunities ORDER BY created_at DESC');
-  const rows = stmt.all() as any[];
+  const baseQuery = 'SELECT * FROM opportunities';
+  const scoped = applyUserScope(baseQuery, user);
+  const stmt = db.prepare(`${scoped.sql} ORDER BY created_at DESC`);
+  const rows = stmt.all(...scoped.params) as any[];
   
   return rows.map(row => ({
     ...row,

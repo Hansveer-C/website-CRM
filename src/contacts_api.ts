@@ -18,7 +18,7 @@ export async function getContacts(req: ApiRequest) {
 
     // 3. Logic: Fetch data from DB
     // At this point we are guaranteed to have a req.user
-    const contacts = getAllContacts();
+    const contacts = getAllContacts(req.user);
     
     return {
         status: 200,

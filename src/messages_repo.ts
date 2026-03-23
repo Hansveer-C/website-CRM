@@ -1,5 +1,6 @@
 import { getDB } from './database';
-import { Message } from './types';
+import { Message, User } from './types';
+import { applyUserScope } from './query_utils';
 
 /**
  * Persists a message to the database.
@@ -52,9 +53,11 @@ export function persistMessage(message: Message): Message {
 /**
  * Retrieves a message by its ID.
  */
-export function getMessage(id: string): Message | null {
+export function getMessage(id: string, user?: User | string | null): Message | null {
     const db = getDB();
-    const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as any;
+    const baseQuery = 'SELECT * FROM messages WHERE id = ?';
+    const scoped = applyUserScope(baseQuery, user);
+    const row = db.prepare(scoped.sql).get(id, ...scoped.params) as any;
     
     if (!row) return null;
     
@@ -67,9 +70,11 @@ export function getMessage(id: string): Message | null {
 /**
  * Retrieves all messages for a specific contact.
  */
-export function getMessagesByContact(contactId: string): Message[] {
+export function getMessagesByContact(contactId: string, user?: User | string | null): Message[] {
     const db = getDB();
-    const rows = db.prepare('SELECT * FROM messages WHERE contact_id = ? ORDER BY created_at ASC').all(contactId) as any[];
+    const baseQuery = 'SELECT * FROM messages WHERE contact_id = ?';
+    const scoped = applyUserScope(baseQuery, user);
+    const rows = db.prepare(`${scoped.sql} ORDER BY created_at ASC`).all(contactId, ...scoped.params) as any[];
     
     return rows.map(row => ({
         ...row,
@@ -99,12 +104,14 @@ export function updateMessageStatus(id: string, status: string, providerMessageI
 /**
  * Counts recent outbound messages for rate limiting.
  */
-export function countRecentOutboundMessages(contactId: string, sinceIso: string): number {
+export function countRecentOutboundMessages(contactId: string, sinceIso: string, user?: User | string | null): number {
     const db = getDB();
-    const result = db.prepare(`
+    const baseQuery = `
         SELECT count(*) as total FROM messages 
         WHERE contact_id = ? AND direction = 'outbound' AND created_at > ?
-    `).get(contactId, sinceIso) as any;
+    `;
+    const scoped = applyUserScope(baseQuery, user);
+    const result = db.prepare(scoped.sql).get(contactId, sinceIso, ...scoped.params) as any;
     
     return result.total;
 }
@@ -112,13 +119,14 @@ export function countRecentOutboundMessages(contactId: string, sinceIso: string)
 /**
  * Checks if a duplicate message was sent recently.
  */
-export function checkDuplicateMessage(contactId: string, content: string, sinceIso: string): boolean {
+export function checkDuplicateMessage(contactId: string, content: string, sinceIso: string, user?: User | string | null): boolean {
     const db = getDB();
-    const result = db.prepare(`
+    const baseQuery = `
         SELECT id FROM messages 
         WHERE contact_id = ? AND direction = 'outbound' AND content = ? AND created_at > ?
-        LIMIT 1
-    `).get(contactId, content, sinceIso);
+    `;
+    const scoped = applyUserScope(baseQuery, user);
+    const result = db.prepare(`${scoped.sql} LIMIT 1`).get(contactId, content, sinceIso, ...scoped.params);
     
     return !!result;
 }
@@ -126,9 +134,11 @@ export function checkDuplicateMessage(contactId: string, content: string, sinceI
 /**
  * Retrieves all messages in the entire system, sorted chronologically (ASC).
  */
-export function getAllMessagesOrdered(): Message[] {
+export function getAllMessagesOrdered(user?: User | string | null): Message[] {
     const db = getDB();
-    const rows = db.prepare('SELECT * FROM messages ORDER BY created_at ASC').all() as any[];
+    const baseQuery = 'SELECT * FROM messages';
+    const scoped = applyUserScope(baseQuery, user);
+    const rows = db.prepare(`${scoped.sql} ORDER BY created_at ASC`).all(...scoped.params) as any[];
     
     return rows.map(row => ({
         ...row,

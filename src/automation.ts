@@ -99,7 +99,7 @@ function executeAction(automation: Automation, context: any) {
 }
 
 function createTaskAction(params: any, context: Opportunity) {
-  const contact = getContact(context.contact_id);
+  const contact = getContact(context.contact_id, context.user_id);
   const contactName = contact ? contact.name : 'Unknown';
   
   const dueDate = new Date();
@@ -124,7 +124,7 @@ function createTaskAction(params: any, context: Opportunity) {
 }
 
 function sendNotificationAction(params: any, context: Opportunity) {
-  const contact = getContact(context.contact_id);
+  const contact = getContact(context.contact_id, context.user_id);
   const contactName = contact ? contact.name : 'Unknown';
   
   const message = params.message.replace('${contactName}', contactName);

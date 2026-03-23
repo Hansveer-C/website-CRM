@@ -29,7 +29,7 @@ export async function handleInboundCall(data: { phone: string }) {
   console.log(`Inbound call received from ${phoneNorm.normalized}`);
 
   // Create call record (PROMPT 3)
-  const existingContact = findContact(phoneNorm.normalized, null);
+  const existingContact = findContact(phoneNorm.normalized, null, 'INTERNAL_SYSTEM_BYPASS');
   const callRecord: Call = {
     id: `call-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     user_id: existingContact?.user_id || 'system',
@@ -68,7 +68,7 @@ export async function endCall(data: { call_id: string; answered: boolean }) {
     throw new Error('call_id is required to end a call.');
   }
 
-  const call = getCall(data.call_id);
+  const call = getCall(data.call_id, 'INTERNAL_SYSTEM_BYPASS');
   
   if (!call) {
     const errorMsg = `Call with ID ${data.call_id} not found.`;

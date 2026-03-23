@@ -1,5 +1,6 @@
 import { getDB } from './database';
-import { Contact } from './types';
+import { Contact, User } from './types';
+import { applyUserScope } from './query_utils';
 
 /**
  * Persists a contact to the SQLite database.
@@ -53,17 +54,17 @@ export function persistContact(contact: Contact): Contact {
 /**
  * Finds a contact by phone or email.
  */
-export function findContact(phone: string, email: string | null): Contact | null {
+export function findContact(phone: string, email: string | null, user?: User | string | null): Contact | null {
   const db = getDB();
-  
-  const stmt = db.prepare(`
+  const baseQuery = `
     SELECT * FROM contacts 
     WHERE (phone = ? AND phone != '') 
        OR (email = ? AND email != '')
-    LIMIT 1
-  `);
+  `;
+  const scoped = applyUserScope(baseQuery, user);
+  const stmt = db.prepare(`${scoped.sql} LIMIT 1`);
 
-  const row = stmt.get(phone, email) as any;
+  const row = stmt.get(phone, email, ...scoped.params) as any;
   if (!row) return null;
 
   // Map SQLite row back to Contact interface
@@ -78,10 +79,12 @@ export function findContact(phone: string, email: string | null): Contact | null
 /**
  * Retrieves a contact by ID.
  */
-export function getContact(id: string): Contact | null {
+export function getContact(id: string, user?: User | string | null): Contact | null {
   const db = getDB();
-  const stmt = db.prepare('SELECT * FROM contacts WHERE id = ?');
-  const row = stmt.get(id) as any;
+  const baseQuery = 'SELECT * FROM contacts WHERE id = ?';
+  const scoped = applyUserScope(baseQuery, user);
+  const stmt = db.prepare(scoped.sql);
+  const row = stmt.get(id, ...scoped.params) as any;
   if (!row) return null;
 
   return {
@@ -95,9 +98,12 @@ export function getContact(id: string): Contact | null {
 /**
  * Retrieves all contacts from the database.
  */
-export function getAllContacts(): Contact[] {
+export function getAllContacts(user?: User | string | null): Contact[] {
   const db = getDB();
-  const rows = db.prepare('SELECT * FROM contacts ORDER BY created_at ASC').all() as any[];
+  const baseQuery = 'SELECT * FROM contacts';
+  const scoped = applyUserScope(baseQuery, user);
+  const stmt = db.prepare(`${scoped.sql} ORDER BY created_at ASC`);
+  const rows = stmt.all(...scoped.params) as any[];
   
   return rows.map(row => ({
     ...row,

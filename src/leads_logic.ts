@@ -51,7 +51,7 @@ export async function createLead(data: {
   }
 
   // 1. Check for Existing Contact (Duplicate Protection - Persistently)
-  const existingContact = findContact(phoneNorm.normalized, emailNorm);
+  const existingContact = findContact(phoneNorm.normalized, emailNorm, request?.user);
 
   let contactIdToUse: string;
 
@@ -60,7 +60,7 @@ export async function createLead(data: {
     console.log(`Duplicate lead found: using existing contact ${contactIdToUse}.`);
     
     // BASIC PROTECTION: Skip new opportunity if one was created for this contact in the last 2 minutes
-    const contactOpps = getOpportunitiesByContact(contactIdToUse);
+    const contactOpps = getOpportunitiesByContact(contactIdToUse, request?.user);
     const recentOpp = contactOpps.find(opp => 
       (new Date().getTime() - new Date(opp.created_at).getTime()) < 120000
     );

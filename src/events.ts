@@ -56,12 +56,12 @@ export async function emitEvent(name: string, payload: Record<string, any> = {},
   if (!finalUserId) {
     // If contact_id in payload, inherit owner
     if (payload.contact_id) {
-       const contact = getContact(payload.contact_id);
+       const contact = getContact(payload.contact_id, 'INTERNAL_SYSTEM_BYPASS');
        if (contact) finalUserId = contact.user_id;
     }
     // Else try opportunity_id
     else if (payload.opportunity_id) {
-       const opp = getOpportunity(payload.opportunity_id);
+       const opp = getOpportunity(payload.opportunity_id, 'INTERNAL_SYSTEM_BYPASS');
        if (opp) finalUserId = opp.user_id;
     }
   }
@@ -133,8 +133,8 @@ onEvent('lead_created', async (payload) => {
     return;
   }
 
-  // Fetch full contact object
-  const contact = getContact(contact_id);
+  // Fetch full contact object - System context for automation
+  const contact = getContact(contact_id, 'INTERNAL_SYSTEM_BYPASS');
   if (!contact) {
     console.log('Contact not found for SMS');
     return;
@@ -218,7 +218,7 @@ onEvent('call_missed', async (payload) => {
     contactIdToUse = newContact.id;
   }
 
-  const targetContact = getContact(contactIdToUse);
+  const targetContact = getContact(contactIdToUse, 'INTERNAL_SYSTEM_BYPASS');
   if (!targetContact) {
     console.log('[SMS PREP] No contact resolved, exiting');
     return;
