@@ -4,6 +4,7 @@ export type ActivityType = 'call' | 'note' | 'sms' | 'visit';
 
 export interface Contact {
   id: string;
+  user_id: string;
   name: string;
   phone: string;
   email: string | null;
@@ -21,6 +22,7 @@ export interface Contact {
 
 export interface Opportunity {
   id: string;
+  user_id: string;
   contact_id: string;
   pipeline_stage: string;
   value: number;
@@ -163,6 +165,7 @@ export interface WebsiteSettings {
 
 export interface EventLog {
   id: string;
+  user_id: string;
   event_name: string;
   payload: Record<string, any>;
   status: string;
@@ -174,6 +177,7 @@ export type MessageStatus = 'pending' | 'sent' | 'failed';
 
 export interface Message {
   id: string;
+  user_id: string;
   contact_id: string;
   opportunity_id?: string;
   direction: MessageDirection;
@@ -198,6 +202,7 @@ export interface TimelineItem {
 
 export interface Call {
   id: string;
+  user_id: string;
   phone: string;
   direction: 'inbound' | 'outbound';
   status: 'received' | 'answered' | 'missed' | 'failed' | 'ended';

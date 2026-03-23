@@ -40,6 +40,7 @@ function migrate(database: Database.Database) {
     database.exec(`
         CREATE TABLE IF NOT EXISTS contacts (
             id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
             name TEXT NOT NULL,
             phone TEXT,
             email TEXT,
@@ -57,6 +58,7 @@ function migrate(database: Database.Database) {
 
         CREATE TABLE IF NOT EXISTS opportunities (
             id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
             contact_id TEXT NOT NULL,
             pipeline_stage TEXT NOT NULL,
             status TEXT NOT NULL CHECK(status IN ('open', 'won', 'lost')),
@@ -69,6 +71,7 @@ function migrate(database: Database.Database) {
 
         CREATE TABLE IF NOT EXISTS messages (
             id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
             contact_id TEXT NOT NULL,
             opportunity_id TEXT,
             direction TEXT NOT NULL CHECK(direction IN ('inbound', 'outbound')),
@@ -84,6 +87,7 @@ function migrate(database: Database.Database) {
 
         CREATE TABLE IF NOT EXISTS calls (
             id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
             contact_id TEXT,
             opportunity_id TEXT,
             phone TEXT NOT NULL,
@@ -97,6 +101,7 @@ function migrate(database: Database.Database) {
 
         CREATE TABLE IF NOT EXISTS event_logs (
             id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
             event_name TEXT NOT NULL,
             payload TEXT NOT NULL,
             status TEXT NOT NULL,
@@ -137,6 +142,32 @@ function migrate(database: Database.Database) {
         );
     `);
     
+    // Explicit Migrations (Adding columns to existing tables)
+    try {
+        database.prepare("ALTER TABLE contacts ADD COLUMN user_id TEXT NOT NULL DEFAULT 'system'").run();
+        console.log('✅ [DB MIGRATION] Added user_id to contacts table');
+    } catch (e) {}
+
+    try {
+        database.prepare("ALTER TABLE opportunities ADD COLUMN user_id TEXT NOT NULL DEFAULT 'system'").run();
+        console.log('✅ [DB MIGRATION] Added user_id to opportunities table');
+    } catch (e) {}
+
+    try {
+        database.prepare("ALTER TABLE messages ADD COLUMN user_id TEXT NOT NULL DEFAULT 'system'").run();
+        console.log('✅ [DB MIGRATION] Added user_id to messages table');
+    } catch (e) {}
+
+    try {
+        database.prepare("ALTER TABLE calls ADD COLUMN user_id TEXT NOT NULL DEFAULT 'system'").run();
+        console.log('✅ [DB MIGRATION] Added user_id to calls table');
+    } catch (e) {}
+
+    try {
+        database.prepare("ALTER TABLE event_logs ADD COLUMN user_id TEXT NOT NULL DEFAULT 'system'").run();
+        console.log('✅ [DB MIGRATION] Added user_id to event_logs table');
+    } catch (e) {}
+
     console.log('✅ [DB] Migrations completed: contacts, opportunities, messages, calls, event_logs, activities, website_settings, and users initialized.');
 }
 
