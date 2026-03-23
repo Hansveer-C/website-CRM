@@ -3,7 +3,7 @@ const isBrowser = typeof window !== 'undefined';
 let Database: any = null;
 
 if (!isBrowser) {
-    Database = (await import('better-sqlite3')).default;
+    Database = require('better-sqlite3');
 }
 
 const DB_PATH = './crm.db';
@@ -121,6 +121,7 @@ function migrate(database: any) {
 
         CREATE TABLE IF NOT EXISTS activities (
             id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
             contact_id TEXT NOT NULL,
             type TEXT NOT NULL,
             description TEXT NOT NULL,

@@ -1,5 +1,6 @@
 import { getDB } from './database';
-import { EventLog } from './types';
+import { EventLog, User } from './types';
+import { applyUserScope } from './query_utils';
 
 /**
  * Persists an event log entry.
@@ -28,9 +29,11 @@ export function persistEventLog(log: EventLog): EventLog {
  * Because payload is JSON, we use LIKE for simple matching or fetch and filter in JS for precision.
  * For this exercise, we fetch and filter in JS to maintain reliability.
  */
-export function getAllEventLogs(): EventLog[] {
+export function getAllEventLogs(user?: User | string | null): EventLog[] {
     const db = getDB();
-    const rows = db.prepare('SELECT * FROM event_logs ORDER BY created_at ASC').all() as any[];
+    const baseQuery = 'SELECT * FROM event_logs';
+    const scoped = applyUserScope(baseQuery, user);
+    const rows = db.prepare(`${scoped.sql} ORDER BY created_at ASC`).all(...scoped.params) as any[];
     
     return rows.map(row => ({
         ...row,

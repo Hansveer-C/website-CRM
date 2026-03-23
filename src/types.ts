@@ -35,6 +35,7 @@ export interface Opportunity {
 
 export interface Activity {
   id: string;
+  user_id: string; // Ownership
   contact_id: string;
   type: ActivityType;
   description: string;

@@ -1,0 +1,58 @@
+import { ApiRequest } from './types';
+import { apiMiddleware, requireAuth } from './middleware';
+import { getContact } from './contacts_repo';
+import { getOpportunity } from './opportunities_repo';
+import { getMessage } from './messages_repo';
+import { getCall } from './calls_repo';
+
+/**
+ * Shared logic to handle specific record retrieval with user scoping.
+ * Returns the record if owned by the user, or 404 if not found/unauthorized.
+ */
+async function getRecordById(req: ApiRequest, fetcher: (id: string, user: any) => any, id: string) {
+    await apiMiddleware(req);
+    const authError = requireAuth(req);
+    if (authError) return authError;
+
+    const record = fetcher(id, req.user);
+    
+    if (!record) {
+        return {
+            status: 404, // Hide existence of sensitive data
+            error: 'Record not found.'
+        };
+    }
+
+    return {
+        status: 200,
+        data: record
+    };
+}
+
+/**
+ * GET /api/contacts/:id
+ */
+export async function getContactApi(req: ApiRequest, id: string) {
+    return getRecordById(req, getContact, id);
+}
+
+/**
+ * GET /api/opportunities/:id
+ */
+export async function getOpportunityApi(req: ApiRequest, id: string) {
+    return getRecordById(req, getOpportunity, id);
+}
+
+/**
+ * GET /api/messages/:id
+ */
+export async function getMessageApi(req: ApiRequest, id: string) {
+    return getRecordById(req, getMessage, id);
+}
+
+/**
+ * GET /api/calls/:id
+ */
+export async function getCallApi(req: ApiRequest, id: string) {
+    return getRecordById(req, getCall, id);
+}

@@ -1,5 +1,6 @@
 import { getDB } from './database';
-import { Activity } from './types';
+import { Activity, User } from './types';
+import { applyUserScope } from './query_utils';
 
 /**
  * Persists an activity to the SQLite database.
@@ -9,10 +10,11 @@ export function persistActivity(activity: Activity): Activity {
     
     db.prepare(`
         INSERT OR REPLACE INTO activities (
-            id, contact_id, type, description, due_date, completed
-        ) VALUES (?, ?, ?, ?, ?, ?)
+            id, user_id, contact_id, type, description, due_date, completed
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
         activity.id,
+        activity.user_id,
         activity.contact_id,
         activity.type,
         activity.description,
@@ -26,9 +28,11 @@ export function persistActivity(activity: Activity): Activity {
 /**
  * Retrieves all activities for a specific contact.
  */
-export function getActivitiesByContact(contact_id: string): Activity[] {
+export function getActivitiesByContact(contact_id: string, user?: User | string | null): Activity[] {
     const db = getDB();
-    const rows = db.prepare('SELECT * FROM activities WHERE contact_id = ?').all(contact_id) as any[];
+    const baseQuery = 'SELECT * FROM activities WHERE contact_id = ?';
+    const scoped = applyUserScope(baseQuery, user);
+    const rows = db.prepare(scoped.sql).all(contact_id, ...scoped.params) as any[];
     
     return rows.map(row => ({
         ...row,

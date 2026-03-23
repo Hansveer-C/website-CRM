@@ -4,7 +4,7 @@ import { checkDuplicateMessage, countRecentOutboundMessages } from './messages_r
 import { getContact, findContact, persistContact } from './contacts_repo';
 import { getOpportunity, persistOpportunity } from './opportunities_repo';
 import { persistEventLog, getAllEventLogs } from './event_logs_repo';
-import { Opportunity } from './types';
+import { Opportunity, User } from './types';
 import { getDefaultLeadReply, sendMessageToContact, getMissedCallReply } from './sms';
 import { normalizePhone } from './leads_logic';
 
@@ -99,11 +99,12 @@ export async function emitEvent(name: string, payload: Record<string, any> = {},
   return event;
 }
 
+
 /**
  * Returns all logged events.
  */
-export function getEvents(): AppEvent[] {
-  return getAllEventLogs() as AppEvent[];
+export function getEvents(user?: User | string | null): AppEvent[] {
+  return getAllEventLogs(user) as AppEvent[];
 }
 
 // --- Register Business Logic Listeners ---

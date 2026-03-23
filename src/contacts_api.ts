@@ -1,4 +1,4 @@
-import { getAllContacts } from './contacts_repo';
+import { getAllContacts, getContact } from './contacts_repo';
 import { ApiRequest } from './types';
 import { apiMiddleware, requireAuth } from './middleware';
 
@@ -24,5 +24,29 @@ export async function getContacts(req: ApiRequest) {
         status: 200,
         data: contacts,
         user: req.user?.email // Diagnostics
+    };
+}
+
+/**
+ * Simulated GET /api/contacts/:id
+ */
+export async function getContactApi(req: ApiRequest, id: string) {
+    await apiMiddleware(req);
+    const authError = requireAuth(req);
+    if (authError) return authError;
+
+    // Repo-level applyUserScope ensures this only returns the contact if owned by req.user
+    const contact = getContact(id, req.user);
+    
+    if (!contact) {
+        return {
+            status: 404,
+            error: 'Contact not found.'
+        };
+    }
+
+    return {
+        status: 200,
+        data: contact
     };
 }

@@ -3,6 +3,7 @@ import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Pa
 export const mockContacts: Contact[] = [
   {
     id: 'c1',
+    user_id: 'system',
     name: 'John Doe',
     phone: '555-0101',
     email: 'john@example.com',
@@ -14,6 +15,7 @@ export const mockContacts: Contact[] = [
   },
   {
     id: 'c2',
+    user_id: 'system',
     name: 'Jane Smith',
     phone: '555-0202',
     email: 'jane@smithresidence.com',
@@ -36,6 +38,7 @@ export const mockPipelines: Pipeline[] = [
 export const mockOpportunities: Opportunity[] = [
   {
     id: 'o1',
+    user_id: 'system',
     contact_id: 'c2',
     pipeline_stage: 'New Lead',
     value: 250,
@@ -45,6 +48,7 @@ export const mockOpportunities: Opportunity[] = [
   },
   {
     id: 'o2',
+    user_id: 'system',
     contact_id: 'c1',
     pipeline_stage: 'Completed',
     value: 450,
@@ -57,14 +61,16 @@ export const mockOpportunities: Opportunity[] = [
 export const mockActivities: Activity[] = [
   {
     id: 'a1',
+    user_id: 'system',
     contact_id: 'c2',
     type: 'call',
-    description: 'Initial follow-up call about driveway cleaning',
+    description: 'Initial follow-at-up call about driveway cleaning',
     due_date: '2026-03-02T09:00:00Z',
     completed: true,
   },
   {
     id: 'a2',
+    user_id: 'system',
     contact_id: 'c2',
     type: 'sms',
     description: 'Sent quote via text',

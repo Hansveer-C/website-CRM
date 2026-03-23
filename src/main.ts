@@ -59,6 +59,7 @@ mockContacts.forEach(c => {
 
 // State Management
 let currentView: string = 'dashboard';
+(window as any).currentUser = 'system'; // 'user_a' or 'user_b'
 
 // Filter & Selection State
 let clientSearchQuery: string = '';
@@ -78,6 +79,13 @@ let lastContactCount = mockContacts.length;
 // SMS Composer State (Phase 2.1)
 let isSmsComposerOpen: boolean = false;
 let smsComposerContactId: string | null = null;
+
+(window as any).currentUser = 'system';
+(window as any).switchUser = (userId: string) => {
+  (window as any).currentUser = userId;
+  console.log(`[QA] Switched UI context to User: ${userId}`);
+  (window as any).navigateTo(currentView, selectedContactId || undefined);
+};
 
 // QA Simulation State (Phase 3.3)
 let pendingSimulationCallId: string | null = null;
@@ -194,9 +202,10 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}" style="display: flex; justify-content: space-between; align-items: center;">
             <span>Clients & Leads</span>
             ${(() => {
-      const newCount = mockContacts.filter(c => isNew(c.created_at)).length;
-      return newCount > 0 ? `<span class="badge" style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 800;">${newCount}</span>` : '';
-    })()}
+              const userId = (window as any).currentUser || 'system';
+              const newCount = mockContacts.filter(c => c.user_id === userId && isNew(c.created_at)).length;
+              return newCount > 0 ? `<span class="badge" style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 800;">${newCount}</span>` : '';
+            })()}
           </li>
           <li onclick="window.navigateTo('opportunities')" class="${activeView === 'opportunities' ? 'active' : ''}">Opportunities</li>
           <li onclick="window.navigateTo('quotes')" class="${activeView === 'quotes' ? 'active' : ''}">Quotes</li>
@@ -225,13 +234,16 @@ function renderSidebar(activeView: string) {
 function renderDashboard() {
   const now = new Date();
 
+  const userId = (window as any).currentUser || 'system';
+
   // Top Level Metrics
-  const openOpportunities = mockOpportunities.filter(o => o.status === 'open');
+  const openOpportunities = mockOpportunities.filter(o => o.user_id === userId && o.status === 'open');
   const pipelineValue = openOpportunities.reduce((sum, o) => sum + o.value, 0);
   const openCount = openOpportunities.length;
 
-  const totalCount = mockOpportunities.length;
-  const wonCount = mockOpportunities.filter(o => o.status === 'won').length;
+  const userOpps = mockOpportunities.filter(o => o.user_id === userId);
+  const totalCount = userOpps.length;
+  const wonCount = userOpps.filter(o => o.status === 'won').length;
   const conversionRate = totalCount > 0 ? (wonCount / totalCount) * 100 : 0;
 
   // 1. Revenue by Stage (Only Open/Won)
@@ -384,11 +396,13 @@ function renderDashboard() {
 }
 
 function renderClients() {
+  const userId = (window as any).currentUser || 'system';
   const filteredContacts = mockContacts.filter(contact => {
+    const isOwner = contact.user_id === userId;
     const matchesSearch = contact.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
       contact.phone.includes(clientSearchQuery);
     const matchesFilter = clientStatusFilter === 'all' || contact.status === clientStatusFilter;
-    return matchesSearch && matchesFilter;
+    return isOwner && matchesSearch && matchesFilter;
   });
 
   const tableRows = filteredContacts.map(contact => {
@@ -1996,7 +2010,7 @@ function handleLeadCaptureSubmission(e: Event) {
       // 1. Create new contact FIRST
       mockContacts.push({
         id: contactIdToUse,
-        user_id: 'system',
+        user_id: (window as any).currentUser || 'system',
         name: normalizedName,
         phone: phoneNorm.normalized,
         email: emailNorm,
@@ -2013,7 +2027,7 @@ function handleLeadCaptureSubmission(e: Event) {
     try {
       const newOpportunity = {
         id: 'o' + Date.now(),
-        user_id: 'system',
+        user_id: (window as any).currentUser || 'system',
         contact_id: contactIdToUse,
         pipeline_stage: 'New Lead',
         value: 0,
@@ -2090,11 +2104,12 @@ function handleLeadCaptureSubmission(e: Event) {
 }
 
 function renderOpportunities() {
+  const userId = (window as any).currentUser || 'system';
   const defaultPipeline = mockPipelines[0];
   const stages = defaultPipeline.stages;
 
   const columnsHtml = stages.map(stage => {
-    const stageOpportunities = mockOpportunities.filter(opp => opp.pipeline_stage === stage);
+    const stageOpportunities = mockOpportunities.filter(opp => opp.user_id === userId && opp.pipeline_stage === stage);
     const cardsHtml = stageOpportunities.map(opp => {
       const contact = mockContacts.find(c => c.id === opp.contact_id);
       return `
@@ -2899,6 +2914,7 @@ function renderContactDetail(contactId: string) {
   if (note) {
     mockActivities.push({
       id: 'act-' + Date.now(),
+      user_id: (window as any).currentUser || 'system',
       contact_id: contactId,
       type: 'call',
       description: note,
@@ -2914,6 +2930,7 @@ function renderContactDetail(contactId: string) {
   if (note) {
     mockActivities.push({
       id: 'act-' + Date.now(),
+      user_id: (window as any).currentUser || 'system',
       contact_id: contactId,
       type: 'note',
       description: note,
@@ -3256,6 +3273,23 @@ function renderQATools() {
       <header class="view-header">
         <h2>QA & Debug Tools</h2>
       </header>
+
+      <div class="card" style="padding: 24px; margin-bottom: 24px; background: #fdf2f2; border: 1px solid #fee2e2;">
+        <h3 style="margin-top: 0; color: #991b1b;">Multi-User Isolation Simulation</h3>
+        <p style="color: #b91c1c; font-size: 0.9rem; margin-bottom: 16px;">Switches the UI context to simulate different logged-in users. Verify that User B cannot see User A's data.</p>
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+          <button class="btn-${(window as any).currentUser === 'user_a' ? 'primary' : 'secondary'}" 
+                  onclick="window.switchUser('user_a')">Simulate User A</button>
+          <button class="btn-${(window as any).currentUser === 'user_b' ? 'primary' : 'secondary'}" 
+                  onclick="window.switchUser('user_b')">Simulate User B</button>
+          <button class="btn-${(window as any).currentUser === 'system' ? 'primary' : 'secondary'}" 
+                  onclick="window.switchUser('system')">System Context</button>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #7f1d1d; font-weight: 600;">
+          <div style="width: 8px; height: 8px; border-radius: 50%; background: #ef4444; animation: pulse 2s infinite;"></div>
+          Active ID: ${(window as any).currentUser}
+        </div>
+      </div>
       
       <div class="card" style="padding: 24px;">
         <h3 style="margin-top: 0;">Call Workflow Simulations</h3>
