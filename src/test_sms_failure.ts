@@ -1,23 +1,23 @@
 import { createLead } from './leads_logic';
-import { mockContacts, mockOpportunities, mockMessages } from './db';
+import { mockMessages } from './db';
 import { twilioConfig } from './config';
+import { smsService } from './smsService';
 
 async function testSMSFailure() {
   console.log('=== Testing SMS Failure Handling ===');
 
-  // 1. Force Twilio credentials to be "configured" but the fetch to fail
+  // 1. Force Twilio credentials to be "configured"
+  const oldConfig = { ...twilioConfig };
   twilioConfig.account_sid = 'test_sid';
   twilioConfig.auth_token = 'test_token';
   twilioConfig.sending_phone_number = '+15555555555';
 
-  // Mock global.fetch to simulate a Twilio API failure
-  const originalFetch = global.fetch;
-  global.fetch = async () => {
+  // Mock smsService to simulate a Twilio API failure
+  const originalSend = smsService.sendSMS;
+  smsService.sendSMS = async () => {
     return {
-      ok: false,
-      status: 401,
-      statusText: 'Unauthorized',
-      json: async () => ({ message: 'Authenticate' })
+      success: false,
+      error: 'Unauthorized'
     } as any;
   };
 

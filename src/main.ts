@@ -7,35 +7,53 @@ import { templates } from './templates';
 import { Activity } from './types';
 import { runAutomations, checkOverdueInvoices } from './automation';
 import { emitEvent } from './events';
-import { validateTwilioConfig, twilioConfig } from './config';
-import { sendSMS, dispatchSMS, sendMessageToContact, retryMessage } from './sms';
+import { sendMessageToContact, retryMessage } from './sms';
 import { getContactTimeline, getLatestActivity } from './timeline';
 import { normalizePhone, normalizeEmail, normalizeName, createLead } from './leads_logic';
 import { handleInboundCall, endCall } from './calls_logic';
 
 // Initialize and Validate Configs
-validateTwilioConfig();
+// Twilio check removed from frontend for security (Phase 7.5 Migration)
 
 // Globals for Phase testing
-(window as any).sendSMS = sendSMS;
-(window as any).dispatchSMS = dispatchSMS;
 (window as any).sendMessageToContact = sendMessageToContact;
 (window as any).retryMessage = retryMessage;
 (window as any).getAllMessagesOrdered = getAllMessagesOrdered;
 
-(window as any).checkTwilioStatus = () => {
-  const isValid = validateTwilioConfig();
-  return {
-    isValid,
-    config: {
-      account_sid: twilioConfig.account_sid ? '✓ Loaded' : '✗ Missing',
-      has_token: !!twilioConfig.auth_token,
-      phone: twilioConfig.sending_phone_number || '✗ Missing'
-    },
-    actions: {
-      sendTestSMS: (to: string, msg: string) => sendSMS(to, msg)
+/**
+ * Mock API Interceptor (Service Layer simulated via fetch)
+ * This allows the frontend to call fetch('/api/...') and have it handled
+ * by the actual backend controller logic in a unified way.
+ */
+const originalFetch = window.fetch;
+window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : (input as any).url;
+    
+    if (url.startsWith('/api/')) {
+        console.log(`[NETWORK MOCK] Intercepting ${init?.method || 'GET'} ${url}...`);
+        
+        // Simulating the Backend Dispatcher/Router
+        if (url === '/api/messages/send' && init?.method === 'POST') {
+            const { sendMessageApi } = await import('./messages_api');
+            const body = init.body ? JSON.parse(init.body as string) : {};
+            const response: any = await sendMessageApi({ body, user: { id: 'admin', email: 'hans@example.com' } } as any);
+            const responseData = response.data || response;
+            return new Response(JSON.stringify(responseData), { 
+                status: response.status || 200, 
+                headers: { 'Content-Type': 'application/json' } 
+            });
+        }
+        
+        if (url.includes('/api/messages/') && url.endsWith('/retry') && init?.method === 'POST') {
+            const { retryMessageApi } = await import('./messages_api');
+            const message_id = url.split('/')[3];
+            const response: any = await retryMessageApi({ user: { id: 'admin' } } as any, message_id);
+            const responseData = response.data || response;
+            return new Response(JSON.stringify(responseData), { status: response.status || 200 });
+        }
     }
-  };
+    
+    return originalFetch(input, init);
 };
 
 (window as any).EventLogs = getEvents();

@@ -14,9 +14,18 @@ export interface AuthConfig {
 }
 
 export const twilioConfig: TwilioConfig = {
-  account_sid: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_ACCOUNT_SID) || (typeof process !== 'undefined' && process.env.VITE_TWILIO_ACCOUNT_SID) || '',
-  auth_token: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_AUTH_TOKEN) || (typeof process !== 'undefined' && process.env.VITE_TWILIO_AUTH_TOKEN) || '',
-  sending_phone_number: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_PHONE_NUMBER) || (typeof process !== 'undefined' && process.env.VITE_TWILIO_PHONE_NUMBER) || '',
+  // Use VITE_ variables in browser, and TWILIO_ (more secure) in Node.
+  account_sid: (typeof process !== 'undefined' && process.env.TWILIO_ACCOUNT_SID) ||
+               (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_ACCOUNT_SID) || 
+               (typeof process !== 'undefined' && process.env.VITE_TWILIO_ACCOUNT_SID) || '',
+               
+  auth_token: (typeof process !== 'undefined' && process.env.TWILIO_AUTH_TOKEN) ||
+              (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_AUTH_TOKEN) || 
+              (typeof process !== 'undefined' && process.env.VITE_TWILIO_AUTH_TOKEN) || '',
+              
+  sending_phone_number: (typeof process !== 'undefined' && process.env.TWILIO_PHONE_NUMBER) ||
+                        (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_PHONE_NUMBER) || 
+                        (typeof process !== 'undefined' && process.env.VITE_TWILIO_PHONE_NUMBER) || '',
 };
 
 export const authConfig: AuthConfig = {

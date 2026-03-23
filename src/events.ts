@@ -5,7 +5,7 @@ import { getContact, findContact, persistContact } from './contacts_repo';
 import { getOpportunity, persistOpportunity } from './opportunities_repo';
 import { persistEventLog, getAllEventLogs } from './event_logs_repo';
 import { Opportunity, User } from './types';
-import { getDefaultLeadReply, sendMessageToContact, getMissedCallReply } from './sms';
+import { getDefaultLeadReply, sendMessageToContact, getMissedCallReply } from './sms_logic';
 import { normalizePhone } from './leads_logic';
 
 export interface AppEvent {
