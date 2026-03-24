@@ -70,6 +70,35 @@ export function validateTwilioConfig() {
 }
 
 /**
+ * Validates that Supabase credentials are loaded.
+ * Logs masked values for security.
+ */
+export function validateSupabaseConfig() {
+  const { url, service_role_key } = supabaseConfig;
+  
+  const isUrlValid = !!url && url.startsWith('https://');
+  // Service role keys often start with 'eyJ' (JWT) or 'sb_secret' (new format)
+  const isKeyValid = !!service_role_key && (service_role_key.startsWith('eyJ') || service_role_key.startsWith('sb_secret_'));
+
+  console.group('%c ⚡ Supabase Configuration Validation ', 'background: #3ECF8E; color: black; font-weight: bold;');
+  
+  if (isUrlValid && isKeyValid) {
+    console.log('✅ URL:', url);
+    console.log('✅ Service Role Key:', maskValue(service_role_key, 10, 4));
+    console.log('%cSupabase backend credentials loaded successfully.', 'color: green;');
+  } else {
+    if (!isUrlValid) console.error('❌ Invalid or missing SUPABASE_URL (must be a https URL)');
+    if (!isKeyValid) console.error('❌ Invalid or missing SUPABASE_SERVICE_ROLE_KEY (must be a secret key)');
+    console.warn('%cSupabase database operations might fail at runtime.', 'color: orange;');
+  }
+  
+  console.groupEnd();
+
+  return isUrlValid && isKeyValid;
+}
+
+
+/**
  * Masks sensitive strings for logging.
  */
 function maskValue(val: string, showStart: number, showEnd: number): string {
