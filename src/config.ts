@@ -27,6 +27,18 @@ export const authConfig: AuthConfig = {
                'antigravity_safe_default_secret_123'
 };
 
+export interface SupabaseConfig {
+  url: string;
+  service_role_key: string;
+}
+
+export const supabaseConfig: SupabaseConfig = {
+  // SECURE: These secrets ARE NOT prefixed with VITE_.
+  url: (typeof process !== 'undefined' && process.env.SUPABASE_URL) || '',
+  service_role_key: (typeof process !== 'undefined' && process.env.SUPABASE_SERVICE_ROLE_KEY) || '',
+};
+
+
 /**
  * Validates that Twilio credentials are loaded.
  * Logs masked values for security.
