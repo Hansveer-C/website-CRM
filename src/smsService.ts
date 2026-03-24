@@ -28,6 +28,18 @@ export const smsService = {
     try {
       console.log(`[SMS SERVICE BACKEND] Sending SMS to ${to} (User: ${user_id || 'system'})...`);
       
+      // Node.js environment check
+      const isNode = typeof process !== 'undefined' && process.versions && process.versions.node;
+
+      if (!isNode) {
+        // We are likely in a Dev Browser Mock (client-side simulation)
+        console.warn('⚠️ [SMS SERVICE] Running in browser mock mode. No real SMS will be sent.');
+        return {
+          success: true,
+          provider_message_id: `SM_MOCK_${Math.floor(Math.random() * 1000)}`
+        };
+      }
+
       const client = twilio(account_sid, auth_token);
       
       const result = await client.messages.create({

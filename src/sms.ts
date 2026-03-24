@@ -1,18 +1,28 @@
+import { Message, Contact } from './types';
+
 /**
- * Frontend SMS API Client.
- * Routes all SMS requests through the secure backend API.
- * The frontend has zero knowledge of Twilio credentials or SDK.
+ * Universal SMS Bridge.
+ * Automatically switches between direct backend logic (Node.js) 
+ * and API routing (Browser) to prevent SDK leakage into the frontend.
  */
 
-export async function sendMessageToContact(contactId: string, message: string, source: string = 'manual') {
-  console.log(`[API] Routing SMS request to the backend for contact ${contactId}...`);
+export async function sendMessageToContact(contactId: string, message: string, source: string = 'manual', user_id?: string) {
+  // Environment Check
+  const isBrowser = typeof window !== 'undefined';
+
+  if (!isBrowser) {
+    // Backend Logic (Node.js) - Uses Dynamic Import to hide Twilio from Vite
+    const { sendMessageToContact: backendSend } = await import('./sms_logic');
+    return backendSend(contactId, message, source, user_id);
+  }
+
+  // Frontend Bridge (Browser) - Zero knowledge of Twilio
+  console.log(`[API BRIDGE] Routing SMS request to the backend for contact ${contactId}...`);
   
   try {
     const response = await fetch('/api/messages/send', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contact_id: contactId,
         message: message,
@@ -33,6 +43,11 @@ export async function sendMessageToContact(contactId: string, message: string, s
 }
 
 export async function retryMessage(messageId: string) {
+  if (typeof window === 'undefined') {
+    const { retryMessage: backendRetry } = await import('./sms_logic');
+    return backendRetry(messageId);
+  }
+
   try {
     const response = await fetch(`/api/messages/${messageId}/retry`, {
       method: 'POST'
@@ -43,9 +58,11 @@ export async function retryMessage(messageId: string) {
   }
 }
 
-// These logic helpers can still exist on the frontend if needed for UI previews,
-// but they no longer involve Twilio directly.
-export function getDefaultLeadReply(name: string, template?: string): string {
+/**
+ * Shared message generators (Safe for both frontend and backend)
+ */
+export function getDefaultLeadReply(contact: Partial<Contact> | undefined | null, template?: string): string {
+  const name = contact?.name?.trim() || '';
   if (template && template.trim()) {
     return template.replace(/{name}/g, name || 'there');
   }
@@ -53,7 +70,8 @@ export function getDefaultLeadReply(name: string, template?: string): string {
   return `${greeting}, thanks for reaching out! I got your request and will get back to you shortly.`;
 }
 
-export function getMissedCallReply(name: string, template?: string): string {
+export function getMissedCallReply(contact: Partial<Contact> | undefined | null, template?: string): string {
+  const name = (contact?.name?.trim() || '').replace('Unknown Caller', '');
   if (template && template.trim()) {
     return template.replace(/{name}/g, name || 'there');
   }

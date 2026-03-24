@@ -1,6 +1,5 @@
 import { getDB } from './database';
 import { User } from './types';
-import { randomUUID } from 'node:crypto';
 import { hashPassword, isBcryptHash } from './password_utils';
 
 /**
@@ -9,7 +8,15 @@ import { hashPassword, isBcryptHash } from './password_utils';
  */
 export async function createUser(email: string, rawPassword: string): Promise<User> {
     const db = getDB();
-    const id = randomUUID();
+    
+    // Environment-agnostic UUID generation
+    let id: string;
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+        id = crypto.randomUUID() as string;
+    } else {
+        // Fallback for environments where crypto.randomUUID is not available
+        id = `user-${Date.now()}-${Math.floor(Math.random() * 1000000).toString(16)}`;
+    }
     
     // Always hash the password before storing
     const hashedPassword = await hashPassword(rawPassword);
