@@ -30,13 +30,21 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : (input as any).url;
     
     if (url.startsWith('/api/')) {
-        console.log(`[NETWORK MOCK] Intercepting ${init?.method || 'GET'} ${url}...`);
+        const method = init?.method || 'GET';
+        const bodyString = init?.body ? (init.body as string) : undefined;
+        console.log(`[MOCK INTERCEPTOR] Intercepting ${method} ${url}`);
         
+        // Build the simulated request context
+        const reqContext: any = { 
+            method, 
+            url,
+            body: bodyString ? JSON.parse(bodyString) : undefined 
+        };
+
         // Simulating the Backend Dispatcher/Router
-        if (url === '/api/messages/send' && init?.method === 'POST') {
+        if (url === '/api/messages/send' && method === 'POST') {
             const { sendMessageApi } = await import('./messages_api');
-            const body = init.body ? JSON.parse(init.body as string) : {};
-            const response: any = await sendMessageApi({ body } as any);
+            const response: any = await sendMessageApi(reqContext);
             const responseData = response.data || response;
             return new Response(JSON.stringify(responseData), { 
                 status: response.status || 200, 
@@ -52,11 +60,14 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
             return new Response(JSON.stringify(responseData), { status: response.status || 200 });
         }
 
-        if (url === '/api/leads' && init?.method === 'POST') {
+        if (url === '/api/leads' && method === 'POST') {
             const { createLeadApi } = await import('./crm_api');
-            const body = init.body ? JSON.parse(init.body as string) : {};
-            const response: any = await createLeadApi({ body } as any);
-            return new Response(JSON.stringify(response.data || response), { status: response.status || 201 });
+            const response: any = await createLeadApi(reqContext);
+            const responseData = response.data || response;
+            return new Response(JSON.stringify(responseData), { 
+                status: response.status || 201,
+                headers: { 'Content-Type': 'application/json' }
+            });
         }
     }
     

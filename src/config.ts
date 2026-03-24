@@ -1,6 +1,6 @@
 /**
  * Configuration manager for environment variables.
- * Uses Vite's import.meta.env for loading.
+ * In production, these variables remain on the server and are NEVER exposed to the frontend bundle.
  */
 
 export interface TwilioConfig {
@@ -14,24 +14,16 @@ export interface AuthConfig {
 }
 
 export const twilioConfig: TwilioConfig = {
-  // Use VITE_ variables in browser, and TWILIO_ (more secure) in Node.
-  account_sid: (typeof process !== 'undefined' && process.env.TWILIO_ACCOUNT_SID) ||
-               (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_ACCOUNT_SID) || 
-               (typeof process !== 'undefined' && process.env.VITE_TWILIO_ACCOUNT_SID) || '',
-               
-  auth_token: (typeof process !== 'undefined' && process.env.TWILIO_AUTH_TOKEN) ||
-              (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_AUTH_TOKEN) || 
-              (typeof process !== 'undefined' && process.env.VITE_TWILIO_AUTH_TOKEN) || '',
-              
-  sending_phone_number: (typeof process !== 'undefined' && process.env.TWILIO_PHONE_NUMBER) ||
-                        (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TWILIO_PHONE_NUMBER) || 
-                        (typeof process !== 'undefined' && process.env.VITE_TWILIO_PHONE_NUMBER) || '',
+  // SECURE: These secrets ARE NOT prefixed with VITE_. 
+  // Vite will leave these as process.env references which resolve to empty strings in the browser.
+  account_sid: (typeof process !== 'undefined' && process.env.TWILIO_ACCOUNT_SID) || '',
+  auth_token: (typeof process !== 'undefined' && process.env.TWILIO_AUTH_TOKEN) || '',
+  sending_phone_number: (typeof process !== 'undefined' && process.env.TWILIO_PHONE_NUMBER) || '',
 };
 
 export const authConfig: AuthConfig = {
-  // If in browser, use VITE_ variable. In Node (tests), use process.env. Default to 'dev_secret' for easy testing.
-  jwt_secret: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_JWT_SECRET) || 
-               (typeof process !== 'undefined' && process.env.JWT_SECRET) || 
+  // SECURE: JWT_SECRET must remain safely on the server.
+  jwt_secret: (typeof process !== 'undefined' && process.env.JWT_SECRET) || 
                'antigravity_safe_default_secret_123'
 };
 
@@ -54,9 +46,9 @@ export function validateTwilioConfig() {
     console.log('✅ Phone Number:', sending_phone_number);
     console.log('%cTwilio credentials loaded successfully.', 'color: green;');
   } else {
-    if (!isSidValid) console.error('❌ Invalid or missing VITE_TWILIO_ACCOUNT_SID (Must start with "AC")');
-    if (!isTokenValid) console.error('❌ Missing VITE_TWILIO_AUTH_TOKEN');
-    if (!isPhoneValid) console.error('❌ Missing VITE_TWILIO_PHONE_NUMBER');
+    if (!isSidValid) console.error('❌ Invalid or missing TWILIO_ACCOUNT_SID (Must start with "AC")');
+    if (!isTokenValid) console.error('❌ Missing TWILIO_AUTH_TOKEN');
+    if (!isPhoneValid) console.error('❌ Missing TWILIO_PHONE_NUMBER');
     console.warn('%cTwilio SMS integration might be disabled or fail at runtime.', 'color: orange;');
   }
   

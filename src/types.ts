@@ -222,8 +222,9 @@ export interface User {
 }
 
 export interface ApiRequest {
+  method?: string;
+  url?: string;
   cookies?: Record<string, string>;
   user?: User | null;
-  // Payload for POST/PUT requests can be added as 'body' later
   body?: any;
 }

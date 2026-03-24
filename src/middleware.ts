@@ -1,27 +1,27 @@
+import { emitEvent } from './events';
 import { getCurrentUser } from './auth_logic';
 import { ApiRequest } from './types';
 
 /**
  * Global API Middleware Simulator.
- * 
- * For every incoming request:
- * 1. Resolves the current authenticated user from cookies.
- * 2. Attaches the user to the request context (req.user).
- * 
- * Note: Does not block unauthorized requests at this stage.
  */
 export async function apiMiddleware(req: ApiRequest): Promise<void> {
     const user = getCurrentUser(req);
-    
-    // Attach to request context
     req.user = user;
     
-    // Diagnostic log (as requested in PROMPT 3.2.8)
-    if (user) {
-        console.log(`[API MIDDLEWARE] Request context populated for user: ${user.email}`);
-    } else {
-        console.log('[API MIDDLEWARE] Request context: unauthenticated');
-    }
+    // Security Audit Log: Record the request path and user (No sensitive payloads)
+    const timestamp = new Date().toISOString();
+    const endpoint = `${req.method || 'GET'} ${req.url || '/unknown'}`;
+    const userDisplay = user ? user.email : 'unauthenticated';
+    
+    console.log(`[AUDIT] ${timestamp} | ${endpoint} | User: ${userDisplay}`);
+    
+    // Persist to Event Logs for full auditability
+    emitEvent('api_request', { 
+        method: req.method, 
+        url: req.url, 
+        user_id: user?.id || 'unauthenticated' 
+    }, user?.id);
 }
 
 /**

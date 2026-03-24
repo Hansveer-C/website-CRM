@@ -39,10 +39,13 @@ export async function login(data: { email: string, password?: string }) {
     // Generate session identifier
     const token = createSessionToken(user);
     
-    // Set secure HTTP-only cookie (simulated via document.cookie if in browser)
+    // Set secure HTTP-only cookie
     // Note: HttpOnly is only strictly enforced when set via HTTP headers from a server.
+    // In our development mock, we set it via document.cookie with safety flags.
     if (typeof document !== 'undefined') {
-        document.cookie = `session=${token}; path=/; HttpOnly; SameSite=Lax`;
+        const isSecure = typeof location !== 'undefined' && location.protocol === 'https:';
+        const secureFlag = isSecure ? '; Secure' : '';
+        document.cookie = `session=${token}; path=/; HttpOnly; SameSite=Lax${secureFlag}`;
     }
 
     await emitEvent('user_logged_in', { email: normalizedEmail, user_id: user.id });

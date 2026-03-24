@@ -147,7 +147,7 @@ onEvent('lead_created', async (payload) => {
   
   // Prevent duplicate automated SMS (2 minute window)
   const sinceIso = new Date(Date.now() - 120000).toISOString();
-  const alreadySent = checkDuplicateMessage(contact_id, message, sinceIso);
+  const alreadySent = checkDuplicateMessage(contact_id, message, sinceIso, contact.user_id);
 
   if (alreadySent) {
     console.log('Automated lead SMS skipped: duplicate prevented');
@@ -157,7 +157,7 @@ onEvent('lead_created', async (payload) => {
   // Trigger SMS
   console.log(`[AUTOMATION] Triggering automated SMS for lead: ${contact.name}`);
   try {
-    const result = await sendMessageToContact(contact_id, message, 'automation');
+    const result = await sendMessageToContact(contact_id, message, 'automation', contact.user_id);
     
     if (result.success) {
       console.log('Automated lead SMS sent');
@@ -232,7 +232,7 @@ onEvent('call_missed', async (payload) => {
 
   // PROMPT 17: Extra Duplicate Protection (2-minute window)
   const twoMinutesAgo = new Date(Date.now() - 120000).toISOString();
-  const alreadySentMC = checkDuplicateMessage(targetContact.id, smsMessage, twoMinutesAgo);
+  const alreadySentMC = checkDuplicateMessage(targetContact.id, smsMessage, twoMinutesAgo, targetContact.user_id);
 
   if (alreadySentMC) {
     console.log('Missed call SMS already sent');
@@ -242,7 +242,7 @@ onEvent('call_missed', async (payload) => {
 
   // PROMPT 18: 5-minute Rate Limit (Max 2 messages)
   const fiveMinAgo = new Date(Date.now() - 300000).toISOString();
-  const recentCount = countRecentOutboundMessages(targetContact.id, fiveMinAgo);
+  const recentCount = countRecentOutboundMessages(targetContact.id, fiveMinAgo, targetContact.user_id);
 
   if (recentCount >= 2) {
     console.log('Missed call SMS rate limited');
@@ -252,7 +252,7 @@ onEvent('call_missed', async (payload) => {
 
   // Send SMS (PROMPT 15)
   console.log(`[SMS PREP] Message prepared: "${smsMessage}"`);
-  const smsResult = await sendMessageToContact(targetContact.id, smsMessage, 'missed_call_automation');
+  const smsResult = await sendMessageToContact(targetContact.id, smsMessage, 'missed_call_automation', targetContact.user_id);
   
   if (smsResult.success) {
     console.log('Missed call SMS sent');
