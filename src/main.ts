@@ -36,7 +36,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         if (url === '/api/messages/send' && init?.method === 'POST') {
             const { sendMessageApi } = await import('./messages_api');
             const body = init.body ? JSON.parse(init.body as string) : {};
-            const response: any = await sendMessageApi({ body, user: { id: 'admin', email: 'hans@example.com' } } as any);
+            const response: any = await sendMessageApi({ body } as any);
             const responseData = response.data || response;
             return new Response(JSON.stringify(responseData), { 
                 status: response.status || 200, 
@@ -47,9 +47,16 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         if (url.includes('/api/messages/') && url.endsWith('/retry') && init?.method === 'POST') {
             const { retryMessageApi } = await import('./messages_api');
             const message_id = url.split('/')[3];
-            const response: any = await retryMessageApi({ user: { id: 'admin' } } as any, message_id);
+            const response: any = await retryMessageApi({} as any, message_id);
             const responseData = response.data || response;
             return new Response(JSON.stringify(responseData), { status: response.status || 200 });
+        }
+
+        if (url === '/api/leads' && init?.method === 'POST') {
+            const { createLeadApi } = await import('./crm_api');
+            const body = init.body ? JSON.parse(init.body as string) : {};
+            const response: any = await createLeadApi({ body } as any);
+            return new Response(JSON.stringify(response.data || response), { status: response.status || 201 });
         }
     }
     

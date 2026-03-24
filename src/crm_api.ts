@@ -4,6 +4,7 @@ import { getContact } from './contacts_repo';
 import { getOpportunity } from './opportunities_repo';
 import { getMessage } from './messages_repo';
 import { getCall } from './calls_repo';
+import { createLead } from './leads_logic';
 
 /**
  * Shared logic to handle specific record retrieval with user scoping.
@@ -55,4 +56,27 @@ export async function getMessageApi(req: ApiRequest, id: string) {
  */
 export async function getCallApi(req: ApiRequest, id: string) {
     return getRecordById(req, getCall, id);
+}
+
+/**
+ * POST /api/leads
+ * Secured automation trigger.
+ */
+export async function createLeadApi(req: ApiRequest) {
+    await apiMiddleware(req);
+    const authError = requireAuth(req);
+    if (authError) return authError;
+
+    try {
+        const result = await createLead(req.body, req);
+        return {
+            status: 201,
+            data: result
+        };
+    } catch (error: any) {
+        return {
+            status: 400,
+            error: error.message
+        };
+    }
 }

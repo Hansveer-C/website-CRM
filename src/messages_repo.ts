@@ -117,6 +117,19 @@ export function countRecentOutboundMessages(contactId: string, sinceIso: string,
 }
 
 /**
+ * Counts the total outbound messages sent by a user across all contacts for global rate limiting.
+ */
+export function countUserTotalRecentMessages(user_id: string, sinceIso: string): number {
+    const db = getDB();
+    const result = db.prepare(`
+        SELECT count(*) as total FROM messages 
+        WHERE user_id = ? AND direction = 'outbound' AND created_at > ?
+    `).get(user_id, sinceIso) as any;
+    
+    return result?.total || 0;
+}
+
+/**
  * Checks if a duplicate message was sent recently.
  */
 export function checkDuplicateMessage(contactId: string, content: string, sinceIso: string, user?: User | string | null): boolean {

@@ -24,14 +24,19 @@ export async function sendMessageApi(req: ApiRequest) {
     const authError = requireAuth(req);
     if (authError) return authError; // 401 Unauthorized
 
-    // 3. Extract Payload
+    // 3. Extract & Validate Payload
     const { contact_id, message, source } = req.body || {};
 
-    if (!contact_id || !message) {
-        return {
-            status: 400,
-            error: 'Missing contact_id or message content.'
-        };
+    if (!contact_id) {
+        return { status: 400, error: 'Missing contact_id.' };
+    }
+
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+        return { status: 400, error: 'Message content cannot be empty.' };
+    }
+
+    if (message.length > 500) {
+        return { status: 400, error: 'Message is too long (max 500 characters).' };
     }
 
     try {
@@ -74,7 +79,7 @@ export async function retryMessageApi(req: ApiRequest, message_id: string) {
 
     try {
         console.log(`[API BACKEND] User ${req.user?.email} is retrying message ${message_id}...`);
-        const result = await retryMessage(message_id);
+        const result = await retryMessage(message_id, req.user?.id);
 
         if (result.success) {
             return {
