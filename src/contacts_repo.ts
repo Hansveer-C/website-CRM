@@ -1,114 +1,140 @@
-import { getDB } from './database';
 import { Contact, User } from './types';
-import { applyUserScope } from './query_utils';
+import { supabase } from './utils/db/supabase';
 
 /**
- * Persists a contact to the SQLite database.
+ * Persists a contact to the Supabase database.
  */
-export function persistContact(contact: Contact): Contact {
-  const db = getDB();
+export async function createContact(contact: Contact): Promise<Contact> {
+  console.log(`[DB: SUPABASE CONTACT] Creating/Updating ${contact.id} (${contact.name}). follow_up_required: ${contact.follow_up_required}`);
   
-  console.log(`[DB: CONTACT] Persisting ${contact.id} (${contact.name}). follow_up_required: ${contact.follow_up_required}`);
-  const stmt = db.prepare(`
-    INSERT INTO contacts (
-        id, user_id, name, phone, email, address, tags, source, service, status, notes, created_at, invalid_phone, lead_status, follow_up_required
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-        user_id = excluded.user_id,
-        name = excluded.name,
-        phone = excluded.phone,
-        email = excluded.email,
-        address = excluded.address,
-        tags = excluded.tags,
-        source = excluded.source,
-        service = excluded.service,
-        status = excluded.status,
-        notes = excluded.notes,
-        created_at = excluded.created_at,
-        invalid_phone = excluded.invalid_phone,
-        lead_status = excluded.lead_status,
-        follow_up_required = excluded.follow_up_required
-  `);
-
-  stmt.run(
-    contact.id,
-    contact.user_id,
-    contact.name,
-    contact.phone,
-    contact.email,
-    contact.address,
-    JSON.stringify(contact.tags || []),
-    contact.source,
-    contact.service || null,
-    contact.status,
-    contact.notes || null,
-    contact.created_at,
-    contact.invalid_phone ? 1 : 0,
-    contact.lead_status || null,
-    contact.follow_up_required ? 1 : 0
-  );
-
-  return contact;
-}
-
-/**
- * Finds a contact by phone or email.
- */
-export function findContact(phone: string, email: string | null, user?: User | string | null): Contact | null {
-  const db = getDB();
-  const baseQuery = `
-    SELECT * FROM contacts 
-    WHERE (phone = ? AND phone != '') 
-       OR (email = ? AND email != '')
-  `;
-  const scoped = applyUserScope(baseQuery, user);
-  const stmt = db.prepare(`${scoped.sql} LIMIT 1`);
-
-  const row = stmt.get(phone, email, ...scoped.params) as any;
-  if (!row) return null;
-
-  // Map SQLite row back to Contact interface
-  return {
-    ...row,
-    tags: row.tags ? JSON.parse(row.tags) : [],
-    invalid_phone: !!row.invalid_phone,
-    follow_up_required: !!row.follow_up_required
+  const payload = {
+    ...contact,
+    // Ensure correct types for Postgres (booleans, jsonb handled by library)
+    invalid_phone: !!contact.invalid_phone,
+    follow_up_required: !!contact.follow_up_required
   };
+
+
+
+
+
+  const { data, error } = await supabase
+    .from('contacts')
+    .upsert(payload)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('[DB: CONTACT] Failed to persist contact in Supabase:', error.message);
+    throw new Error(`DB_PERSIST_CONTACT_ERROR: ${error.message}`);
+  }
+
+  return data as Contact;
 }
 
 /**
- * Retrieves a contact by ID.
+ * Finds a contact by phone or email, scoped to the user context.
  */
-export function getContact(id: string, user?: User | string | null): Contact | null {
-  const db = getDB();
-  const baseQuery = 'SELECT * FROM contacts WHERE id = ?';
-  const scoped = applyUserScope(baseQuery, user);
-  const stmt = db.prepare(scoped.sql);
-  const row = stmt.get(id, ...scoped.params) as any;
-  if (!row) return null;
-
-  return {
-    ...row,
-    tags: row.tags ? JSON.parse(row.tags) : [],
-    invalid_phone: !!row.invalid_phone,
-    follow_up_required: !!row.follow_up_required
-  };
-}
-
-/**
- * Retrieves all contacts from the database.
- */
-export function getAllContacts(user?: User | string | null): Contact[] {
-  const db = getDB();
-  const baseQuery = 'SELECT * FROM contacts';
-  const scoped = applyUserScope(baseQuery, user);
-  const stmt = db.prepare(`${scoped.sql} ORDER BY created_at ASC`);
-  const rows = stmt.all(...scoped.params) as any[];
+export async function searchContacts(phone: string, email: string | null, user?: User | string | null): Promise<Contact | null> {
+  const userId = typeof user === 'string' ? user : (user?.id);
   
-  return rows.map(row => ({
-    ...row,
-    tags: row.tags ? JSON.parse(row.tags) : [],
-    invalid_phone: !!row.invalid_phone,
-    follow_up_required: !!row.follow_up_required
-  }));
+  if (!userId) {
+      console.warn('[DB: CONTACT] Search contact attempted without user context.');
+      return null;
+  }
+
+  let query = supabase.from('contacts')
+    .select('*')
+    .eq('user_id', userId);
+
+  if (phone && email) {
+      query = query.or(`phone.eq.${phone},email.eq.${email}`);
+  } else if (phone) {
+      query = query.eq('phone', phone);
+  } else if (email) {
+      query = query.eq('email', email);
+  } else {
+      return null;
+  }
+
+  const { data, error } = await query.maybeSingle();
+
+  if (error) {
+      console.error('[DB: CONTACT] Error searching contact in Supabase:', error.message);
+      throw new Error(`DB_SEARCH_CONTACT_ERROR: ${error.message}`);
+  }
+
+  return data as Contact | null;
 }
+
+/**
+ * Retrieves a contact by ID, scoped to the user context.
+ */
+export async function getContactById(id: string, user?: User | string | null): Promise<Contact | null> {
+  const userId = typeof user === 'string' ? user : (user?.id);
+  
+  if (!userId) {
+      console.warn('[DB: CONTACT] Get contact attempted without user context.');
+      return null;
+  }
+
+  const { data, error } = await supabase
+    .from('contacts')
+    .select('*')
+    .eq('id', id)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+      console.error('[DB: CONTACT] Error retrieving contact from Supabase:', error.message);
+      throw new Error(`DB_GET_CONTACT_ERROR: ${error.message}`);
+  }
+
+  return data as Contact | null;
+}
+
+/**
+ * Retrieves all contacts, scoped to the user context.
+ */
+export async function getContacts(user?: User | string | null): Promise<Contact[]> {
+  const userId = typeof user === 'string' ? user : (user?.id);
+  
+  if (!userId) {
+      console.warn('[DB: CONTACT] Get all contacts attempted without user context.');
+      return [];
+  }
+
+  const { data, error } = await supabase
+    .from('contacts')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+      console.error('[DB: CONTACT] Error listing contacts from Supabase:', error.message);
+      throw new Error(`DB_LIST_CONTACTS_ERROR: ${error.message}`);
+  }
+
+  return (data || []) as Contact[];
+}
+
+// --- Aliases for Backward Compatibility ---
+export const persistContact = createContact;
+export const findContact = searchContacts;
+export const getContact = getContactById;
+export const getAllContacts = getContacts;
+
+// Namespace export (common in some parts of the system)
+export const ContactsRepo = {
+  createContact,
+  persistContact,
+  searchContacts,
+  findContact,
+  getContactById,
+  getContact,
+  getContacts,
+  getAllContacts
+};
+
+
+

@@ -6,7 +6,7 @@ import { ApiRequest } from './types';
  * Global API Middleware Simulator.
  */
 export async function apiMiddleware(req: ApiRequest): Promise<void> {
-    const user = getCurrentUser(req);
+    const user = await getCurrentUser(req);
     req.user = user;
     
     // Security Audit Log: Record the request path and user (No sensitive payloads)

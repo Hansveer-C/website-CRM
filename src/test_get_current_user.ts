@@ -21,7 +21,7 @@ async function testGetCurrentUser() {
     const token = createSessionToken(testUser);
     const mockRequest = { cookies: { session: token } };
     
-    const resolvedUser = getCurrentUser(mockRequest);
+    const resolvedUser = await getCurrentUser(mockRequest);
     if (resolvedUser && resolvedUser.id === testUser.id) {
         console.log('✅ PASS: Successfully resolved user from request cookies.');
     } else {
@@ -31,7 +31,7 @@ async function testGetCurrentUser() {
 
     // 2. Test without any cookie
     console.log('Case 2: No cookies provided...');
-    const resolvedNone = getCurrentUser({});
+    const resolvedNone = await getCurrentUser({});
     if (resolvedNone === null) {
         console.log('✅ PASS: Correctly returned null for missing cookies.');
     } else {
@@ -41,7 +41,7 @@ async function testGetCurrentUser() {
 
     // 3. Test with invalid/expired token simulation
     console.log('Case 3: Invalid session token...');
-    const resultInvalid = getCurrentUser({ cookies: { session: 'invalid-token-here' } });
+    const resultInvalid = await getCurrentUser({ cookies: { session: 'invalid-token-here' } });
     if (resultInvalid === null) {
         console.log('✅ PASS: Correctly returned null for invalid session token.');
     } else {
@@ -55,7 +55,7 @@ async function testGetCurrentUser() {
         cookie: `other=ignore; session=${token}`
     };
     
-    const resolvedDoc = getCurrentUser(); // Call without arguments
+    const resolvedDoc = await getCurrentUser(); // Call without arguments
     if (resolvedDoc && resolvedDoc.id === testUser.id) {
         console.log('✅ PASS: Successfully resolved user from document.cookie fallback.');
     } else {

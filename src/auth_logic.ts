@@ -21,7 +21,7 @@ export async function login(data: { email: string, password?: string }) {
     }
     
     // Fetch user by email
-    const user = getUserByEmail(normalizedEmail);
+    const user = await getUserByEmail(normalizedEmail);
     
     if (!user) {
         // Return "Invalid credentials" if not found
@@ -60,7 +60,7 @@ export async function login(data: { email: string, password?: string }) {
 /**
  * Resolves the current authenticated user from a request's cookies.
  */
-export function getCurrentUser(request?: { cookies?: Record<string, string> }) {
+export async function getCurrentUser(request?: { cookies?: Record<string, string> }) {
     let token: string | undefined;
 
     // 1. Try to read from request cookies (server-side context)
@@ -85,5 +85,5 @@ export function getCurrentUser(request?: { cookies?: Record<string, string> }) {
     }
 
     // 4. Fetch user from repository
-    return getUserById(decoded.user_id);
+    return await getUserById(decoded.user_id);
 }

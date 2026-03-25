@@ -1,10 +1,14 @@
-// Browser-safe check for conditional imports
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+
 const isBrowser = typeof window !== 'undefined';
 let Database: any = null;
 
 if (!isBrowser) {
     Database = require('better-sqlite3');
 }
+
+
 
 const DB_PATH = './crm.db';
 

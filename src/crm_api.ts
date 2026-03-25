@@ -15,7 +15,8 @@ async function getRecordById(req: ApiRequest, fetcher: (id: string, user: any) =
     const authError = requireAuth(req);
     if (authError) return authError;
 
-    const record = fetcher(id, req.user);
+    const record = await fetcher(id, req.user);
+
     
     if (!record) {
         return {

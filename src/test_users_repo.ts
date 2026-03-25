@@ -25,7 +25,7 @@ async function testUsersRepo() {
         
         // Test getUserByEmail
         console.log('Testing getUserByEmail...');
-        const fetchedByEmail = getUserByEmail(testEmail);
+        const fetchedByEmail = await getUserByEmail(testEmail);
         console.log('✅ getUserByEmail result:', fetchedByEmail);
         
         if (!fetchedByEmail || fetchedByEmail.id !== user.id) {
@@ -34,7 +34,7 @@ async function testUsersRepo() {
         
         // Test getUserById
         console.log('Testing getUserById...');
-        const fetchedById = getUserById(user.id);
+        const fetchedById = await getUserById(user.id);
         console.log('✅ getUserById result:', fetchedById);
         
         if (!fetchedById || fetchedById.email !== testEmail) {

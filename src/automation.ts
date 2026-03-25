@@ -17,6 +17,7 @@ export function checkOverdueInvoices() {
       if (!alreadyExists) {
         mockActivities.push({
           id: 'task-overdue-' + invoice.id + '-' + Math.floor(Math.random() * 1000),
+          user_id: 'system', // Default for background automation
           contact_id: invoice.contact_id,
           type: 'note',
           description: `Follow up for payment (INV-${invoice.id})`,
@@ -77,29 +78,29 @@ const automations: Automation[] = [
   }
 ];
 
-export function runAutomations(trigger: TriggerType, context: any) {
+export async function runAutomations(trigger: TriggerType, context: any) {
   const activeAutomations = automations.filter(a => 
     a.trigger === trigger && (!a.condition || a.condition(context))
   );
 
-  activeAutomations.forEach(automation => {
-    executeAction(automation, context);
-  });
+  for (const automation of activeAutomations) {
+    await executeAction(automation, context);
+  }
 }
 
-function executeAction(automation: Automation, context: any) {
+async function executeAction(automation: Automation, context: any) {
   switch (automation.action) {
     case 'CREATE_TASK':
-      createTaskAction(automation.actionParams, context);
+      await createTaskAction(automation.actionParams, context);
       break;
     case 'SEND_NOTIFICATION':
-      sendNotificationAction(automation.actionParams, context);
+      await sendNotificationAction(automation.actionParams, context);
       break;
   }
 }
 
-function createTaskAction(params: any, context: Opportunity) {
-  const contact = getContact(context.contact_id, context.user_id);
+async function createTaskAction(params: any, context: Opportunity) {
+  const contact = await getContact(context.contact_id, context.user_id);
   const contactName = contact ? contact.name : 'Unknown';
   
   const dueDate = new Date();
@@ -112,6 +113,7 @@ function createTaskAction(params: any, context: Opportunity) {
 
   const newTask: Activity = {
     id: 'task-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+    user_id: context.user_id || 'system',
     contact_id: context.contact_id,
     type: params.type || 'note',
     description: params.description || `[AUTOMATED] Follow up for ${contactName}`,
@@ -123,8 +125,8 @@ function createTaskAction(params: any, context: Opportunity) {
   console.log(`[AUTOMATION: TASK CREATED] ${newTask.description}`);
 }
 
-function sendNotificationAction(params: any, context: Opportunity) {
-  const contact = getContact(context.contact_id, context.user_id);
+async function sendNotificationAction(params: any, context: Opportunity) {
+  const contact = await getContact(context.contact_id, context.user_id);
   const contactName = contact ? contact.name : 'Unknown';
   
   const message = params.message.replace('${contactName}', contactName);
@@ -138,3 +140,4 @@ function sendNotificationAction(params: any, context: Opportunity) {
     alert(`Automation Notification: ${message}`);
   }
 }
+

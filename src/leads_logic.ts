@@ -51,7 +51,7 @@ export async function createLead(data: {
   }
 
   // 1. Check for Existing Contact (Duplicate Protection - Persistently)
-  const existingContact = findContact(phoneNorm.normalized, emailNorm, request?.user);
+  const existingContact = await findContact(phoneNorm.normalized, emailNorm, request?.user);
 
   let contactIdToUse: string;
 
@@ -86,8 +86,9 @@ export async function createLead(data: {
     };
 
     // Save to DB
-    persistContact(newContact);
+    await persistContact(newContact);
   }
+
 
   // 2. Create Opportunity
   const newOpportunity: Opportunity = {

@@ -90,7 +90,7 @@ export async function sendMessageToContact(
   user_id?: string
 ): Promise<{ success: boolean; internal_id?: string; error?: string }> {
   
-  const contact = getContact(contact_id, user_id);
+  const contact = await getContact(contact_id, user_id);
   if (!contact) return { success: false, error: 'Contact lookup failed' };
   if (!contact.phone) return { success: false, error: 'Contact has no phone number' };
 
@@ -139,7 +139,7 @@ export async function retryMessage(message_id: string, user_id?: string): Promis
   const msg = getMessage(message_id, user_id);
   if (!msg || msg.status !== 'failed' || !msg.retryable) return { success: false, error: 'Retry not possible' };
 
-  const contact = getContact(msg.contact_id);
+  const contact = await getContact(msg.contact_id, user_id);
   if (!contact || !contact.phone) return { success: false, error: 'Contact/phone missing' };
 
   const result = await smsService.sendSMS({ to: contact.phone, message: msg.content, user_id: msg.user_id });

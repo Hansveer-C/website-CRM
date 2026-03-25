@@ -29,7 +29,8 @@ export async function handleInboundCall(data: { phone: string }) {
   console.log(`Inbound call received from ${phoneNorm.normalized}`);
 
   // Create call record (PROMPT 3)
-  const existingContact = findContact(phoneNorm.normalized, null, 'INTERNAL_SYSTEM_BYPASS');
+  const existingContact = await findContact(phoneNorm.normalized, null, 'INTERNAL_SYSTEM_BYPASS');
+
   const callRecord: Call = {
     id: `call-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     user_id: existingContact?.user_id || 'system',

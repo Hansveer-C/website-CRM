@@ -1,22 +1,12 @@
-import { getDB } from './database';
 import { User } from './types';
 import { hashPassword, isBcryptHash } from './password_utils';
+import { supabase } from './utils/db/supabase';
 
 /**
- * Creates a new user in the database.
+ * Creates a new user in the Supabase database.
  * The raw password is automatically hashed before storage.
  */
 export async function createUser(email: string, rawPassword: string): Promise<User> {
-    const db = getDB();
-    
-    // Environment-agnostic UUID generation
-    let id: string;
-    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-        id = crypto.randomUUID() as string;
-    } else {
-        // Fallback for environments where crypto.randomUUID is not available
-        id = `user-${Date.now()}-${Math.floor(Math.random() * 1000000).toString(16)}`;
-    }
     
     // Always hash the password before storing
     const hashedPassword = await hashPassword(rawPassword);
@@ -26,40 +16,66 @@ export async function createUser(email: string, rawPassword: string): Promise<Us
         throw new Error('INTERNAL_ERROR: Password hashing failed to produce a valid hash');
     }
 
-    const stmt = db.prepare(`
-        INSERT INTO users (id, email, password_hash)
-        VALUES (?, ?, ?)
-    `);
-    
-    stmt.run(id, email, hashedPassword);
-    
-    // Fetch the created user to get the automated created_at
-    const user = getUserById(id);
-    if (!user) {
-        throw new Error(`Failed to retrieve created user with id: ${id}`);
+    // Environment-agnostic UUID generation for user ID
+    let id: string;
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+        id = crypto.randomUUID() as string;
+    } else {
+        id = `user-${Date.now()}-${Math.floor(Math.random() * 1000000).toString(16)}`;
+    }
+
+    const { data, error } = await supabase
+        .from('users')
+        .insert({
+            id,
+            email,
+            password_hash: hashedPassword,
+            created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+    if (error) {
+        console.error('[DB: USER] Error creating user in Supabase:', error.message);
+        throw new Error(`DB_CREATE_USER_ERROR: ${error.message}`);
     }
     
-    return user;
+    return data as User;
 }
 
 /**
- * Retrieves a user by their email address.
+ * Retrieves a user by their email address from Supabase.
  */
-export function getUserByEmail(email: string): User | null {
-    const db = getDB();
-    const stmt = db.prepare('SELECT * FROM users WHERE email = ?');
-    const row = stmt.get(email) as User | undefined;
+export async function getUserByEmail(email: string): Promise<User | null> {
+    const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', email)
+        .maybeSingle();
+
+    if (error) {
+        console.error('[DB: USER] Error fetching user by email from Supabase:', error.message);
+        throw new Error(`DB_GET_USER_EMAIL_ERROR: ${error.message}`);
+    }
     
-    return row || null;
+    return data as User | null;
 }
 
 /**
- * Retrieves a user by their unique ID.
+ * Retrieves a user by their unique ID from Supabase.
  */
-export function getUserById(id: string): User | null {
-    const db = getDB();
-    const stmt = db.prepare('SELECT * FROM users WHERE id = ?');
-    const row = stmt.get(id) as User | undefined;
+export async function getUserById(id: string): Promise<User | null> {
+    const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+
+    if (error) {
+        console.error('[DB: USER] Error fetching user by ID from Supabase:', error.message);
+        throw new Error(`DB_GET_USER_ID_ERROR: ${error.message}`);
+    }
     
-    return row || null;
+    return data as User | null;
 }
+

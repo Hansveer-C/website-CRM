@@ -32,11 +32,12 @@ export async function createUserSafe(email: string, password: string): Promise<U
         }
         
         // 3. Check if user already exists
-        const existingUser = getUserByEmail(normalizedEmail);
+        const existingUser = await getUserByEmail(normalizedEmail);
         if (existingUser) {
             await emitEvent('user_creation_failed', { email: normalizedEmail, reason: 'Duplicate email' });
             return { success: false, error: 'A user with this email already exists' };
         }
+
         
         // 4 & 5. hash password & create via repository 
         const newUser = await createUser(normalizedEmail, password);

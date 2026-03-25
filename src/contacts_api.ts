@@ -18,7 +18,7 @@ export async function getContacts(req: ApiRequest) {
 
     // 3. Logic: Fetch data from DB
     // At this point we are guaranteed to have a req.user
-    const contacts = getAllContacts(req.user);
+    const contacts = await getAllContacts(req.user);
     
     return {
         status: 200,
@@ -36,7 +36,7 @@ export async function getContactApi(req: ApiRequest, id: string) {
     if (authError) return authError;
 
     // Repo-level applyUserScope ensures this only returns the contact if owned by req.user
-    const contact = getContact(id, req.user);
+    const contact = await getContact(id, req.user);
     
     if (!contact) {
         return {
