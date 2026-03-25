@@ -1,41 +1,81 @@
-import { getDB } from './database';
 import { Activity, User } from './types';
-import { applyUserScope } from './query_utils';
+import { supabase } from './utils/db/supabase';
 
 /**
- * Persists an activity to the SQLite database.
+ * Phase S3 - Batch 5: Activities Repository (Supabase).
  */
-export function persistActivity(activity: Activity): Activity {
-    const db = getDB();
+export const ActivitiesRepo = {
+  /**
+   * Persists an activity to Supabase.
+   */
+  async createActivity(activity: Activity): Promise<Activity> {
+    console.log(`[DB: SUPABASE ACTIVITY] Persisting activity ${activity.id} for contact ${activity.contact_id}.`);
     
-    db.prepare(`
-        INSERT OR REPLACE INTO activities (
-            id, user_id, contact_id, type, description, due_date, completed
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-        activity.id,
-        activity.user_id,
-        activity.contact_id,
-        activity.type,
-        activity.description,
-        activity.due_date,
-        activity.completed ? 1 : 0
-    );
+    const payload = {
+        ...activity,
+        completed: !!activity.completed
+    };
 
-    return activity;
+    const { data, error } = await supabase
+      .from('activities')
+      .upsert(payload)
+      .select()
+      .single();
+
+    if (error) {
+        console.error('[DB: ACTIVITY] Failed to persist activity in Supabase:', error.message);
+        throw new Error(`DB_PERSIST_ACTIVITY_ERROR: ${error.message}`);
+    }
+
+    return data as Activity;
+  },
+
+  /**
+   * Alias for createActivity to maintain compatibility.
+   */
+  async persistActivity(activity: Activity): Promise<Activity> {
+    return this.createActivity(activity);
+  },
+
+  /**
+   * Retrieves all activities for a specific contact, scoped to user.
+   */
+  async getActivitiesByContact(contact_id: string, user?: User | string | null): Promise<Activity[]> {
+    const userId = typeof user === 'string' ? user : (user?.id);
+    
+    if (!userId) {
+        console.warn('[DB: ACTIVITY] Get by contact attempted without user context.');
+        return [];
+    }
+
+    const { data, error } = await supabase
+      .from('activities')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('contact_id', contact_id)
+      .order('due_date', { ascending: false });
+
+    if (error) {
+        console.error('[DB: ACTIVITY] Error listing activities in Supabase:', error.message);
+        throw new Error(`DB_LIST_ACTIVITIES_CONTACT_ERROR: ${error.message}`);
+    }
+
+    return (data || []) as Activity[];
+  }
+};
+
+// --- Standard Individual Exports ---
+/**
+ * Persist activity to Supabase.
+ */
+export async function persistActivity(activity: Activity): Promise<Activity> {
+    return ActivitiesRepo.createActivity(activity);
 }
 
 /**
- * Retrieves all activities for a specific contact.
+ * Get all activities for a specific contact (Supabase).
  */
-export function getActivitiesByContact(contact_id: string, user?: User | string | null): Activity[] {
-    const db = getDB();
-    const baseQuery = 'SELECT * FROM activities WHERE contact_id = ?';
-    const scoped = applyUserScope(baseQuery, user);
-    const rows = db.prepare(scoped.sql).all(contact_id, ...scoped.params) as any[];
-    
-    return rows.map(row => ({
-        ...row,
-        completed: row.completed === 1
-    }));
+export async function getActivitiesByContact(contact_id: string, user?: User | string | null): Promise<Activity[]> {
+    return ActivitiesRepo.getActivitiesByContact(contact_id, user);
 }
+

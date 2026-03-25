@@ -2794,7 +2794,7 @@ async function loadTimeline(contactId: string) {
   console.log(`[API] GET /api/contacts/${contactId}/timeline`);
 
   // FETCH: In a real system we would use fetch()
-  const timeline = getContactTimeline(contactId);
+  const timeline = await getContactTimeline(contactId, (window as any).currentUser);
 
   // STATE: Store response in local state
   contactTimelineState = timeline;

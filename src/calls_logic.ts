@@ -39,7 +39,8 @@ export async function handleInboundCall(data: { phone: string }) {
     status: 'received',
     created_at: timestamp
   };
-  persistCall(callRecord);
+  await persistCall(callRecord);
+
 
   // Emit "call_received" event
   await emitEvent('call_received', {
@@ -69,7 +70,7 @@ export async function endCall(data: { call_id: string; answered: boolean }) {
     throw new Error('call_id is required to end a call.');
   }
 
-  const call = getCall(data.call_id, 'INTERNAL_SYSTEM_BYPASS');
+  const call = await getCall(data.call_id, 'INTERNAL_SYSTEM_BYPASS');
   
   if (!call) {
     const errorMsg = `Call with ID ${data.call_id} not found.`;
@@ -91,7 +92,8 @@ export async function endCall(data: { call_id: string; answered: boolean }) {
   // Update status
   call.status = data.answered ? 'answered' : 'missed';
   call.duration = data.answered ? 60 : 0; // Simulate 1 minute call if answered
-  persistCall(call);
+  await persistCall(call);
+
   
   const timestamp = new Date().toISOString();
   

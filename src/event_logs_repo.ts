@@ -1,42 +1,75 @@
-import { getDB } from './database';
 import { EventLog, User } from './types';
-import { applyUserScope } from './query_utils';
+import { supabase } from './utils/db/supabase';
 
 /**
- * Persists an event log entry.
+ * Phase S3 - Batch 5: EventLogs Repository (Supabase).
  */
-export function persistEventLog(log: EventLog): EventLog {
-    const db = getDB();
+export const EventLogsRepo = {
+  /**
+   * Persists an event log entry to Supabase.
+   */
+  async createEventLog(log: EventLog): Promise<EventLog> {
+    console.log(`[DB: SUPABASE EVENT] Logging ${log.event_name} (${log.id}).`);
     
-    db.prepare(`
-        INSERT OR REPLACE INTO event_logs (
-            id, user_id, event_name, payload, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-        log.id,
-        log.user_id,
-        log.event_name,
-        JSON.stringify(log.payload || {}),
-        log.status,
-        log.created_at
-    );
+    const { data, error } = await supabase
+      .from('event_logs')
+      .upsert(log)
+      .select()
+      .single();
 
-    return log;
+    if (error) {
+        console.error('[DB: EVENT_LOG] Failed to persist event log in Supabase:', error.message);
+        throw new Error(`DB_PERSIST_EVENT_LOG_ERROR: ${error.message}`);
+    }
+
+    return data as EventLog;
+  },
+
+  /**
+   * Alias for createEventLog to maintain compatibility.
+   */
+  async persistEventLog(log: EventLog): Promise<EventLog> {
+    return this.createEventLog(log);
+  },
+
+  /**
+   * Retrieves all event logs, scoped to the user context.
+   */
+  async getAllEventLogs(user?: User | string | null): Promise<EventLog[]> {
+    const userId = typeof user === 'string' ? user : (user?.id);
+    
+    if (!userId) {
+        console.warn('[DB: EVENT_LOG] Get all event logs attempted without user context.');
+        return [];
+    }
+
+    const { data, error } = await supabase
+      .from('event_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+        console.error('[DB: EVENT_LOG] Error listing event logs from Supabase:', error.message);
+        throw new Error(`DB_LIST_EVENT_LOGS_ERROR: ${error.message}`);
+    }
+
+    return (data || []) as EventLog[];
+  }
+};
+
+// --- Standard Individual Exports ---
+/**
+ * Persist event log to Supabase.
+ */
+export async function persistEventLog(log: EventLog): Promise<EventLog> {
+    return EventLogsRepo.createEventLog(log);
 }
 
 /**
- * Retrieves event logs for a contact or phone.
- * Because payload is JSON, we use LIKE for simple matching or fetch and filter in JS for precision.
- * For this exercise, we fetch and filter in JS to maintain reliability.
+ * List all event logs (Supabase).
  */
-export function getAllEventLogs(user?: User | string | null): EventLog[] {
-    const db = getDB();
-    const baseQuery = 'SELECT * FROM event_logs';
-    const scoped = applyUserScope(baseQuery, user);
-    const rows = db.prepare(`${scoped.sql} ORDER BY created_at ASC`).all(...scoped.params) as any[];
-    
-    return rows.map(row => ({
-        ...row,
-        payload: JSON.parse(row.payload)
-    }));
+export async function getAllEventLogs(user?: User | string | null): Promise<EventLog[]> {
+    return EventLogsRepo.getAllEventLogs(user);
 }
+

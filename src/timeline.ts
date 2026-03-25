@@ -14,15 +14,17 @@ export interface TimelineGroup {
  * Standardized timeline item source.
  * Fully DB-backed.
  */
-export function getContactTimeline(contact_id: string, user?: User | string | null): TimelineGroup[] {
-  const contact = getContact(contact_id, user);
+export async function getContactTimeline(contact_id: string, user?: User | string | null): Promise<TimelineGroup[]> {
+  const contact = await getContact(contact_id, user);
   const phone = contact?.phone;
 
-  // 1. Fetch source data from DB repositories
-  const messages = getMessagesByContact(contact_id, user);
-  const allEventLogs = getAllEventLogs(user);
-  const activities = getActivitiesByContact(contact_id, user);
-  const calls = getCallsForContact(contact_id, phone, user);
+  // 1. Fetch source data from DB repositories (Parallel)
+  const [messages, allEventLogs, activities, calls] = await Promise.all([
+    getMessagesByContact(contact_id, user),
+    getAllEventLogs(user),
+    getActivitiesByContact(contact_id, user),
+    getCallsForContact(contact_id, phone, user)
+  ]);
 
   // Filter event logs in JS for contact linkage (payload-based)
   const eventLogs = allEventLogs.filter(e => {
@@ -180,8 +182,8 @@ function formatDateForComparison(date: Date): string {
 /**
  * Returns the single most recent activity for a contact.
  */
-export function getLatestActivity(contact_id: string): any | null {
-    const groups = getContactTimeline(contact_id);
+export async function getLatestActivity(contact_id: string, user?: User | string | null): Promise<any | null> {
+    const groups = await getContactTimeline(contact_id, user);
     const reversedGroups = [...groups].reverse();
     for (const group of reversedGroups) {
         if (group.items.length > 0) {
@@ -190,3 +192,4 @@ export function getLatestActivity(contact_id: string): any | null {
     }
     return null;
 }
+
