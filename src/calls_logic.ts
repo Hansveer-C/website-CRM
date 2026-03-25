@@ -1,4 +1,4 @@
-import { normalizePhone } from './leads_logic';
+import { normalizePhone } from './utils/normalization';
 import { emitEvent } from './events';
 import { persistCall, getCall } from './calls_repo';
 import { findContact } from './contacts_repo';

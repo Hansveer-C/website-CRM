@@ -33,12 +33,18 @@ const createLead = async (data: any, request?: any) => {
     }).then(res => res.json());
 };
 const handleInboundCall = async (payload: { phone: string }) => {
-    console.log(`[API STUB] Inbound call: ${payload.phone}`);
-    return { callId: `call-stub-${Date.now()}` };
+    return fetch('/api/calls/inbound', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    }).then(res => res.json());
 };
 const endCall = async (payload: { call_id: string, answered?: boolean, duration?: number }) => {
-    console.log(`[API STUB] End call: ${payload.call_id} (Answered: ${payload.answered})`);
-    return { status: 'success' };
+    return fetch('/api/calls/end', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    }).then(res => res.json());
 };
 const sendMessageToContact = async (id: string, msg: string, source: string = 'manual', user_id?: string) => {
     return fetch('/api/messages/send', {
@@ -113,6 +119,47 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
             return new Response(JSON.stringify(responseData), { 
                 status: response.status || 201,
                 headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
+        if (url === '/api/contacts' && method === 'GET') {
+            const { getContacts } = await import('./contacts_api');
+            const response: any = await getContacts(reqContext);
+            const responseData = response.data || response;
+            return new Response(JSON.stringify(responseData), { 
+                status: response.status || 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
+        if (url.startsWith('/api/contacts/') && url.endsWith('/timeline') && method === 'GET') {
+            const { getContactTimelineApi } = await import('./crm_api');
+            const id = url.split('/')[3];
+            const response: any = await getContactTimelineApi(reqContext, id);
+            const responseData = response.data || response;
+            return new Response(JSON.stringify(responseData), { 
+                status: response.status || 200, 
+                headers: { 'Content-Type': 'application/json' } 
+            });
+        }
+
+        if (url === '/api/calls/inbound' && method === 'POST') {
+            const { handleInboundCallApi } = await import('./calls_api');
+            const response: any = await handleInboundCallApi(reqContext);
+            const responseData = response.data || response;
+            return new Response(JSON.stringify(responseData), { 
+                status: response.status || 200, 
+                headers: { 'Content-Type': 'application/json' } 
+            });
+        }
+
+        if (url === '/api/calls/end' && method === 'POST') {
+            const { endCallApi } = await import('./calls_api');
+            const response: any = await endCallApi(reqContext);
+            const responseData = response.data || response;
+            return new Response(JSON.stringify(responseData), { 
+                status: response.status || 200, 
+                headers: { 'Content-Type': 'application/json' } 
             });
         }
     }

@@ -5,6 +5,7 @@ import { getOpportunity } from './opportunities_repo';
 import { getMessage } from './messages_repo';
 import { getCall } from './calls_repo';
 import { createLead } from './leads_logic';
+import { getContactTimeline } from './timeline';
 
 /**
  * Shared logic to handle specific record retrieval with user scoping.
@@ -80,4 +81,25 @@ export async function createLeadApi(req: ApiRequest) {
             error: error.message
         };
     }
+}
+
+/**
+ * GET /api/contacts/:id/timeline
+ */
+export async function getContactTimelineApi(req: ApiRequest, id: string) {
+    await apiMiddleware(req);
+    const authError = requireAuth(req);
+    if (authError) return authError;
+
+    // Check Existence & Ownership
+    const contact = await getContact(id, req.user);
+    if (!contact) {
+        return { status: 404, error: 'Contact not found or access denied.' };
+    }
+
+    const timeline = await getContactTimeline(id, req.user);
+    return {
+        status: 200,
+        data: timeline
+    };
 }

@@ -4,29 +4,8 @@ import { persistContact, findContact } from './contacts_repo';
 import { persistOpportunity, getOpportunitiesByContact } from './opportunities_repo';
 import { Contact, Opportunity, ApiRequest } from './types';
 
-export function normalizePhone(phone: string): { normalized: string; invalid: boolean } {
-  if (!phone) return { normalized: '', invalid: true };
-  
-  const cleaned = phone.replace(/[\s\-\(\)\[\]\{\}\.\,\/]/g, '').replace(/\D/g, '');
-  
-  if (cleaned.length === 10) {
-    return { normalized: `+1${cleaned}`, invalid: false };
-  } else if (cleaned.length === 11 && cleaned.startsWith('1')) {
-    return { normalized: `+${cleaned}`, invalid: false };
-  }
-  
-  return { normalized: cleaned || phone, invalid: true };
-}
+import { normalizePhone, normalizeEmail, normalizeName } from './utils/normalization';
 
-export function normalizeEmail(email: string | null | undefined): string | null {
-  if (!email || !email.trim()) return null;
-  return email.trim().toLowerCase();
-}
-
-export function normalizeName(name: string): string {
-  if (!name) return '';
-  return name.trim().replace(/\s\s+/g, ' ');
-}
 
 /**
  * Reusable Lead Creation Engine (End-to-End Pipeline)
