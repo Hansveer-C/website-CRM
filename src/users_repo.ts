@@ -1,5 +1,10 @@
 import { User } from './types';
 import { hashPassword, isBcryptHash } from './password_utils';
+/**
+ * 🔒 SERVER-ONLY MODULE
+ * This module contains administrative logic, database credentials, or Node.js internal utilities.
+ * ⚠️ DO NOT IMPORT INTO FRONTEND CODE (main.ts, etc.)
+ */
 import { supabase } from './utils/db/supabase';
 
 /**

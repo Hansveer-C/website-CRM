@@ -1,3 +1,8 @@
+/**
+ * 🔒 SERVER-ONLY MODULE
+ * This module contains administrative logic, database credentials, or Node.js internal utilities.
+ * ⚠️ DO NOT IMPORT INTO FRONTEND CODE (main.ts, etc.)
+ */
 import { getDB } from './database';
 import { WebsiteSettings } from './types';
 

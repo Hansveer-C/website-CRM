@@ -1,3 +1,10 @@
+/**
+ * 🔒 SERVER-ONLY MODULE
+ * This module contains administrative logic, database credentials, or Node.js internal utilities.
+ * ⚠️ DO NOT IMPORT INTO FRONTEND CODE (main.ts, etc.)
+ * All database access from the frontend must go through the /api layer.
+ */
+
 import { createClient } from '@supabase/supabase-js';
 
 /**

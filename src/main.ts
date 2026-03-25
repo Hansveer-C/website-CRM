@@ -1,16 +1,62 @@
-import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, } from './db';
-import { getWebsiteSettings, persistWebsiteSettings } from './website_settings_repo';
-import { getEvents } from './events';
-import { getAllMessagesOrdered, getConversation } from './messages';
-import { getCallsForContact, getCall } from './calls_repo';
+import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings } from './db';
 import { templates } from './templates';
 import { Activity } from './types';
-import { runAutomations, checkOverdueInvoices } from './automation';
-import { emitEvent } from './events';
-import { sendMessageToContact, retryMessage } from './sms';
-import { getContactTimeline, getLatestActivity } from './timeline';
-import { normalizePhone, normalizeEmail, normalizeName, createLead } from './leads_logic';
-import { handleInboundCall, endCall } from './calls_logic';
+import { normalizePhone, normalizeEmail, normalizeName } from './utils/normalization';
+
+/**
+ * 🌐 FRONTEND API BRIDGE
+ * These stubs replace direct backend function calls to prevent credential leakage.
+ * These utilize regional mock data (db.ts) to maintain UI functionality without direct DB access.
+ */
+const getWebsiteSettings = () => mockWebsiteSettings;
+const persistWebsiteSettings = async (data: any) => { 
+    console.log('[API STUB] Saving settings:', data);
+    return { success: true }; 
+};
+const getEvents = (user?: any) => [];
+const getAllMessagesOrdered = (user?: any) => [];
+const getConversation = (id: string, user?: any) => [];
+const getCallsForContact = (id: string, phone?: string, user?: any) => [];
+const getCall = (id: string) => null;
+const runAutomations = (type: string, data: any) => {};
+const checkOverdueInvoices = () => { console.log('[API STUB] Checking overdue invoices'); };
+const emitEvent = (name: string, payload: any, user_id?: string) => {
+    console.log(`[FRONTEND EVENT] ${name}:`, payload);
+};
+const getContactTimeline = (id: string, user?: any) => [];
+const getLatestActivity = (id: string, user?: any) => null;
+const createLead = async (data: any, request?: any) => {
+    return fetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    }).then(res => res.json());
+};
+const handleInboundCall = async (payload: { phone: string }) => {
+    console.log(`[API STUB] Inbound call: ${payload.phone}`);
+    return { callId: `call-stub-${Date.now()}` };
+};
+const endCall = async (payload: { call_id: string, answered?: boolean, duration?: number }) => {
+    console.log(`[API STUB] End call: ${payload.call_id} (Answered: ${payload.answered})`);
+    return { status: 'success' };
+};
+const sendMessageToContact = async (id: string, msg: string, source: string = 'manual', user_id?: string) => {
+    return fetch('/api/messages/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact_id: id, message: msg, source })
+    }).then(res => res.json());
+};
+const retryMessage = async (id: string, user_id?: string) => {
+    return fetch(`/api/messages/${id}/retry`, { method: 'POST' }).then(res => res.json());
+};
+const getContact = (id: string, user?: any) => mockContacts.find(c => c.id === id);
+const getOpportunity = (id: string, user?: any) => mockOpportunities.find(o => o.id === id);
+
+
+
+
+
 
 // Initialize and Validate Configs
 // Twilio check removed from frontend for security (Phase 7.5 Migration)

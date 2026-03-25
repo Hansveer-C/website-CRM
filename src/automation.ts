@@ -1,4 +1,10 @@
 import { Automation, TriggerType, Opportunity, Activity, Contact } from './types';
+/**
+ * 🔒 SERVER-ONLY MODULE
+ * This module contains administrative logic, database credentials, or Node.js internal utilities.
+ * ⚠️ DO NOT IMPORT INTO FRONTEND CODE (main.ts, etc.)
+ */
+import { emitEvent } from './events';
 import { getContact } from './contacts_repo';
 import { mockActivities, mockInvoices } from './db';
 

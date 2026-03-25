@@ -1,3 +1,8 @@
+/**
+ * 🔒 SERVER-ONLY MODULE
+ * This module contains administrative logic, database credentials, or Node.js internal utilities.
+ * ⚠️ DO NOT IMPORT INTO FRONTEND CODE (main.ts, etc.)
+ */
 import { Message, Contact } from './types';
 import { saveMessage } from './messages';
 import { getContact } from './contacts_repo';
