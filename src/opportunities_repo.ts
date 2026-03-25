@@ -1,82 +1,182 @@
-import { getDB } from './database';
 import { Opportunity, User } from './types';
-import { applyUserScope } from './query_utils';
+import { supabase } from './utils/db/supabase';
 
 /**
- * Persists an opportunity to the SQLite database.
+ * Phase S3 - Batch 2: Opportunities Repository (Supabase).
  */
-export function persistOpportunity(opportunity: Opportunity): Opportunity {
-  const db = getDB();
-  
-  const stmt = db.prepare(`
-    INSERT OR REPLACE INTO opportunities (
-        id, user_id, contact_id, pipeline_stage, status, value, source, notes, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+export const OpportunitiesRepo = {
+  /**
+   * Persists an opportunity to the Supabase database.
+   */
+  async createOpportunity(opportunity: Opportunity): Promise<Opportunity> {
+    console.log(`[DB: SUPABASE OPPORTUNITY] Persisting ${opportunity.id} for contact ${opportunity.contact_id}.`);
+    
+    const payload = {
+      ...opportunity,
+      // Map correctly to Postgres types
+      value: Number(opportunity.value) || 0
+    };
 
-  stmt.run(
-    opportunity.id,
-    opportunity.user_id,
-    opportunity.contact_id,
-    opportunity.pipeline_stage,
-    opportunity.status,
-    opportunity.value || 0,
-    opportunity.source || null,
-    opportunity.notes || null,
-    opportunity.created_at
-  );
+    const { data, error } = await supabase
+      .from('opportunities')
+      .upsert(payload)
+      .select()
+      .single();
 
-  return opportunity;
+    if (error) {
+        console.error('[DB: OPPORTUNITY] Failed to persist opportunity in Supabase:', error.message);
+        throw new Error(`DB_PERSIST_OPPORTUNITY_ERROR: ${error.message}`);
+    }
+
+    return data as Opportunity;
+  },
+
+  /**
+   * Alias for createOpportunity to maintain compatibility.
+   */
+  async persistOpportunity(opportunity: Opportunity): Promise<Opportunity> {
+    return this.createOpportunity(opportunity);
+  },
+
+  /**
+   * Retrieves all opportunities associated with a specific contact, scoped to the user context.
+   */
+  async getOpportunitiesByContact(contact_id: string, user?: User | string | null): Promise<Opportunity[]> {
+    const userId = typeof user === 'string' ? user : (user?.id);
+    
+    if (!userId) {
+        console.warn('[DB: OPPORTUNITY] Get by contact attempted without user context.');
+        return [];
+    }
+
+    const { data, error } = await supabase
+      .from('opportunities')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('contact_id', contact_id)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+        console.error('[DB: OPPORTUNITY] Error listing opportunities in Supabase:', error.message);
+        throw new Error(`DB_LIST_OPPORTUNITIES_CONTACT_ERROR: ${error.message}`);
+    }
+
+    return (data || []) as Opportunity[];
+  },
+
+  /**
+   * Retrieves a single opportunity by ID, scoped to the user context.
+   */
+  async getOpportunityById(id: string, user?: User | string | null): Promise<Opportunity | null> {
+    const userId = typeof user === 'string' ? user : (user?.id);
+    
+    if (!userId) {
+        console.warn('[DB: OPPORTUNITY] Get opportunity attempted without user context.');
+        return null;
+    }
+
+    const { data, error } = await supabase
+      .from('opportunities')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+        console.error('[DB: OPPORTUNITY] Error retrieving opportunity from Supabase:', error.message);
+        throw new Error(`DB_GET_OPPORTUNITY_ERROR: ${error.message}`);
+    }
+
+    return data as Opportunity | null;
+  },
+
+  /**
+   * Alias for getOpportunityById to maintain compatibility.
+   */
+  async getOpportunity(id: string, user?: User | string | null): Promise<Opportunity | null> {
+    return this.getOpportunityById(id, user);
+  },
+
+  /**
+   * Retrieves all opportunities, scoped to the user context.
+   */
+  async getOpportunities(user?: User | string | null): Promise<Opportunity[]> {
+    const userId = typeof user === 'string' ? user : (user?.id);
+    
+    if (!userId) {
+        console.warn('[DB: OPPORTUNITY] Get all opportunities attempted without user context.');
+        return [];
+    }
+
+    const { data, error } = await supabase
+      .from('opportunities')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+        console.error('[DB: OPPORTUNITY] Error listing opportunities from Supabase:', error.message);
+        throw new Error(`DB_LIST_OPPORTUNITIES_ERROR: ${error.message}`);
+    }
+
+    return (data || []) as Opportunity[];
+  },
+
+  /**
+   * Alias for getOpportunities to maintain compatibility.
+   */
+  async getAllOpportunities(user?: User | string | null): Promise<Opportunity[]> {
+    return this.getOpportunities(user);
+  }
+};
+
+// --- Standard Individual Exports ---
+/**
+ * Persist opportunity to Supabase.
+ */
+export async function createOpportunity(opportunity: Opportunity): Promise<Opportunity> {
+    return OpportunitiesRepo.createOpportunity(opportunity);
 }
 
 /**
- * Retrieves all opportunities associated with a specific contact.
+ * Persist opportunity to Supabase (Legacy Alias).
  */
-export function getOpportunitiesByContact(contact_id: string, user?: User | string | null): Opportunity[] {
-  const db = getDB();
-  const baseQuery = 'SELECT * FROM opportunities WHERE contact_id = ?';
-  const scoped = applyUserScope(baseQuery, user);
-  const stmt = db.prepare(`${scoped.sql} ORDER BY created_at DESC`);
-  const rows = stmt.all(contact_id, ...scoped.params) as any[];
-  
-  return rows.map(row => ({
-    ...row,
-    status: row.status as any,
-    value: parseFloat(row.value) || 0
-  }));
+export async function persistOpportunity(opportunity: Opportunity): Promise<Opportunity> {
+    return OpportunitiesRepo.createOpportunity(opportunity);
 }
 
 /**
- * Retrieves a single opportunity by ID.
+ * Get opportunities by contact (Supabase).
  */
-export function getOpportunity(id: string, user?: User | string | null): Opportunity | null {
-  const db = getDB();
-  const baseQuery = 'SELECT * FROM opportunities WHERE id = ?';
-  const scoped = applyUserScope(baseQuery, user);
-  const stmt = db.prepare(scoped.sql);
-  const row = stmt.get(id, ...scoped.params) as any;
-  if (!row) return null;
-
-  return {
-    ...row,
-    status: row.status as any,
-    value: parseFloat(row.value) || 0
-  };
+export async function getOpportunitiesByContact(contact_id: string, user?: User | string | null): Promise<Opportunity[]> {
+    return OpportunitiesRepo.getOpportunitiesByContact(contact_id, user);
 }
 
 /**
- * Retrieves all opportunities in the system.
+ * Get single opportunity by ID (Supabase).
  */
-export function getAllOpportunities(user?: User | string | null): Opportunity[] {
-  const db = getDB();
-  const baseQuery = 'SELECT * FROM opportunities';
-  const scoped = applyUserScope(baseQuery, user);
-  const stmt = db.prepare(`${scoped.sql} ORDER BY created_at DESC`);
-  const rows = stmt.all(...scoped.params) as any[];
-  
-  return rows.map(row => ({
-    ...row,
-    status: row.status as any,
-    value: parseFloat(row.value) || 0
-  }));
+export async function getOpportunityById(id: string, user?: User | string | null): Promise<Opportunity | null> {
+    return OpportunitiesRepo.getOpportunityById(id, user);
 }
+
+/**
+ * Get single opportunity by ID (Legacy Alias).
+ */
+export async function getOpportunity(id: string, user?: User | string | null): Promise<Opportunity | null> {
+    return OpportunitiesRepo.getOpportunityById(id, user);
+}
+
+/**
+ * List all opportunities (Supabase).
+ */
+export async function getOpportunities(user?: User | string | null): Promise<Opportunity[]> {
+    return OpportunitiesRepo.getOpportunities(user);
+}
+
+/**
+ * List all opportunities (Legacy Alias).
+ */
+export async function getAllOpportunities(user?: User | string | null): Promise<Opportunity[]> {
+    return OpportunitiesRepo.getOpportunities(user);
+}
+

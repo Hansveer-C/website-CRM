@@ -1,160 +1,214 @@
-import { getDB } from './database';
 import { Message, User } from './types';
-import { applyUserScope } from './query_utils';
+import { supabase } from './utils/db/supabase';
 
 /**
- * Persists a message to the database.
- * If the message already exists (by ID), it updates it.
+ * Phase S3 - Batch 3: Messages Repository (Supabase).
  */
-export function persistMessage(message: Message): Message {
-    const db = getDB();
+export const MessagesRepo = {
+  /**
+   * Persists a message to the Supabase database.
+   */
+  async createMessage(message: Message): Promise<Message> {
+    console.log(`[DB: SUPABASE MESSAGE] Persisting ${message.id} for contact ${message.contact_id}. Status: ${message.status}`);
     
-    // Check if message exists for upsert behavior
-    const existing = db.prepare('SELECT id FROM messages WHERE id = ?').get(message.id);
-    
-    if (existing) {
-        db.prepare(`
-            UPDATE messages SET
-                status = ?,
-                retryable = ?,
-                provider_message_id = ?
-            WHERE id = ?
-        `).run(
-            message.status,
-            message.retryable ? 1 : 0,
-            message.provider_message_id || null,
-            message.id
-        );
-    } else {
-        db.prepare(`
-            INSERT INTO messages (
-                id, user_id, contact_id, opportunity_id, direction, type, content, 
-                status, source, retryable, provider_message_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-            message.id,
-            message.user_id,
-            message.contact_id,
-            message.opportunity_id || null,
-            message.direction,
-            message.type,
-            message.content,
-            message.status,
-            message.source || null,
-            message.retryable ? 1 : 0,
-            message.provider_message_id || null,
-            message.created_at
-        );
+    const payload = {
+      ...message,
+      // Map correctly to Postgres types
+      retryable: !!message.retryable
+    };
+
+    const { data, error } = await supabase
+      .from('messages')
+      .upsert(payload)
+      .select()
+      .single();
+
+    if (error) {
+        console.error('[DB: MESSAGE] Failed to persist message in Supabase:', error.message);
+        throw new Error(`DB_PERSIST_MESSAGE_ERROR: ${error.message}`);
     }
 
-    return message;
-}
+    return data as Message;
+  },
 
-/**
- * Retrieves a message by its ID.
- */
-export function getMessage(id: string, user?: User | string | null): Message | null {
-    const db = getDB();
-    const baseQuery = 'SELECT * FROM messages WHERE id = ?';
-    const scoped = applyUserScope(baseQuery, user);
-    const row = db.prepare(scoped.sql).get(id, ...scoped.params) as any;
-    
-    if (!row) return null;
-    
-    return {
-        ...row,
-        retryable: row.retryable === 1
-    };
-}
+  /**
+   * Alias for createMessage to maintain compatibility.
+   */
+  async persistMessage(message: Message): Promise<Message> {
+    return this.createMessage(message);
+  },
 
-/**
- * Retrieves all messages for a specific contact.
- */
-export function getMessagesByContact(contactId: string, user?: User | string | null): Message[] {
-    const db = getDB();
-    const baseQuery = 'SELECT * FROM messages WHERE contact_id = ?';
-    const scoped = applyUserScope(baseQuery, user);
-    const rows = db.prepare(`${scoped.sql} ORDER BY created_at ASC`).all(contactId, ...scoped.params) as any[];
+  /**
+   * Retrieves a message by its ID, scoped to the user context.
+   */
+  async getMessage(id: string, user?: User | string | null): Promise<Message | null> {
+    const userId = typeof user === 'string' ? user : (user?.id);
     
-    return rows.map(row => ({
-        ...row,
-        retryable: row.retryable === 1
-    }));
-}
+    if (!userId) {
+        console.warn('[DB: MESSAGE] Get message attempted without user context.');
+        return null;
+    }
 
-/**
- * Updates a message's status and provider info.
- */
-export function updateMessageStatus(id: string, status: string, providerMessageId?: string, retryable?: boolean): void {
-    const db = getDB();
-    db.prepare(`
-        UPDATE messages SET
-            status = ?,
-            provider_message_id = ?,
-            retryable = ?
-        WHERE id = ?
-    `).run(
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+        console.error('[DB: MESSAGE] Error retrieving message from Supabase:', error.message);
+        throw new Error(`DB_GET_MESSAGE_ERROR: ${error.message}`);
+    }
+
+    return data as Message | null;
+  },
+
+  /**
+   * Retrieves all messages for a specific contact, scoped to the user context.
+   */
+  async getMessagesByContact(contactId: string, user?: User | string | null): Promise<Message[]> {
+    const userId = typeof user === 'string' ? user : (user?.id);
+    
+    if (!userId) {
+        console.warn('[DB: MESSAGE] Get by contact attempted without user context.');
+        return [];
+    }
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('contact_id', contactId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+        console.error('[DB: MESSAGE] Error listing messages in Supabase:', error.message);
+        throw new Error(`DB_LIST_MESSAGES_CONTACT_ERROR: ${error.message}`);
+    }
+
+    return (data || []) as Message[];
+  },
+
+  /**
+   * Updates a message's status and provider info.
+   */
+  async updateMessageStatus(id: string, status: string, providerMessageId?: string, retryable?: boolean): Promise<void> {
+    const { error } = await supabase
+      .from('messages')
+      .update({
         status,
-        providerMessageId || null,
-        retryable ? 1 : 0,
-        id
-    );
-}
+        provider_message_id: providerMessageId || null,
+        retryable: !!retryable
+      })
+      .eq('id', id);
 
-/**
- * Counts recent outbound messages for rate limiting.
- */
-export function countRecentOutboundMessages(contactId: string, sinceIso: string, user?: User | string | null): number {
-    const db = getDB();
-    const baseQuery = `
-        SELECT count(*) as total FROM messages 
-        WHERE contact_id = ? AND direction = 'outbound' AND created_at > ?
-    `;
-    const scoped = applyUserScope(baseQuery, user);
-    const result = db.prepare(scoped.sql).get(contactId, sinceIso, ...scoped.params) as any;
-    
-    return result.total;
-}
+    if (error) {
+        console.error('[DB: MESSAGE] Failed to update message status in Supabase:', error.message);
+        throw new Error(`DB_UPDATE_MESSAGE_STATUS_ERROR: ${error.message}`);
+    }
+  },
 
-/**
- * Counts the total outbound messages sent by a user across all contacts for global rate limiting.
- */
-export function countUserTotalRecentMessages(user_id: string, sinceIso: string): number {
-    const db = getDB();
-    const result = db.prepare(`
-        SELECT count(*) as total FROM messages 
-        WHERE user_id = ? AND direction = 'outbound' AND created_at > ?
-    `).get(user_id, sinceIso) as any;
+  /**
+   * Counts recent outbound messages for rate limiting.
+   */
+  async countRecentOutboundMessages(contactId: string, sinceIso: string, user?: User | string | null): Promise<number> {
+    const userId = typeof user === 'string' ? user : (user?.id);
     
-    return result?.total || 0;
-}
+    if (!userId) return 0;
 
-/**
- * Checks if a duplicate message was sent recently.
- */
-export function checkDuplicateMessage(contactId: string, content: string, sinceIso: string, user?: User | string | null): boolean {
-    const db = getDB();
-    const baseQuery = `
-        SELECT id FROM messages 
-        WHERE contact_id = ? AND direction = 'outbound' AND content = ? AND created_at > ?
-    `;
-    const scoped = applyUserScope(baseQuery, user);
-    const result = db.prepare(`${scoped.sql} LIMIT 1`).get(contactId, content, sinceIso, ...scoped.params);
-    
-    return !!result;
-}
+    const { count, error } = await supabase
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('contact_id', contactId)
+      .eq('direction', 'outbound')
+      .gt('created_at', sinceIso);
 
-/**
- * Retrieves all messages in the entire system, sorted chronologically (ASC).
- */
-export function getAllMessagesOrdered(user?: User | string | null): Message[] {
-    const db = getDB();
-    const baseQuery = 'SELECT * FROM messages';
-    const scoped = applyUserScope(baseQuery, user);
-    const rows = db.prepare(`${scoped.sql} ORDER BY created_at ASC`).all(...scoped.params) as any[];
+    if (error) {
+        console.error('[DB: MESSAGE] Error counting recent messages in Supabase:', error.message);
+        return 0;
+    }
+
+    return count || 0;
+  },
+
+  /**
+   * Counts the total outbound messages sent by a user across all contacts for global rate limiting.
+   */
+  async countUserTotalRecentMessages(user_id: string, sinceIso: string): Promise<number> {
+    const { count, error } = await supabase
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user_id)
+      .eq('direction', 'outbound')
+      .gt('created_at', sinceIso);
+
+    if (error) {
+        console.error('[DB: MESSAGE] Error counting user global messages in Supabase:', error.message);
+        return 0;
+    }
+
+    return count || 0;
+  },
+
+  /**
+   * Checks if a duplicate message was sent recently.
+   */
+  async checkDuplicateMessage(contactId: string, content: string, sinceIso: string, user?: User | string | null): Promise<boolean> {
+    const userId = typeof user === 'string' ? user : (user?.id);
     
-    return rows.map(row => ({
-        ...row,
-        retryable: row.retryable === 1
-    }));
-}
+    if (!userId) return false;
+
+    const { count, error } = await supabase
+      .from('messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('contact_id', contactId)
+      .eq('direction', 'outbound')
+      .eq('content', content)
+      .gt('created_at', sinceIso);
+
+    if (error) {
+        console.error('[DB: MESSAGE] Error checking duplicate message in Supabase:', error.message);
+        return false;
+    }
+
+    return (count || 0) > 0;
+  },
+
+  /**
+   * Retrieves all messages in the entire system, sorted chronologically (ASC).
+   */
+  async getAllMessagesOrdered(user?: User | string | null): Promise<Message[]> {
+    const userId = typeof user === 'string' ? user : (user?.id);
+    
+    if (!userId) return [];
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+        console.error('[DB: MESSAGE] Error listing all messages in Supabase:', error.message);
+        throw new Error(`DB_LIST_ALL_MESSAGES_ERROR: ${error.message}`);
+    }
+
+    return (data || []) as Message[];
+  }
+};
+
+// --- Standard Individual Exports ---
+export const createMessage = MessagesRepo.createMessage;
+export const persistMessage = MessagesRepo.createMessage;
+export const getMessage = MessagesRepo.getMessage;
+export const getMessagesByContact = MessagesRepo.getMessagesByContact;
+export const updateMessageStatus = MessagesRepo.updateMessageStatus;
+export const countRecentOutboundMessages = MessagesRepo.countRecentOutboundMessages;
+export const countUserTotalRecentMessages = MessagesRepo.countUserTotalRecentMessages;
+export const checkDuplicateMessage = MessagesRepo.checkDuplicateMessage;
+export const getAllMessagesOrdered = MessagesRepo.getAllMessagesOrdered;
+export const getMessages = MessagesRepo.getAllMessagesOrdered; // Alias as requested
+

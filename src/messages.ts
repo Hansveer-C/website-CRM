@@ -10,9 +10,9 @@ import { persistMessage, getMessagesByContact } from './messages_repo';
  * @param message - The message object to save.
  * @returns { boolean } - True if saved successfully, false otherwise.
  */
-export function saveMessage(message: Partial<Message> & { contact_id: string }): boolean {
+export async function saveMessage(message: Partial<Message> & { contact_id: string }): Promise<boolean> {
   // Validate contact_id exists
-  const contact = getContact(message.contact_id, 'INTERNAL_SYSTEM_BYPASS');
+  const contact = await getContact(message.contact_id, 'INTERNAL_SYSTEM_BYPASS');
   if (!contact) {
     console.error(`[Message Error] Invalid contact_id: ${message.contact_id}`);
     return false;
@@ -20,7 +20,7 @@ export function saveMessage(message: Partial<Message> & { contact_id: string }):
 
   // OPTIONAL: Attach opportunity_id if one exists for the contact (Link to the latest open deal)
   if (!message.opportunity_id) {
-    const opps = getOpportunitiesByContact(message.contact_id, 'INTERNAL_SYSTEM_BYPASS');
+    const opps = await getOpportunitiesByContact(message.contact_id, 'INTERNAL_SYSTEM_BYPASS');
     const latestOpp = opps
       .filter(o => o.status === 'open')
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
@@ -44,7 +44,7 @@ export function saveMessage(message: Partial<Message> & { contact_id: string }):
     created_at: message.created_at || new Date().toISOString()
   };
 
-  persistMessage(finalMessage);
+  await persistMessage(finalMessage);
   console.log(`[Message Saved]: ${finalMessage.id} with status "${finalMessage.status}" for contact ${finalMessage.contact_id}`);
   return true;
 }
@@ -62,8 +62,8 @@ export function sortMessagesAsc(messages: Message[]): Message[] {
  * @param contactId - The ID of the contact.
  * @returns { Message[] } - Chronologically sorted message list.
  */
-export function getConversation(contactId: string, user?: User | string | null): Message[] {
-  const messages = getMessagesByContact(contactId, user);
+export async function getConversation(contactId: string, user?: User | string | null): Promise<Message[]> {
+  const messages = await getMessagesByContact(contactId, user);
   return sortMessagesAsc(messages);
 }
 
@@ -86,8 +86,8 @@ export interface ConversationSummary {
  * @param contactId - The ID of the contact.
  * @returns { ConversationSummary | null } - The summary or null if no messages exist.
  */
-export function getConversationSummary(contactId: string, user?: User | string | null): ConversationSummary | null {
-  const conversation = getConversation(contactId, user);
+export async function getConversationSummary(contactId: string, user?: User | string | null): Promise<ConversationSummary | null> {
+  const conversation = await getConversation(contactId, user);
   if (conversation.length === 0) return null;
 
   const latest = conversation[conversation.length - 1]; // Already sorted ASC
@@ -97,3 +97,4 @@ export function getConversationSummary(contactId: string, user?: User | string |
     last_message_direction: latest.direction
   };
 }
+
