@@ -30,32 +30,53 @@ const createLead = async (data: any, request?: any) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
-    }).then(res => res.json());
+    }).then(async res => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to create lead');
+        return json;
+    });
 };
 const handleInboundCall = async (payload: { phone: string }) => {
     return fetch('/api/calls/inbound', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-    }).then(res => res.json());
+    }).then(async res => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to start call');
+        return json;
+    });
 };
 const endCall = async (payload: { call_id: string, answered?: boolean, duration?: number }) => {
     return fetch('/api/calls/end', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-    }).then(res => res.json());
+    }).then(async res => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to end call');
+        return json;
+    });
 };
 const sendMessageToContact = async (id: string, msg: string, source: string = 'manual', user_id?: string) => {
     return fetch('/api/messages/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contact_id: id, message: msg, source })
-    }).then(res => res.json());
+    }).then(async res => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to send SMS');
+        return json;
+    });
 };
 const retryMessage = async (id: string, user_id?: string) => {
-    return fetch(`/api/messages/${id}/retry`, { method: 'POST' }).then(res => res.json());
+    return fetch(`/api/messages/${id}/retry`, { method: 'POST' }).then(async res => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed to retry message');
+        return json;
+    });
 };
+
 const getContact = (id: string, user?: any) => mockContacts.find(c => c.id === id);
 const getOpportunity = (id: string, user?: any) => mockOpportunities.find(o => o.id === id);
 
@@ -136,6 +157,17 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
             const { getContactTimelineApi } = await import('./crm_api');
             const id = url.split('/')[3];
             const response: any = await getContactTimelineApi(reqContext, id);
+            const responseData = response.data || response;
+            return new Response(JSON.stringify(responseData), { 
+                status: response.status || 200, 
+                headers: { 'Content-Type': 'application/json' } 
+            });
+        }
+
+        if (url.startsWith('/api/contacts/') && method === 'GET') {
+            const { getContactApi } = await import('./crm_api');
+            const id = url.split('/')[3];
+            const response: any = await getContactApi(reqContext, id);
             const responseData = response.data || response;
             return new Response(JSON.stringify(responseData), { 
                 status: response.status || 200, 
@@ -524,15 +556,33 @@ function renderDashboard() {
   `;
 }
 
-function renderClients() {
-  const userId = (window as any).currentUser || 'system';
-  const filteredContacts = mockContacts.filter(contact => {
-    const isOwner = contact.user_id === userId;
+async function renderClients() {
+  // Show initial structure with sidebar to keep UI responsive
+  app.innerHTML = `
+    ${renderSidebar('clients')}
+    <main class="main-content">
+      <header class="view-header">
+        <h2>Clients & Leads</h2>
+        <button class="btn-primary" onclick="window.navigateTo('lead-capture')">+ Add Lead</button>
+      </header>
+      <div class="card" style="padding: 20px; text-align: center; color: #64748b;">
+        <div class="skeleton" style="height: 40px; margin-bottom: 20px;"></div>
+        Loading contacts...
+      </div>
+    </main>
+  `;
+
+  const response = await fetch('/api/contacts');
+  const result = await response.json();
+  const contacts: any[] = result.data || result;
+
+  const filteredContacts = contacts.filter(contact => {
     const matchesSearch = contact.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
       contact.phone.includes(clientSearchQuery);
     const matchesFilter = clientStatusFilter === 'all' || contact.status === clientStatusFilter;
-    return isOwner && matchesSearch && matchesFilter;
+    return matchesSearch && matchesFilter;
   });
+
 
   const tableRows = filteredContacts.map(contact => {
     const latest = getLatestActivity(contact.id);
@@ -662,9 +712,14 @@ function renderClients() {
   }
 };
 
-(window as any).openSmsComposer = (contactId: string) => {
-  const contact = mockContacts.find(c => c.id === contactId);
-  if (!contact) return;
+(window as any).openSmsComposer = async (contactId: string) => {
+  const response = await fetch(`/api/contacts/${contactId}`);
+  const contact = await response.json();
+  
+  if (!contact || response.status === 404) {
+    (window as any).showToast('Contact not found.', 3000);
+    return;
+  }
   
   isSmsComposerOpen = true;
   smsComposerContactId = contactId;
@@ -2091,7 +2146,7 @@ function renderLeadCapture() {
   document.getElementById('lead-form')?.addEventListener('submit', handleLeadCaptureSubmission);
 }
 
-function handleLeadCaptureSubmission(e: Event) {
+async function handleLeadCaptureSubmission(e: Event) {
   e.preventDefault();
   const name = (document.getElementById('lead_name') as HTMLInputElement).value;
   const phone = (document.getElementById('lead_phone') as HTMLInputElement).value;
@@ -2106,129 +2161,24 @@ function handleLeadCaptureSubmission(e: Event) {
   }
 
   try {
-    const timestamp = new Date().toISOString();
-    const phoneNorm = normalizePhone(phone || '');
-    const emailNorm = normalizeEmail(email);
-    const normalizedName = normalizeName(name);
+    (window as any).showToast('Creating lead...', 2000);
+    const result = await createLead({
+      name,
+      phone,
+      email,
+      address,
+      service_type,
+      message,
+      source: 'internal'
+    });
 
-    // Check if Contact exists with same phone OR same email
-    const existingContact = mockContacts.find(c =>
-      (phoneNorm.normalized && c.phone === phoneNorm.normalized) ||
-      (emailNorm && c.email === emailNorm)
-    );
+    console.log("Internal Lead Created:", result);
+    alert(`Success! Lead created for ${name}.`);
+    window.navigateTo('clients');
 
-    let contactIdToUse: string;
-
-    if (existingContact) {
-      contactIdToUse = existingContact.id;
-      console.log(`Duplicate found: using existing contact ${contactIdToUse} instead of creating a new one.`);
-
-      // BASIC PROTECTION: Skip new opportunity if one was created for this contact in the last 2 minutes
-      const recentOpp = mockOpportunities.find(opp =>
-        opp.contact_id === contactIdToUse &&
-        (new Date().getTime() - new Date(opp.created_at).getTime()) < 120000
-      );
-
-      if (recentOpp) {
-        console.warn(`Duplicate submission window: Skipping new opportunity for ${contactIdToUse}.`);
-        alert("A recent submission was already detected for this contact.");
-        return;
-      }
-    } else {
-      contactIdToUse = 'c' + Date.now();
-      // 1. Create new contact FIRST
-      mockContacts.push({
-        id: contactIdToUse,
-        user_id: (window as any).currentUser || 'system',
-        name: normalizedName,
-        phone: phoneNorm.normalized,
-        email: emailNorm,
-        address,
-        tags: ['new-lead'],
-        source: 'website',
-        service: service_type,
-        status: 'lead',
-        created_at: timestamp,
-        invalid_phone: phoneNorm.invalid || undefined
-      });
-    }
-
-    try {
-      const newOpportunity = {
-        id: 'o' + Date.now(),
-        user_id: (window as any).currentUser || 'system',
-        contact_id: contactIdToUse,
-        pipeline_stage: 'New Lead',
-        value: 0,
-        assigned_to: 'Hansveer',
-        status: 'open' as any,
-        notes: `Service Type: ${service_type || 'N/A'}\nAddress: ${address || 'N/A'}\nMessage: ${message || 'N/A'}`,
-        created_at: timestamp
-      };
-
-      // ATOMIC BEHAVIOR: Opportunity creation MUST follow Contact creation.
-      // If it fails, roll back the Contact creation.
-      mockOpportunities.push(newOpportunity);
-
-      const emissionsInThisCycle = new Set<string>();
-      const guardedEmit = (name: string, payload: any) => {
-        if (!emissionsInThisCycle.has(name)) {
-          emitEvent(name, payload);
-          emissionsInThisCycle.add(name);
-        }
-      };
-
-      // Emit form_submitted event
-      guardedEmit('form_submitted', {
-        contact_id: contactIdToUse,
-        opportunity_id: newOpportunity.id,
-        phone: phoneNorm.normalized,
-        email: emailNorm,
-        source: 'website'
-      });
-
-      // Emit lead_created event
-      guardedEmit('lead_created', {
-        contact_id: contactIdToUse,
-        opportunity_id: newOpportunity.id,
-        phone: phoneNorm.normalized,
-        email: emailNorm,
-        pipeline_stage: 'New Lead',
-        source: 'website'
-      });
-
-      // Trigger automations for the new opportunity
-      runAutomations('OPPORTUNITY_CREATED', newOpportunity);
-
-    } catch (oppError: any) {
-      logError('opportunity_creation', oppError.message || 'Unknown error during manual lead capture', { name, phone, email, contactIdToUse });
-
-      // FALLBACK: Tag the newly created contact as "incomplete" instead of deleting it.
-      const contact = mockContacts.find(c => c.id === contactIdToUse);
-      if (contact) {
-        contact.lead_status = "incomplete";
-        console.warn(`Partial Failure: Contact ${contactIdToUse} preserved but marked as incomplete.`);
-      }
-
-      alert('Something went wrong. Please try again.');
-      return;
-    }
-
-    const container = document.querySelector('.lead-form-container');
-    if (container) {
-      container.innerHTML = `
-        <div style="text-align: center; padding: 40px 0;">
-          <div style="font-size: 3rem; color: var(--primary-color); margin-bottom: 20px;">✓</div>
-          <h2 style="margin-bottom: 10px;">Submission Received</h2>
-          <p style="font-size: 1.2rem; color: var(--secondary-color);">Thanks! We’ve received your request.</p>
-          <button onclick="window.navigateTo('lead-capture')" class="btn-primary" style="margin-top: 30px; background-color: var(--secondary-color);">Capture Another Lead</button>
-          <button onclick="window.navigateTo('opportunities')" class="btn-primary" style="margin-top: 30px; margin-left:10px;">View Pipeline</button>
-        </div>
-      `;
-    }
   } catch (error: any) {
-    logError('contact_creation', error.message || 'Unknown error during manual lead capture', { name, phone, email });
-    alert('Something went wrong. Please try again.');
+    console.error("Internal Lead Submission Error:", error);
+    alert(`Failed to create lead: ${error.message}`);
   }
 }
 
@@ -2884,12 +2834,9 @@ function renderQuotePreview(quoteId: string) {
  * GET /api/contacts/:id/timeline
  */
 async function loadTimeline(contactId: string) {
-  console.log(`[API] GET /api/contacts/${contactId}/timeline`);
-
-  // FETCH: In a real system we would use fetch()
-  const timeline = await getContactTimeline(contactId, (window as any).currentUser);
-
-  // STATE: Store response in local state
+  const response = await fetch(`/api/contacts/${contactId}/timeline`);
+  const result = await response.json();
+  const timeline = result.data || result;
   contactTimelineState = timeline;
 
   // RENDER: Simple list (no heavy styling yet)
@@ -2926,9 +2873,23 @@ async function sendQuickSMS(contactId: string) {
 
 (window as any).sendQuickSMS = sendQuickSMS;
 
-function renderContactDetail(contactId: string) {
-  const contact = mockContacts.find(c => c.id === contactId);
-  if (!contact) return;
+async function renderContactDetail(contactId: string) {
+  app.innerHTML = `
+    ${renderSidebar('clients')}
+    <main class="main-content" style="padding: 24px; text-align: center; color: #64748b;">
+      Loading contact details...
+    </main>
+  `;
+
+  const response = await fetch(`/api/contacts/${contactId}`);
+  const result = await response.json();
+  const contact = result.data || result;
+
+  if (!contact || response.status === 404) {
+    (window as any).showToast('Contact not found.', 3000);
+    window.navigateTo('clients');
+    return;
+  }
 
   const contactOpps = mockOpportunities.filter(opp => opp.contact_id === contactId);
   const contactQuotes = mockQuotes.filter(q => q.contact_id === contactId);
@@ -3532,16 +3493,15 @@ function renderQATools() {
     if (result.status === 'ignored') {
       console.warn(`[SIMULATION] ${result.message}`);
       (window as any).showToast('Call was already processed.', 3000);
-    } else if (!answered) {
-      // Extract CRM effects from mock DB for display (Phase 3.4)
-      const call = getCall(callId);
-      const contact = mockContacts.find(c => c.id === call?.contact_id);
-      const opportunity = mockOpportunities.find(o => o.contact_id === contact?.id && o.source === 'missed_call');
-      const sms = [...getAllMessagesOrdered()].reverse().find(m => m.contact_id === contact?.id && m.source === 'missed_call_automation');
-      
-      lastSimulationResult = { contact, opportunity, sms, call };
     } else {
-      lastSimulationResult = null;
+      // In a real system, we'd fetch the updated contact/timeline to show results
+      // Transitioning away from direct mock peaking for security. 
+      lastSimulationResult = { 
+          status: 'success', 
+          call_id: callId, 
+          type: answered ? 'answered' : 'missed',
+          message: 'Backend workflow triggered successfully.'
+      };
     }
 
     pendingSimulationCallId = null;
