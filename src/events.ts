@@ -3,7 +3,7 @@ import { getCall, persistCall } from './calls_repo';
 import { checkDuplicateMessage, countRecentOutboundMessages } from './messages_repo';
 import { getContact, findContact, persistContact } from './contacts_repo';
 import { getOpportunity, persistOpportunity } from './opportunities_repo';
-import { persistEventLog, getAllEventLogs } from './event_logs_repo';
+import { persistEventLog, getAllEventLogs, getRecentEventLogs } from './event_logs_repo';
 import { Opportunity, User } from './types';
 import { getDefaultLeadReply, sendMessageToContact, getMissedCallReply } from './sms';
 import { normalizePhone } from './utils/normalization';
@@ -16,7 +16,7 @@ export interface AppEvent {
   created_at: string; // ISO 8601 timestamp
 }
 
-export type EventListener = (payload: Record<string, any>) => Promise<void> | void;
+export type EventListener = (payload: Record<string, any>, userId?: string) => Promise<void> | void;
 const listeners: Record<string, EventListener[]> = {};
 
 export function onEvent(name: string, callback: EventListener) {
@@ -54,15 +54,13 @@ export async function emitEvent(name: string, payload: Record<string, any> = {},
   let finalUserId = user_id;
   
   if (!finalUserId) {
-    // If contact_id in payload, inherit owner
     if (payload.contact_id) {
-       const contact = await getContact(payload.contact_id, 'INTERNAL_SYSTEM_BYPASS');
-       if (contact) finalUserId = contact.user_id;
+       const contactRes = await getContact(payload.contact_id, 'INTERNAL_SYSTEM_BYPASS');
+       if (contactRes.success && contactRes.data) finalUserId = contactRes.data.user_id;
     }
-    // Else try opportunity_id
     else if (payload.opportunity_id) {
-       const opp = await getOpportunity(payload.opportunity_id, 'INTERNAL_SYSTEM_BYPASS');
-       if (opp) finalUserId = opp.user_id;
+       const oppRes = await getOpportunity(payload.opportunity_id, 'INTERNAL_SYSTEM_BYPASS');
+       if (oppRes.success && oppRes.data) finalUserId = oppRes.data.user_id;
     }
   }
 
@@ -79,19 +77,18 @@ export async function emitEvent(name: string, payload: Record<string, any> = {},
   };
   await persistEventLog(logEntry);
 
-
   // Mark as processed (Synchronous update)
   logEntry.status = 'processed';
   await persistEventLog(logEntry);
 
-
   console.log('[Event Logged]:', event);
   
-  // Trigger Listeners (Synchronously awaiting to prevent race conditions in tests)
+  // Trigger Listeners
   if (listeners[name]) {
+    const payloadWithId = { ...payload, event_log_id: logEntry.id };
     for (const fn of listeners[name]) {
       try {
-        await fn(payload);
+        await fn(payloadWithId, logEntry.user_id);
       } catch (e) {
         console.error(`[Event Listener Error] ${name}:`, e);
       }
@@ -105,41 +102,38 @@ export async function emitEvent(name: string, payload: Record<string, any> = {},
 /**
  * Returns all logged events.
  */
-export function getEvents(user?: User | string | null): AppEvent[] {
-  return getAllEventLogs(user) as AppEvent[];
+export async function getEvents(user?: User | string | null): Promise<AppEvent[]> {
+  const res = await getAllEventLogs(user);
+  if (!res.success || !res.data) return [];
+  return res.data as any[] as AppEvent[];
 }
 
 // --- Register Business Logic Listeners ---
-onEvent('lead_created', async (payload) => {
+onEvent('lead_created', async (payload, userId) => {
   // Global Toggle Check
-  const settings = getWebsiteSettings();
+  const settingsRes = await getWebsiteSettings();
+  if (!settingsRes.success || !settingsRes.data) return;
+  const settings = settingsRes.data;
+
   if (!settings.auto_lead_sms_enabled) {
     console.log('Automated lead SMS skipped: auto-response disabled globally');
     return;
   }
 
-  console.log('Lead created event received');
-
   const contact_id = payload.contact_id;
   let phone = payload.phone;
 
-  // If no phone in payload, fallback to DB
-  if (!phone && contact_id) {
-    const contact = await getContact(contact_id);
-    if (contact && contact.phone) {
-      phone = contact.phone;
-    }
+  // Fetch full contact object - System context for automation
+  const contactRes = await getContact(contact_id, userId || 'system');
+  if (!contactRes.success || !contactRes.data) {
+    console.log('Contact not found for SMS');
+    return;
   }
+  const contact = contactRes.data;
+  if (!phone) phone = contact.phone;
 
   if (!phone) {
     console.log('Automated lead SMS skipped: No phone available');
-    return;
-  }
-
-  // Fetch full contact object - System context for automation
-  const contact = await getContact(contact_id, 'INTERNAL_SYSTEM_BYPASS');
-  if (!contact) {
-    console.log('Contact not found for SMS');
     return;
   }
 
@@ -149,9 +143,9 @@ onEvent('lead_created', async (payload) => {
   
   // Prevent duplicate automated SMS (2 minute window)
   const sinceIso = new Date(Date.now() - 120000).toISOString();
-  const alreadySent = await checkDuplicateMessage(contact_id, message, sinceIso, contact.user_id);
+  const alreadySentRes = await checkDuplicateMessage(contact_id, message, sinceIso, contact.user_id);
 
-  if (alreadySent) {
+  if (alreadySentRes.success && alreadySentRes.data) {
     console.log('Automated lead SMS skipped: duplicate prevented');
     return;
   }
@@ -176,37 +170,53 @@ onEvent('lead_created', async (payload) => {
 });
 
 // --- Match Inbound Call to Contact (Phase 1.8.2) ---
-onEvent('call_missed', async (payload) => {
+onEvent('call_missed', async (payload, userId) => {
   console.log('call_missed event received');
   
-  // PROMPT 19: Global Toggle
-  const settings = getWebsiteSettings();
-  if (!settings.missed_call_sms_enabled) {
+  // 1. Global Toggle
+  const settingsRes = await getWebsiteSettings();
+  if (!settingsRes.success || !settingsRes.data || !settingsRes.data.missed_call_sms_enabled) {
     console.log('Missed call SMS disabled');
     return;
   }
+  const settings = settingsRes.data;
 
   const { phone, call_id } = payload;
-  
-  if (!phone) {
-    console.log('[SMS PREP] No phone provided, exiting');
-    return;
-  }
+  if (!phone) return;
 
   const phoneNorm = normalizePhone(phone);
+  const finalUserId = userId || 'system';
   
-  // Search Contacts: match by phone
-  const existingContact = await findContact(phoneNorm.normalized, null);
+  // 2. DEDUP: Check for identical events in the last 5 minutes
+  const fiveMinAgoStr = new Date(Date.now() - 300000).toISOString();
+  const recentLogsRes = await getRecentEventLogs('call_missed', finalUserId, fiveMinAgoStr);
+  
+  if (recentLogsRes.success && recentLogsRes.data) {
+      const alreadyProcessed = recentLogsRes.data.some(log => 
+          log.payload.phone === phone &&
+          log.status === 'processed' &&
+          log.id !== (payload as any).event_log_id
+      );
+      if (alreadyProcessed) {
+          console.log('[DEDUP] Skipping duplicate missed call trigger.');
+          return;
+      }
+  }
 
-  let contactIdToUse: string;
+  // 3. Match Contacts
+  const contactRes = await findContact(phoneNorm.normalized, null, finalUserId);
+  const existingContact = contactRes.data;
+
+  let contactIdToUseValue: string;
 
   if (existingContact) {
     console.log(`Contact matched: ${existingContact.name} (${existingContact.id})`);
-    contactIdToUse = existingContact.id;
+    contactIdToUseValue = existingContact.id;
   } else {
+    contactIdToUseValue = `c-${Date.now()}`;
     const newContact = {
-      id: `c-${Date.now()}`,
-      user_id: 'system',
+      id: contactIdToUseValue,
+      user_id: finalUserId,
       name: 'Unknown Caller',
       phone: phoneNorm.normalized,
       email: null,
@@ -216,64 +226,50 @@ onEvent('call_missed', async (payload) => {
       status: 'lead' as const,
       created_at: new Date().toISOString()
     };
-    await persistContact(newContact);
+    const contactResult = await persistContact(newContact);
+    if (!contactResult.success) {
+      console.error('Failed to create contact for missed call:', contactResult.error);
+      return;
+    }
     console.log('New contact created from missed call');
-    contactIdToUse = newContact.id;
   }
 
-  const targetContact = await getContact(contactIdToUse, 'INTERNAL_SYSTEM_BYPASS');
-  if (!targetContact) {
-    console.log('[SMS PREP] No contact resolved, exiting');
-    return;
-  }
+  const contactRes2 = await getContact(contactIdToUseValue, finalUserId);
+  const targetContact = contactRes2.data;
+  if (!targetContact) return;
   
-  console.log(`[SMS PREP] Target contact resolved: ${targetContact.name} (${targetContact.id})`);
-
-  // Prepare SMS message first so we can check for duplicates against the content
+  // 4. Duplicate Check for SMS
   const smsMessage = getMissedCallReply(targetContact, settings.missed_call_sms_template);
-
-  // PROMPT 17: Extra Duplicate Protection (2-minute window)
   const twoMinutesAgo = new Date(Date.now() - 120000).toISOString();
   const alreadySentMC = await checkDuplicateMessage(targetContact.id, smsMessage, twoMinutesAgo, targetContact.user_id);
 
-  if (alreadySentMC) {
-    console.log('Missed call SMS already sent');
-    console.log(`[SMS SKIPPED] Prevented duplicate follow-up within 2-minute window for ${targetContact.name}`);
+  if (alreadySentMC.success && alreadySentMC.data) {
+    console.log('Missed call SMS already sent (dedup window)');
     return;
   }
 
-  // PROMPT 18: 5-minute Rate Limit (Max 2 messages)
-  const fiveMinAgo = new Date(Date.now() - 300000).toISOString();
-  const recentCount = await countRecentOutboundMessages(targetContact.id, fiveMinAgo, targetContact.user_id);
+  // 5. Rate Limit
+  const rateLimitSince = new Date(Date.now() - 300000).toISOString();
+  const recentCountRes = await countRecentOutboundMessages(targetContact.id, rateLimitSince, targetContact.user_id);
 
-  if (recentCount >= 2) {
+  if (recentCountRes.success && (recentCountRes.data || 0) >= 2) {
     console.log('Missed call SMS rate limited');
-    console.warn(`[SMS SKIPPED] Rate limit of 2 messages reached within 5 minutes for ${targetContact.name}`);
     return;
   }
 
-  // Send SMS (PROMPT 15)
-  console.log(`[SMS PREP] Message prepared: "${smsMessage}"`);
+  // 6. Send SMS
   const smsResult = await sendMessageToContact(targetContact.id, smsMessage, 'missed_call_automation', targetContact.user_id);
   
-  if (smsResult.success) {
-    console.log('Missed call SMS sent');
-    console.log(`[SMS SUCCESS] Automated reply sent to ${targetContact.name}: "${smsMessage}"`);
-  } else if (smsResult.error === 'Duplicate SMS prevented' || smsResult.error === 'Rate limit hit') {
-    console.log('Missed call SMS skipped');
-    console.warn(`[SMS SKIPPED] ${smsResult.error} for ${targetContact.name}`);
-  } else {
-    console.log('Missed call SMS failed');
-    console.error(`[SMS FAILURE] Could not send reply to ${targetContact.name}: ${smsResult.error}`);
+  if (!smsResult.success && smsResult.error !== 'Duplicate SMS prevented') {
     targetContact.follow_up_required = true;
     await persistContact(targetContact);
   }
 
-  // Create Opportunity (PROMPT 10)
+  // 7. Create Opportunity
   const newOpportunity: Opportunity = {
     id: `opp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    user_id: targetContact?.user_id || 'system',
-    contact_id: contactIdToUse,
+    user_id: targetContact.user_id || 'system',
+    contact_id: contactIdToUseValue,
     pipeline_stage: 'New Lead',
     status: 'open',
     value: 0,
@@ -281,17 +277,16 @@ onEvent('call_missed', async (payload) => {
     created_at: new Date().toISOString()
   };
   await persistOpportunity(newOpportunity);
-  console.log(`Opportunity created for contact ${contactIdToUse}`);
 
-  // Link Call record (PROMPT 11)
+  // 8. Link Call
   if (call_id) {
-    const callRecord = await getCall(call_id);
-    if (callRecord) {
-      callRecord.contact_id = contactIdToUse;
-      callRecord.opportunity_id = newOpportunity.id;
-      callRecord.user_id = targetContact?.user_id || 'system';
-      await persistCall(callRecord);
-      console.log(`Call record ${call_id} linked to contact ${contactIdToUse} and opportunity ${newOpportunity.id}`);
+    const callRes = await getCall(call_id);
+    if (callRes.success && callRes.data) {
+        const callRecord = callRes.data;
+        callRecord.contact_id = contactIdToUseValue;
+        callRecord.opportunity_id = newOpportunity.id;
+        callRecord.user_id = targetContact.user_id || 'system';
+        await persistCall(callRecord);
     }
   }
 });

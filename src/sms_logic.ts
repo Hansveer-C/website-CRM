@@ -98,8 +98,10 @@ export async function sendMessageToContact(
   user_id?: string
 ): Promise<{ success: boolean; internal_id?: string; error?: string }> {
   
-  const contact = await getContact(contact_id, user_id);
-  if (!contact) return { success: false, error: 'Contact lookup failed' };
+  const contactRes = await getContact(contact_id, user_id);
+  if (!contactRes.success || !contactRes.data) return { success: false, error: contactRes.error || 'Contact lookup failed' };
+  const contact = contactRes.data;
+
   if (!contact.phone) return { success: false, error: 'Contact has no phone number' };
 
   // Basic format check (must look like +1XXXXXXXXXX or standard E.164)
@@ -110,22 +112,23 @@ export async function sendMessageToContact(
 
   // Anti-Spam (Duplicates)
   const sinceIso = new Date(Date.now() - 60000).toISOString();
-  if (await checkDuplicateMessage(contact_id, messageText, sinceIso, user_id)) {
+  const dupRes = await checkDuplicateMessage(contact_id, messageText, sinceIso, user_id);
+  if (dupRes.success && dupRes.data) {
     emitEvent('sms_attempt_skipped', { contact_id, user_id, status: 'skipped', reason: 'duplicate', content: messageText.substring(0, 50) }, user_id);
     return { success: false, error: 'Duplicate SMS prevented' };
   }
 
   // Anti-Spam (Rate Limit per Contact: Max 3 per minute)
-  if (await countRecentOutboundMessages(contact_id, sinceIso, user_id) >= 3) {
+  const contactCountRes = await countRecentOutboundMessages(contact_id, sinceIso, user_id);
+  if (contactCountRes.success && (contactCountRes.data || 0) >= 3) {
     emitEvent('sms_attempt_skipped', { contact_id, user_id, status: 'skipped', reason: 'contact_rate_limit' }, user_id);
     return { success: false, error: 'Rate limit hit' };
   }
 
   // Global Anti-Spam (Rate Limit per User: Max 5 per minute)
   if (user_id) {
-    const userCount = await countUserTotalRecentMessages(user_id, sinceIso);
-    if (userCount >= 5) {
-
+    const userCountRes = await countUserTotalRecentMessages(user_id, sinceIso);
+    if (userCountRes.success && (userCountRes.data || 0) >= 5) {
       console.warn(`[SMS SECURITY] User ${user_id} hit global rate limit (5 msgs/min). Blocking send.`);
       emitEvent('sms_attempt_skipped', { user_id, contact_id, status: 'skipped', reason: 'user_global_rate_limit', limit: 5 }, user_id);
       return { success: false, error: 'Global rate limit hit. Please wait a minute before sending more messages.' };
@@ -145,11 +148,17 @@ export async function sendMessageToContact(
  * Retries a failed message.
  */
 export async function retryMessage(message_id: string, user_id?: string): Promise<{ success: boolean; error?: string }> {
-  const msg = await getMessage(message_id, user_id);
-  if (!msg || msg.status !== 'failed' || !msg.retryable) return { success: false, error: 'Retry not possible' };
+  const msgRes = await getMessage(message_id, user_id);
+  if (!msgRes.success || !msgRes.data) return { success: false, error: 'Message lookup failed' };
+  const msg = msgRes.data;
 
-  const contact = await getContact(msg.contact_id, user_id);
-  if (!contact || !contact.phone) return { success: false, error: 'Contact/phone missing' };
+  if (msg.status !== 'failed' || !msg.retryable) return { success: false, error: 'Retry not possible' };
+
+  const contactRes = await getContact(msg.contact_id, user_id);
+  if (!contactRes.success || !contactRes.data || !contactRes.data.phone) {
+      return { success: false, error: 'Contact/phone missing' };
+  }
+  const contact = contactRes.data;
 
   const result = await smsService.sendSMS({ to: contact.phone, message: msg.content, user_id: msg.user_id });
   
@@ -161,6 +170,5 @@ export async function retryMessage(message_id: string, user_id?: string): Promis
     emitEvent('sms_retry_attempt', { message_id, contact_id: msg.contact_id, user_id: msg.user_id, status: 'failed', reason: result.error }, msg.user_id);
   }
 
-  
   return result;
 }

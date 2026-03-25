@@ -30,27 +30,33 @@ export async function createLead(data: {
   }
 
   // 1. Check for Existing Contact (Duplicate Protection - Persistently)
-  const existingContact = await findContact(phoneNorm.normalized, emailNorm, request?.user);
+  const contactRes = await findContact(phoneNorm.normalized, emailNorm, request?.user);
+  if (!contactRes.success) {
+      throw new Error(`DB_SEARCH_ERROR: ${contactRes.error}`);
+  }
+  const existingContact = contactRes.data;
 
-  let contactIdToUse: string;
+  let contactIdToUseValue: string;
 
   if (existingContact) {
-    contactIdToUse = existingContact.id;
-    console.log(`Duplicate lead found: using existing contact ${contactIdToUse}.`);
+    contactIdToUseValue = existingContact.id;
+    console.log(`Duplicate lead found: using existing contact ${contactIdToUseValue}.`);
     
     // BASIC PROTECTION: Skip new opportunity if one was created for this contact in the last 2 minutes
-    const contactOpps = await getOpportunitiesByContact(contactIdToUse, request?.user);
-    const recentOpp = contactOpps.find(opp => 
-      (new Date().getTime() - new Date(opp.created_at).getTime()) < 120000
-    );
-    
-    if (recentOpp) {
-      throw new Error(`Duplicate submission window open for contact ${contactIdToUse}.`);
+    const oppsRes = await getOpportunitiesByContact(contactIdToUseValue, request?.user);
+    if (oppsRes.success && oppsRes.data) {
+        const recentOpp = oppsRes.data.find(opp => 
+          (new Date().getTime() - new Date(opp.created_at).getTime()) < 120000
+        );
+        
+        if (recentOpp) {
+          throw new Error(`Duplicate submission window open for contact ${contactIdToUseValue}.`);
+        }
     }
   } else {
-    contactIdToUse = `c-${Date.now()}`;
+    contactIdToUseValue = `c-${Date.now()}`;
     const newContact: Contact = {
-      id: contactIdToUse,
+      id: contactIdToUseValue,
       user_id: user_id,
       name: normalizedName,
       phone: phoneNorm.normalized, 
@@ -65,7 +71,10 @@ export async function createLead(data: {
     };
 
     // Save to DB
-    await persistContact(newContact);
+    const saveContactRes = await persistContact(newContact);
+    if (!saveContactRes.success) {
+        throw new Error(`DB_SAVE_CONTACT_ERROR: ${saveContactRes.error}`);
+    }
   }
 
 
@@ -73,7 +82,7 @@ export async function createLead(data: {
   const newOpportunity: Opportunity = {
     id: `opp-${Date.now()}`,
     user_id: existingContact ? (existingContact.user_id || 'system') : user_id,
-    contact_id: contactIdToUse,
+    contact_id: contactIdToUseValue,
     pipeline_stage: 'New Lead',
     value: 0,
     assigned_to: 'Unassigned',
@@ -84,7 +93,12 @@ export async function createLead(data: {
   };
 
   // Save to DB
-  await persistOpportunity(newOpportunity);
+  const saveOppRes = await persistOpportunity(newOpportunity);
+  if (!saveOppRes.success) {
+      throw new Error(`DB_SAVE_OPPORTUNITY_ERROR: ${saveOppRes.error}`);
+  }
+
+  const contactIdToUse = contactIdToUseValue;
 
 
   // 3. Emit Events

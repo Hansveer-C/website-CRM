@@ -171,6 +171,7 @@ export interface EventLog {
   payload: Record<string, any>;
   status: string;
   created_at: string;
+  contact_id?: string;
 }
 
 export type MessageDirection = 'outbound' | 'inbound';
@@ -227,4 +228,10 @@ export interface ApiRequest {
   cookies?: Record<string, string>;
   user?: User | null;
   body?: any;
+}
+
+export interface RepoResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
 }

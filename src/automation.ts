@@ -1,41 +1,13 @@
-import { Automation, TriggerType, Opportunity, Activity, Contact } from './types';
+import { Automation, TriggerType, Opportunity, Activity } from './types';
 /**
  * 🔒 SERVER-ONLY MODULE
  * This module contains administrative logic, database credentials, or Node.js internal utilities.
  * ⚠️ DO NOT IMPORT INTO FRONTEND CODE (main.ts, etc.)
  */
-import { emitEvent } from './events';
 import { getContact } from './contacts_repo';
-import { mockActivities, mockInvoices } from './db';
+import { createActivity } from './activities_repo';
 
-export function checkOverdueInvoices() {
-  const now = new Date();
-  mockInvoices.forEach(invoice => {
-    // If unpaid and overdue
-    if (invoice.status === 'unpaid' && new Date(invoice.due_date) < now) {
-      // Check if a follow-up task already exists for this invoice to avoid spam
-      const alreadyExists = mockActivities.some(a => 
-        a.contact_id === invoice.contact_id && 
-        a.description.includes(`INV-${invoice.id}`) &&
-        a.description.includes('Follow up for payment')
-      );
-
-      if (!alreadyExists) {
-        mockActivities.push({
-          id: 'task-overdue-' + invoice.id + '-' + Math.floor(Math.random() * 1000),
-          user_id: 'system', // Default for background automation
-          contact_id: invoice.contact_id,
-          type: 'note',
-          description: `Follow up for payment (INV-${invoice.id})`,
-          due_date: new Date().toISOString(),
-          completed: false
-        });
-        console.log(`[AUTOMATION: OVERDUE] Created payment follow-up for INV-${invoice.id}`);
-      }
-    }
-  });
-}
-
+// In-memory triggers remain for non-persisted events
 const automations: Automation[] = [
   {
     id: 'a1',
@@ -106,7 +78,8 @@ async function executeAction(automation: Automation, context: any) {
 }
 
 async function createTaskAction(params: any, context: Opportunity) {
-  const contact = await getContact(context.contact_id, context.user_id);
+  const contactRes = await getContact(context.contact_id, context.user_id);
+  const contact = contactRes.success ? contactRes.data : null;
   const contactName = contact ? contact.name : 'Unknown';
   
   const dueDate = new Date();
@@ -127,23 +100,17 @@ async function createTaskAction(params: any, context: Opportunity) {
     completed: false
   };
 
-  mockActivities.push(newTask);
+  await createActivity(newTask);
   console.log(`[AUTOMATION: TASK CREATED] ${newTask.description}`);
 }
 
 async function sendNotificationAction(params: any, context: Opportunity) {
-  const contact = await getContact(context.contact_id, context.user_id);
+  const contactRes = await getContact(context.contact_id, context.user_id);
+  const contact = contactRes.success ? contactRes.data : null;
   const contactName = contact ? contact.name : 'Unknown';
   
   const message = params.message.replace('${contactName}', contactName);
   
   // LOG (placeholder for SMS integration)
   console.log(`%c[AUTOMATION: NOTIFICATION] ${message} (${contactName})`, "color: #007bff; font-weight: bold;");
-  
-  // Visual Feedback for user
-  // Avoid window.alert in pure Node tests
-  if (typeof window !== 'undefined') {
-    alert(`Automation Notification: ${message}`);
-  }
 }
-

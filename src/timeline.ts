@@ -1,9 +1,9 @@
 import { getContact } from './contacts_repo';
 import { getMessagesByContact } from './messages_repo';
-import { getAllEventLogs } from './event_logs_repo';
+import { getEventLogsByContact } from './event_logs_repo';
 import { getCallsForContact } from './calls_repo';
 import { getActivitiesByContact } from './activities_repo';
-import { TimelineItem, User } from './types';
+import { TimelineItem, User, RepoResponse } from './types';
 
 export interface TimelineGroup {
     label: string;
@@ -12,25 +12,37 @@ export interface TimelineGroup {
 
 /**
  * Standardized timeline item source.
- * Fully DB-backed.
+ * Optimized with DB-side filtering, sorting, and indexing.
  */
-export async function getContactTimeline(contact_id: string, user?: User | string | null): Promise<TimelineGroup[]> {
-  const contact = await getContact(contact_id, user);
-  const phone = contact?.phone;
+/**
+ * Standardized timeline item source.
+ * Optimized with DB-side filtering, sorting, and indexing.
+ */
+export async function getContactTimeline(contact_id: string, user?: User | string | null, limit = 50): Promise<RepoResponse<TimelineGroup[]>> {
+  const contactRes = await getContact(contact_id, user);
+  if (!contactRes.success || !contactRes.data) {
+    return { success: false, error: contactRes.error || 'CONTACT_NOT_FOUND' };
+  }
+  const phone = contactRes.data.phone;
 
-  // 1. Fetch source data from DB repositories (Parallel)
-  const [messages, allEventLogs, activities, calls] = await Promise.all([
-    getMessagesByContact(contact_id, user),
-    getAllEventLogs(user),
-    getActivitiesByContact(contact_id, user),
-    getCallsForContact(contact_id, phone, user)
+  // 1. Fetch source data from DB repositories (Parallel & DB-Filtered)
+  const [msgRes, logRes, actRes, callRes] = await Promise.all([
+    getMessagesByContact(contact_id, user, limit),
+    getEventLogsByContact(contact_id, user, limit),
+    getActivitiesByContact(contact_id, user, limit),
+    getCallsForContact(contact_id, phone, user, limit)
   ]);
 
-  // Filter event logs in JS for contact linkage (payload-based)
-  const eventLogs = allEventLogs.filter(e => {
-    if (!e.payload) return false;
-    return e.payload.contact_id === contact_id || (phone && e.payload.phone === phone);
-  });
+  // Check for failures
+  if (!msgRes.success) return { success: false, error: msgRes.error };
+  if (!logRes.success) return { success: false, error: logRes.error };
+  if (!actRes.success) return { success: false, error: actRes.error };
+  if (!callRes.success) return { success: false, error: callRes.error };
+
+  const messages = msgRes.data || [];
+  const eventLogs = logRes.data || [];
+  const activities = actRes.data || [];
+  const calls = callRes.data || [];
 
   // 2. Map Messages
   const messageItems = messages.map(m => {
@@ -109,12 +121,12 @@ export async function getContactTimeline(contact_id: string, user?: User | strin
     metadata: { completed: a.completed, activityType: a.type, description: a.description }
   }));
 
-  // 6. Combine and Sort (Oldest First within groups)
-  const allItems = [...messageItems, ...eventItems, ...callItems, ...activityItems].sort((a, b) => 
-    new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-  );
+  // 6. Combine and Sort (Newest First overall, then grouped)
+  const allItems = [...messageItems, ...eventItems, ...callItems, ...activityItems]
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, limit);
 
-  // 7. Define Date Boundaries (Recalculated each time)
+  // 7. Define Date Boundaries
   const now = new Date();
   const todayStr = formatDateForComparison(now);
   const yesterday = new Date(now);
@@ -128,7 +140,7 @@ export async function getContactTimeline(contact_id: string, user?: User | strin
 
   allItems.forEach((item, idx) => {
     const itemDate = formatDateForComparison(new Date(item.created_at));
-    const isLatest = idx === allItems.length - 1;
+    const isLatest = idx === 0; // Since sorted DESC, the first item is the newest
     const displayItem = {
         ...item,
         is_latest: isLatest,
@@ -145,11 +157,14 @@ export async function getContactTimeline(contact_id: string, user?: User | strin
   });
 
   // 9. Final Grouped Structure
-  return [
-    { label: 'Earlier', items: earlierItems },
-    { label: 'Yesterday', items: yesterdayItems },
-    { label: 'Today', items: todayItems }
-  ];
+  return {
+    success: true,
+    data: [
+      { label: 'Earlier', items: earlierItems.reverse() },
+      { label: 'Yesterday', items: yesterdayItems.reverse() },
+      { label: 'Today', items: todayItems.reverse() }
+    ]
+  };
 }
 
 /**
@@ -183,7 +198,9 @@ function formatDateForComparison(date: Date): string {
  * Returns the single most recent activity for a contact.
  */
 export async function getLatestActivity(contact_id: string, user?: User | string | null): Promise<any | null> {
-    const groups = await getContactTimeline(contact_id, user);
+    const { success, data: groups } = await getContactTimeline(contact_id, user);
+    if (!success || !groups) return null;
+
     const reversedGroups = [...groups].reverse();
     for (const group of reversedGroups) {
         if (group.items.length > 0) {

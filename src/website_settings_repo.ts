@@ -1,10 +1,5 @@
-/**
- * 🔒 SERVER-ONLY MODULE
- * This module contains administrative logic, database credentials, or Node.js internal utilities.
- * ⚠️ DO NOT IMPORT INTO FRONTEND CODE (main.ts, etc.)
- */
-import { getDB } from './database';
-import { WebsiteSettings } from './types';
+import { supabase, safeDbCall } from './utils/db/supabase';
+import { WebsiteSettings, RepoResponse } from './types';
 
 // Default initial settings
 export const DEFAULT_SETTINGS: WebsiteSettings = {
@@ -24,57 +19,38 @@ export const DEFAULT_SETTINGS: WebsiteSettings = {
 };
 
 /**
- * Persists the website settings to the SQLite database.
- * The settings act as a singleton, maintaining only one row.
+ * Persists the website settings to Supabase.
+ * Single row with ID 'global-settings'.
  */
-export function persistWebsiteSettings(settings: WebsiteSettings): WebsiteSettings {
-  const db = getDB();
-  
-  const stmt = db.prepare(`
-    INSERT OR REPLACE INTO website_settings (
-      id, business_name, phone, email, logo_url, primary_color,
-      facebook_pixel_id, gtm_id, auto_lead_sms_enabled, auto_lead_sms_template,
-      missed_call_sms_enabled, missed_call_sms_template, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+export async function persistWebsiteSettings(settings: WebsiteSettings): Promise<RepoResponse<WebsiteSettings>> {
+  const payload = {
+    ...settings,
+    id: 'global-settings'
+  };
 
-  stmt.run(
-    settings.id || 'global-settings',
-    settings.business_name,
-    settings.phone,
-    settings.email,
-    settings.logo_url || null,
-    settings.primary_color || null,
-    settings.facebook_pixel_id || null,
-    settings.gtm_id || null,
-    settings.auto_lead_sms_enabled ? 1 : 0,
-    settings.auto_lead_sms_template,
-    settings.missed_call_sms_enabled ? 1 : 0,
-    settings.missed_call_sms_template,
-    settings.created_at || new Date().toISOString()
+  return safeDbCall('PERSIST_SETTINGS', 'system', supabase
+    .from('website_settings')
+    .upsert(payload)
+    .select()
+    .single()
   );
-
-  return settings;
 }
 
 /**
  * Retrieves the global website settings.
- * Returns default settings automatically if the table is empty.
  */
-export function getWebsiteSettings(): WebsiteSettings {
-  const db = getDB();
-  const stmt = db.prepare("SELECT * FROM website_settings WHERE id = 'global-settings' LIMIT 1");
-  const row = stmt.get() as any;
-  
-  if (!row) {
-    // Return and save defaults to ensure singleton consistency
-    persistWebsiteSettings(DEFAULT_SETTINGS);
-    return DEFAULT_SETTINGS;
+export async function getWebsiteSettings(): Promise<RepoResponse<WebsiteSettings>> {
+  const res = await safeDbCall('GET_SETTINGS', 'system', supabase
+    .from('website_settings')
+    .select('*')
+    .eq('id', 'global-settings')
+    .maybeSingle()
+  );
+
+  if (res.success && !res.data) {
+     // If not found, create and return defaults
+     return persistWebsiteSettings(DEFAULT_SETTINGS);
   }
 
-  return {
-    ...row,
-    auto_lead_sms_enabled: row.auto_lead_sms_enabled === 1,
-    missed_call_sms_enabled: row.missed_call_sms_enabled === 1
-  };
+  return res as unknown as RepoResponse<WebsiteSettings>;
 }

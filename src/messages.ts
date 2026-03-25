@@ -12,21 +12,24 @@ import { persistMessage, getMessagesByContact } from './messages_repo';
  */
 export async function saveMessage(message: Partial<Message> & { contact_id: string }): Promise<boolean> {
   // Validate contact_id exists
-  const contact = await getContact(message.contact_id, 'INTERNAL_SYSTEM_BYPASS');
-  if (!contact) {
+  const contactRes = await getContact(message.contact_id, 'INTERNAL_SYSTEM_BYPASS');
+  if (!contactRes.success || !contactRes.data) {
     console.error(`[Message Error] Invalid contact_id: ${message.contact_id}`);
     return false;
   }
+  const contact = contactRes.data;
 
   // OPTIONAL: Attach opportunity_id if one exists for the contact (Link to the latest open deal)
   if (!message.opportunity_id) {
-    const opps = await getOpportunitiesByContact(message.contact_id, 'INTERNAL_SYSTEM_BYPASS');
-    const latestOpp = opps
-      .filter(o => o.status === 'open')
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-    
-    if (latestOpp) {
-      message.opportunity_id = latestOpp.id;
+    const oppsRes = await getOpportunitiesByContact(message.contact_id, 'INTERNAL_SYSTEM_BYPASS');
+    if (oppsRes.success && oppsRes.data) {
+        const latestOpp = oppsRes.data
+          .filter(o => o.status === 'open')
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+        
+        if (latestOpp) {
+          message.opportunity_id = latestOpp.id;
+        }
     }
   }
 
@@ -44,7 +47,11 @@ export async function saveMessage(message: Partial<Message> & { contact_id: stri
     created_at: message.created_at || new Date().toISOString()
   };
 
-  await persistMessage(finalMessage);
+  const saveRes = await persistMessage(finalMessage);
+  if (!saveRes.success) {
+      console.error(`[Message Error] Failed to persist: ${saveRes.error}`);
+      return false;
+  }
   console.log(`[Message Saved]: ${finalMessage.id} with status "${finalMessage.status}" for contact ${finalMessage.contact_id}`);
   return true;
 }
@@ -63,16 +70,19 @@ export function sortMessagesAsc(messages: Message[]): Message[] {
  * @returns { Message[] } - Chronologically sorted message list.
  */
 export async function getConversation(contactId: string, user?: User | string | null): Promise<Message[]> {
-  const messages = await getMessagesByContact(contactId, user);
-  return sortMessagesAsc(messages);
+  const res = await getMessagesByContact(contactId, user);
+  if (!res.success || !res.data) return [];
+  return sortMessagesAsc(res.data);
 }
 
 /**
  * Retrieves all messages in the entire system, sorted chronologically (ASC).
  * Useful for building global activity feeds or logs.
  */
-export function getAllMessagesOrdered(user?: User | string | null): Message[] {
-  return repo.getAllMessagesOrdered(user);
+export async function getAllMessagesOrdered(user?: User | string | null): Promise<Message[]> {
+  const res = await repo.getAllMessagesOrdered(user);
+  if (!res.success || !res.data) return [];
+  return res.data;
 }
 
 export interface ConversationSummary {

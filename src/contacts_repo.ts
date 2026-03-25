@@ -1,51 +1,43 @@
-import { Contact, User } from './types';
+import { Contact, User, RepoResponse } from './types';
 /**
  * 🔒 SERVER-ONLY MODULE
  * This module contains administrative logic, database credentials, or Node.js internal utilities.
  * ⚠️ DO NOT IMPORT INTO FRONTEND CODE (main.ts, etc.)
  */
-import { supabase } from './utils/db/supabase';
+import { supabase, safeDbCall } from './utils/db/supabase';
 
 /**
  * Persists a contact to the Supabase database.
  */
-export async function createContact(contact: Contact): Promise<Contact> {
-  console.log(`[DB: SUPABASE CONTACT] Creating/Updating ${contact.id} (${contact.name}). follow_up_required: ${contact.follow_up_required}`);
+export async function createContact(contact: Contact): Promise<RepoResponse<Contact>> {
+  console.log(`[DB: SUPABASE CONTACT] Creating/Updating ${contact.id} (${contact.name}).`);
   
   const payload = {
     ...contact,
-    // Ensure correct types for Postgres (booleans, jsonb handled by library)
+    // Ensure correct types for Postgres
     invalid_phone: !!contact.invalid_phone,
     follow_up_required: !!contact.follow_up_required
   };
 
+  const userId = contact.user_id;
 
-
-
-
-  const { data, error } = await supabase
+  return safeDbCall('CREATE_CONTACT', userId, supabase
     .from('contacts')
     .upsert(payload)
     .select()
-    .single();
-
-  if (error) {
-    console.error('[DB: CONTACT] Failed to persist contact in Supabase:', error.message);
-    throw new Error(`DB_PERSIST_CONTACT_ERROR: ${error.message}`);
-  }
-
-  return data as Contact;
+    .single()
+  );
 }
 
 /**
  * Finds a contact by phone or email, scoped to the user context.
  */
-export async function searchContacts(phone: string, email: string | null, user?: User | string | null): Promise<Contact | null> {
+export async function searchContacts(phone: string, email: string | null, user?: User | string | null): Promise<RepoResponse<Contact | null>> {
   const userId = typeof user === 'string' ? user : (user?.id);
   
   if (!userId) {
       console.warn('[DB: CONTACT] Search contact attempted without user context.');
-      return null;
+      return { success: false, error: 'MISSING_USER_CONTEXT' };
   }
 
   let query = supabase.from('contacts')
@@ -59,68 +51,50 @@ export async function searchContacts(phone: string, email: string | null, user?:
   } else if (email) {
       query = query.eq('email', email);
   } else {
-      return null;
+      return { success: true, data: null };
   }
 
-  const { data, error } = await query.maybeSingle();
-
-  if (error) {
-      console.error('[DB: CONTACT] Error searching contact in Supabase:', error.message);
-      throw new Error(`DB_SEARCH_CONTACT_ERROR: ${error.message}`);
-  }
-
-  return data as Contact | null;
+  return safeDbCall('SEARCH_CONTACTS', userId, query.maybeSingle());
 }
 
 /**
  * Retrieves a contact by ID, scoped to the user context.
  */
-export async function getContactById(id: string, user?: User | string | null): Promise<Contact | null> {
+export async function getContactById(id: string, user?: User | string | null): Promise<RepoResponse<Contact | null>> {
   const userId = typeof user === 'string' ? user : (user?.id);
   
   if (!userId) {
       console.warn('[DB: CONTACT] Get contact attempted without user context.');
-      return null;
+      return { success: false, error: 'MISSING_USER_CONTEXT' };
   }
 
-  const { data, error } = await supabase
+  return safeDbCall('GET_CONTACT', userId, supabase
     .from('contacts')
     .select('*')
     .eq('id', id)
     .eq('user_id', userId)
-    .maybeSingle();
-
-  if (error) {
-      console.error('[DB: CONTACT] Error retrieving contact from Supabase:', error.message);
-      throw new Error(`DB_GET_CONTACT_ERROR: ${error.message}`);
-  }
-
-  return data as Contact | null;
+    .maybeSingle()
+  );
 }
+
+
 
 /**
  * Retrieves all contacts, scoped to the user context.
  */
-export async function getContacts(user?: User | string | null): Promise<Contact[]> {
+export async function getContacts(user?: User | string | null): Promise<RepoResponse<Contact[]>> {
   const userId = typeof user === 'string' ? user : (user?.id);
   
   if (!userId) {
-      console.warn('[DB: CONTACT] Get all contacts attempted without user context.');
-      return [];
+      return { success: false, error: 'MISSING_USER_CONTEXT' };
   }
 
-  const { data, error } = await supabase
+  return safeDbCall('GET_CONTACTS', userId, supabase
     .from('contacts')
     .select('*')
     .eq('user_id', userId)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-      console.error('[DB: CONTACT] Error listing contacts from Supabase:', error.message);
-      throw new Error(`DB_LIST_CONTACTS_ERROR: ${error.message}`);
-  }
-
-  return (data || []) as Contact[];
+    .order('created_at', { ascending: true })
+  );
 }
 
 // --- Aliases for Backward Compatibility ---

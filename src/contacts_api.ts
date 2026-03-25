@@ -18,8 +18,15 @@ export async function getContacts(req: ApiRequest) {
 
     // 3. Logic: Fetch data from DB
     // At this point we are guaranteed to have a req.user
-    const contacts = await getAllContacts(req.user);
+    const { success, data: contacts, error } = await getAllContacts(req.user);
     
+    if (!success) {
+        return {
+            status: 500,
+            error: error || 'Failed to fetch contacts.'
+        };
+    }
+
     return {
         status: 200,
         data: contacts,
@@ -36,12 +43,12 @@ export async function getContactApi(req: ApiRequest, id: string) {
     if (authError) return authError;
 
     // Repo-level applyUserScope ensures this only returns the contact if owned by req.user
-    const contact = await getContact(id, req.user);
+    const { success, data: contact, error } = await getContact(id, req.user);
     
-    if (!contact) {
+    if (!success || !contact) {
         return {
-            status: 404,
-            error: 'Contact not found.'
+            status: !success ? 500 : 404,
+            error: error || 'Contact not found.'
         };
     }
 

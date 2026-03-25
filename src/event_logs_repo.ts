@@ -1,80 +1,94 @@
-import { EventLog, User } from './types';
+import { EventLog, User, RepoResponse } from './types';
 /**
  * 🔒 SERVER-ONLY MODULE
  * This module contains administrative logic, database credentials, or Node.js internal utilities.
  * ⚠️ DO NOT IMPORT INTO FRONTEND CODE (main.ts, etc.)
  */
-import { supabase } from './utils/db/supabase';
+import { supabase, safeDbCall } from './utils/db/supabase';
 
 /**
- * Phase S3 - Batch 5: EventLogs Repository (Supabase).
+ * Standardized "New" badge logic.
+ * Returns true if the provided date string is within the last 24 hours.
  */
-export const EventLogsRepo = {
-  /**
-   * Persists an event log entry to Supabase.
-   */
-  async createEventLog(log: EventLog): Promise<EventLog> {
-    console.log(`[DB: SUPABASE EVENT] Logging ${log.event_name} (${log.id}).`);
-    
-    const { data, error } = await supabase
-      .from('event_logs')
-      .upsert(log)
-      .select()
-      .single();
+function isNew(dateStr: string): boolean {
+  if (!dateStr) return false;
+  const now = new Date().getTime();
+  const createdAt = new Date(dateStr).getTime();
+  return (now - createdAt) < (24 * 60 * 60 * 1000);
+}
 
-    if (error) {
-        console.error('[DB: EVENT_LOG] Failed to persist event log in Supabase:', error.message);
-        throw new Error(`DB_PERSIST_EVENT_LOG_ERROR: ${error.message}`);
-    }
+/**
+ * Persists an event log entry to Supabase.
+ */
+export async function createEventLog(log: EventLog): Promise<RepoResponse<EventLog>> {
+  console.log(`[DB: SUPABASE EVENT] Logging ${log.event_name} (${log.id}).`);
+  
+  // Auto-extract contact_id if present in payload but not in log root
+  const contact_id = log.contact_id || (log.payload as any)?.contact_id;
 
-    return data as EventLog;
-  },
+  return safeDbCall('CREATE_EVENT_LOG', log.user_id, supabase
+    .from('event_logs')
+    .upsert({ ...log, contact_id })
+    .select()
+    .single()
+  );
+}
 
-  /**
-   * Alias for createEventLog to maintain compatibility.
-   */
-  async persistEventLog(log: EventLog): Promise<EventLog> {
-    return this.createEventLog(log);
-  },
+/**
+ * Alias for createEventLog to maintain compatibility.
+ */
+export async function persistEventLog(log: EventLog): Promise<RepoResponse<EventLog>> {
+  return createEventLog(log);
+}
 
-  /**
-   * Retrieves all event logs, scoped to the user context.
-   */
-  async getAllEventLogs(user?: User | string | null): Promise<EventLog[]> {
-    const userId = typeof user === 'string' ? user : (user?.id);
-    
-    if (!userId) {
-        console.warn('[DB: EVENT_LOG] Get all event logs attempted without user context.');
-        return [];
-    }
-
-    const { data, error } = await supabase
-      .from('event_logs')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: true });
-
-    if (error) {
-        console.error('[DB: EVENT_LOG] Error listing event logs from Supabase:', error.message);
-        throw new Error(`DB_LIST_EVENT_LOGS_ERROR: ${error.message}`);
-    }
-
-    return (data || []) as EventLog[];
+/**
+ * Retrieves all event logs, scoped to the user context.
+ */
+export async function getAllEventLogs(user?: User | string | null): Promise<RepoResponse<EventLog[]>> {
+  const userId = typeof user === 'string' ? user : (user?.id);
+  
+  if (!userId) {
+      return { success: false, error: 'MISSING_USER_CONTEXT' };
   }
-};
 
-// --- Standard Individual Exports ---
-/**
- * Persist event log to Supabase.
- */
-export async function persistEventLog(log: EventLog): Promise<EventLog> {
-    return EventLogsRepo.createEventLog(log);
+  return safeDbCall('GET_ALL_EVENT_LOGS', userId, supabase
+    .from('event_logs')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+  );
 }
 
 /**
- * List all event logs (Supabase).
+ * Retrieves event logs for a specific contact, scoped to user.
  */
-export async function getAllEventLogs(user?: User | string | null): Promise<EventLog[]> {
-    return EventLogsRepo.getAllEventLogs(user);
+export async function getEventLogsByContact(contact_id: string, user?: User | string | null, limit = 50): Promise<RepoResponse<EventLog[]>> {
+  const userId = typeof user === 'string' ? user : (user?.id);
+  
+  if (!userId) {
+      return { success: false, error: 'MISSING_USER_CONTEXT' };
+  }
+
+  return safeDbCall('GET_EVENT_LOGS_BY_CONTACT', userId, supabase
+    .from('event_logs')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('contact_id', contact_id)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  );
 }
 
+/**
+ * Retrieves recent event logs for a specific event name and user.
+ */
+export async function getRecentEventLogs(eventName: string, userId: string, sinceIso: string): Promise<RepoResponse<EventLog[]>> {
+  return safeDbCall('GET_RECENT_EVENT_LOGS', userId, supabase
+    .from('event_logs')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('event_name', eventName)
+    .gt('created_at', sinceIso)
+    .order('created_at', { ascending: false })
+  );
+}
