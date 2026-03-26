@@ -148,6 +148,14 @@ export const OpportunitiesRepo = {
   }
 };
 
+/**
+ * Resolves the owner of an opportunity. (Internal use)
+ */
+export async function resolveOpportunityOwner(opp_id: string): Promise<string | null> {
+    const { data } = await supabase.from('opportunities').select('user_id').eq('id', opp_id).maybeSingle();
+    return data?.user_id || null;
+}
+
 // --- Standard Individual Exports ---
 /**
  * Persist opportunity to Supabase.

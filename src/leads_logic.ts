@@ -29,6 +29,17 @@ export async function createLead(data: {
     throw new Error('Name is required for lead creation.');
   }
 
+  // 🛡️ PT.10: Malformed Input Protection
+  if (normalizedName.length > 200) {
+      throw new Error('Name too long. Please use less than 200 characters.');
+  }
+  if (data.phone && data.phone.length > 50) {
+      throw new Error('Phone number is too long.');
+  }
+  if (data.email && data.email.length > 200) {
+      throw new Error('Email address is too long.');
+  }
+
   // 1. Check for Existing Contact (Duplicate Protection - Persistently)
   const contactRes = await findContact(phoneNorm.normalized, emailNorm, request?.user);
   if (!contactRes.success) {
