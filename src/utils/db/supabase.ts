@@ -32,6 +32,8 @@ export async function safeDbCall<T>(
     promise: PromiseLike<{ data: T | null; error: any }>
 ): Promise<RepoResponse<T>> {
     const TIMEOUT_MS = 8000; // 8 second timeout for DB 
+    const start = Date.now();
+
     const timeoutPromise = new Promise<any>((_, reject) => 
         setTimeout(() => reject(new Error('DATABASE_TIMEOUT')), TIMEOUT_MS)
     );
@@ -41,12 +43,17 @@ export async function safeDbCall<T>(
         
         if (error) {
             console.error(`[DB: ${operation}] error for user ${userId || 'system'}:`, error.message);
-            return { success: false, error: error.message, code: error.code }; // Include code
+            return { success: false, error: error.message, code: error.code };
         }
         
         return { success: true, data: data as T };
     } catch (err: any) {
-        console.error(`[DB: ${operation}] crash for user ${userId || 'system'}:`, err.message);
+        const duration = Date.now() - start;
+        if (err.message === 'DATABASE_TIMEOUT') {
+            console.error(`[DB: ${operation}] timeout after ${duration}ms for user ${userId || 'system'}`);
+            return { success: false, error: 'timeout', source: 'database' };
+        }
+        console.error(`[DB: ${operation}] crash for user ${userId || 'system'} after ${duration}ms:`, err.message);
         return { success: false, error: 'DATABASE_CRASH', code: 'INTERNAL_ERROR' };
     }
 }
@@ -60,6 +67,8 @@ export async function safeDbCount(
     promise: PromiseLike<{ count: number | null; error: any }>
 ): Promise<RepoResponse<number>> {
     const TIMEOUT_MS = 8000;
+    const start = Date.now();
+
     const timeoutPromise = new Promise<any>((_, reject) => 
         setTimeout(() => reject(new Error('DATABASE_TIMEOUT')), TIMEOUT_MS)
     );
@@ -69,12 +78,17 @@ export async function safeDbCount(
         
         if (error) {
             console.error(`[DB: ${operation}] error for user ${userId || 'system'}:`, error.message);
-            return { success: false, error: error.message, code: error.code }; // Include code
+            return { success: false, error: error.message, code: error.code };
         }
         
         return { success: true, data: count || 0 };
     } catch (err: any) {
-        console.error(`[DB: ${operation}] crash for user ${userId || 'system'}:`, err.message);
+        const duration = Date.now() - start;
+        if (err.message === 'DATABASE_TIMEOUT') {
+            console.error(`[DB: ${operation}] timeout after ${duration}ms for user ${userId || 'system'}`);
+            return { success: false, error: 'timeout', source: 'database' };
+        }
+        console.error(`[DB: ${operation}] crash for user ${userId || 'system'} after ${duration}ms:`, err.message);
         return { success: false, error: 'DATABASE_CRASH', code: 'INTERNAL_ERROR' };
     }
 }

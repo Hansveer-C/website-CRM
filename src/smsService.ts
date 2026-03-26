@@ -30,6 +30,7 @@ export const smsService = {
       };
     }
 
+    const start = Date.now();
     try {
       console.log(`[SMS SERVICE BACKEND] Sending SMS to ${to} (User: ${user_id || 'system'})...`);
       
@@ -47,7 +48,7 @@ export const smsService = {
 
       const client = twilio(account_sid, auth_token);
       
-      // 🛡️ PT.11: SMS Provider Timeout Protection (15s)
+      // 🛡️ C5: Standardized SMS Provider Timeout (15s)
       const timeoutPromise = new Promise<any>((_, reject) => 
         setTimeout(() => reject(new Error('SMS_PROVIDER_TIMEOUT')), 15000)
       );
@@ -61,14 +62,21 @@ export const smsService = {
         timeoutPromise
       ]);
 
-      console.log(`✅ [SMS SERVICE BACKEND] SMS dispatched. SID: ${result.sid}`);
+      const duration = Date.now() - start;
+      console.log(`✅ [SMS SERVICE BACKEND] SMS dispatched after ${duration}ms. SID: ${result.sid}`);
       
       return {
         success: true,
-        provider_message_id: result.sid
+        provider_message_id: result.sid,
+        duration
       };
     } catch (error: any) {
-      console.error('❌ [SMS SERVICE BACKEND] Error sending SMS via Twilio SDK:', error.message);
+      const duration = Date.now() - start;
+      if (error.message === 'SMS_PROVIDER_TIMEOUT') {
+          console.error(`❌ [SMS SERVICE BACKEND] timeout after ${duration}ms sending to ${to}`);
+          return { success: false, error: 'timeout', source: 'sms' as const };
+      }
+      console.error(`❌ [SMS SERVICE BACKEND] Error after ${duration}ms:`, error.message);
       return {
         success: false,
         error: error.message || 'Unknown error dispatching SMS'
