@@ -26,9 +26,6 @@ export async function apiMiddleware(req: ApiRequest): Promise<void> {
 
 /**
  * Authorization Guard Middleware.
- * 
- * Ensures that the request contains a valid authenticated user.
- * If not, it blocks execution and returns a 401 Unauthorized state.
  */
 export function requireAuth(req: ApiRequest) {
     if (!req.user) {
@@ -38,7 +35,35 @@ export function requireAuth(req: ApiRequest) {
             message: 'Authentication is required to access this resource.' 
         };
     }
+    return null;
+}
+
+/**
+ * 🛡️ C8: Payload Size Guard.
+ * 
+ * Protects against memory abuse by limiting the JSON body size.
+ * Limit: 50 KB (approx. 51,200 bytes)
+ */
+export function validatePayloadSize(req: ApiRequest) {
+    if (!req.body) return null;
     
-    // Return true to indicate authorization successful
+    try {
+        const payloadStr = JSON.stringify(req.body);
+        const bytes = Buffer.byteLength(payloadStr, 'utf8');
+        const LIMIT_BYTES = 51200; 
+
+        if (bytes > LIMIT_BYTES) {
+            console.warn(`[SECURITY: DOS] Refused oversized payload (${bytes} bytes) from user ${req.user?.id || 'anonymous'}`);
+            return {
+                status: 413,
+                success: false,
+                error: 'payload_too_large'
+            };
+        }
+    } catch (e) {
+        // If stringify fails, it's likely malformed or circular (also risky)
+        return { status: 400, error: 'invalid_payload_structure' };
+    }
+    
     return null;
 }

@@ -1,5 +1,5 @@
 import { ApiRequest } from './types';
-import { apiMiddleware, requireAuth } from './middleware';
+import { apiMiddleware, requireAuth, validatePayloadSize } from './middleware';
 import { getContact, deleteContact } from './contacts_repo';
 import { getOpportunity, deleteOpportunity } from './opportunities_repo';
 import { getMessage } from './messages_repo';
@@ -17,6 +17,9 @@ async function getRecordById(req: ApiRequest, fetcher: (id: string, user: any) =
     await apiMiddleware(req);
     const authError = requireAuth(req);
     if (authError) return authError;
+
+    const payloadError = validatePayloadSize(req);
+    if (payloadError) return payloadError;
 
     const userId = req.user?.id || 'anonymous';
 
@@ -73,6 +76,9 @@ export async function createLeadApi(req: ApiRequest) {
     const authError = requireAuth(req);
     if (authError) return authError;
 
+    const payloadError = validatePayloadSize(req);
+    if (payloadError) return payloadError;
+
     try {
         const result = await createLead(req.body, req);
         return {
@@ -104,6 +110,9 @@ export async function getContactTimelineApi(req: ApiRequest, id: string) {
     await apiMiddleware(req);
     const authError = requireAuth(req);
     if (authError) return authError;
+
+    const payloadError = validatePayloadSize(req);
+    if (payloadError) return payloadError;
 
     const userId = req.user?.id || 'anonymous';
 
@@ -143,6 +152,9 @@ export async function deleteContactApi(req: ApiRequest, id: string) {
     await apiMiddleware(req);
     const authError = requireAuth(req);
     if (authError) return authError;
+
+    const payloadError = validatePayloadSize(req);
+    if (payloadError) return payloadError;
 
     const userId = req.user?.id || 'anonymous';
 
