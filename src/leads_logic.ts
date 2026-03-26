@@ -1,7 +1,7 @@
 import { emitEvent } from './events';
 import { runAutomations } from './automation';
 import { persistContact, findContact, deleteContact } from './contacts_repo';
-import { persistOpportunity, getOpportunitiesByContact } from './opportunities_repo';
+import { persistOpportunity, getOpenOpportunityByContact } from './opportunities_repo';
 import { Contact, Opportunity, ApiRequest } from './types';
 
 import { normalizePhone, normalizeEmail, normalizeName } from './utils/normalization';
@@ -37,26 +37,15 @@ export async function createLead(data: {
   const existingContact = contactRes.data;
 
   let contactIdToUseValue: string;
-  let isNewContact = false;
 
+  let createdByThisRequest = false; // 🛡️ F4: Track context for rollback
   if (existingContact) {
     contactIdToUseValue = existingContact.id;
     console.log(`Duplicate lead found: using existing contact ${contactIdToUseValue}.`);
-    
-    // BASIC PROTECTION: Skip new opportunity if one was created for this contact in the last 2 minutes
-    const oppsRes = await getOpportunitiesByContact(contactIdToUseValue, request?.user);
-    if (oppsRes.success && oppsRes.data) {
-        const recentOpp = oppsRes.data.find(opp => 
-          (new Date().getTime() - new Date(opp.created_at).getTime()) < 120000
-        );
-        
-        if (recentOpp) {
-          throw new Error(`Duplicate submission window open for contact ${contactIdToUseValue}.`);
-        }
-    }
+    // F1 Logic: We now handle deduplication by checking for open status below.
   } else {
     contactIdToUseValue = `c-${Date.now()}`;
-    isNewContact = true;
+    createdByThisRequest = true; // Mark as candidate for rollback
     const newContact: Contact = {
       id: contactIdToUseValue,
       user_id: user_id,
@@ -75,36 +64,64 @@ export async function createLead(data: {
     // Save to DB
     const saveContactRes = await persistContact(newContact);
     if (!saveContactRes.success) {
-        throw new Error(`DB_SAVE_CONTACT_ERROR: ${saveContactRes.error}`);
+        if (saveContactRes.code === '23505') {
+            // 🛡️ REUSE (F3): Another thread beat us to it - locate the winner.
+            console.log(`[Concurrency] Contact duplicate detected for ${phoneNorm.normalized}. Resolving to existing.`);
+            const winner = await findContact(phoneNorm.normalized, emailNorm, request?.user);
+            if (winner.data) {
+                contactIdToUseValue = winner.data.id;
+            } else {
+                throw new Error(`CONCURRENCY_ERROR: ${saveContactRes.error}`);
+            }
+        } else {
+            throw new Error(`DB_SAVE_CONTACT_ERROR: ${saveContactRes.error}`);
+        }
     }
   }
 
+  try {
+    // 2. Resolve/Create Opportunity (F1 Logic)
+  let activeOpp: Opportunity | null = null;
+  const openOppRes = await getOpenOpportunityByContact(contactIdToUseValue, request?.user);
+  if (openOppRes.success && openOppRes.data) {
+    activeOpp = openOppRes.data;
+    console.log(`Active opportunity ${activeOpp.id} found for contact. Reusing instead of creating.`);
+  } else {
+    // No active opp - Create a new one
+    const newOpportunity: Opportunity = {
+      id: `opp-${Date.now()}`,
+      user_id: existingContact ? (existingContact.user_id || 'system') : user_id,
+      contact_id: contactIdToUseValue,
+      pipeline_stage: 'New Lead',
+      value: 0,
+      assigned_to: 'Unassigned',
+      status: 'open',
+      notes: `Service Type: ${data.service_type || 'N/A'}\nAddress: ${data.address || 'N/A'}\nMessage: ${data.message || 'N/A'}`,
+      source: data.source || 'api',
+      created_at: timestamp
+    };
 
-  // 2. Create Opportunity
-  const newOpportunity: Opportunity = {
-    id: `opp-${Date.now()}`,
-    user_id: existingContact ? (existingContact.user_id || 'system') : user_id,
-    contact_id: contactIdToUseValue,
-    pipeline_stage: 'New Lead',
-    value: 0,
-    assigned_to: 'Unassigned',
-    status: 'open',
-    notes: `Service Type: ${data.service_type || 'N/A'}\nAddress: ${data.address || 'N/A'}\nMessage: ${data.message || 'N/A'}`,
-    source: data.source || 'api',
-    created_at: timestamp
-  };
-
-  // Save to DB with Transaction-Like Rollback
-  const saveOppRes = await persistOpportunity(newOpportunity);
-  if (!saveOppRes.success) {
-      if (isNewContact) {
-          console.warn(`[ROLLBACK] Opportunity failed. Deleting orphaned contact ${contactIdToUseValue}...`);
-          await deleteContact(contactIdToUseValue, request?.user);
-      }
-      throw new Error(`DB_SAVE_OPPORTUNITY_ERROR: ${saveOppRes.error}`);
+    const saveOppRes = await persistOpportunity(newOpportunity);
+    if (!saveOppRes.success) {
+        if (saveOppRes.code === '23505') {
+            // 🛡️ REUSE (F3): Another thread beat us to it - locate the open deal.
+            console.log(`[Concurrency] Opportunity duplicate detected. Resolving to existing.`);
+            const openWinner = await getOpenOpportunityByContact(contactIdToUseValue, request?.user);
+            if (openWinner.data) {
+                activeOpp = openWinner.data;
+            } else {
+                throw new Error(`CONCURRENCY_ERROR: ${saveOppRes.error}`);
+            }
+        } else {
+            throw new Error(`DB_SAVE_OPPORTUNITY_ERROR: ${saveOppRes.error}`);
+        }
+    } else {
+        activeOpp = newOpportunity;
+    }
   }
 
   const contactIdToUse = contactIdToUseValue;
+  const oppIdToUse = activeOpp.id;
 
 
   // 3. Emit Events
@@ -112,14 +129,14 @@ export async function createLead(data: {
   const emissionsInThisCycle = new Set<string>();
   const guardedEmit = (name: string, payload: any) => {
     if (!emissionsInThisCycle.has(name)) {
-      emitEvent(name, payload);
+      emitEvent(name, payload, user_id);
       emissionsInThisCycle.add(name);
     }
   };
 
   guardedEmit('lead_created', {
     contact_id: contactIdToUse,
-    opportunity_id: newOpportunity.id,
+    opportunity_id: oppIdToUse,
     phone: phoneNorm.normalized,
     email: emailNorm,
     pipeline_stage: 'New Lead',
@@ -127,11 +144,18 @@ export async function createLead(data: {
   });
 
   // 4. Trigger Automations
-  runAutomations('OPPORTUNITY_CREATED', newOpportunity);
+  runAutomations('OPPORTUNITY_CREATED', activeOpp);
 
-  return {
-    contactId: contactIdToUse,
-    opportunityId: newOpportunity.id,
-    status: 'success'
-  };
+    return {
+      contactId: contactIdToUse,
+      opportunityId: oppIdToUse,
+      status: 'success'
+    };
+  } catch (error: any) {
+    if (createdByThisRequest) {
+        console.warn(`[Rollback] Operation failed. Deleting contact ${contactIdToUseValue} created by this request.`);
+        await deleteContact(contactIdToUseValue, user_id);
+    }
+    throw error;
+  }
 }

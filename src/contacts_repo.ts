@@ -10,8 +10,17 @@ import { supabase, safeDbCall } from './utils/db/supabase';
  * Persists a contact to the Supabase database.
  */
 export async function createContact(contact: Contact): Promise<RepoResponse<Contact>> {
-  console.log(`[DB: SUPABASE CONTACT] Creating/Updating ${contact.id} (${contact.name}).`);
+  console.log(`[DB: SUPABASE CONTACT] Persisting ${contact.id} (${contact.name}).`);
+  
   const userId = contact.user_id;
+
+  // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
+  // Before upserting, verify that if the record exists, it belongs to the same user.
+  const { data: existing } = await supabase.from('contacts').select('user_id').eq('id', contact.id).maybeSingle();
+  if (existing && existing.user_id !== userId) {
+      console.error(`[SECURITY ALERT] Cross-tenant overwrite blocked: User ${userId} attempted to overwrite contact ${contact.id} owned by ${existing.user_id}`);
+      return { success: false, error: 'ACCESS_DENIED_CROSS_TENANT' };
+  }
 
   const payload = {
     ...contact,
@@ -19,21 +28,6 @@ export async function createContact(contact: Contact): Promise<RepoResponse<Cont
     follow_up_required: !!contact.follow_up_required
   };
 
-  // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
-  // Step 1: Check if the record already exists and who owns it
-  const { data: existing } = await supabase
-    .from('contacts')
-    .select('user_id')
-    .eq('id', contact.id)
-    .maybeSingle();
-
-  // Step 2: Ownership verification
-  if (existing && existing.user_id !== userId) {
-      console.error(`[SECURITY: MF.3] Access Denied: User ${userId} attempted to overwrite contact ${contact.id} owned by User ${existing.user_id}`);
-      return { success: false, error: 'ACCESS_DENIED' };
-  }
-
-  // Step 3: Proceed with upsert only if ownership is confirmed or record is new
   return safeDbCall('CREATE_CONTACT', userId, supabase
     .from('contacts')
     .upsert(payload)
@@ -90,6 +84,8 @@ export async function getContactById(id: string, user?: User | string | null): P
   );
 }
 
+
+
 /**
  * Retrieves all contacts, scoped to the user context.
  */
@@ -109,21 +105,21 @@ export async function getContacts(user?: User | string | null): Promise<RepoResp
 }
 
 /**
- * Permanently deletes a contact, scoped to the user context.
+ * Deletes a contact, scoped strictly to the user context. (MF.4)
  */
-export async function deleteContact(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
-  const userId = typeof user === 'string' ? user : (user?.id);
-  
-  if (!userId) {
-      return { success: false, error: 'MISSING_USER_CONTEXT' };
-  }
+export async function deleteContact(id: string, user: User | string): Promise<RepoResponse<void>> {
+  const userId = typeof user === 'string' ? user : user.id;
 
-  return safeDbCall('DELETE_CONTACT', userId, supabase
+  const { error } = await supabase
     .from('contacts')
     .delete()
     .eq('id', id)
-    .eq('user_id', userId)
-  );
+    .eq('user_id', userId);
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+  return { success: true };
 }
 
 // --- Aliases for Backward Compatibility ---
@@ -142,36 +138,8 @@ export const ContactsRepo = {
   getContact,
   getContacts,
   getAllContacts,
-  deleteContact,
-  resolveOwnerId,
-  resolveOwnerByPhone
+  deleteContact
 };
 
 
-async function resolveOwnerId(contactId: string): Promise<string | null> {
-    const { data } = await supabase
-      .from('contacts')
-      .select('user_id')
-      .eq('id', contactId)
-      .maybeSingle();
-    
-    if (data) {
-        console.log(`[SYSTEM AUTH] Resolved owner for contact ${contactId}: ${data.user_id}`);
-    }
-    return data?.user_id || null;
-}
 
-async function resolveOwnerByPhone(phone: string): Promise<string | null> {
-    const { data } = await supabase
-      .from('contacts')
-      .select('user_id')
-      .eq('phone', phone)
-      .maybeSingle();
-
-    if (data) {
-        console.log(`[SYSTEM AUTH] Resolved owner for phone ${phone}: ${data.user_id}`);
-    }
-    return data?.user_id || null;
-}
-
-export { resolveOwnerId as resolveContactOwner, resolveOwnerByPhone as resolveContactOwnerByPhone };

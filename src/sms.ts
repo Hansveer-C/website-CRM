@@ -6,14 +6,14 @@ import { Message, Contact } from './types';
  * and API routing (Browser) to prevent SDK leakage into the frontend.
  */
 
-export async function sendMessageToContact(contactId: string, message: string, source: string = 'manual', user_id?: string) {
+export async function sendMessageToContact(contactId: string, message: string, source: string = 'manual', user_id?: string, trigger_event_id?: string) {
   // Environment Check
   const isBrowser = typeof window !== 'undefined';
 
   if (!isBrowser) {
     // Backend Logic (Node.js) - Uses Dynamic Import to hide Twilio from Vite
     const { sendMessageToContact: backendSend } = await import('./sms_logic');
-    return backendSend(contactId, message, source, user_id);
+    return backendSend(contactId, message, source, user_id, trigger_event_id);
   }
 
   // Frontend Bridge (Browser) - Zero knowledge of Twilio
@@ -26,7 +26,9 @@ export async function sendMessageToContact(contactId: string, message: string, s
       body: JSON.stringify({
         contact_id: contactId,
         message: message,
-        source: source
+        source: source,
+        user_id: user_id,
+        trigger_event_id: trigger_event_id
       })
     });
 

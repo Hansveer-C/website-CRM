@@ -15,20 +15,19 @@ export const OpportunitiesRepo = {
    */
   async createOpportunity(opportunity: Opportunity): Promise<RepoResponse<Opportunity>> {
     console.log(`[DB: SUPABASE OPPORTUNITY] Persisting ${opportunity.id} for contact ${opportunity.contact_id}.`);
-    const userId = opportunity.user_id;
+    
+    // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
+    const { data: existing } = await supabase.from('opportunities').select('user_id').eq('id', opportunity.id).maybeSingle();
+    if (existing && existing.user_id !== opportunity.user_id) {
+        return { success: false, error: 'ACCESS_DENIED_CROSS_TENANT' };
+    }
 
     const payload = {
       ...opportunity,
       value: Number(opportunity.value) || 0
     };
 
-    // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
-    const { data: existing } = await supabase.from('opportunities').select('user_id').eq('id', opportunity.id).maybeSingle();
-    if (existing && existing.user_id !== userId) {
-        return { success: false, error: 'ACCESS_DENIED_CROSS_TENANT' };
-    }
-
-    return safeDbCall('CREATE_OPPORTUNITY', userId, supabase
+    return safeDbCall('CREATE_OPPORTUNITY', opportunity.user_id, supabase
       .from('opportunities')
       .upsert(payload)
       .select()
@@ -107,6 +106,23 @@ export const OpportunitiesRepo = {
   },
 
   /**
+   * Retrieves an open opportunity for a contact, if one exists. (F1)
+   */
+  async getOpenOpportunityByContact(contact_id: string, user?: User | string | null): Promise<RepoResponse<Opportunity | null>> {
+    const userId = typeof user === 'string' ? user : (user?.id);
+    if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
+
+    return safeDbCall('GET_OPEN_OPP', userId, supabase
+      .from('opportunities')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('contact_id', contact_id)
+      .eq('status', 'open')
+      .maybeSingle()
+    );
+  },
+
+  /**
    * Alias for getOpportunities to maintain compatibility.
    */
   async getAllOpportunities(user?: User | string | null): Promise<RepoResponse<Opportunity[]>> {
@@ -114,35 +130,28 @@ export const OpportunitiesRepo = {
   },
 
   /**
-   * Permanently deletes an opportunity, scoped to user.
+   * Deletes an opportunity, scoped strictly to the user context. (MF.4)
    */
-  async deleteOpportunity(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
-    const userId = typeof user === 'string' ? user : (user?.id);
-    if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
+  async deleteOpportunity(id: string, user: User | string): Promise<RepoResponse<void>> {
+    const userId = typeof user === 'string' ? user : user.id;
 
-    return safeDbCall('DELETE_OPPORTUNITY', userId, supabase
+    const { error } = await supabase
       .from('opportunities')
       .delete()
       .eq('id', id)
-      .eq('user_id', userId)
-    );
-  },
+      .eq('user_id', userId);
 
-  async resolveOwnerId(opportunityId: string): Promise<string | null> {
-    const { data } = await supabase
-      .from('opportunities')
-      .select('user_id')
-      .eq('id', opportunityId)
-      .maybeSingle();
-    
-    if (data) {
-        console.log(`[SYSTEM AUTH] Resolved owner for opportunity ${opportunityId}: ${data.user_id}`);
+    if (error) {
+      return { success: false, error: error.message };
     }
-    return data?.user_id || null;
+    return { success: true };
   }
 };
 
 // --- Standard Individual Exports ---
+/**
+ * Persist opportunity to Supabase.
+ */
 export async function createOpportunity(opportunity: Opportunity): Promise<RepoResponse<Opportunity>> {
     return OpportunitiesRepo.createOpportunity(opportunity);
 }
@@ -171,10 +180,11 @@ export async function getAllOpportunities(user?: User | string | null): Promise<
     return OpportunitiesRepo.getOpportunities(user);
 }
 
-export async function deleteOpportunity(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
+export async function deleteOpportunity(id: string, user: User | string): Promise<RepoResponse<void>> {
     return OpportunitiesRepo.deleteOpportunity(id, user);
 }
 
-export async function resolveOpportunityOwner(oppId: string): Promise<string | null> {
-    return OpportunitiesRepo.resolveOwnerId(oppId);
+export async function getOpenOpportunityByContact(contact_id: string, user?: User | string | null): Promise<RepoResponse<Opportunity | null>> {
+    return OpportunitiesRepo.getOpenOpportunityByContact(contact_id, user);
 }
+

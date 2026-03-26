@@ -15,16 +15,19 @@ export const MessagesRepo = {
    */
   async createMessage(message: Message): Promise<RepoResponse<Message>> {
     console.log(`[DB: SUPABASE MESSAGE] Persisting ${message.id} for contact ${message.contact_id}.`);
-    const userId = message.user_id;
-    const payload = { ...message, retryable: !!message.retryable };
-
+    
     // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
     const { data: existing } = await supabase.from('messages').select('user_id').eq('id', message.id).maybeSingle();
-    if (existing && existing.user_id !== userId) {
+    if (existing && existing.user_id !== message.user_id) {
         return { success: false, error: 'ACCESS_DENIED_CROSS_TENANT' };
     }
 
-    return safeDbCall('CREATE_MESSAGE', userId, supabase
+    const payload = {
+      ...message,
+      retryable: !!message.retryable
+    };
+
+    return safeDbCall('CREATE_MESSAGE', message.user_id, supabase
       .from('messages')
       .upsert(payload)
       .select()
@@ -80,16 +83,17 @@ export const MessagesRepo = {
 
   /**
    * Updates a message's status and provider info.
-   * Required for webhooks and automated status tracking.
    */
-  async updateMessageStatus(id: string, status: string, providerMessageId?: string, retryable?: boolean, user_id?: string): Promise<RepoResponse<void>> {
-    const userId = user_id || 'system';
-
-    // 🛡️ MF.3: VERIFY OWNERSHIP BEFORE UPDATE
-    const { data: existing } = await supabase.from('messages').select('user_id').eq('id', id).maybeSingle();
-    if (existing && userId !== 'system' && existing.user_id !== userId) {
-        return { success: false, error: 'ACCESS_DENIED_CROSS_TENANT' };
+  async updateMessageStatus(id: string, status: string, providerMessageId?: string, retryable?: boolean, user?: User | string | null): Promise<RepoResponse<void>> {
+    const userId = typeof user === 'string' ? user : (user?.id);
+    if (!userId) {
+        return { success: false, error: 'MISSING_USER_CONTEXT' };
     }
+
+    // Resolve owner
+    const { data: existing } = await supabase.from('messages').select('user_id').eq('id', id).maybeSingle();
+    if (!existing) return { success: false, error: 'MESSAGE_NOT_FOUND' };
+    if (existing.user_id !== userId) return { success: false, error: 'ACCESS_DENIED_CROSS_TENANT' };
 
     const res = await supabase
       .from('messages')
@@ -98,12 +102,29 @@ export const MessagesRepo = {
         provider_message_id: providerMessageId || null,
         retryable: !!retryable
       })
-      .eq('id', id);
+      .eq('id', id)
+      .eq('user_id', userId); // Extra safety
 
     if (res.error) {
         console.error('[DB: UPDATE_MESSAGE_STATUS] Error:', res.error.message);
         return { success: false, error: res.error.message };
     }
+    return { success: true };
+  },
+
+  /**
+   * Deletes a message, scoped strictly to the user. (MF.4)
+   */
+  async deleteMessage(id: string, user: User | string): Promise<RepoResponse<void>> {
+    const userId = typeof user === 'string' ? user : user.id;
+
+    const { error } = await supabase
+      .from('messages')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+
+    if (error) return { success: false, error: error.message };
     return { success: true };
   },
 
@@ -170,26 +191,12 @@ export const MessagesRepo = {
     const userId = typeof user === 'string' ? user : (user?.id);
     
     if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
+
     return safeDbCall('GET_ALL_MESSAGES', userId, supabase
       .from('messages')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: true })
-    );
-  },
-
-  /**
-   * Secure deletion of a message record.
-   */
-  async deleteMessage(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
-    const userId = typeof user === 'string' ? user : (user?.id);
-    if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
-
-    return safeDbCall('DELETE_MESSAGE', userId, supabase
-      .from('messages')
-      .delete()
-      .eq('id', id)
-      .eq('user_id', userId)
     );
   }
 };
@@ -200,12 +207,12 @@ export const persistMessage = MessagesRepo.createMessage;
 export const getMessage = MessagesRepo.getMessage;
 export const getMessagesByContact = MessagesRepo.getMessagesByContact;
 export const updateMessageStatus = MessagesRepo.updateMessageStatus;
+export const deleteMessage = MessagesRepo.deleteMessage;
 export const countRecentOutboundMessages = MessagesRepo.countRecentOutboundMessages;
 export const countUserTotalRecentMessages = MessagesRepo.countUserTotalRecentMessages;
 export const checkDuplicateMessage = MessagesRepo.checkDuplicateMessage;
 export const getAllMessagesOrdered = MessagesRepo.getAllMessagesOrdered;
 export const getMessages = MessagesRepo.getAllMessagesOrdered; 
-export const deleteMessage = MessagesRepo.deleteMessage;
 
 // Backward compatibility or direct access
 export async function countRecentOutboundMessagesRaw(contactId: string, sinceIso: string, user?: User | string | null): Promise<number> {

@@ -36,13 +36,13 @@ export async function safeDbCall<T>(
         
         if (error) {
             console.error(`[DB: ${operation}] error for user ${userId || 'system'}:`, error.message);
-            return { success: false, error: error.message };
+            return { success: false, error: error.message, code: error.code }; // Include code
         }
         
         return { success: true, data: data as T };
     } catch (err: any) {
         console.error(`[DB: ${operation}] crash for user ${userId || 'system'}:`, err.message);
-        return { success: false, error: 'DATABASE_CRASH' };
+        return { success: false, error: 'DATABASE_CRASH', code: 'INTERNAL_ERROR' };
     }
 }
 
@@ -59,12 +59,12 @@ export async function safeDbCount(
         
         if (error) {
             console.error(`[DB: ${operation}] error for user ${userId || 'system'}:`, error.message);
-            return { success: false, error: error.message };
+            return { success: false, error: error.message, code: error.code }; // Include code
         }
         
         return { success: true, data: count || 0 };
     } catch (err: any) {
         console.error(`[DB: ${operation}] crash for user ${userId || 'system'}:`, err.message);
-        return { success: false, error: 'DATABASE_CRASH' };
+        return { success: false, error: 'DATABASE_CRASH', code: 'INTERNAL_ERROR' };
     }
 }

@@ -15,17 +15,19 @@ export const ActivitiesRepo = {
    */
   async createActivity(activity: Activity): Promise<RepoResponse<Activity>> {
     console.log(`[DB: SUPABASE ACTIVITY] Persisting activity ${activity.id} for contact ${activity.contact_id}.`);
-    const userId = activity.user_id;
-
-    const payload = { ...activity, completed: !!activity.completed };
-
+    
     // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
     const { data: existing } = await supabase.from('activities').select('user_id').eq('id', activity.id).maybeSingle();
-    if (existing && existing.user_id !== userId) {
+    if (existing && existing.user_id !== activity.user_id) {
         return { success: false, error: 'ACCESS_DENIED_CROSS_TENANT' };
     }
 
-    return safeDbCall('CREATE_ACTIVITY', userId, supabase
+    const payload = {
+        ...activity,
+        completed: !!activity.completed
+    };
+
+    return safeDbCall('CREATE_ACTIVITY', activity.user_id, supabase
       .from('activities')
       .upsert(payload)
       .select()
@@ -61,18 +63,19 @@ export const ActivitiesRepo = {
   },
 
   /**
-   * Secure deletion of an activity.
+   * Deletes an activity, scoped strictly to the user. (MF.4)
    */
-  async deleteActivity(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
-    const userId = typeof user === 'string' ? user : (user?.id);
-    if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
+  async deleteActivity(id: string, user: User | string): Promise<RepoResponse<void>> {
+    const userId = typeof user === 'string' ? user : user.id;
 
-    return safeDbCall('DELETE_ACTIVITY', userId, supabase
+    const { error } = await supabase
       .from('activities')
       .delete()
       .eq('id', id)
-      .eq('user_id', userId)
-    );
+      .eq('user_id', userId);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
   }
 };
 
@@ -92,7 +95,7 @@ export async function getActivitiesByContact(contact_id: string, user?: User | s
     return ActivitiesRepo.getActivitiesByContact(contact_id, user, limit);
 }
 
-export async function deleteActivity(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
+export async function deleteActivity(id: string, user: User | string): Promise<RepoResponse<void>> {
     return ActivitiesRepo.deleteActivity(id, user);
 }
 

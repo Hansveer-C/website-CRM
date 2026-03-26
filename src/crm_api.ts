@@ -6,6 +6,7 @@ import { getMessage } from './messages_repo';
 import { getCall } from './calls_repo';
 import { createLead } from './leads_logic';
 import { getContactTimeline } from './timeline';
+import { mapRepoToApi } from './utils/api_errors';
 
 /**
  * Shared logic to handle specific record retrieval with user scoping.
@@ -19,19 +20,12 @@ async function getRecordById(req: ApiRequest, fetcher: (id: string, user: any) =
     const userId = req.user?.id || 'anonymous';
 
     try {
-        const { success, data: record, error } = await fetcher(id, req.user);
-        
-        if (!success || !record) {
-            return {
-                status: !success ? 500 : 404, 
-                error: error || 'Record not found.'
-            };
+        const res = await fetcher(id, req.user);
+        const apiRes = mapRepoToApi(res, { resourceName: operation.split('_')[1] });
+        if (apiRes.status === 200 && !apiRes.data) {
+             return { status: 404, error: 'Record not found.' };
         }
-
-        return {
-            status: 200,
-            data: record
-        };
+        return apiRes;
     } catch (error: any) {
         console.error(`[API: ${operation}] Failed for user ${userId}:`, error.message);
         return {

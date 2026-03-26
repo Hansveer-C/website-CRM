@@ -83,6 +83,7 @@ export async function emitEvent(name: string, payload: Record<string, any> = {},
   
   // Trigger Listeners
   if (listeners[name]) {
+    console.log(`[EVENT TRIGGER] Dispatched ${name} to ${listeners[name].length} listeners.`);
     const payloadWithId = { ...payload, event_log_id: logEntry.id };
     for (const fn of listeners[name]) {
       try {
@@ -150,8 +151,9 @@ onEvent('lead_created', async (payload, userId) => {
 
   // Trigger SMS
   console.log(`[AUTOMATION] Triggering automated SMS for lead: ${contact.name}`);
+  const event_id = payload.event_log_id;
   try {
-    const result = await sendMessageToContact(contact_id, message, 'automation', contact.user_id);
+    const result = await sendMessageToContact(contact_id, message, 'automation', contact.user_id, event_id);
     
     if (result.success) {
       console.log('Automated lead SMS sent');
@@ -255,13 +257,6 @@ onEvent('call_missed', async (payload, userId) => {
     return;
   }
 
-  // 6. Send SMS
-  const smsResult = await sendMessageToContact(targetContact.id, smsMessage, 'missed_call_automation', targetContact.user_id);
-  
-  if (!smsResult.success && smsResult.error !== 'Duplicate SMS prevented') {
-    targetContact.follow_up_required = true;
-    await persistContact(targetContact);
-  }
 
   // 7. Create Opportunity
   const newOpportunity: Opportunity = {
@@ -274,7 +269,11 @@ onEvent('call_missed', async (payload, userId) => {
     source: 'missed_call',
     created_at: new Date().toISOString()
   };
-  await persistOpportunity(newOpportunity);
+  const oppResult = await persistOpportunity(newOpportunity);
+  if (!oppResult.success) {
+      console.error('Failed to create opportunity for missed call. Aborting automation.');
+      return;
+  }
 
   // 8. Link Call
   if (call_id) {
@@ -286,5 +285,14 @@ onEvent('call_missed', async (payload, userId) => {
         callRecord.user_id = targetContact.user_id || 'system';
         await persistCall(callRecord);
     }
+  }
+
+  // 9. Send SMS (F5: Only after DB success)
+  const event_id = (payload as any).event_log_id;
+  const smsResult = await sendMessageToContact(targetContact.id, smsMessage, 'missed_call_automation', targetContact.user_id, event_id);
+  
+  if (!smsResult.success && smsResult.error !== 'Duplicate SMS prevented') {
+    targetContact.follow_up_required = true;
+    await persistContact(targetContact);
   }
 });

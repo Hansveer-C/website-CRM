@@ -15,15 +15,14 @@ export const CallsRepo = {
    */
   async createCall(call: Call): Promise<RepoResponse<Call>> {
     console.log(`[DB: SUPABASE CALL] Persisting ${call.id} for phone ${call.phone}.`);
-    const userId = call.user_id;
-
+    
     // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
     const { data: existing } = await supabase.from('calls').select('user_id').eq('id', call.id).maybeSingle();
-    if (existing && existing.user_id !== userId) {
+    if (existing && existing.user_id !== call.user_id) {
         return { success: false, error: 'ACCESS_DENIED_CROSS_TENANT' };
     }
 
-    return safeDbCall('CREATE_CALL', userId, supabase
+    return safeDbCall('CREATE_CALL', call.user_id, supabase
       .from('calls')
       .upsert(call)
       .select()
@@ -86,18 +85,19 @@ export const CallsRepo = {
   },
 
   /**
-   * Secure deletion of a call record.
+   * Deletes a call, scoped strictly to the user context. (MF.4)
    */
-  async deleteCall(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
-    const userId = typeof user === 'string' ? user : (user?.id);
-    if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
+  async deleteCall(id: string, user: User | string): Promise<RepoResponse<void>> {
+    const userId = typeof user === 'string' ? user : user.id;
 
-    return safeDbCall('DELETE_CALL', userId, supabase
+    const { error } = await supabase
       .from('calls')
       .delete()
       .eq('id', id)
-      .eq('user_id', userId)
-    );
+      .eq('user_id', userId);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
   }
 };
 
@@ -121,7 +121,6 @@ export async function getCallsForContact(contact_id: string, phone?: string, use
     return CallsRepo.getCallsForContact(contact_id, phone, user, limit);
 }
 
-export async function deleteCall(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
+export async function deleteCall(id: string, user: User | string): Promise<RepoResponse<void>> {
     return CallsRepo.deleteCall(id, user);
 }
-

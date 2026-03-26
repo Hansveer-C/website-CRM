@@ -189,6 +189,7 @@ export interface Message {
   provider_message_id?: string;
   retryable?: boolean;
   source?: string; // e.g. 'automation'
+  trigger_event_id?: string; // link to event_logs
   created_at: string;
 }
 
@@ -234,4 +235,5 @@ export interface RepoResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
+  code?: string;
 }

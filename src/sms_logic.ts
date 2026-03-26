@@ -46,8 +46,9 @@ export async function dispatchSMS(
   messageText: string, 
   opportunity_id?: string,
   source?: string,
-  user_id?: string
-): Promise<{ internal_id: string; twilio_result: any }> {
+  user_id?: string,
+  trigger_event_id?: string
+): Promise<{ success: boolean; internal_id?: string; skipped?: boolean; reason?: string; twilio_result?: any }> {
   
   const newMessage: Message = {
     id: `msg-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -59,11 +60,28 @@ export async function dispatchSMS(
     content: messageText,
     status: 'pending',
     source,
+    trigger_event_id,
     created_at: new Date().toISOString()
   };
 
-  await saveMessage(newMessage);
+  const saveRes = await saveMessage(newMessage);
+  if (!saveRes.success) {
+    return { 
+      success: false,
+      internal_id: newMessage.id, 
+      twilio_result: { success: false, error: saveRes.error || 'Database persistence failed' } 
+    };
+  }
 
+  if (saveRes.skipped) {
+    console.log('[SMS Skip] SMS skipped due to idempotency (duplicate_event)');
+    return {
+      success: true,
+      skipped: true,
+      reason: 'duplicate_event',
+      internal_id: 'skipped'
+    };
+  }
 
   // Use the Backend SDK Service
   const result = await smsService.sendSMS({ to: phone, message: messageText, user_id });
@@ -83,6 +101,7 @@ export async function dispatchSMS(
   }
   
   return { 
+    success: result.success,
     internal_id: newMessage.id, 
     twilio_result: result 
   };
@@ -95,7 +114,8 @@ export async function sendMessageToContact(
   contact_id: string, 
   messageText: string,
   source?: string,
-  user_id?: string
+  user_id?: string,
+  trigger_event_id?: string
 ): Promise<{ success: boolean; internal_id?: string; error?: string }> {
   
   const contactRes = await getContact(contact_id, user_id);
@@ -135,12 +155,12 @@ export async function sendMessageToContact(
     }
   }
 
-  const result = await dispatchSMS(contact_id, contact.phone, messageText, undefined, source, user_id);
+  const result = await dispatchSMS(contact_id, contact.phone, messageText, undefined, source, user_id, trigger_event_id);
   
   return {
-    success: result.twilio_result.success,
+    success: !!result.success,
     internal_id: result.internal_id,
-    error: result.twilio_result.error
+    error: result.twilio_result?.error
   };
 }
 
