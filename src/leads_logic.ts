@@ -4,8 +4,7 @@ import { persistContact, findContact, deleteContact } from './contacts_repo';
 import { persistOpportunity, getOpenOpportunityByContact } from './opportunities_repo';
 import { Contact, Opportunity, ApiRequest } from './types';
 
-import { normalizePhone, normalizeEmail, normalizeName } from './utils/normalization';
-
+import { validateContactInput } from './utils/validators';
 
 /**
  * Reusable Lead Creation Engine (End-to-End Pipeline)
@@ -21,27 +20,18 @@ export async function createLead(data: {
 }, request?: ApiRequest) {
   const user_id = request?.user?.id || 'system';
   const timestamp = new Date().toISOString();
-  const phoneNorm = normalizePhone(data.phone || '');
-  const emailNorm = normalizeEmail(data.email);
-  const normalizedName = normalizeName(data.name);
 
-  if (!normalizedName) {
-    throw new Error('Name is required for lead creation.');
-  }
+  // 🛡️ C3: Use Centralized Validation
+  const validated = validateContactInput({
+      name: data.name,
+      phone: data.phone,
+      email: data.email
+  });
 
-  // 🛡️ PT.10: Malformed Input Protection
-  if (normalizedName.length > 200) {
-      throw new Error('Name too long. Please use less than 200 characters.');
-  }
-  if (data.phone && data.phone.length > 50) {
-      throw new Error('Phone number is too long.');
-  }
-  if (data.email && data.email.length > 200) {
-      throw new Error('Email address is too long.');
-  }
+  const { name: normalizedName, phone: phoneNormValue, invalid_phone: isPhoneInvalid, email: emailNorm } = validated;
 
   // 1. Check for Existing Contact (Duplicate Protection - Persistently)
-  const contactRes = await findContact(phoneNorm.normalized, emailNorm, request?.user);
+  const contactRes = await findContact(phoneNormValue, emailNorm, request?.user);
   if (!contactRes.success) {
       throw new Error(`DB_SEARCH_ERROR: ${contactRes.error}`);
   }
@@ -61,7 +51,7 @@ export async function createLead(data: {
       id: contactIdToUseValue,
       user_id: user_id,
       name: normalizedName,
-      phone: phoneNorm.normalized, 
+      phone: phoneNormValue, 
       email: emailNorm, 
       address: data.address || 'Lead API Submission',
       tags: ['web-lead'],
@@ -69,7 +59,7 @@ export async function createLead(data: {
       service: data.service_type || undefined,
       status: 'lead', 
       created_at: timestamp,
-      invalid_phone: phoneNorm.invalid
+      invalid_phone: isPhoneInvalid
     };
 
     // Save to DB
@@ -77,8 +67,8 @@ export async function createLead(data: {
     if (!saveContactRes.success) {
         if (saveContactRes.code === '23505') {
             // 🛡️ REUSE (F3): Another thread beat us to it - locate the winner.
-            console.log(`[Concurrency] Contact duplicate detected for ${phoneNorm.normalized}. Resolving to existing.`);
-            const winner = await findContact(phoneNorm.normalized, emailNorm, request?.user);
+            console.log(`[Concurrency] Contact duplicate detected for ${phoneNormValue}. Resolving to existing.`);
+            const winner = await findContact(phoneNormValue, emailNorm, request?.user);
             if (winner.data) {
                 contactIdToUseValue = winner.data.id;
             } else {
@@ -148,7 +138,7 @@ export async function createLead(data: {
   guardedEmit('lead_created', {
     contact_id: contactIdToUse,
     opportunity_id: oppIdToUse,
-    phone: phoneNorm.normalized,
+    phone: phoneNormValue,
     email: emailNorm,
     pipeline_stage: 'New Lead',
     source: data.source || 'api'

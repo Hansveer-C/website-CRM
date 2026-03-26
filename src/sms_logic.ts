@@ -107,6 +107,8 @@ export async function dispatchSMS(
   };
 }
 
+import { validatePhone, validateMessage } from './utils/validators';
+
 /**
  * Convenience helper for contacts.
  */
@@ -118,15 +120,22 @@ export async function sendMessageToContact(
   trigger_event_id?: string
 ): Promise<{ success: boolean; internal_id?: string; error?: string }> {
   
+  // 🛡️ C3: Centralized Message Content Validation
+  try {
+      validateMessage(messageText);
+  } catch (err: any) {
+      return { success: false, error: err.message };
+  }
+
   const contactRes = await getContact(contact_id, user_id);
   if (!contactRes.success || !contactRes.data) return { success: false, error: contactRes.error || 'Contact lookup failed' };
   const contact = contactRes.data;
 
   if (!contact.phone) return { success: false, error: 'Contact has no phone number' };
 
-  // Basic format check (must look like +1XXXXXXXXXX or standard E.164)
-  const phoneRegex = /^\+\d{10,15}$/;
-  if (!phoneRegex.test(contact.phone)) {
+  // 🛡️ C3: Centralized Phone Validation
+  const phoneVal = validatePhone(contact.phone);
+  if (phoneVal.invalid) {
     return { success: false, error: `Invalid phone format: ${contact.phone}` };
   }
 
