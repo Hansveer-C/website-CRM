@@ -474,6 +474,185 @@ button:active {
     display: flex;
 }
 
+/* ── WB.3.1 Inline Text Editing ─────────────────────────────── */
+
+/* Base editable text element */
+.pb-inline-text {
+    cursor: text;
+    border-radius: 3px;
+    outline: none;
+    transition: background 120ms ease, box-shadow 120ms ease;
+    /* prevent unwanted spacing shifts */
+    min-width: 4px;
+    position: relative;
+}
+
+/* Subtle hover state: warm highlight, text cursor cue */
+.pb-inline-text:hover {
+    background: rgba(37, 99, 235, 0.06);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+/* Active / focused edit mode */
+.pb-inline-text:focus {
+    background: rgba(37, 99, 235, 0.08);
+    box-shadow: 0 0 0 2px #2563EB;
+    cursor: text;
+}
+
+/* Small "Editing" chip that appears while focused */
+.pb-inline-text:focus::before {
+    content: 'Editing';
+    position: absolute;
+    top: -22px;
+    left: 0;
+    background: #2563EB;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 100;
+    font-family: system-ui, sans-serif;
+    opacity: 0;
+    animation: pb-chip-in 120ms ease forwards;
+}
+
+@keyframes pb-chip-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* Prevent accidental section-select click propagation when editing */
+.pb-inline-text[contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+/* ── WB.3.2 Image Picker ─────────────────────────────────────── */
+
+/* Wrapper — establishes stacking context for overlay */
+.pb-image-wrapper {
+    position: relative;
+    display: block;
+    cursor: pointer;
+    overflow: hidden;
+    border-radius: inherit;
+    line-height: 0; /* prevent baseline gap under img */
+}
+
+/* Placeholder shown when no image is set */
+.pb-image-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 220px;
+    background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+    border: 2px dashed #cbd5e0;
+    border-radius: inherit;
+    color: #64748b;
+    transition: background 150ms ease, border-color 150ms ease;
+}
+
+.pb-image-wrapper:hover .pb-image-placeholder {
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    border-color: #2563EB;
+}
+
+/* Semi-transparent overlay that fades in on hover */
+.pb-image-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    opacity: 0;
+    transition: opacity 200ms ease;
+    border-radius: inherit;
+    pointer-events: none; /* let clicks fall through to wrapper */
+}
+
+.pb-image-wrapper:hover .pb-image-overlay {
+    opacity: 1;
+}
+
+.pb-image-overlay-icon {
+    font-size: 2rem;
+    display: block;
+    transform: scale(1);
+    transition: transform 200ms ease;
+}
+
+.pb-image-wrapper:hover .pb-image-overlay-icon {
+    transform: scale(1.15);
+}
+
+/* Loading / progress overlay shown while FileReader runs */
+.pb-image-upload-progress {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.75);
+    display: flex;       /* toggled to none via JS */
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: inherit;
+    z-index: 10;
+    pointer-events: none;
+    backdrop-filter: blur(2px);
+}
+
+/* Spinning ring */
+.pb-image-spinner {
+    width: 36px;
+    height: 36px;
+    border: 3px solid rgba(255,255,255,0.25);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: pb-spin 700ms linear infinite;
+}
+
+@keyframes pb-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ── WB.3.3 FAQ Accordion ────────────────────────────────────── */
+.pb-faq-item.open .pb-faq-answer {
+    max-height: 400px !important;
+    padding-bottom: 4px !important;
+}
+
+.pb-faq-item.open .pb-faq-chevron {
+    transform: rotate(180deg);
+}
+
+.pb-faq-toggle:hover {
+    background: #f8fafc !important;
+}
+
+/* Structured section type labels in left panel (WB.3.3) */
+.pb-component-item:hover .pb-component-icon {
+    transform: scale(1.1);
+    transition: transform 150ms ease;
+}
+
+
 .pb-right-panel {
     width: 320px;
     background: #161616;

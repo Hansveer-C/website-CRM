@@ -285,14 +285,58 @@ export const mockComponents: Component[] = [
     type: 'cta',
     default_content: { 
       heading: 'Ready to Transform Your Home?', 
-      subheading: 'Book your free estimate today and see the difference professional cleaning makes.',
+      subtext: 'Book your free estimate today and see the difference professional cleaning makes.',
       button_text: 'Get My Free Quote',
       button_link: '#form'
     },
     default_styles: { 
       padding: '80px 20px', 
-      cta_background: '#4f46e5' 
+      background: '#4f46e5',
+      color: '#ffffff'
     }
+  },
+  // ── WB.3.3 Structured Section Types ─────────────────────────────────────
+  {
+    id: 'comp-services',
+    name: 'Services Grid',
+    type: 'services',
+    default_content: {
+      heading: 'Our Services',
+      subheading: 'Everything you need, done right.',
+      items: [
+        { icon: '🚿', title: 'Driveway Cleaning', description: 'Remove oil, algae and grime from any surface.' },
+        { icon: '🏠', title: 'House Washing',     description: 'Gentle soft-wash for siding, brick and stucco.' },
+        { icon: '🌿', title: 'Roof Treatment',    description: 'Kill moss and extend your roof\'s life span.' },
+        { icon: '✨', title: 'Patio & Deck',      description: 'Restore natural colour and prevent slipping.' }
+      ]
+    },
+    default_styles: { padding: '80px 20px', background: '#ffffff', text_alignment: 'center' }
+  },
+  {
+    id: 'comp-testimonials',
+    name: 'Testimonials',
+    type: 'testimonial',
+    default_content: {
+      quote: 'The best pressure washing service we\'ve ever used. The driveway looks brand new!',
+      author: 'Sarah M.',
+      location: 'Austin, TX'
+    },
+    default_styles: { padding: '80px 20px', background: '#f8fafc', text_alignment: 'center' }
+  },
+  {
+    id: 'comp-faq',
+    name: 'FAQ',
+    type: 'faq',
+    default_content: {
+      heading: 'Frequently Asked Questions',
+      items: [
+        { question: 'How long does a typical job take?',   answer: 'Most residential jobs are completed in 1–3 hours depending on the size.' },
+        { question: 'Is pressure washing safe for my home?', answer: 'Yes — we use appropriate PSI and soft-wash techniques for every surface.' },
+        { question: 'Do I need to be home during the service?', answer: 'No, as long as we have access to an outdoor water source.' },
+        { question: 'How often should I get my driveway cleaned?', answer: 'We recommend once per year to prevent build-up and surface damage.' }
+      ]
+    },
+    default_styles: { padding: '80px 20px', background: '#ffffff' }
   }
 ];
 

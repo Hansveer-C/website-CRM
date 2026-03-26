@@ -900,32 +900,38 @@ function _renderBuilder() {
         </div>
       </header>
       <div class="pb-layout" style="flex: 1;">
-        <!-- Left Panel: Navigator & Components -->
+        <!-- Left Panel: Structured Sections -->
         <aside class="pb-left-panel">
           <div class="pb-panel-header">
-            <h3>Library</h3>
-            <span style="font-size: 0.7rem; background: #333; padding: 2px 6px; border-radius: 4px; color: #888;">${mockComponents.length} Assets</span>
+            <h3>Sections</h3>
+            <span style="font-size: 0.7rem; background: #1a472a; color: #4ade80; padding: 2px 8px; border-radius: 4px; font-weight: 700;">WB.3.3</span>
           </div>
-          
+
           <div class="pb-component-list">
+            <div style="font-size: 0.65rem; color: #555; margin-bottom: 14px; line-height: 1.5; padding: 10px; background: #111; border-radius: 6px; border: 1px solid #1e1e1e;">
+              Click a section type below to add it to your page. Use ↑↓ on the canvas to reorder.
+            </div>
+
             ${[
-      { title: 'Basic', types: ['text', 'button', 'image'], icon: '📄' },
-      { title: 'Layout', types: ['hero', 'section'], icon: '🖼️' },
-      { title: 'Forms', types: ['form'], icon: '📝' },
-      { title: 'Advanced', types: ['cta', 'pricing', 'testimonial'], icon: '⚡' }
-    ].map(cat => `
-              <div style="font-size: 0.7rem; color: #888; margin: ${cat.title === 'Basic' ? '0 0 12px 0' : '24px 0 12px 0'}; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">${cat.title}</div>
-              ${mockComponents.filter(c => cat.types.includes(c.type)).map(comp => `
-                <div class="pb-component-item" onclick="window.addSectionToPage('${comp.id}')">
-                  <div class="pb-component-icon">${cat.icon}</div>
-                  <div>
-                    <div style="font-weight: 600; font-size: 0.8rem; color: white;">${comp.name}</div>
-                  </div>
+      { id: 'comp1',            icon: '🦸',  label: 'Hero',          desc: 'Full-width headline + CTA' },
+      { id: 'comp-services',    icon: '⚙️',  label: 'Services',      desc: '4-card service grid' },
+      { id: 'comp-testimonials', icon: '💬', label: 'Testimonials',  desc: 'Customer quote block' },
+      { id: 'comp6',            icon: '🎯',  label: 'CTA',           desc: 'Conversion call-to-action' },
+      { id: 'comp-faq',         icon: '❓',  label: 'FAQ',           desc: 'Expandable Q&A list' },
+      { id: 'comp3',            icon: '📋',  label: 'Form',          desc: 'Lead capture form' },
+      { id: 'comp4',            icon: '🖼️', label: 'Image',         desc: 'Full-width image' },
+      { id: 'comp2',            icon: '📄',  label: 'Text',          desc: 'Rich text block' }
+    ].map(item => `
+              <div class="pb-component-item" onclick="window.addStructuredSection('${item.id}')">
+                <div class="pb-component-icon" style="font-size: 1.2rem;">${item.icon}</div>
+                <div>
+                  <div style="font-weight: 700; font-size: 0.85rem; color: white;">${item.label}</div>
+                  <div style="font-size: 0.7rem; color: #666; margin-top: 2px;">${item.desc}</div>
                 </div>
-              `).join('')}
+              </div>
             `).join('')}
           </div>
-          
+
           <div style="margin-top: auto; padding: 15px; background: #111; border-top: 1px solid #222;">
              <select onchange="window.switchBuilderPage(this.value)" style="width: 100%; padding: 10px; border-radius: 6px; background: #000; border: 1px solid #333; color: white; font-size: 0.8rem; font-weight: 600;">
                 ${mockPages.map(p => `<option value="${p.id}" ${p.id === builderPageId ? 'selected' : ''}>${p.name}</option>`).join('')}
@@ -972,11 +978,11 @@ function _renderBuilder() {
                       </div>
 
                       <div class="pb-section-controls">
-                        <button title="Add section below" onclick="event.stopPropagation(); window.showComponentPickerAt('${order}')" style="background: #28a745; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: 600;">+ Add</button>
-                        <button title="Duplicate section" onclick="event.stopPropagation(); window.duplicateBuilderSection('${section.id}')" style="background: #ffc107; color: #000; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: 600;">Copy</button>
-                        <button title="Move Up" onclick="event.stopPropagation(); window.moveSection('${section.id}', -1)" style="background: #333; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: 600;">↑</button>
-                        <button title="Move Down" onclick="event.stopPropagation(); window.moveSection('${section.id}', 1)" style="background: #333; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: 600;">↓</button>
-                        <button title="Delete section" onclick="event.stopPropagation(); window.removeSection('${section.id}')" style="background: #dc3545; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: 600;">Delete</button>
+                        <span style="font-size: 0.65rem; color: #888; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em; margin-right: 4px;">${section.type}</span>
+                        <button title="Move Up" onclick="event.stopPropagation(); window.moveSection('${section.id}', -1)" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">↑ Up</button>
+                        <button title="Move Down" onclick="event.stopPropagation(); window.moveSection('${section.id}', 1)" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">↓ Down</button>
+                        <button title="Duplicate section" onclick="event.stopPropagation(); window.duplicateBuilderSection('${section.id}')" style="background: #78350f; color: #fcd34d; border: 1px solid #92400e; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">Copy</button>
+                        <button title="Delete section" onclick="event.stopPropagation(); window.removeSection('${section.id}')" style="background: #7f1d1d; color: #fca5a5; border: 1px solid #991b1b; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">🗑 Delete</button>
                       </div>
                   </div>
                 ` : ''}
@@ -1113,45 +1119,282 @@ function renderSectionSettings(section: any) {
   }
 };
 
+/**
+ * WB.3.1 — Inline text edit: save without re-rendering the builder.
+ * Called from contenteditable onblur. Persists value to the in-memory
+ * store and triggers the autosave indicator only.
+ */
+(window as any).saveInlineEdit = (sectionId: string, field: string, el: HTMLElement) => {
+  const section = mockPageSections.find((s: any) => s.id === sectionId);
+  if (!section) return;
+  const value = el.innerText;
+  (section as any).content[field] = value;
+  (window as any).triggerAutoSave();
+  // Sync inspector panel value if it exists (non-destructive)
+  const inspectorInput = document.querySelector(
+    `[data-inspector-field="${sectionId}:${field}"]`
+  ) as HTMLInputElement | null;
+  if (inspectorInput) inspectorInput.value = value;
+};
+
+/**
+ * WB.3.1 — Inline editable text span helper.
+ * Renders a contenteditable span that saves on blur without re-rendering the builder.
+ */
+function inlineText(sectionId: string, field: string, value: string, extraStyle: string = ''): string {
+  const safe = (value || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  return `<span
+    class="pb-inline-text"
+    contenteditable="true"
+    data-section-id="${sectionId}"
+    data-field="${field}"
+    style="${extraStyle}"
+    onclick="event.stopPropagation()"
+    onblur="window.saveInlineEdit('${sectionId}', '${field}', this)"
+    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.blur();}"
+  >${safe}</span>`;
+}
+
 function renderSectionPreviewContent(section: any) {
   const content = section.content;
+  const id = section.id;
+
   switch (section.type) {
-    case 'hero':
+    case 'hero': {
+      const headingField = content.heading !== undefined ? 'heading' : 'title';
+      const subField = content.subheading !== undefined ? 'subheading' : 'subtitle';
+      const btnField = content.button_text !== undefined ? 'button_text' : 'buttonText';
+      const textAlign = section.styles.text_alignment === 'center' ? 'auto' : '0';
       return `
-        <h1 style="font-size: 3rem; margin-bottom: 1.5rem; font-weight: 800;">${content.heading || content.title || 'Hero Heading'}</h1>
-        <p style="font-size: 1.5rem; opacity: 0.9; margin-bottom: 2.5rem; max-width: 600px; margin-left: ${section.styles.text_alignment === 'center' ? 'auto' : '0'}; margin-right: ${section.styles.text_alignment === 'center' ? 'auto' : '0'};">${content.subheading || content.subtitle || 'Hero Subheading'}</p>
-        <button class="btn-primary" style="padding: 15px 30px; font-size: 1.1rem; border-radius: 50px;">${content.button_text || content.buttonText || 'Action'}</button>
+        <h1 style="font-size: 3rem; margin-bottom: 1.5rem; font-weight: 800;">
+          ${inlineText(id, headingField, content[headingField] || 'Hero Heading', 'display:block;width:100%;')}
+        </h1>
+        <p style="font-size: 1.5rem; opacity: 0.9; margin-bottom: 2.5rem; max-width: 600px; margin-left: ${textAlign}; margin-right: ${textAlign};">
+          ${inlineText(id, subField, content[subField] || 'Hero Subheading', 'display:block;width:100%;')}
+        </p>
+        <button class="btn-primary" style="padding: 15px 30px; font-size: 1.1rem; border-radius: 50px; pointer-events: none;">
+          ${inlineText(id, btnField, content[btnField] || 'Action')}
+        </button>
       `;
-    case 'text':
-      return `<div style="line-height: 1.6; font-size: ${section.styles.font_size || 'inherit'}">${content.text || 'Text content goes here...'}</div>`;
-    case 'image':
-      return `<img src="${content.image_url || content.url}" alt="Image" style="width: 100%; height: auto; border-radius: inherit;">`;
-    case 'form':
+    }
+    case 'text': {
       return `
-        <h3 style="margin-bottom: 20px; color: var(--primary-color);">${content.title || 'Contact Form'}</h3>
+        <div style="line-height: 1.6; font-size: ${section.styles.font_size || 'inherit'}">
+          ${inlineText(id, 'text', content.text || 'Text content goes here...', 'display:block;width:100%;white-space:pre-wrap;')}
+        </div>`;
+    }
+    case 'image': {
+      const imgSrc = content.image_url || content.url || '';
+      const imgField = content.image_url !== undefined ? 'image_url' : 'url';
+      const hasImage = Boolean(imgSrc);
+      return `
+        <div class="pb-image-wrapper"
+             id="imgwrap-${id}"
+             onclick="window.openImagePicker('${id}', '${imgField}')"
+             title="Click to replace image">
+          ${hasImage
+            ? `<img id="pb-img-${id}" src="${imgSrc}" alt="Section image"
+                    style="width: 100%; height: auto; display: block; border-radius: inherit;">`
+            : `<div class="pb-image-placeholder" id="pb-img-${id}">
+                 <span style="font-size:2.5rem;">🖼️</span>
+                 <span style="font-size:0.9rem; font-weight:600; color:#94a3b8;">Click to add an image</span>
+               </div>`
+          }
+          <div class="pb-image-overlay">
+            <span class="pb-image-overlay-icon">📷</span>
+            <span>Click to replace</span>
+          </div>
+          <div class="pb-image-upload-progress" id="pb-img-progress-${id}" style="display:none;">
+            <div class="pb-image-spinner"></div>
+            <span>Reading file…</span>
+          </div>
+        </div>`;
+    }
+    case 'form': {
+      return `
+        <h3 style="margin-bottom: 20px; color: var(--primary-color);">
+          ${inlineText(id, 'title', content.title || 'Contact Form', 'display:block;width:100%;')}
+        </h3>
         <div style="display: flex; flex-direction: column; gap: 15px;">
           ${(content.fields || []).map((f: string) => `
             <div class="form-group" style="margin-bottom: 0;">
-              <input type="${f === 'email' ? 'email' : 'text'}" 
-                     id="pf-${f}-${section.id}" 
-                     placeholder="Your ${f.charAt(0).toUpperCase() + f.slice(1)}" 
-                     style="padding: 12px; border: 1px solid #cbd5e0; border-radius: 6px; width: 100%; focus: border-color: var(--primary-color);">
+              <input type="${f === 'email' ? 'email' : 'text'}"
+                     id="pf-${f}-${id}"
+                     placeholder="Your ${f.charAt(0).toUpperCase() + f.slice(1)}"
+                     style="padding: 12px; border: 1px solid #cbd5e0; border-radius: 6px; width: 100%;">
             </div>
           `).join('')}
-          <button class="btn-primary" 
-                  style="padding: 14px; font-weight: 700; margin-top: 10px;" 
-                  onclick="window.submitBuilderForm('${section.id}')">
-            Submit Request
+          <button class="btn-primary" style="padding: 14px; font-weight: 700; margin-top: 10px; pointer-events: none;">
+            ${inlineText(id, 'submit_label', content.submit_label || 'Submit Request')}
           </button>
         </div>
       `;
-    case 'button':
+    }
+    case 'button': {
       const sizeMap: any = { small: '8px 16px', medium: '12px 24px', large: '16px 32px' };
-      return `<button class="btn-primary" style="background: ${section.styles.color || 'var(--primary-color)'}; padding: ${sizeMap[section.styles.size] || '12px 24px'}" onclick="alert('Link: ${content.link}')">${content.label || content.text || 'Click Here'}</button>`;
+      const btnField = content.label !== undefined ? 'label' : 'text';
+      return `<button class="btn-primary" style="background: ${section.styles.color || 'var(--primary-color)'}; padding: ${sizeMap[section.styles.size] || '12px 24px'}; pointer-events: none;">
+        ${inlineText(id, btnField, content[btnField] || 'Click Here')}
+      </button>`;
+    }
+    case 'cta': {
+      return `
+        <div style="text-align: center; padding: 40px 20px;">
+          <h2 style="font-size: 2.2rem; margin-bottom: 12px; font-weight: 800;">
+            ${inlineText(id, 'heading', content.heading || 'Ready to get started?', 'display:block;width:100%;')}
+          </h2>
+          <p style="font-size: 1.1rem; opacity: 0.8; margin-bottom: 28px;">
+            ${inlineText(id, 'subtext', content.subtext || 'Join thousands of happy customers.', 'display:block;width:100%;')}
+          </p>
+          <button class="btn-primary" style="padding: 14px 32px; font-size: 1.1rem; border-radius: 50px; pointer-events: none;">
+            ${inlineText(id, 'button_text', content.button_text || 'Get Started')}
+          </button>
+        </div>`;
+    }
+    case 'testimonial': {
+      return `
+        <div style="text-align: center; padding: 40px 20px;">
+          <p style="font-size: 1.3rem; font-style: italic; margin-bottom: 20px; opacity: 0.9;">
+            &ldquo;${inlineText(id, 'quote', content.quote || 'This service changed everything for us.', 'display:inline;')}&rdquo;
+          </p>
+          <strong style="font-size: 1rem;">&mdash; ${inlineText(id, 'author', content.author || 'Happy Customer', 'display:inline;')}</strong>
+        </div>`;
+    }
+    case 'pricing': {
+      return `
+        <div style="text-align: center; padding: 40px 20px;">
+          <h2 style="font-size: 2rem; font-weight: 800; margin-bottom: 8px;">${inlineText(id, 'plan_name', content.plan_name || 'Standard Plan', 'display:block;width:100%;')}</h2>
+          <div style="font-size: 3rem; font-weight: 900; color: var(--primary-color); margin: 12px 0;">${inlineText(id, 'price', content.price || '$99', 'display:inline;')}</div>
+          <p style="opacity: 0.7; margin-bottom: 24px;">${inlineText(id, 'description', content.description || 'Everything you need to get started.', 'display:block;width:100%;')}</p>
+          <button class="btn-primary" style="padding: 14px 32px; font-size: 1.1rem; pointer-events: none;">${inlineText(id, 'cta', content.cta || 'Choose Plan')}</button>
+        </div>`;
+    }
+    // ── WB.3.3 Structured Section Types ─────────────────────────────────────
+    case 'services': {
+      const items: any[] = content.items || [];
+      return `
+        <div style="padding: 60px 40px;">
+          <div style="text-align: center; margin-bottom: 48px;">
+            <h2 style="font-size: 2.2rem; font-weight: 800; margin-bottom: 12px;">
+              ${inlineText(id, 'heading', content.heading || 'Our Services', 'display:block;width:100%;')}
+            </h2>
+            <p style="font-size: 1.1rem; opacity: 0.7; max-width: 560px; margin: 0 auto;">
+              ${inlineText(id, 'subheading', content.subheading || 'Everything you need, done right.', 'display:block;width:100%;')}
+            </p>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px;">
+            ${items.map((item: any, idx: number) => `
+              <div style="background: #f8fafc; border-radius: 12px; padding: 28px 20px; text-align: center; border: 1px solid #e2e8f0; transition: box-shadow 0.2s;">
+                <div style="font-size: 2.5rem; margin-bottom: 14px;">${item.icon || '✨'}</div>
+                <h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 8px; color: #1e293b;">${item.title || 'Service ' + (idx + 1)}</h3>
+                <p style="font-size: 0.875rem; color: #64748b; line-height: 1.6;">${item.description || ''}</p>
+              </div>
+            `).join('')}
+          </div>
+        </div>`;
+    }
+    case 'faq': {
+      const faqs: any[] = content.items || [];
+      return `
+        <div style="padding: 60px 40px; max-width: 760px; margin: 0 auto;">
+          <h2 style="font-size: 2.2rem; font-weight: 800; margin-bottom: 36px; text-align: center;">
+            ${inlineText(id, 'heading', content.heading || 'Frequently Asked Questions', 'display:block;width:100%;')}
+          </h2>
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            ${faqs.map((faq: any, idx: number) => `
+              <div class="pb-faq-item" style="border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; background: #fff;">
+                <button class="pb-faq-toggle" onclick="this.closest('.pb-faq-item').classList.toggle('open'); event.stopPropagation();"
+                        style="width: 100%; text-align: left; padding: 18px 20px; background: transparent; border: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 1rem; font-weight: 600; color: #1e293b;">
+                  <span>${faq.question || 'Question ' + (idx + 1)}</span>
+                  <span class="pb-faq-chevron" style="font-size: 0.85rem; color: #94a3b8; flex-shrink: 0; transition: transform 200ms ease;">▼</span>
+                </button>
+                <div class="pb-faq-answer" style="padding: 0 20px; max-height: 0; overflow: hidden; transition: max-height 250ms ease, padding 250ms ease;">
+                  <p style="padding-bottom: 16px; color: #475569; line-height: 1.7; font-size: 0.95rem;">${faq.answer || ''}</p>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>`;
+    }
     default:
       return `<pre>${JSON.stringify(content, null, 2)}</pre>`;
   }
 }
+
+// ── WB.3.2 Image Picker ─────────────────────────────────────────────────────
+/**
+ * Opens a hidden file-input, reads the selected image as a data URL,
+ * updates the canvas img element in-place (no re-render flicker),
+ * persists to the in-memory store, and fires auto-save.
+ */
+(window as any).openImagePicker = (sectionId: string, field: string) => {
+  // Avoid stacking inputs
+  const existingInput = document.getElementById('pb-hidden-file-input');
+  if (existingInput) existingInput.remove();
+
+  const input = document.createElement('input');
+  input.id = 'pb-hidden-file-input';
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.style.display = 'none';
+  document.body.appendChild(input);
+
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    if (!file) return;
+
+    // Show loading overlay on the image wrapper
+    const progress = document.getElementById(`pb-img-progress-${sectionId}`);
+    const wrapper  = document.getElementById(`imgwrap-${sectionId}`);
+    if (progress) progress.style.display = 'flex';
+    if (wrapper)  wrapper.style.pointerEvents = 'none';
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+
+      // ── 1. Instant DOM patch (no full re-render) ──────────────────────
+      const imgEl = document.getElementById(`pb-img-${sectionId}`) as HTMLImageElement | null;
+      if (imgEl && imgEl.tagName === 'IMG') {
+        imgEl.src = dataUrl;
+      } else if (imgEl) {
+        // Was placeholder div — replace with real img
+        const newImg = document.createElement('img');
+        newImg.id = `pb-img-${sectionId}`;
+        newImg.src = dataUrl;
+        newImg.alt = 'Section image';
+        newImg.style.cssText = 'width:100%;height:auto;display:block;border-radius:inherit;';
+        imgEl.replaceWith(newImg);
+      }
+
+      // ── 2. Persist to in-memory store ──────────────────────────────────
+      const section = mockPageSections.find((s: any) => s.id === sectionId);
+      if (section) {
+        (section as any).content[field] = dataUrl;
+        (window as any).triggerAutoSave();
+      }
+
+      // ── 3. Dismiss loading state ──────────────────────────────────────
+      if (progress) progress.style.display = 'none';
+      if (wrapper)  wrapper.style.pointerEvents = '';
+      (window as any).showToast('Image updated ✓');
+
+      input.remove();
+    };
+
+    reader.onerror = () => {
+      if (progress) progress.style.display = 'none';
+      if (wrapper)  wrapper.style.pointerEvents = '';
+      (window as any).showToast('Could not read image file.');
+      input.remove();
+    };
+
+    reader.readAsDataURL(file);
+  });
+
+  // Trigger the native file picker
+  input.click();
+};
 
 // Global functions for Builder interaction
 (window as any).switchBuilderPage = (id: string, noSkeleton = false) => {
@@ -1210,19 +1453,16 @@ function renderSectionPreviewContent(section: any) {
   (window as any).triggerAutoSave();
 };
 
-(window as any).addSectionToPage = (componentId: string) => {
-  const component = mockComponents.find(c => c.id === componentId);
+(window as any).addStructuredSection = (componentId: string) => {
+  const component = mockComponents.find((c: any) => c.id === componentId);
   if (!component) return;
 
-  const currentSections = mockPageSections.filter(s => s.page_id === builderPageId);
-  let orderToInsertAt = 0;
+  const currentSections = mockPageSections.filter((s: any) => s.page_id === builderPageId);
+  const orderToInsertAt = builderInsertOrder !== null
+    ? builderInsertOrder
+    : Math.max(...currentSections.map((s: any) => s.order), 0) + 1;
 
-  if (builderInsertOrder !== null) {
-    orderToInsertAt = builderInsertOrder;
-    builderInsertOrder = null; // reset
-  } else {
-    orderToInsertAt = Math.max(...currentSections.map(s => s.order), 0) + 1;
-  }
+  builderInsertOrder = null;
 
   const newSection = {
     id: `sec-${Date.now()}`,
@@ -1236,7 +1476,16 @@ function renderSectionPreviewContent(section: any) {
   mockPageSections.push(newSection);
   builderSelectedSectionId = newSection.id;
   (window as any).triggerAutoSave();
-  (window as any).navigateTo('builder');
+  renderBuilder(); // stay on builder — no navigation
+  // Scroll newly added section into view
+  setTimeout(() => {
+    document.getElementById(`sec-preview-${newSection.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 80);
+};
+
+// Keep legacy addSectionToPage working (used by duplicateBuilderSection + right-panel)
+(window as any).addSectionToPage = (componentId: string) => {
+  (window as any).addStructuredSection(componentId);
 };
 
 (window as any).removeSection = (id: string) => {
