@@ -139,6 +139,7 @@ export async function sendMessageToContact(
   // 🛡️ C4: Standardized Phone Validation
   const phoneVal = validatePhone(contact.phone);
   if (phoneVal.invalid) {
+    emitEvent('invalid_input_attempt', { user_id, contact_id, field: 'phone', reason: 'malformed_contact_phone' }, user_id);
     return new ValidationError('phone', `Invalid phone format: ${contact.phone}`).serialize() as any;
   }
 
@@ -153,6 +154,7 @@ export async function sendMessageToContact(
   // Anti-Spam (Rate Limit per Contact: Max 3 per minute)
   const contactCountRes = await countRecentOutboundMessages(contact_id, sinceIso, user_id);
   if (contactCountRes.success && (contactCountRes.data || 0) >= 3) {
+    emitEvent('rate_limit_exceeded', { user_id, contact_id, type: 'contact' }, user_id);
     emitEvent('sms_attempt_skipped', { contact_id, user_id, status: 'skipped', reason: 'contact_rate_limit' }, user_id);
     return { success: false, error: 'Rate limit hit' };
   }
@@ -162,6 +164,7 @@ export async function sendMessageToContact(
     const userCountRes = await countUserTotalRecentMessages(user_id, sinceIso);
     if (userCountRes.success && (userCountRes.data || 0) >= 5) {
       console.warn(`[SMS SECURITY] User ${user_id} hit global rate limit (5 msgs/min). Blocking send.`);
+      emitEvent('rate_limit_exceeded', { user_id, contact_id, type: 'global' }, user_id);
       emitEvent('sms_attempt_skipped', { user_id, contact_id, status: 'skipped', reason: 'user_global_rate_limit', limit: 5 }, user_id);
       return { success: false, error: 'Global rate limit hit. Please wait a minute before sending more messages.' };
     }
@@ -169,6 +172,10 @@ export async function sendMessageToContact(
 
   const result = await dispatchSMS(contact_id, contact.phone, messageText, undefined, source, user_id, trigger_event_id);
   
+  if (result.twilio_result?.error === 'timeout') {
+      emitEvent('timeout', { user_id, contact_id, operation: 'SEND_SMS', source: 'sms' }, user_id);
+  }
+
   return {
     success: !!result.success,
     internal_id: result.internal_id,

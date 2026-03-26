@@ -8,6 +8,7 @@ import { createLead } from './leads_logic';
 import { getContactTimeline } from './timeline';
 import { mapRepoToApi } from './utils/api_errors';
 import { ValidationError } from './utils/validators';
+import { emitEvent } from './events';
 
 /**
  * Shared logic to handle specific record retrieval with user scoping.
@@ -25,6 +26,12 @@ async function getRecordById(req: ApiRequest, fetcher: (id: string, user: any) =
 
     try {
         const res = await fetcher(id, req.user);
+        
+        if (res.error === 'timeout') {
+            emitEvent('timeout', { user_id: userId, operation, source: res.source }, userId);
+            return { status: 504, error: 'The request timed out. Please try again later.' };
+        }
+
         const apiRes = mapRepoToApi(res, { resourceName: operation.split('_')[1] });
         if (apiRes.status === 200 && !apiRes.data) {
              return { status: 404, error: 'Record not found.' };
@@ -89,6 +96,7 @@ export async function createLeadApi(req: ApiRequest) {
         const userId = req.user?.id || 'anonymous';
         
         if (error instanceof ValidationError) {
+            emitEvent('invalid_input_attempt', { user_id: userId, field: error.field, reason: error.reason }, userId);
             return {
                 status: 400,
                 ...error.serialize()
@@ -130,6 +138,10 @@ export async function getContactTimelineApi(req: ApiRequest, id: string) {
 
         const timelineRes = await getContactTimeline(id, req.user);
         if (!timelineRes.success) {
+            if (timelineRes.error === 'timeout') {
+                emitEvent('timeout', { user_id: userId, operation: 'GET_TIMELINE', source: timelineRes.source }, userId);
+                return { status: 504, error: 'The request timed out.' };
+            }
             return { status: 500, error: timelineRes.error || 'Failed to build timeline.' };
         }
 
