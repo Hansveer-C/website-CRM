@@ -1,6 +1,6 @@
 import { emitEvent } from './events';
 import { runAutomations } from './automation';
-import { persistContact, findContact } from './contacts_repo';
+import { persistContact, findContact, deleteContact } from './contacts_repo';
 import { persistOpportunity, getOpportunitiesByContact } from './opportunities_repo';
 import { Contact, Opportunity, ApiRequest } from './types';
 
@@ -37,6 +37,7 @@ export async function createLead(data: {
   const existingContact = contactRes.data;
 
   let contactIdToUseValue: string;
+  let isNewContact = false;
 
   if (existingContact) {
     contactIdToUseValue = existingContact.id;
@@ -55,6 +56,7 @@ export async function createLead(data: {
     }
   } else {
     contactIdToUseValue = `c-${Date.now()}`;
+    isNewContact = true;
     const newContact: Contact = {
       id: contactIdToUseValue,
       user_id: user_id,
@@ -92,9 +94,13 @@ export async function createLead(data: {
     created_at: timestamp
   };
 
-  // Save to DB
+  // Save to DB with Transaction-Like Rollback
   const saveOppRes = await persistOpportunity(newOpportunity);
   if (!saveOppRes.success) {
+      if (isNewContact) {
+          console.warn(`[ROLLBACK] Opportunity failed. Deleting orphaned contact ${contactIdToUseValue}...`);
+          await deleteContact(contactIdToUseValue, request?.user);
+      }
       throw new Error(`DB_SAVE_OPPORTUNITY_ERROR: ${saveOppRes.error}`);
   }
 

@@ -39,7 +39,7 @@ export async function endCallApi(req: ApiRequest) {
     if (authError) return authError;
 
     try {
-        const result = await endCall(req.body);
+        const result = await endCall(req.body, req.user);
         return {
             status: 200,
             data: result

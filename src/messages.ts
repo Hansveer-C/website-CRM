@@ -1,6 +1,6 @@
 import { Message, User } from './types';
 import * as repo from './messages_repo';
-import { getContact } from './contacts_repo';
+import { resolveContactOwner } from './contacts_repo';
 import { getOpportunitiesByContact } from './opportunities_repo';
 import { persistMessage, getMessagesByContact } from './messages_repo';
 
@@ -11,17 +11,17 @@ import { persistMessage, getMessagesByContact } from './messages_repo';
  * @returns { boolean } - True if saved successfully, false otherwise.
  */
 export async function saveMessage(message: Partial<Message> & { contact_id: string }): Promise<boolean> {
-  // Validate contact_id exists
-  const contactRes = await getContact(message.contact_id, 'INTERNAL_SYSTEM_BYPASS');
-  if (!contactRes.success || !contactRes.data) {
-    console.error(`[Message Error] Invalid contact_id: ${message.contact_id}`);
+  // Resolve Owner if not provided
+  const ownerId = message.user_id || await resolveContactOwner(message.contact_id);
+  
+  if (!ownerId) {
+    console.error(`[Message Error] Could not resolve owner for contact: ${message.contact_id}`);
     return false;
   }
-  const contact = contactRes.data;
 
   // OPTIONAL: Attach opportunity_id if one exists for the contact (Link to the latest open deal)
   if (!message.opportunity_id) {
-    const oppsRes = await getOpportunitiesByContact(message.contact_id, 'INTERNAL_SYSTEM_BYPASS');
+    const oppsRes = await getOpportunitiesByContact(message.contact_id, ownerId);
     if (oppsRes.success && oppsRes.data) {
         const latestOpp = oppsRes.data
           .filter(o => o.status === 'open')
@@ -36,7 +36,7 @@ export async function saveMessage(message: Partial<Message> & { contact_id: stri
   // 3. Build the complete Message object with defaults
   const finalMessage: Message = {
     id: message.id || `msg-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    user_id: message.user_id || contact.user_id || 'system',
+    user_id: ownerId,
     contact_id: message.contact_id,
     opportunity_id: message.opportunity_id,
     direction: message.direction || 'outbound',

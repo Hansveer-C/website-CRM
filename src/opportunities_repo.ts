@@ -15,13 +15,20 @@ export const OpportunitiesRepo = {
    */
   async createOpportunity(opportunity: Opportunity): Promise<RepoResponse<Opportunity>> {
     console.log(`[DB: SUPABASE OPPORTUNITY] Persisting ${opportunity.id} for contact ${opportunity.contact_id}.`);
-    
+    const userId = opportunity.user_id;
+
     const payload = {
       ...opportunity,
       value: Number(opportunity.value) || 0
     };
 
-    return safeDbCall('CREATE_OPPORTUNITY', opportunity.user_id, supabase
+    // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
+    const { data: existing } = await supabase.from('opportunities').select('user_id').eq('id', opportunity.id).maybeSingle();
+    if (existing && existing.user_id !== userId) {
+        return { success: false, error: 'ACCESS_DENIED_CROSS_TENANT' };
+    }
+
+    return safeDbCall('CREATE_OPPORTUNITY', userId, supabase
       .from('opportunities')
       .upsert(payload)
       .select()
@@ -104,13 +111,38 @@ export const OpportunitiesRepo = {
    */
   async getAllOpportunities(user?: User | string | null): Promise<RepoResponse<Opportunity[]>> {
     return this.getOpportunities(user);
+  },
+
+  /**
+   * Permanently deletes an opportunity, scoped to user.
+   */
+  async deleteOpportunity(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
+    const userId = typeof user === 'string' ? user : (user?.id);
+    if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
+
+    return safeDbCall('DELETE_OPPORTUNITY', userId, supabase
+      .from('opportunities')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId)
+    );
+  },
+
+  async resolveOwnerId(opportunityId: string): Promise<string | null> {
+    const { data } = await supabase
+      .from('opportunities')
+      .select('user_id')
+      .eq('id', opportunityId)
+      .maybeSingle();
+    
+    if (data) {
+        console.log(`[SYSTEM AUTH] Resolved owner for opportunity ${opportunityId}: ${data.user_id}`);
+    }
+    return data?.user_id || null;
   }
 };
 
 // --- Standard Individual Exports ---
-/**
- * Persist opportunity to Supabase.
- */
 export async function createOpportunity(opportunity: Opportunity): Promise<RepoResponse<Opportunity>> {
     return OpportunitiesRepo.createOpportunity(opportunity);
 }
@@ -139,3 +171,10 @@ export async function getAllOpportunities(user?: User | string | null): Promise<
     return OpportunitiesRepo.getOpportunities(user);
 }
 
+export async function deleteOpportunity(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
+    return OpportunitiesRepo.deleteOpportunity(id, user);
+}
+
+export async function resolveOpportunityOwner(oppId: string): Promise<string | null> {
+    return OpportunitiesRepo.resolveOwnerId(oppId);
+}

@@ -16,11 +16,6 @@ import { User } from './types';
  * @returns { sql: string, params: any[] }
  */
 export function applyUserScope(baseQuery: string, user: User | string | null | undefined): { sql: string, params: any[] } {
-  // Special Case: Allow internal system tasks to ignore user scoping
-  if (user === 'INTERNAL_SYSTEM_BYPASS') {
-    return { sql: baseQuery, params: [] };
-  }
-
   const userId = typeof user === 'string' ? user : (user?.id);
 
   // 1. Safe Fallback: If no user context, return a query that returns NO results 

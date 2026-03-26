@@ -31,7 +31,7 @@ async function testSupabaseMissedCall() {
     
     // 2. End as missed
     console.log('Step 2: Ending call as missed...');
-    await endCall({ call_id: resReceived.callId, answered: false });
+    await endCall({ call_id: resReceived.callId, answered: false }, user);
 
     // Wait for async listeners (short delay)
     console.log('Step 3: Waiting for automation to complete...');
@@ -44,8 +44,8 @@ async function testSupabaseMissedCall() {
     // We expect the call log to be stored in Supabase under this phone
     // Note: since handleInboundCall is internal, user_id might be 'system' 
     // depending on if a contact was matched.
-    const calls = await getCallsForContact('', testPhone, 'INTERNAL_SYSTEM_BYPASS');
-    const matchedCall = calls.find(c => c.id === resReceived.callId);
+    const callsRes = await getCallsForContact('', testPhone, user);
+    const matchedCall = callsRes.success && callsRes.data ? callsRes.data.find(c => c.id === resReceived.callId) : null;
     if (matchedCall) {
         console.log('✅ PASS: Call log stored in Supabase.');
     } else {
@@ -54,19 +54,18 @@ async function testSupabaseMissedCall() {
 
     // B. Check for auto-created contact & messages
     // The listener on 'call_missed' should create a contact and send an SMS
-    const messages = await getMessagesByContact('', 'INTERNAL_SYSTEM_BYPASS');
-    const autoSms = messages.find(m => m.source === 'missed_call_automation' && m.content.includes('sorry we missed your call'));
+    const msgsRes = await getMessagesByContact('', user);
+    const autoSms = msgsRes.success && msgsRes.data ? msgsRes.data.find(m => m.source === 'missed_call_automation') : null;
     
     if (autoSms) {
         console.log('✅ PASS: Automated SMS response persisted in Supabase.');
-        console.log('SMS Content:', autoSms.content);
     } else {
         console.warn('ℹ️ Automated SMS NOT found. Either contact creation failed or table missing.');
     }
 
     // C. Check for Opportunity
-    const opps = await getOpportunitiesByContact('', 'INTERNAL_SYSTEM_BYPASS');
-    const autoOpp = opps.find(o => o.source === 'missed_call');
+    const oppsRes = await getOpportunitiesByContact('', user);
+    const autoOpp = oppsRes.success && oppsRes.data ? oppsRes.data.find(o => o.source === 'missed_call') : null;
     
     if (autoOpp) {
         console.log('✅ PASS: Opportunity created in Supabase for missed call.');

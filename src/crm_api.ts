@@ -1,7 +1,7 @@
 import { ApiRequest } from './types';
 import { apiMiddleware, requireAuth } from './middleware';
-import { getContact } from './contacts_repo';
-import { getOpportunity } from './opportunities_repo';
+import { getContact, deleteContact } from './contacts_repo';
+import { getOpportunity, deleteOpportunity } from './opportunities_repo';
 import { getMessage } from './messages_repo';
 import { getCall } from './calls_repo';
 import { createLead } from './leads_logic';
@@ -125,6 +125,38 @@ export async function getContactTimelineApi(req: ApiRequest, id: string) {
         return {
             status: 500,
             error: 'Failed to retrieve timeline.'
+        };
+    }
+}
+/**
+ * DELETE /api/contacts/:id
+ */
+export async function deleteContactApi(req: ApiRequest, id: string) {
+    await apiMiddleware(req);
+    const authError = requireAuth(req);
+    if (authError) return authError;
+
+    const userId = req.user?.id || 'anonymous';
+
+    try {
+        const res = await deleteContact(id, req.user);
+        
+        if (!res.success) {
+            return {
+                status: 500,
+                error: res.error || 'Failed to delete contact.'
+            };
+        }
+
+        return {
+            status: 200,
+            data: { success: true, message: 'Contact deleted successfully.' }
+        };
+    } catch (error: any) {
+        console.error(`[API: DELETE_CONTACT] Failed for user ${userId}:`, error.message);
+        return {
+            status: 500,
+            error: 'Failed to process deletion.'
         };
     }
 }

@@ -15,13 +15,16 @@ export const MessagesRepo = {
    */
   async createMessage(message: Message): Promise<RepoResponse<Message>> {
     console.log(`[DB: SUPABASE MESSAGE] Persisting ${message.id} for contact ${message.contact_id}.`);
-    
-    const payload = {
-      ...message,
-      retryable: !!message.retryable
-    };
+    const userId = message.user_id;
+    const payload = { ...message, retryable: !!message.retryable };
 
-    return safeDbCall('CREATE_MESSAGE', message.user_id, supabase
+    // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
+    const { data: existing } = await supabase.from('messages').select('user_id').eq('id', message.id).maybeSingle();
+    if (existing && existing.user_id !== userId) {
+        return { success: false, error: 'ACCESS_DENIED_CROSS_TENANT' };
+    }
+
+    return safeDbCall('CREATE_MESSAGE', userId, supabase
       .from('messages')
       .upsert(payload)
       .select()
@@ -77,8 +80,17 @@ export const MessagesRepo = {
 
   /**
    * Updates a message's status and provider info.
+   * Required for webhooks and automated status tracking.
    */
-  async updateMessageStatus(id: string, status: string, providerMessageId?: string, retryable?: boolean): Promise<RepoResponse<void>> {
+  async updateMessageStatus(id: string, status: string, providerMessageId?: string, retryable?: boolean, user_id?: string): Promise<RepoResponse<void>> {
+    const userId = user_id || 'system';
+
+    // 🛡️ MF.3: VERIFY OWNERSHIP BEFORE UPDATE
+    const { data: existing } = await supabase.from('messages').select('user_id').eq('id', id).maybeSingle();
+    if (existing && userId !== 'system' && existing.user_id !== userId) {
+        return { success: false, error: 'ACCESS_DENIED_CROSS_TENANT' };
+    }
+
     const res = await supabase
       .from('messages')
       .update({
@@ -158,12 +170,26 @@ export const MessagesRepo = {
     const userId = typeof user === 'string' ? user : (user?.id);
     
     if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
-
     return safeDbCall('GET_ALL_MESSAGES', userId, supabase
       .from('messages')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: true })
+    );
+  },
+
+  /**
+   * Secure deletion of a message record.
+   */
+  async deleteMessage(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
+    const userId = typeof user === 'string' ? user : (user?.id);
+    if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
+
+    return safeDbCall('DELETE_MESSAGE', userId, supabase
+      .from('messages')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId)
     );
   }
 };
@@ -179,6 +205,7 @@ export const countUserTotalRecentMessages = MessagesRepo.countUserTotalRecentMes
 export const checkDuplicateMessage = MessagesRepo.checkDuplicateMessage;
 export const getAllMessagesOrdered = MessagesRepo.getAllMessagesOrdered;
 export const getMessages = MessagesRepo.getAllMessagesOrdered; 
+export const deleteMessage = MessagesRepo.deleteMessage;
 
 // Backward compatibility or direct access
 export async function countRecentOutboundMessagesRaw(contactId: string, sinceIso: string, user?: User | string | null): Promise<number> {

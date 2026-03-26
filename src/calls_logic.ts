@@ -1,7 +1,7 @@
 import { normalizePhone } from './utils/normalization';
 import { emitEvent } from './events';
 import { persistCall, getCall } from './calls_repo';
-import { findContact } from './contacts_repo';
+import { resolveContactOwnerByPhone } from './contacts_repo';
 import { Call } from './types';
 
 /**
@@ -29,11 +29,11 @@ export async function handleInboundCall(data: { phone: string }) {
   console.log(`Inbound call received from ${phoneNorm.normalized}`);
 
   // Create call record (PROMPT 3)
-  const existingContact = await findContact(phoneNorm.normalized, null, 'INTERNAL_SYSTEM_BYPASS');
+  const contactOwnerId = await resolveContactOwnerByPhone(phoneNorm.normalized);
 
   const callRecord: Call = {
     id: `call-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-    user_id: existingContact?.user_id || 'system',
+    user_id: contactOwnerId || 'system',
     phone: phoneNorm.normalized,
     direction: 'inbound',
     status: 'received',
@@ -59,26 +59,22 @@ export async function handleInboundCall(data: { phone: string }) {
 
 /**
  * End Call (Simulated POST /api/calls/end)
- * 
- * Instructions:
- * - Fetch call by ID
- * - Update status based on answered flag
- * - Log result
  */
-export async function endCall(data: { call_id: string; answered: boolean }) {
+export async function endCall(data: { call_id: string; answered: boolean }, user?: any) {
   if (!data || !data.call_id) {
     throw new Error('call_id is required to end a call.');
   }
 
-  const call = await getCall(data.call_id, 'INTERNAL_SYSTEM_BYPASS');
+  const res = await getCall(data.call_id, user);
   
-  if (!call) {
-    const errorMsg = `Call with ID ${data.call_id} not found.`;
+  if (!res.success || !res.data) {
+    const errorMsg = `Call with ID ${data.call_id} not found or access denied.`;
     console.error(`[API ERROR] ${errorMsg}`);
     throw new Error(errorMsg);
   }
+  const call = res.data;
 
-  // PROMPT 7: Prevent duplicate call end handling
+  // Prevent duplicate call end handling
   if (call.status === 'answered' || call.status === 'missed') {
     console.log(`Call already processed: ${call.status}`);
     return {
@@ -91,21 +87,16 @@ export async function endCall(data: { call_id: string; answered: boolean }) {
 
   // Update status
   call.status = data.answered ? 'answered' : 'missed';
-  call.duration = data.answered ? 60 : 0; // Simulate 1 minute call if answered
+  call.duration = data.answered ? 60 : 0; 
   await persistCall(call);
 
-  
-  const timestamp = new Date().toISOString();
-  
-  // Requirement: Log: "Call ended: answered/missed"
   console.log(`Call ended: ${call.status}`);
 
-  // PROMPT 6: Emit "call_missed" if not answered
   if (!data.answered) {
     await emitEvent('call_missed', {
       phone: call.phone,
       call_id: call.id,
-      timestamp
+      timestamp: new Date().toISOString()
     });
   }
 
@@ -113,6 +104,6 @@ export async function endCall(data: { call_id: string; answered: boolean }) {
     status: 'updated',
     callId: call.id,
     newStatus: call.status,
-    timestamp
+    timestamp: new Date().toISOString()
   };
 }

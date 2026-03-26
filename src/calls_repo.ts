@@ -15,8 +15,15 @@ export const CallsRepo = {
    */
   async createCall(call: Call): Promise<RepoResponse<Call>> {
     console.log(`[DB: SUPABASE CALL] Persisting ${call.id} for phone ${call.phone}.`);
-    
-    return safeDbCall('CREATE_CALL', call.user_id, supabase
+    const userId = call.user_id;
+
+    // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
+    const { data: existing } = await supabase.from('calls').select('user_id').eq('id', call.id).maybeSingle();
+    if (existing && existing.user_id !== userId) {
+        return { success: false, error: 'ACCESS_DENIED_CROSS_TENANT' };
+    }
+
+    return safeDbCall('CREATE_CALL', userId, supabase
       .from('calls')
       .upsert(call)
       .select()
@@ -76,6 +83,21 @@ export const CallsRepo = {
             .order('created_at', { ascending: false })
             .limit(limit)
     );
+  },
+
+  /**
+   * Secure deletion of a call record.
+   */
+  async deleteCall(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
+    const userId = typeof user === 'string' ? user : (user?.id);
+    if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
+
+    return safeDbCall('DELETE_CALL', userId, supabase
+      .from('calls')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId)
+    );
   }
 };
 
@@ -97,5 +119,9 @@ export async function getCall(id: string, user?: User | string | null): Promise<
 
 export async function getCallsForContact(contact_id: string, phone?: string, user?: User | string | null, limit = 50): Promise<RepoResponse<Call[]>> {
     return CallsRepo.getCallsForContact(contact_id, phone, user, limit);
+}
+
+export async function deleteCall(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
+    return CallsRepo.deleteCall(id, user);
 }
 

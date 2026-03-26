@@ -1,8 +1,8 @@
 import { getWebsiteSettings } from './website_settings_repo';
 import { getCall, persistCall } from './calls_repo';
 import { checkDuplicateMessage, countRecentOutboundMessages } from './messages_repo';
-import { getContact, findContact, persistContact } from './contacts_repo';
-import { getOpportunity, persistOpportunity } from './opportunities_repo';
+import { getContact, findContact, persistContact, resolveContactOwner } from './contacts_repo';
+import { persistOpportunity, resolveOpportunityOwner } from './opportunities_repo';
 import { persistEventLog, getAllEventLogs, getRecentEventLogs } from './event_logs_repo';
 import { Opportunity, User } from './types';
 import { getDefaultLeadReply, sendMessageToContact, getMissedCallReply } from './sms';
@@ -55,12 +55,10 @@ export async function emitEvent(name: string, payload: Record<string, any> = {},
   
   if (!finalUserId) {
     if (payload.contact_id) {
-       const contactRes = await getContact(payload.contact_id, 'INTERNAL_SYSTEM_BYPASS');
-       if (contactRes.success && contactRes.data) finalUserId = contactRes.data.user_id;
+       finalUserId = await resolveContactOwner(payload.contact_id) || undefined;
     }
     else if (payload.opportunity_id) {
-       const oppRes = await getOpportunity(payload.opportunity_id, 'INTERNAL_SYSTEM_BYPASS');
-       if (oppRes.success && oppRes.data) finalUserId = oppRes.data.user_id;
+       finalUserId = await resolveOpportunityOwner(payload.opportunity_id) || undefined;
     }
   }
 

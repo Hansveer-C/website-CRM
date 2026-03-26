@@ -10,7 +10,7 @@ import { RepoResponse } from '../../types';
 
 /**
  * Single backend-only Supabase client. Do not import in frontend code.
- * Uses the service_role key to bypass Row-Level Security (RLS).
+ * Uses the service_role key to manage administrative-level access (Backend RLS).
  * MUST NOT be exposed to the browser.
  */
 const supabaseUrl = process.env.SUPABASE_URL;

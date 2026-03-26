@@ -15,13 +15,17 @@ export const ActivitiesRepo = {
    */
   async createActivity(activity: Activity): Promise<RepoResponse<Activity>> {
     console.log(`[DB: SUPABASE ACTIVITY] Persisting activity ${activity.id} for contact ${activity.contact_id}.`);
-    
-    const payload = {
-        ...activity,
-        completed: !!activity.completed
-    };
+    const userId = activity.user_id;
 
-    return safeDbCall('CREATE_ACTIVITY', activity.user_id, supabase
+    const payload = { ...activity, completed: !!activity.completed };
+
+    // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
+    const { data: existing } = await supabase.from('activities').select('user_id').eq('id', activity.id).maybeSingle();
+    if (existing && existing.user_id !== userId) {
+        return { success: false, error: 'ACCESS_DENIED_CROSS_TENANT' };
+    }
+
+    return safeDbCall('CREATE_ACTIVITY', userId, supabase
       .from('activities')
       .upsert(payload)
       .select()
@@ -54,6 +58,21 @@ export const ActivitiesRepo = {
       .order('due_date', { ascending: false })
       .limit(limit)
     );
+  },
+
+  /**
+   * Secure deletion of an activity.
+   */
+  async deleteActivity(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
+    const userId = typeof user === 'string' ? user : (user?.id);
+    if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
+
+    return safeDbCall('DELETE_ACTIVITY', userId, supabase
+      .from('activities')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId)
+    );
   }
 };
 
@@ -71,5 +90,9 @@ export async function persistActivity(activity: Activity): Promise<RepoResponse<
 
 export async function getActivitiesByContact(contact_id: string, user?: User | string | null, limit = 50): Promise<RepoResponse<Activity[]>> {
     return ActivitiesRepo.getActivitiesByContact(contact_id, user, limit);
+}
+
+export async function deleteActivity(id: string, user?: User | string | null): Promise<RepoResponse<null>> {
+    return ActivitiesRepo.deleteActivity(id, user);
 }
 

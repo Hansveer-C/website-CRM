@@ -18,18 +18,18 @@ async function testSupabaseCalls() {
     // 1. Inbound Call
     console.log('Step 1: Handling inbound call...');
     const phone = '+16040008888';
-    // Internal simulator might skip auth check if using handleInboundCall directly
+    // Inbound call now defaults to 'system' context for discovery if not passed.
     const res1 = await handleInboundCall({ phone });
     console.log('✅ Call received. ID:', res1.callId);
 
-    // 2. End Call as Missed
-    console.log('Step 2: Ending call as missed...');
-    const res2 = await endCall({ call_id: res1.callId, answered: false });
+    // Pass user context
+    const res2 = await endCall({ call_id: res1.callId, answered: false }, user);
     console.log('✅ Call ended. Status:', res2.newStatus);
 
     // 3. Verify in Supabase
     console.log('Step 3: Verifying call record in Supabase...');
-    const call = await getCall(res1.callId, 'INTERNAL_SYSTEM_BYPASS');
+    const callRes = await getCall(res1.callId, user);
+    const call = callRes.success ? callRes.data : null;
     
     if (call && call.status === 'missed') {
         console.log('✅ PASS: Call record persistent in Supabase.');
