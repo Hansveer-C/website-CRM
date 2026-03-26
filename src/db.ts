@@ -1,4 +1,23 @@
-import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component, Asset, Template, WebsiteSettings, EventLog, Message, Call } from './types';
+import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component, Asset, Template, WebsiteSettings, EventLog, Message, Call, Funnel } from './types';
+
+export const mockFunnels: Funnel[] = [
+  {
+    id: 'fnl-1',
+    user_id: 'system',
+    name: 'Driveway Cleaning Funnel',
+    status: 'published',
+    created_at: '2026-03-24T10:00:00Z',
+    updated_at: '2026-03-24T10:00:00Z'
+  },
+  {
+    id: 'fnl-2',
+    user_id: 'system',
+    name: 'House Washing Funnel',
+    status: 'draft',
+    created_at: '2026-03-25T14:30:00Z',
+    updated_at: '2026-03-25T14:30:00Z'
+  }
+];
 
 export const mockContacts: Contact[] = [
   {
@@ -118,6 +137,7 @@ export const mockInvoices: Invoice[] = [
 export const mockPages: Page[] = [
   {
     id: 'p1',
+    user_id: 'system',
     name: 'Home',
     slug: 'home',
     status: 'published',
@@ -128,6 +148,7 @@ export const mockPages: Page[] = [
   },
   {
     id: 'p2',
+    user_id: 'system',
     name: 'About Us',
     slug: 'about',
     status: 'published',
@@ -138,6 +159,8 @@ export const mockPages: Page[] = [
   },
   {
     id: 'p3',
+    user_id: 'system',
+    funnel_id: 'fnl-1',
     name: 'Driveway Cleaning',
     slug: 'driveway-cleaning',
     status: 'published',
@@ -148,6 +171,8 @@ export const mockPages: Page[] = [
   },
   {
     id: 'p4',
+    user_id: 'system',
+    funnel_id: 'fnl-1',
     name: 'Patio Cleaning',
     slug: 'patio-cleaning',
     status: 'published',
