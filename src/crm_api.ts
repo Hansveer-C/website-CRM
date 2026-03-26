@@ -108,10 +108,15 @@ export async function getContactTimelineApi(req: ApiRequest, id: string) {
     const userId = req.user?.id || 'anonymous';
 
     try {
-        // Check Existence & Ownership
-        const { success, data: contact, error } = await getContact(id, req.user);
-        if (!success || !contact) {
-            return { status: !success ? 500 : 404, error: error || 'Contact not found or access denied.' };
+        // Check Existence & Ownership (Harden against delete-read race C7)
+        const contactRes = await getContact(id, req.user!);
+        const contactApiRes = mapRepoToApi(contactRes, { resourceName: 'contact' });
+        
+        if (contactApiRes.status !== 200 || !contactApiRes.data) {
+             return {
+                 status: contactApiRes.status === 200 ? 404 : contactApiRes.status,
+                 error: contactApiRes.error || 'Contact not found.'
+             };
         }
 
         const timelineRes = await getContactTimeline(id, req.user);
