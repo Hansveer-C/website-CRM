@@ -187,16 +187,17 @@ export const MessagesRepo = {
   /**
    * Retrieves all messages in the entire system, sorted chronologically (ASC).
    */
-  async getAllMessagesOrdered(user?: User | string | null): Promise<RepoResponse<Message[]>> {
+  async getAllMessagesOrdered(user?: User | string | null, limit = 200): Promise<RepoResponse<Message[]>> {
     const userId = typeof user === 'string' ? user : (user?.id);
     
     if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
-
+ 
     return safeDbCall('GET_ALL_MESSAGES', userId, supabase
       .from('messages')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: true })
+      .limit(limit)
     );
   }
 };

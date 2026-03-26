@@ -89,7 +89,7 @@ export async function getContactById(id: string, user?: User | string | null): P
 /**
  * Retrieves all contacts, scoped to the user context.
  */
-export async function getContacts(user?: User | string | null): Promise<RepoResponse<Contact[]>> {
+export async function getContacts(user?: User | string | null, limit = 100): Promise<RepoResponse<Contact[]>> {
   const userId = typeof user === 'string' ? user : (user?.id);
   
   if (!userId) {
@@ -101,6 +101,7 @@ export async function getContacts(user?: User | string | null): Promise<RepoResp
     .select('*')
     .eq('user_id', userId)
     .order('created_at', { ascending: true })
+    .limit(limit)
   );
 }
 
