@@ -23,7 +23,7 @@ export const FunnelsRepo = {
       .from('funnels')
       .insert(funnel)
       .select()
-      .single()
+      .maybeSingle()
     );
   },
 
@@ -48,7 +48,7 @@ export const FunnelsRepo = {
       .select('*')
       .eq('id', funnelId)
       .eq('user_id', userId)
-      .single()
+      .maybeSingle()
     );
   },
 
@@ -67,7 +67,7 @@ export const FunnelsRepo = {
       .eq('id', funnelId)
       .eq('user_id', userId)
       .select()
-      .single()
+      .maybeSingle()
     );
   }
 };

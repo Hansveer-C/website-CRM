@@ -101,6 +101,7 @@ export type PageStatus = 'draft' | 'published';
 
 export interface Page {
   id: string;
+  user_id: string;
   name: string;
   slug: string; // unique
   status: PageStatus;
@@ -108,6 +109,9 @@ export interface Page {
   seo_description: string;
   seo_keywords: string[];
   created_at: string;
+  funnel_id?: string;
+  step_type?: string;
+  step_order?: number;
 }
 
 export type FunnelStatus = 'draft' | 'published';

@@ -197,6 +197,32 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                 headers: { 'Content-Type': 'application/json' } 
             });
         }
+
+        // Funnels API (WB.1.4 Integration)
+        if (url.startsWith('/api/funnels')) {
+            const { getFunnelsApi, getFunnelByIdApi, createFunnelApi, updateFunnelApi } = await import('./funnels_api');
+            let response: any;
+
+            if (url === '/api/funnels' && method === 'GET') {
+                response = await getFunnelsApi(reqContext);
+            } else if (url === '/api/funnels' && method === 'POST') {
+                response = await createFunnelApi(reqContext);
+            } else if (url.startsWith('/api/funnels/') && method === 'GET') {
+                const id = url.split('/')[3];
+                response = await getFunnelByIdApi(reqContext, id);
+            } else if (url.startsWith('/api/funnels/') && method === 'PATCH') {
+                const id = url.split('/')[3];
+                response = await updateFunnelApi(reqContext, id);
+            }
+
+            if (response) {
+                // Return the whole object to maintain success/data/error shape (WB.1.4 requirement)
+                return new Response(JSON.stringify(response), { 
+                    status: response.status || 200, 
+                    headers: { 'Content-Type': 'application/json' } 
+                });
+            }
+        }
     }
     
     return originalFetch(input, init);
@@ -376,11 +402,14 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('invoices')" class="${activeView === 'invoices' ? 'active' : ''}">Invoices</li>
           <li onclick="window.navigateTo('lead-capture')" class="${activeView === 'lead-capture' ? 'active' : ''}">Lead Capture</li>
           
-          <div class="nav-group-title">Websites</div>
-          <li onclick="window.navigateTo('pages')" class="${activeView === 'pages' || activeView === 'page-sections' ? 'active' : ''}">Pages</li>
-          <li onclick="window.navigateTo('templates')" class="${activeView === 'templates' ? 'active' : ''}">Templates</li>
-          <li onclick="window.navigateTo('components')" class="${activeView === 'components' ? 'active' : ''}">Components</li>
-          <li onclick="window.navigateTo('website-settings')" class="${activeView === 'website-settings' ? 'active' : ''}">Settings</li>
+          <div class="nav-group-title">Marketing & Sales</div>
+          <li onclick="window.navigateTo('funnels')" class="${activeView === 'funnels' ? 'active' : ''}" style="font-weight: 700; color: var(--primary-color);">Funnels <span class="badge" style="background: #3b82f6; color: white;">New</span></li>
+          
+          <div class="nav-group-title">Websites (Legacy)</div>
+          <li onclick="window.navigateTo('pages')" class="${activeView === 'pages' || activeView === 'page-sections' ? 'active' : ''}" style="opacity: 0.7;">Pages</li>
+          <li onclick="window.navigateTo('templates')" class="${activeView === 'templates' ? 'active' : ''}" style="opacity: 0.7;">Templates</li>
+          <li onclick="window.navigateTo('components')" class="${activeView === 'components' ? 'active' : ''}" style="opacity: 0.7;">Components</li>
+          <li onclick="window.navigateTo('website-settings')" class="${activeView === 'website-settings' ? 'active' : ''}" style="opacity: 0.7;">Settings</li>
           
           <div class="nav-group-title">System</div>
           <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
@@ -2628,6 +2657,165 @@ function renderSkeleton(type: 'pages' | 'templates' | 'builder' | 'generic') {
   return `<div class="skeleton skeleton-rect" style="height: 100%; border-radius: 12px;"></div>`;
 }
 
+async function renderFunnels() {
+  currentView = 'funnels';
+  app.innerHTML = `
+    ${renderSidebar('funnels')}
+    <main class="main-content">
+      <header class="view-header">
+        <h2>Funnels</h2>
+        <button class="btn-primary" onclick="window.createFunnelPrompt()">+ Create New Funnel</button>
+      </header>
+      <div id="funnels-container" style="padding: 20px;">
+        <div class="loading">Loading your funnels...</div>
+      </div>
+    </main>
+  `;
+
+  try {
+    const res = await fetch('/api/funnels').then(r => r.json());
+    const container = document.getElementById('funnels-container');
+    if (!container) return;
+
+    if (!res.success || !res.data || res.data.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state" style="text-align: center; padding: 60px 20px; background: white; border-radius: 12px; border: 2px dashed #e2e8f0;">
+          <div style="font-size: 3rem; margin-bottom: 16px;">🚀</div>
+          <h3 style="color: #1e293b; margin-bottom: 8px;">No funnels yet</h3>
+          <p style="color: #64748b; max-width: 400px; margin: 0 auto 24px;">Your first funnel will help you capture leads fast. Create one to start growing your business.</p>
+          <button class="btn-primary" onclick="window.createFunnelPrompt()">Build My First Funnel</button>
+        </div>
+      `;
+      return;
+    }
+
+    const funnelsHtml = res.data.map((f: any) => `
+      <div class="card funnel-card" 
+           style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; transition: transform 0.2s; cursor: pointer; border: 1px solid #eef2f6;" 
+           onclick="window.navigateTo('funnel-detail', '${f.id}')"
+           onmouseover="this.style.boxShadow='0 10px 25px rgba(0,0,0,0.05)'; this.style.borderColor='var(--primary-color)';"
+           onmouseout="this.style.boxShadow='none'; this.style.borderColor='#eef2f6';">
+        <div style="display: flex; align-items: center; gap: 20px;">
+          <div style="background: #f0f7ff; width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">🎯</div>
+          <div>
+            <h4 style="margin: 0; color: #1e293b; font-size: 1.1rem;">${f.name}</h4>
+            <div style="font-size: 0.85rem; color: #64748b; margin-top: 4px;">Created ${new Date(f.created_at).toLocaleDateString()}</div>
+          </div>
+        </div>
+        <div style="text-align: right; display: flex; align-items: center; gap: 30px;">
+          <div style="text-align: center;">
+            <div style="font-weight: 700; color: #1e293b; font-size: 1.1rem;">${f.step_count || 0}</div>
+            <div style="font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Steps</div>
+          </div>
+          <span class="badge badge-${f.status}" style="text-transform: capitalize; padding: 6px 12px; border-radius: 6px; font-weight: 600;">${f.status}</span>
+        </div>
+      </div>
+    `).join('');
+
+    container.innerHTML = `
+      <div class="funnels-grid">
+        ${funnelsHtml}
+      </div>
+    `;
+  } catch (err) {
+    console.error('Failed to load funnels:', err);
+    const container = document.getElementById('funnels-container');
+    if (container) container.innerHTML = '<div class="error">Failed to load funnels. Please try again.</div>';
+  }
+}
+
+async function renderFunnelDetail(funnelId: string) {
+  app.innerHTML = `
+    ${renderSidebar('funnels')}
+    <main class="main-content">
+      <div id="funnel-detail-container" style="padding: 20px;">
+        <div class="loading">Loading funnel details...</div>
+      </div>
+    </main>
+  `;
+
+  try {
+    const res = await fetch(`/api/funnels/${funnelId}`).then(r => r.json());
+    const container = document.getElementById('funnel-detail-container');
+    if (!container || !res.success) throw new Error(res.error || 'Failed to load');
+
+    const funnel = res.data;
+    const steps = funnel.steps || [];
+
+    const stepsHtml = steps.map((step: any, index: number) => `
+      <div class="step-card" style="display: flex; gap: 24px; align-items: flex-start; margin-bottom: 24px;">
+        <div style="flex-shrink: 0; width: 40px; height: 40px; background: var(--primary-color); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.2rem; box-shadow: 0 4px 10px rgba(59, 130, 246, 0.3);">${index + 1}</div>
+        <div class="card" style="flex: 1; padding: 24px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #eef2f6;">
+          <div>
+            <div style="font-size: 0.75rem; color: #3b82f6; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">${step.step_type}</div>
+            <h4 style="margin: 0; font-size: 1.1rem; color: #1e293b;">${step.name}</h4>
+            <div style="font-size: 0.85rem; color: #64748b; margin-top: 4px;">Linked Page: <span style="font-family: monospace; background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">/${step.slug}</span></div>
+          </div>
+          <button class="btn-primary" style="background: white; color: var(--primary-color); border: 1px solid var(--primary-color); padding: 8px 16px; font-weight: 600;" onclick="window.switchBuilderPage('${step.id}'); window.navigateTo('builder')">Edit Step</button>
+        </div>
+      </div>
+      ${index < steps.length - 1 ? `<div style="width: 2px; height: 30px; background: #e2e8f0; margin-left: 19px; margin-top: -24px; margin-bottom: 4px;"></div>` : ''}
+    `).join('');
+
+    container.innerHTML = `
+      <header class="view-header" style="padding-left: 0; margin-bottom: 32px;">
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <button onclick="window.navigateTo('funnels')" class="btn-primary" style="background: #f1f5f9; color: #475569; padding: 8px 12px; border-radius: 8px; border: none;">←</button>
+          <div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <h2 style="margin: 0;">${funnel.name}</h2>
+              <span class="badge badge-${funnel.status}" style="text-transform: capitalize; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem;">${funnel.status}</span>
+            </div>
+            <p style="color: #64748b; margin: 4px 0 0 0; font-size: 0.9rem;">Configure your automation flow and pages</p>
+          </div>
+        </div>
+        <div style="display: flex; gap: 12px;">
+           <button class="btn-primary" style="background: #10b981;">Publish Funnel</button>
+           <button class="btn-primary" style="background: white; color: #64748b; border: 1px solid #e2e8f0;">Settings</button>
+        </div>
+      </header>
+
+      <div style="max-width: 900px;">
+        <h3 style="margin-bottom: 24px; color: #1e293b; font-size: 1.25rem;">Funnel Steps</h3>
+        <div class="steps-flow">
+          ${stepsHtml}
+        </div>
+        
+        <div style="margin-top: 32px; text-align: center; padding: 32px; border: 2px dashed #e2e8f0; border-radius: 12px;">
+          <button class="btn-primary" style="background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0;">+ Add New Step</button>
+        </div>
+      </div>
+    `;
+  } catch (err: any) {
+    console.error('Failed to load funnel detail:', err);
+    const container = document.getElementById('funnel-detail-container');
+    if (container) container.innerHTML = `<div class="error">Failed to load funnel: ${err.message}</div>`;
+  }
+}
+
+(window as any).createFunnelPrompt = async () => {
+    const name = prompt("Enter a name for your new funnel:");
+    if (!name) return;
+
+    try {
+        (window as any).showToast('Creating funnel and setting up steps...', 3000);
+        const res = await fetch('/api/funnels', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        }).then(r => r.json());
+
+        if (res.success) {
+            (window as any).showToast('Funnel created successfully!', 2000);
+            window.navigateTo('funnel-detail', res.data.id);
+        } else {
+            alert('Failed to create funnel: ' + res.error);
+        }
+    } catch (err: any) {
+        alert('Error creating funnel: ' + err.message);
+    }
+};
+
 (window as any).navigateTo = (view: string, id?: string) => {
   const previousView = currentView;
   currentView = view;
@@ -2654,27 +2842,35 @@ function renderSkeleton(type: 'pages' | 'templates' | 'builder' | 'generic') {
 };
 
 function executeNavigation(view: string, id?: string) {
-  if (view === 'dashboard') renderDashboard();
-  if (view === 'clients') renderClients();
-  if (view === 'opportunities') renderOpportunities();
-  if (view === 'quotes') renderQuotes();
-  if (view === 'new-quote') renderNewQuote();
-  if (view === 'invoices') renderInvoices();
-  if (view === 'lead-capture') renderLeadCapture();
-  if (view === 'builder') renderBuilder();
-  if (view === 'reports') renderReports();
-  if (view === 'event-logs') renderEventLogs();
-  if (view === 'pages') renderPages();
-  if (view === 'page-sections' && id) renderPageSections(id);
-  if (view === 'components') renderComponents();
-  if (view === 'templates') renderTemplates();
-  if (view === 'website-settings') renderWebsiteSettings();
-  if (view === 'quickstart') renderQuickstart();
-  if (view === 'qa-tools') renderQATools();
-  if (view === 'quote-preview' && id) renderQuotePreview(id);
-  if (view === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
-  if (view === 'site' && id) renderSitePage(id);
-  if (view === 'preview' && id) renderSitePage(id, true);
+  switch (view) {
+    case 'dashboard': renderDashboard(); break;
+    case 'clients': renderClients(); break;
+    case 'contact-detail': if (id) renderContactDetail(id); break;
+    case 'opportunities': renderOpportunities(); break;
+    case 'quotes': renderQuotes(); break;
+    case 'new-quote': 
+      (window as any).newQuoteContactId = id || '';
+      (window as any).newQuoteOpportunityId = '';
+      (window as any).newQuoteLineItems = [];
+      renderNewQuote(); 
+      break;
+    case 'invoices': renderInvoices(); break;
+    case 'lead-capture': renderLeadCapture(); break;
+    case 'funnels': renderFunnels(); break;
+    case 'funnel-detail': if (id) renderFunnelDetail(id); break;
+    case 'pages': renderPages(); break;
+    case 'page-sections': if (id) renderPageSections(id); break;
+    case 'builder': if (id) renderBuilder(); break;
+    case 'templates': renderTemplates(); break;
+    case 'components': app.innerHTML = `${renderSidebar('components')}<main class="main-content"><h2>Components Shelf</h2><div class="empty-state">Library of pre-built UI components coming soon.</div></main>`; break;
+    case 'website-settings': renderWebsiteSettings(); break;
+    case 'reports': renderReports(); break;
+    case 'quickstart': renderQuickstart(); break;
+    case 'event-logs': renderEventLogs(); break;
+    case 'qa-tools': renderQATools(); break;
+    case 'quote-preview': if (id) renderQuotePreview(id); break;
+    default: renderDashboard();
+  }
 
   if (!['site', 'preview'].includes(view)) {
     document.title = 'Hansveer CRM';
