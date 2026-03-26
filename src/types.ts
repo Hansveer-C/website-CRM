@@ -110,6 +110,17 @@ export interface Page {
   created_at: string;
 }
 
+export type FunnelStatus = 'draft' | 'published';
+
+export interface Funnel {
+  id: string;
+  user_id: string;
+  name: string;
+  status: FunnelStatus;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PageSection {
   id: string;
   page_id: string; // foreign key to Page.id
