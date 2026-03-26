@@ -1,7 +1,7 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings } from './db';
 import { templates } from './templates';
 import { Activity } from './types';
-import { normalizePhone, normalizeEmail, normalizeName } from './utils/normalization';
+import { normalizePhone, normalizeEmail, normalizeName } from './utils/validators';
 
 /**
  * 🌐 FRONTEND API BRIDGE
