@@ -47,11 +47,19 @@ export const smsService = {
 
       const client = twilio(account_sid, auth_token);
       
-      const result = await client.messages.create({
-        body: message,
-        from: sending_phone_number,
-        to: to
-      });
+      // 🛡️ PT.11: SMS Provider Timeout Protection (15s)
+      const timeoutPromise = new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error('SMS_PROVIDER_TIMEOUT')), 15000)
+      );
+
+      const result = await Promise.race([
+        client.messages.create({
+          body: message,
+          from: sending_phone_number,
+          to: to
+        }),
+        timeoutPromise
+      ]);
 
       console.log(`✅ [SMS SERVICE BACKEND] SMS dispatched. SID: ${result.sid}`);
       

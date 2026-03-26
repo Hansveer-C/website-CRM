@@ -31,8 +31,13 @@ export async function safeDbCall<T>(
     userId: string | undefined,
     promise: PromiseLike<{ data: T | null; error: any }>
 ): Promise<RepoResponse<T>> {
+    const TIMEOUT_MS = 8000; // 8 second timeout for DB 
+    const timeoutPromise = new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error('DATABASE_TIMEOUT')), TIMEOUT_MS)
+    );
+
     try {
-        const { data, error } = await promise;
+        const { data, error } = await Promise.race([promise as any, timeoutPromise]);
         
         if (error) {
             console.error(`[DB: ${operation}] error for user ${userId || 'system'}:`, error.message);
@@ -54,8 +59,13 @@ export async function safeDbCount(
     userId: string | undefined,
     promise: PromiseLike<{ count: number | null; error: any }>
 ): Promise<RepoResponse<number>> {
+    const TIMEOUT_MS = 8000;
+    const timeoutPromise = new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error('DATABASE_TIMEOUT')), TIMEOUT_MS)
+    );
+
     try {
-        const { count, error } = await promise;
+        const { count, error } = await Promise.race([promise as any, timeoutPromise]);
         
         if (error) {
             console.error(`[DB: ${operation}] error for user ${userId || 'system'}:`, error.message);
