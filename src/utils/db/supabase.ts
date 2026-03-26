@@ -13,14 +13,19 @@ import { RepoResponse } from '../../types';
  * Uses the service_role key to manage administrative-level access (Backend RLS).
  * MUST NOT be exposed to the browser.
  */
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const isBrowser = typeof window !== 'undefined';
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-if (!supabaseUrl || !supabaseServiceRoleKey) {
+if (!isBrowser && (!supabaseUrl || !supabaseServiceRoleKey)) {
   throw new Error('Missing Supabase environment variables. Please check your .env file.');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+// 🛡️ MF.2: Use placeholder in browser to prevent crash during bundling/mock-testing
+export const supabase = createClient(
+    supabaseUrl || 'https://placeholder.supabase.co', 
+    supabaseServiceRoleKey || 'placeholder'
+);
 
 /**
  * 🛡️ SAFE DB CALL WRAPPER

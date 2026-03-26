@@ -134,43 +134,46 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         }
 
         if (url === '/api/leads' && method === 'POST') {
-            const { createLeadApi } = await import('./crm_api');
-            const response: any = await createLeadApi(reqContext);
-            const responseData = response.data || response;
-            return new Response(JSON.stringify(responseData), { 
-                status: response.status || 201,
+            console.log('[MOCK] Intercepting Lead Submission:', reqContext.body);
+            const newLead = { 
+                id: `c-${Date.now()}`, 
+                ...reqContext.body, 
+                status: 'lead', 
+                created_at: new Date().toISOString(),
+                user_id: (window as any).currentUser || 'system',
+                source: 'website_form'
+            };
+            mockContacts.push(newLead as any);
+            return new Response(JSON.stringify({ success: true, data: newLead }), { 
+                status: 201,
                 headers: { 'Content-Type': 'application/json' }
             });
         }
 
         if (url === '/api/contacts' && method === 'GET') {
-            const { getContacts } = await import('./contacts_api');
-            const response: any = await getContacts(reqContext);
-            const responseData = response.data || response;
-            return new Response(JSON.stringify(responseData), { 
-                status: response.status || 200,
+            const userId = (window as any).currentUser || 'system';
+            const userContacts = mockContacts.filter(c => c.user_id === userId);
+            return new Response(JSON.stringify({ success: true, data: userContacts }), { 
+                status: 200,
                 headers: { 'Content-Type': 'application/json' }
             });
         }
 
         if (url.startsWith('/api/contacts/') && url.endsWith('/timeline') && method === 'GET') {
-            const { getContactTimelineApi } = await import('./crm_api');
             const id = url.split('/')[3];
-            const response: any = await getContactTimelineApi(reqContext, id);
-            const responseData = response.data || response;
-            return new Response(JSON.stringify(responseData), { 
-                status: response.status || 200, 
+            console.log(`[MOCK] Fetching timeline for contact ${id}`);
+            return new Response(JSON.stringify({ success: true, data: [] }), { 
+                status: 200, 
                 headers: { 'Content-Type': 'application/json' } 
             });
         }
 
         if (url.startsWith('/api/contacts/') && method === 'GET') {
-            const { getContactApi } = await import('./crm_api');
             const id = url.split('/')[3];
-            const response: any = await getContactApi(reqContext, id);
-            const responseData = response.data || response;
-            return new Response(JSON.stringify(responseData), { 
-                status: response.status || 200, 
+            const contact = mockContacts.find(c => c.id === id);
+            if (!contact) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404 });
+            return new Response(JSON.stringify({ success: true, data: contact }), { 
+                status: 200, 
                 headers: { 'Content-Type': 'application/json' } 
             });
         }
