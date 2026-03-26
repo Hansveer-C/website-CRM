@@ -125,6 +125,28 @@ export interface Funnel {
   updated_at: string;
 }
 
+export type FunnelTemplateCategory = 'pressure_washing' | 'general_service';
+export type FunnelTemplateServiceType = 'driveway' | 'house_wash' | 'generic';
+export type TemplateStepType = 'landing' | 'form' | 'thank_you';
+
+export interface TemplateStep {
+  id: string;
+  template_id: string;
+  type: TemplateStepType;
+  order: number;
+  template_content: Record<string, any>;
+}
+
+export interface FunnelTemplate {
+  id: string;
+  name: string;
+  category: FunnelTemplateCategory;
+  service_type: FunnelTemplateServiceType;
+  city_placeholder_enabled: boolean;
+  created_at: string;
+  steps?: TemplateStep[]; // eagerly loaded by getTemplateById
+}
+
 export interface PageSection {
   id: string;
   page_id: string; // foreign key to Page.id

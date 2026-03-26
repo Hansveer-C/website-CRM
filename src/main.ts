@@ -200,13 +200,15 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
         // Funnels API (WB.1.4 Integration)
         if (url.startsWith('/api/funnels')) {
-            const { getFunnelsApi, getFunnelByIdApi, createFunnelApi, updateFunnelApi } = await import('./funnels_api');
+            const { getFunnelsApi, getFunnelByIdApi, createFunnelApi, updateFunnelApi, createFunnelFromTemplateApi } = await import('./funnels_api');
             let response: any;
 
             if (url === '/api/funnels' && method === 'GET') {
                 response = await getFunnelsApi(reqContext);
             } else if (url === '/api/funnels' && method === 'POST') {
                 response = await createFunnelApi(reqContext);
+            } else if (url === '/api/funnels/from-template' && method === 'POST') {
+                response = await createFunnelFromTemplateApi(reqContext);
             } else if (url.startsWith('/api/funnels/') && method === 'GET') {
                 const id = url.split('/')[3];
                 response = await getFunnelByIdApi(reqContext, id);

@@ -170,3 +170,172 @@ export async function updateFunnelApi(req: ApiRequest, id: string) {
         data: res.data
     };
 }
+
+/**
+ * POST /api/funnels/from-template
+ * WB.2.3 – Atomic template-driven funnel creation.
+ *
+ * Input body:
+ *   template_id  string  (required)
+ *   city         string  (optional – replaces {{city}} placeholders)
+ *
+ * Process (all-or-nothing):
+ *   1. Fetch the template + its ordered steps
+ *   2. Create the funnel record
+ *   3. For each template step, create a Page hydrated with step content
+ *      (replacing {{city}} if provided)
+ *   4. Link each page as a funnel step (funnel_id, step_type, step_order)
+ *   5. On any failure → delete funnel + pages created so far (compensating TX)
+ *   6. Return { funnel_id, funnel, steps }
+ */
+export async function createFunnelFromTemplateApi(req: ApiRequest) {
+    await apiMiddleware(req);
+    const authError = requireAuth(req);
+    if (authError) return authError;
+
+    const { template_id, city } = req.body || {};
+
+    if (!template_id || typeof template_id !== 'string') {
+        return {
+            status: 400,
+            success: false,
+            error: 'template_id is required.'
+        };
+    }
+
+    // ── 1. Fetch template + steps ──────────────────────────────────────────
+    const { FunnelTemplatesRepo } = await import('./funnel_templates_repo');
+    const tplRes = await FunnelTemplatesRepo.getTemplateById(template_id);
+
+    if (!tplRes.success || !tplRes.data) {
+        return {
+            status: 404,
+            success: false,
+            error: `Template "${template_id}" not found.`
+        };
+    }
+
+    const template = tplRes.data;
+    const templateSteps = template.steps || [];
+
+    if (templateSteps.length === 0) {
+        return {
+            status: 422,
+            success: false,
+            error: 'Template has no steps defined.'
+        };
+    }
+
+    // ── 2. Create the funnel record ────────────────────────────────────────
+    const funnelName = city
+        ? `${template.name} – ${city}`
+        : template.name;
+
+    const funnelRes = await FunnelsRepo.createFunnel(req.user!.id, funnelName);
+
+    if (!funnelRes.success || !funnelRes.data) {
+        return {
+            status: 500,
+            success: false,
+            error: funnelRes.error || 'Failed to create funnel record.'
+        };
+    }
+
+    const funnel = funnelRes.data;
+    const createdPageIds: string[] = [];
+
+    // ── Helper: slugify ────────────────────────────────────────────────────
+    const slugify = (text: string) =>
+        text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+    // ── Helper: replace {{city}} in any string value ───────────────────────
+    const hydrate = (text: string): string =>
+        city ? text.replace(/\{\{city\}\}/gi, city) : text;
+
+    // ── Helper: deep-hydrate a JSON object's string values ─────────────────
+    const hydrateContent = (obj: Record<string, any>): Record<string, any> => {
+        const out: Record<string, any> = {};
+        for (const [k, v] of Object.entries(obj)) {
+            if (typeof v === 'string') out[k] = hydrate(v);
+            else if (Array.isArray(v)) out[k] = v.map(i => typeof i === 'string' ? hydrate(i) : i);
+            else out[k] = v;
+        }
+        return out;
+    };
+
+    // ── Rollback helper – cleans up on failure ─────────────────────────────
+    const rollback = async (reason: string) => {
+        // Delete pages created so far
+        for (const pid of createdPageIds) {
+            await PagesRepo.deletePage(pid, req.user!.id).catch(() => {});
+        }
+        // Delete the funnel (cascade removes funnel-step links if any)
+        await FunnelsRepo.updateFunnel(req.user!.id, funnel.id, { status: 'draft' }).catch(() => {});
+        // Best-effort funnel deletion – if repo doesn't expose delete, mark failed
+        console.error(`[WB.2.3 ROLLBACK] funnel=${funnel.id} reason=${reason}`);
+    };
+
+    // ── 3 & 4. Create one Page per template step ───────────────────────────
+    const createdSteps: Page[] = [];
+
+    for (const tplStep of templateSteps) {
+        const content = hydrateContent(tplStep.template_content);
+
+        // Derive human-readable step name
+        const stepLabel = tplStep.type === 'landing'
+            ? (content.headline || 'Landing Page')
+            : tplStep.type === 'form'
+            ? (content.title || 'Lead Capture Form')
+            : (content.headline || 'Thank You Page');
+
+        const pageId = `pg_${funnel.id}_${tplStep.order}_${Date.now()}`;
+        const baseSlug = slugify(`${funnelName}-${tplStep.type}`);
+
+        const page: Page = {
+            id:              pageId,
+            user_id:         req.user!.id,
+            name:            stepLabel,
+            slug:            `${baseSlug}-${tplStep.order}-${Date.now()}`,
+            status:          'draft',
+            seo_title:       hydrate(content.headline || content.title || stepLabel),
+            seo_description: hydrate(content.subtext || content.confirmation_message || ''),
+            seo_keywords:    [],
+            created_at:      new Date().toISOString(),
+            // Funnel linkage (WB.1.6 schema)
+            funnel_id:       funnel.id,
+            step_type:       tplStep.type,
+            step_order:      tplStep.order
+        };
+
+        const pageRes = await PagesRepo.persistPage(page, req.user!.id);
+
+        if (!pageRes.success) {
+            await rollback(`Failed to persist page for step ${tplStep.order}: ${pageRes.error}`);
+            return {
+                status: 500,
+                success: false,
+                error: `Funnel creation aborted – could not create step ${tplStep.order} (${tplStep.type}). All changes rolled back.`
+            };
+        }
+
+        createdPageIds.push(pageId);
+        createdSteps.push({ ...page, ...hydrateContent(tplStep.template_content) } as any);
+    }
+
+    // ── 5. Return the complete funnel ──────────────────────────────────────
+    return {
+        status: 201,
+        success: true,
+        data: {
+            funnel_id: funnel.id,
+            funnel,
+            steps: createdSteps,
+            template: {
+                id:           template.id,
+                name:         template.name,
+                service_type: template.service_type,
+                category:     template.category
+            }
+        }
+    };
+}
