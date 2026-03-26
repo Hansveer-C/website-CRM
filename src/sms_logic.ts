@@ -107,7 +107,7 @@ export async function dispatchSMS(
   };
 }
 
-import { validatePhone, validateMessage } from './utils/validators';
+import { validatePhone, validateMessage, ValidationError } from './utils/validators';
 
 /**
  * Convenience helper for contacts.
@@ -120,10 +120,13 @@ export async function sendMessageToContact(
   trigger_event_id?: string
 ): Promise<{ success: boolean; internal_id?: string; error?: string }> {
   
-  // 🛡️ C3: Centralized Message Content Validation
+  // 🛡️ C4: Standardized Message Validation
   try {
       validateMessage(messageText);
   } catch (err: any) {
+      if (err instanceof ValidationError) {
+          return err.serialize() as any;
+      }
       return { success: false, error: err.message };
   }
 
@@ -133,10 +136,10 @@ export async function sendMessageToContact(
 
   if (!contact.phone) return { success: false, error: 'Contact has no phone number' };
 
-  // 🛡️ C3: Centralized Phone Validation
+  // 🛡️ C4: Standardized Phone Validation
   const phoneVal = validatePhone(contact.phone);
   if (phoneVal.invalid) {
-    return { success: false, error: `Invalid phone format: ${contact.phone}` };
+    return new ValidationError('phone', `Invalid phone format: ${contact.phone}`).serialize() as any;
   }
 
   // Anti-Spam (Duplicates)

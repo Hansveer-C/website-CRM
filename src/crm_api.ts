@@ -7,6 +7,7 @@ import { getCall } from './calls_repo';
 import { createLead } from './leads_logic';
 import { getContactTimeline } from './timeline';
 import { mapRepoToApi } from './utils/api_errors';
+import { ValidationError } from './utils/validators';
 
 /**
  * Shared logic to handle specific record retrieval with user scoping.
@@ -80,6 +81,14 @@ export async function createLeadApi(req: ApiRequest) {
         };
     } catch (error: any) {
         const userId = req.user?.id || 'anonymous';
+        
+        if (error instanceof ValidationError) {
+            return {
+                status: 400,
+                ...error.serialize()
+            };
+        }
+
         console.error(`[API: CREATE_LEAD] Failed for user ${userId}:`, error.message);
         return {
             status: 400,
@@ -133,7 +142,7 @@ export async function deleteContactApi(req: ApiRequest, id: string) {
     const userId = req.user?.id || 'anonymous';
 
     try {
-        const res = await deleteContact(id, req.user);
+        const res = await deleteContact(id, req.user!);
         
         if (!res.success) {
             return {

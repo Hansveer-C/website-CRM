@@ -22,6 +22,29 @@ export function normalizeName(name: string): string {
 }
 
 /**
+ * 🛡️ C4: Standardized Validation Errors
+ */
+export class ValidationError extends Error {
+    constructor(
+        public field: string,
+        public reason: string,
+        public error: string = 'invalid_input'
+    ) {
+        super(reason);
+        this.name = 'ValidationError';
+    }
+
+    serialize() {
+        return {
+            success: false,
+            error: this.error,
+            field: this.field,
+            reason: this.reason
+        };
+    }
+}
+
+/**
  * 🛡️ C3: Centralized Input Validation
  * Single source of truth for data integrity across the CRM.
  */
@@ -45,16 +68,16 @@ export function validateContactInput(data: {
     const normalizedName = normalizeName(data.name);
     
     if (!normalizedName) {
-        throw new Error('Name is required.');
+        throw new ValidationError('name', 'Name is required.');
     }
     if (normalizedName.length > 200) {
-        throw new Error('Name too long. Please use less than 200 characters.');
+        throw new ValidationError('name', 'Name too long. Please use less than 200 characters.');
     }
     if (data.phone && data.phone.length > 50) {
-        throw new Error('Phone number is too long.');
+        throw new ValidationError('phone', 'Phone number is too long.');
     }
     if (data.email && data.email.length > 200) {
-        throw new Error('Email address is too long.');
+        throw new ValidationError('email', 'Email address is too long.');
     }
 
     const phoneNorm = normalizePhone(data.phone || '');
@@ -73,10 +96,10 @@ export function validateContactInput(data: {
  */
 export function validateMessage(content: string): string {
     if (!content || content.trim().length === 0) {
-        throw new Error('Message content cannot be empty.');
+        throw new ValidationError('content', 'Message content cannot be empty.');
     }
     if (content.length > 2000) {
-        throw new Error('Message too long. Please use less than 2000 characters.');
+        throw new ValidationError('content', 'Message too long. Please use less than 2000 characters.');
     }
     return content.trim();
 }

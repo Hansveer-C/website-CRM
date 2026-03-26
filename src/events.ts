@@ -6,7 +6,7 @@ import { persistOpportunity, resolveOpportunityOwner } from './opportunities_rep
 import { persistEventLog, getAllEventLogs, getRecentEventLogs } from './event_logs_repo';
 import { Opportunity, User } from './types';
 import { getDefaultLeadReply, sendMessageToContact, getMissedCallReply } from './sms';
-import { normalizePhone } from './utils/normalization';
+import { normalizePhone } from './utils/validators';
 
 export interface AppEvent {
   user_id?: string;
