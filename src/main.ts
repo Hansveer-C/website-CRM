@@ -3421,6 +3421,39 @@ async function renderFunnelDetail(funnelId: string) {
     const funnel = res.data;
     const steps = funnel.steps || [];
 
+    // 📊 WB.7.1: Calculate Metrics
+    const [oppsAll, logsAll] = await Promise.all([
+      fetch('/api/opportunities').then(r => r.json()),
+      fetch('/api/events/logs').then(r => r.json())
+    ]);
+
+    const funnelOpps = (oppsAll.data || []).filter((o: any) => o.funnel_id === funnelId);
+    const totalLeads = funnelOpps.length;
+    const todayLeads = funnelOpps.filter((o: any) => new Date(o.created_at).toDateString() === new Date().toDateString()).length;
+    
+    // Average Response Time calculation
+    const logs = logsAll.data || [];
+    const leadLogs = logs.filter((l: any) => l.event_name === 'lead_captured' && (l.payload?.funnel_id === funnelId || l.funnel_id === funnelId));
+    
+    let totalRespTime = 0;
+    let respCount = 0;
+    leadLogs.forEach((lead: any) => {
+       const contactId = lead.payload?.contact_id || lead.contact_id;
+       const smsLog = logs.find((l: any) => l.event_name === 'auto_sms_sent' && (l.payload?.contact_id === contactId || l.contact_id === contactId));
+       if (smsLog) {
+         const diff = new Date(smsLog.created_at).getTime() - new Date(lead.created_at).getTime();
+         totalRespTime += Math.max(0, diff);
+         respCount++;
+       }
+    });
+    
+    const avgRespTimeSec = respCount > 0 ? Math.round((totalRespTime / respCount) / 1000) : 0;
+    const respTimeStr = avgRespTimeSec === 0 ? 'No data yet' : (avgRespTimeSec < 60 ? `${avgRespTimeSec}s` : `${Math.round(avgRespTimeSec/60)}m`);
+
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    const weeklyLeads = funnelOpps.filter((o: any) => new Date(o.created_at) >= oneWeekAgo).length;
+
     const stepsHtml = steps.map((step: any, index: number) => `
       <div class="step-card" style="display: flex; gap: 24px; align-items: flex-start; margin-bottom: 24px;">
         <div style="flex-shrink: 0; width: 40px; height: 40px; background: var(--primary-color); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.2rem; box-shadow: 0 4px 10px rgba(59, 130, 246, 0.3);">${index + 1}</div>
@@ -3456,6 +3489,27 @@ async function renderFunnelDetail(funnelId: string) {
         </div>
       </div>
 
+      <div style="margin-bottom: 12px; font-size: 0.9rem; color: #475569; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+        <span style="color: #10b981;">📈</span>
+        <span>${weeklyLeads} leads this week</span>
+      </div>
+
+      <div id="funnel-metrics" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-bottom: 32px;">
+        <div class="card" style="padding: 24px; text-align: center; border: 1px solid #e2e8f0; background: white;">
+          <div style="font-size: 2.5rem; font-weight: 800; color: #1e293b; margin-bottom: 4px;">${totalLeads}</div>
+          <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Total Leads</div>
+        </div>
+        <div class="card" style="padding: 24px; text-align: center; border: 1px solid #e2e8f0; background: white;">
+          <div style="font-size: 2.5rem; font-weight: 800; color: #3b82f6; margin-bottom: 4px;">${todayLeads}</div>
+          <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Leads Today</div>
+        </div>
+        <div class="card" style="padding: 24px; text-align: center; border: 1px solid #e2e8f0; background: white;">
+          <div style="font-size: ${respTimeStr === 'No data yet' ? '1.5rem' : '2.5rem'}; font-weight: 800; color: #10b981; margin-bottom: 4px;">${respTimeStr}</div>
+          <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Avg. response time</div>
+          <div style="font-size: 0.7rem; color: #059669; font-weight: 600; margin-top: 8px;">Faster responses = more bookings</div>
+        </div>
+      </div>
+
       <header class="view-header" style="padding-left: 0; margin-bottom: 32px;">
         <div style="display: flex; align-items: center; gap: 16px;">
           <button onclick="window.navigateTo('funnels')" class="btn-primary" style="background: #f1f5f9; color: #475569; padding: 8px 12px; border-radius: 8px; border: none;">←</button>
@@ -3466,10 +3520,6 @@ async function renderFunnelDetail(funnelId: string) {
             </div>
             <p style="color: #64748b; margin: 4px 0 0 0; font-size: 0.9rem;">Configure your automation flow and pages</p>
           </div>
-        </div>
-        <div style="display: flex; gap: 12px;">
-           <button class="btn-primary" style="background: #10b981;">Publish Funnel</button>
-           <button class="btn-primary" style="background: white; color: #64748b; border: 1px solid #e2e8f0;">Settings</button>
         </div>
       </header>
 
@@ -3491,7 +3541,7 @@ async function renderFunnelDetail(funnelId: string) {
               <span style="font-size: 1.25rem;">⚡</span> Recent Activity
             </h3>
             <div id="activity-feed-container">
-              <div class="loading">Loading activity...</div>
+               <div id="activity-feed-list"></div>
             </div>
           </div>
         </div>
@@ -3499,28 +3549,20 @@ async function renderFunnelDetail(funnelId: string) {
     `;
 
     // 🌿 WB.5.6: Populate activity feed
-    const activityContainer = document.getElementById('activity-feed-container');
-    if (activityContainer) {
-      const [oppsRes, logsRes] = await Promise.all([
-        fetch('/api/opportunities').then(r => r.json()),
-        fetch('/api/events/logs').then(r => r.json())
-      ]);
-
-      const funnelOpps = (oppsRes.data || []).filter((o: any) => o.funnel_id === funnelId);
+    const activityList = document.getElementById('activity-feed-list');
+    if (activityList) {
       const contactIds = new Set(funnelOpps.map((o: any) => o.contact_id));
-      
-      const rawLogs = (logsRes.data || []).filter((l: any) => 
+      const rawLogs = (logsAll.data || []).filter((l: any) => 
         contactIds.has(l.payload?.contact_id || l.contact_id) || 
         (l.payload?.funnel_id === funnelId)
       );
 
-      // Sort logs by newest first
       const sortedLogs = rawLogs.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 15);
 
       if (sortedLogs.length === 0) {
-        activityContainer.innerHTML = '<div style="color: #64748b; font-size: 0.9rem; text-align: center; padding: 20px;">No activity yet. Share your funnel to start seeing leads!</div>';
+        activityList.innerHTML = '<div style="color: #64748b; font-size: 0.9rem; text-align: center; padding: 20px;">No activity yet. Share your funnel to start seeing leads!</div>';
       } else {
-        activityContainer.innerHTML = sortedLogs.map((l: any) => {
+        activityList.innerHTML = sortedLogs.map((l: any) => {
           let icon = '📝';
           let label = l.event_name.replace(/_/g, ' ');
           let color = '#64748b';
