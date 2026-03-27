@@ -17,6 +17,8 @@ export async function createLead(data: {
   service_type?: string;
   message?: string;
   source?: string;
+  funnel_id?: string;
+  page_id?: string;
 }, request?: ApiRequest) {
   const user_id = request?.user?.id || 'system';
   const timestamp = new Date().toISOString();
@@ -88,7 +90,7 @@ export async function createLead(data: {
     activeOpp = openOppRes.data;
     console.log(`Active opportunity ${activeOpp.id} found for contact. Reusing instead of creating.`);
   } else {
-    // No active opp - Create a new one
+    const funnelMetadata = `[Funnel: ${data.funnel_id || 'N/A'}] [Page: ${data.page_id || 'N/A'}]`;
     const newOpportunity: Opportunity = {
       id: `opp-${Date.now()}`,
       user_id: existingContact ? (existingContact.user_id || 'system') : user_id,
@@ -97,7 +99,7 @@ export async function createLead(data: {
       value: 0,
       assigned_to: 'Unassigned',
       status: 'open',
-      notes: `Service Type: ${data.service_type || 'N/A'}\nAddress: ${data.address || 'N/A'}\nMessage: ${data.message || 'N/A'}`,
+      notes: `Service Type: ${data.service_type || 'N/A'}\nAddress: ${data.address || 'N/A'}\nMessage: ${data.message || 'N/A'}\n${funnelMetadata}`,
       source: data.source || 'api',
       created_at: timestamp
     };

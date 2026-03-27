@@ -50,7 +50,7 @@ export interface Pipeline {
 }
 
 export type TriggerType = 'OPPORTUNITY_CREATED' | 'OPPORTUNITY_STAGE_UPDATED';
-export type ActionType = 'CREATE_TASK' | 'SEND_NOTIFICATION';
+export type ActionType = 'CREATE_TASK' | 'SEND_NOTIFICATION' | 'SEND_AUTO_REPLY';
 
 export interface Automation {
   id: string;

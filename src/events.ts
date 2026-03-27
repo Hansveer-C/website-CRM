@@ -4,6 +4,7 @@ import { checkDuplicateMessage, countRecentOutboundMessages } from './messages_r
 import { getContact, findContact, persistContact, resolveContactOwner } from './contacts_repo';
 import { persistOpportunity, resolveOpportunityOwner } from './opportunities_repo';
 import { persistEventLog, getAllEventLogs, getRecentEventLogs } from './event_logs_repo';
+import { FunnelsRepo } from './funnels_repo_supabase';
 import { Opportunity, User } from './types';
 import { getDefaultLeadReply, sendMessageToContact, getMissedCallReply } from './sms';
 import { normalizePhone } from './utils/validators';
@@ -258,6 +259,11 @@ onEvent('call_missed', async (payload, userId) => {
   }
 
 
+  // 6. Associate with Default Funnel (WB.5.3)
+  const funnelsRes = await FunnelsRepo.getFunnels(targetContact.user_id || 'system');
+  const defaultFunnel = funnelsRes.success && funnelsRes.data ? funnelsRes.data.find(f => f.status === 'published') : null;
+  const funnelNote = defaultFunnel ? `[Linked Funnel: ${defaultFunnel.name} (${defaultFunnel.id})]` : '[No Funnel Associated]';
+
   // 7. Create Opportunity
   const newOpportunity: Opportunity = {
     id: `opp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -267,6 +273,7 @@ onEvent('call_missed', async (payload, userId) => {
     status: 'open',
     value: 0,
     source: 'missed_call',
+    notes: `Missed call from ${phoneNorm.normalized}\n${funnelNote}`,
     created_at: new Date().toISOString()
   };
   const oppResult = await persistOpportunity(newOpportunity);

@@ -6,6 +6,7 @@ import { Automation, TriggerType, Opportunity, Activity } from './types';
  */
 import { getContact } from './contacts_repo';
 import { createActivity } from './activities_repo';
+import { sendMessageToContact } from './sms_logic';
 
 // In-memory triggers remain for non-persisted events
 const automations: Automation[] = [
@@ -53,6 +54,16 @@ const automations: Automation[] = [
       description: 'Follow up on quote in 24 hours',
       dueInDays: 1
     }
+  },
+  {
+    id: 'a5',
+    name: 'Instant Web Lead Auto-Reply',
+    trigger: 'OPPORTUNITY_CREATED',
+    condition: (context: Opportunity) => context.pipeline_stage === 'New Lead' && context.source === 'funnel',
+    action: 'SEND_AUTO_REPLY',
+    actionParams: {
+      template: "Hey {name}, thanks for reaching out! I'll contact you shortly."
+    }
   }
 ];
 
@@ -73,6 +84,9 @@ async function executeAction(automation: Automation, context: any) {
       break;
     case 'SEND_NOTIFICATION':
       await sendNotificationAction(automation.actionParams, context);
+      break;
+    case 'SEND_AUTO_REPLY':
+      await sendAutoReplyAction(automation.actionParams, context);
       break;
   }
 }
@@ -113,4 +127,22 @@ async function sendNotificationAction(params: any, context: Opportunity) {
   
   // LOG (placeholder for SMS integration)
   console.log(`%c[AUTOMATION: NOTIFICATION] ${message} (${contactName})`, "color: #007bff; font-weight: bold;");
+}
+async function sendAutoReplyAction(params: any, context: Opportunity) {
+  const contactRes = await getContact(context.contact_id, context.user_id);
+  const contact = contactRes.success ? contactRes.data : null;
+  if (!contact) return;
+
+  const contactName = contact.name.trim() || 'there';
+  const finalMessage = params.template.replace('{name}', contactName);
+
+  console.log(`[AUTOMATION: SEND_AUTO_REPLY] Triggering SMS for ${contactName} (${contact.phone})`);
+  
+  await sendMessageToContact(
+    context.contact_id,
+    finalMessage,
+    'automation',
+    context.user_id,
+    'auto-reply-' + Date.now()
+  );
 }
