@@ -135,15 +135,22 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
         if (url === '/api/leads' && method === 'POST') {
             console.log('[MOCK] Intercepting Lead Submission:', reqContext.body);
+            const isTest = reqContext.body.is_test;
             const newLead = { 
                 id: `c-${Date.now()}`, 
                 ...reqContext.body, 
                 status: 'lead', 
                 created_at: new Date().toISOString(),
                 user_id: (window as any).currentUser || 'system',
-                source: 'website_form'
+                source: isTest ? 'test_submission' : 'website_form'
             };
             mockContacts.push(newLead as any);
+            
+            if (isTest) {
+                (window as any).showToast('Test lead received! Redirecting to CRM...', 'success');
+                setTimeout(() => window.navigateTo('contact-detail', newLead.id), 2000);
+            }
+
             return new Response(JSON.stringify({ success: true, data: newLead }), { 
                 status: 201,
                 headers: { 'Content-Type': 'application/json' }
@@ -3317,6 +3324,9 @@ async function renderFunnels() {
         <h2>Funnels</h2>
         <button class="btn-primary" onclick="window.createFunnelPrompt()">+ Create New Funnel</button>
       </header>
+      <div id="funnels-top-container" style="padding: 0 20px;">
+        ${(window as any).renderFunnelsChecklist()}
+      </div>
       <div id="funnels-container" style="padding: 20px;">
         <div class="loading">Loading your funnels...</div>
       </div>
@@ -3427,15 +3437,23 @@ async function renderFunnelDetail(funnelId: string) {
     `).join('');
 
     container.innerHTML = `
-      <div id="live-url-banner" class="card" style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 16px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-          <span style="font-size: 1.25rem;">🌐</span>
-          <div>
-            <div style="font-size: 0.75rem; color: #166534; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Your Funnel is Live</div>
-            <div id="funnel-public-url" style="font-weight: 600; color: #1e293b; font-family: monospace;">https://${(window as any).userSlug || 'app'}.pressurepro.io/${funnel.id}</div>
+      <div id="live-url-banner" class="card" style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 20px; margin-bottom: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 1.5rem;">🌐</span>
+            <div>
+              <div style="font-size: 0.75rem; color: #166534; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Your Funnel is Live & Public</div>
+              <div id="funnel-public-url" style="font-weight: 600; color: #1e293b; font-family: monospace; font-size: 1rem;">https://${(window as any).userSlug || 'app'}.pressurepro.io/${funnel.id}</div>
+            </div>
           </div>
+          <button class="btn-primary" style="background: white; color: #166534; border: 1px solid #166534; padding: 8px 16px; font-size: 0.85rem;" onclick="window.copyFunnelUrl()">Copy Link</button>
         </div>
-        <button class="btn-primary" style="background: white; color: #166534; border: 1px solid #166534; padding: 6px 16px; font-size: 0.85rem;" onclick="window.copyFunnelUrl()">Copy URL</button>
+        
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+          <button class="btn-primary" style="background: #1877f2; border: none; padding: 10px 20px; font-size: 0.9rem; flex: 1; min-width: 140px;" onclick="window.shareToSocial('${funnel.id}', 'facebook')">Share to Facebook</button>
+          <button class="btn-primary" style="background: #25d366; border: none; padding: 10px 20px; font-size: 0.9rem; flex: 1; min-width: 140px;" onclick="window.shareToSocial('${funnel.id}', 'whatsapp')">Share to WhatsApp</button>
+          <button class="btn-primary" style="background: #6366f1; border: none; padding: 10px 20px; font-size: 0.9rem; flex: 1; min-width: 140px;" onclick="window.testFunnel('${funnel.id}')">Test My Funnel</button>
+        </div>
       </div>
 
       <header class="view-header" style="padding-left: 0; margin-bottom: 32px;">
@@ -4592,7 +4610,7 @@ let onboardingState = { step: 1, service: '', city: '', phone: '' };
       </div>
 
       <div style="display: flex; gap: 16px;">
-        <button class="btn-primary" style="flex: 1; padding: 16px; background: white; color: #1e293b; border: 1px solid #e2e8f0;" onclick="window.open('${url}', '_blank')">Preview Page</button>
+        <button class="btn-primary" style="flex: 1; padding: 16px; background: white; color: #1e293b; border: 1px solid #e2e8f0;" onclick="window.testFunnel('${(window as any).lastCreatedFunnelId}')">Test My Funnel</button>
         <button class="btn-primary" style="flex: 1; padding: 16px;" onclick="window.onboardingComplete()">Get My First Lead</button>
       </div>
     `;
@@ -4657,6 +4675,52 @@ let onboardingState = { step: 1, service: '', city: '', phone: '' };
   document.getElementById('onboarding-modal')?.remove();
   window.navigateTo('funnel-detail', (window as any).lastCreatedFunnelId);
 };
+
+// ── WB.6.4 Funnel Dashboard Checklist ────────────────────────────────
+(window as any).renderFunnelsChecklist = () => {
+  if (window.localStorage.getItem('funnels_checklist_dismissed')) return '';
+  
+  const state = JSON.parse(window.localStorage.getItem('funnels_checklist_state') || '{"copy":false,"share":false,"test":false}');
+  
+  return `
+    <div id="funnels-checklist" class="card" style="background: #fffbeb; border: 1px solid #fde68a; padding: 20px; margin-bottom: 24px; position: relative;">
+      <button onclick="window.dismissFunnelChecklist()" style="position: absolute; top: 12px; right: 12px; background: none; border: none; color: #92400e; cursor: pointer; font-size: 1.2rem;">&times;</button>
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+        <span style="font-size: 1.25rem;">📝</span>
+        <h3 style="margin: 0; font-size: 1rem; color: #92400e;">Get Your First Lead Checklist</h3>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <input type="checkbox" id="check-copy" ${state.copy ? 'checked' : ''} onchange="window.toggleCheckItem('copy')">
+          <label for="check-copy" style="font-size: 0.9rem; color: #92400e; cursor: pointer;">Copy your funnel link</label>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <input type="checkbox" id="check-share" ${state.share ? 'checked' : ''} onchange="window.toggleCheckItem('share')">
+          <label for="check-share" style="font-size: 0.9rem; color: #92400e; cursor: pointer;">Share it (FB / WhatsApp)</label>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <input type="checkbox" id="check-test" ${state.test ? 'checked' : ''} onchange="window.toggleCheckItem('test')">
+          <label for="check-test" style="font-size: 0.9rem; color: #92400e; cursor: pointer;">Test the form yourself</label>
+        </div>
+      </div>
+      <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #fef3c7; display: flex; gap: 12px;">
+         <a href="https://www.facebook.com/sharer/sharer.php?u=https://app.pressurepro.io" target="_blank" style="font-size: 0.8rem; color: #b45309; text-decoration: none; border: 1px solid #fcd34d; padding: 4px 10px; border-radius: 4px; background: white;">Share on Facebook</a>
+         <a href="https://api.whatsapp.com/send?text=Check out my new business page: https://app.pressurepro.io" target="_blank" style="font-size: 0.8rem; color: #b45309; text-decoration: none; border: 1px solid #fcd34d; padding: 4px 10px; border-radius: 4px; background: white;">WhatsApp</a>
+      </div>
+    </div>
+  `;
+};
+
+(window as any).toggleCheckItem = (item: string) => {
+  const state = JSON.parse(window.localStorage.getItem('funnels_checklist_state') || '{"copy":false,"share":false,"test":false}');
+  state[item] = !state[item];
+  window.localStorage.setItem('funnels_checklist_state', JSON.stringify(state));
+};
+
+(window as any).dismissFunnelChecklist = () => {
+  window.localStorage.setItem('funnels_checklist_dismissed', 'true');
+  document.getElementById('funnels-checklist')?.remove();
+};
 // ── WB.4.1 Scroll Handler for Sticky CTA Bar ──
 let lastScrollTop = 0;
 window.addEventListener('scroll', () => {
@@ -4673,3 +4737,58 @@ window.addEventListener('scroll', () => {
   }
   lastScrollTop = st <= 0 ? 0 : st;
 }, false);
+
+// ── WB.6.5 Social Sharing Helpers ────────────────────────────────────
+(window as any).copyFunnelUrl = () => {
+  const url = document.getElementById('funnel-public-url')?.textContent;
+  if (url) {
+    (window as any).copyToClipboard(url);
+    // Auto-check the checklist
+    (window as any).toggleCheckItem('copy');
+  }
+};
+
+(window as any).shareToSocial = async (funnelId: string, platform: string) => {
+  const url = `https://${(window as any).userSlug || 'app'}.pressurepro.io/${funnelId}`;
+  const city = (window as any).userCity || 'your area';
+  const text = `Now offering professional driveway cleaning in ${city}. Get a free quote here: ${url}`;
+
+  if (platform === 'native' && navigator.share) {
+    try {
+      await navigator.share({ title: 'Professional Cleaning Quote', text, url });
+      (window as any).toggleCheckItem('share');
+      return;
+    } catch (e) { console.warn('Native share failed', e); }
+  }
+
+  let shareUrl = '';
+  if (platform === 'facebook') {
+    shareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}&quote=${encodeURIComponent(text)}`;
+  } else if (platform === 'whatsapp') {
+    shareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+  } else {
+    // Fallback to native or copy
+    return (window as any).copyFunnelUrl();
+  }
+
+  window.open(shareUrl, '_blank');
+  (window as any).toggleCheckItem('share');
+};
+
+(window as any).testFunnel = (funnelId: string) => {
+  // In a real app, this would be the live URL with a test flag
+  // In our prototype, we show the "Public" page view with a ?test=true hint
+  const url = `https://${(window as any).userSlug || 'app'}.pressurepro.io/${funnelId}?test=true`;
+  console.log('[TEST MODE] Opening funnel:', url);
+  window.localStorage.setItem('test_mode_active', 'true');
+  
+  // For the prototype, we navigate to the first page of the funnel
+  fetch(`/api/funnels/${funnelId}`).then(r => r.json()).then(res => {
+     if (res.success && res.data.steps.length > 0) {
+       const landingPage = res.data.steps[0];
+       window.open(`/?page=${landingPage.slug}&test=true`, '_blank');
+     }
+  });
+
+  (window as any).toggleCheckItem('test');
+};
