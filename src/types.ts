@@ -124,6 +124,8 @@ export interface Funnel {
   status: FunnelStatus;
   created_at: string;
   updated_at: string;
+  service_type?: string;
+  city?: string;
 }
 
 export type FunnelTemplateCategory = 'pressure_washing' | 'general_service';
@@ -224,6 +226,7 @@ export interface WebsiteRoute {
 export interface NavItem {
   label: string;
   path: string;
+  children?: NavItem[];
 }
 
 export interface HeaderConfig {

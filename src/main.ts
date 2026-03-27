@@ -248,20 +248,28 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                 const funnel = mockFunnels.find(f => f.id === id);
                 if (funnel) {
                     const { name, status } = reqContext.body || {};
-                    if (name) (funnel as any).name = name;
-                    if (status) (funnel as any).status = status;
+                    if (name) funnel.name = name;
+                    if (status) funnel.status = status;
                     response = { success: true, data: funnel };
                 } else {
                     response = { success: false, error: 'Funnel not found' };
                 }
             }
-
+            
             if (response) {
-                return new Response(JSON.stringify(response), { 
-                    status: (response as any).status || (response.success ? 200 : 400), 
-                    headers: { 'Content-Type': 'application/json' } 
-                });
+                return new Response(JSON.stringify(response), { status: response.success ? 200 : (response.error === 'Funnel not found' ? 404 : 500) });
             }
+        }
+
+        // Websites API (WB.2.2 Integration)
+        if (url.startsWith('/api/websites/generate') && method === 'POST') {
+            const { generateWebsiteApi } = await import('./websites_api');
+            const response: any = await generateWebsiteApi(reqContext);
+            const responseData = response.data || response;
+            return new Response(JSON.stringify(responseData), { 
+                status: response.status || 201, 
+                headers: { 'Content-Type': 'application/json' } 
+            });
         }
 
         // ── WB.3.5 Page Sections Auto-Save ──────────────────────────────────
@@ -4825,139 +4833,178 @@ setInterval(() => {
 }, 5000);
 
 // ── WB.6.1 Onboarding Modal & Flow ──────────────────────────────────
-let onboardingState = { step: 1, service: '', city: '', phone: '' };
+let onboardingState = { 
+    businessName: '', 
+    phone: '', 
+    city: '', 
+    services: [] as string[] 
+};
 
 (window as any).showOnboardingModal = () => {
-  onboardingState = { step: 1, service: '', city: '', phone: '' };
-  const modal = document.createElement('div');
-  modal.id = 'onboarding-modal';
-  modal.innerHTML = `
-    <div id="onboarding-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); z-index: 9999; display: flex; align-items: center; justify-content: center;">
-      <div id="onboarding-card" class="card" style="width: 100%; max-width: 500px; padding: 40px; text-align: center; position: relative;">
-        <div id="onboarding-step-content"></div>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-  (window as any).renderOnboardingStep();
-};
-
-(window as any).renderOnboardingStep = () => {
-  const container = document.getElementById('onboarding-step-content');
-  if (!container) return;
-
-  if (onboardingState.step === 1) {
-    container.innerHTML = `
-      <div style="font-size: 3rem; margin-bottom: 20px;">🚀</div>
-      <h2 style="margin-bottom: 12px;">Welcome to PressurePro!</h2>
-      <p style="color: #64748b; margin-bottom: 32px;">Let's get your first funnel live in seconds. What service do you offer?</p>
-      <div style="display: flex; flex-direction: column; gap: 12px;">
-        <button class="btn-primary" style="background: white; color: #1e293b; border: 1px solid #e2e8f0; padding: 16px;" onclick="window.onboardingSelectService('dc54de07-5ea2-46f7-b513-85149306449c')">Driveway Cleaning</button>
-        <button class="btn-primary" style="background: white; color: #1e293b; border: 1px solid #e2e8f0; padding: 16px;" onclick="window.onboardingSelectService('4e4da69c-ebd8-432c-bbef-5e291d08812b')">House Washing</button>
-        <button class="btn-primary" style="background: white; color: #1e293b; border: 1px solid #e2e8f0; padding: 16px;" onclick="window.onboardingSelectService('0d3214fb-2777-41fa-9837-4a6fddc660ec')">General Service</button>
-      </div>
-    `;
-  } else if (onboardingState.step === 2) {
-    container.innerHTML = `
-      <h2 style="margin-bottom: 12px;">Where do you operate?</h2>
-      <p style="color: #64748b; margin-bottom: 32px;">We'll customize your pages with your local city name.</p>
-      <input type="text" id="onboarding-city" placeholder="Enter your city (e.g. Austin)" style="width: 100%; padding: 16px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 24px; font-size: 1.1rem;">
-      <button class="btn-primary" style="width: 100%; padding: 16px;" onclick="window.onboardingSubmitCity()">Next Step</button>
-    `;
-    setTimeout(() => document.getElementById('onboarding-city')?.focus(), 100);
-  } else if (onboardingState.step === 3) {
-    container.innerHTML = `
-      <h2 style="margin-bottom: 12px;">Final Step: Your Phone</h2>
-      <p style="color: #64748b; margin-bottom: 32px;">Where should leads call or text you?</p>
-      <input type="tel" id="onboarding-phone" placeholder="(555) 000-0000" style="width: 100%; padding: 16px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 24px; font-size: 1.1rem;">
-      <button id="onboarding-finish-btn" class="btn-primary" style="width: 100%; padding: 16px;" onclick="window.onboardingFinish()">Launch My Funnel</button>
-    `;
-    setTimeout(() => document.getElementById('onboarding-phone')?.focus(), 100);
-  } else if (onboardingState.step === 4) {
-    container.innerHTML = `
-      <div class="loading" style="font-size: 1.2rem; font-weight: 700;">Building your funnel...</div>
-      <p style="color: #64748b; margin-top: 16px;">This takes about 5 seconds.</p>
-    `;
-  } else if (onboardingState.step === 5) {
-    const url = `https://${(window as any).userSlug || 'app'}.pressurepro.io/${(window as any).lastCreatedFunnelId}`;
-    container.innerHTML = `
-      <div style="font-size: 4rem; margin-bottom: 20px;">🎊</div>
-      <h2 style="margin-bottom: 12px; font-size: 2rem; color: #059669;">You're live!</h2>
-      <p style="color: #64748b; margin-bottom: 32px; font-size: 1.1rem;">Your marketing engine is officially running. Share this link or run ads to start getting leads today.</p>
-      
-      <div class="card" style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; margin-bottom: 32px; text-align: left;">
-        <small style="color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Live Funnel URL</small>
-        <div style="display: flex; gap: 12px; margin-top: 8px;">
-          <div style="flex: 1; background: white; border: 1px solid #cbd5e1; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${url}</div>
-          <button class="btn-primary" style="padding: 10px 16px; font-size: 0.85rem;" onclick="window.copyToClipboard('${url}')">Copy</button>
+    // Reset state
+    onboardingState = { 
+        businessName: '', 
+        phone: '', 
+        city: '', 
+        services: [] 
+    };
+    
+    // Check if session has captured data
+    const saved = window.sessionStorage.getItem('onboarding_capture');
+    if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            onboardingState = { ...onboardingState, ...parsed };
+        } catch {}
+    }
+    
+    const modal = document.createElement('div');
+    modal.id = 'website-onboarding-modal';
+    modal.innerHTML = `
+        <div id="onboarding-backdrop"></div>
+        <div class="onboarding-card">
+            <h1 class="onboarding-title">Let's build your site</h1>
+            <p class="onboarding-subtitle">Tell us about your business to generate your premium website.</p>
+            
+            <div id="onboarding-form-container">
+                <div class="onboarding-form-group">
+                    <label for="ob-business-name">Business Name</label>
+                    <input type="text" id="ob-business-name" class="onboarding-input" placeholder="e.g. PressurePro Cleaning" value="${onboardingState.businessName}" required>
+                </div>
+                
+                <div class="onboarding-form-group">
+                    <label for="ob-city">Service City</label>
+                    <input type="text" id="ob-city" class="onboarding-input" placeholder="e.g. Austin, TX" value="${onboardingState.city}" required>
+                </div>
+                
+                <div class="onboarding-form-group">
+                    <label for="ob-phone">Phone Number</label>
+                    <input type="tel" id="ob-phone" class="onboarding-input" placeholder="e.g. (555) 000-0000" value="${onboardingState.phone}" required>
+                </div>
+                
+                <div class="onboarding-form-group">
+                    <label>Services Offered (Multi-select)</label>
+                    <div class="services-grid">
+                        <div class="service-chip ${onboardingState.services.includes('Driveway Cleaning') ? 'selected' : ''}" onclick="window.toggleOnboardingService(this, 'Driveway Cleaning')">Driveway Cleaning</div>
+                        <div class="service-chip ${onboardingState.services.includes('House Washing') ? 'selected' : ''}" onclick="window.toggleOnboardingService(this, 'House Washing')">House Washing</div>
+                        <div class="service-chip ${onboardingState.services.includes('Patio Cleaning') ? 'selected' : ''}" onclick="window.toggleOnboardingService(this, 'Patio Cleaning')">Patio Cleaning</div>
+                        <div class="service-chip ${onboardingState.services.includes('Other') ? 'selected' : ''}" onclick="window.toggleOnboardingService(this, 'Other')">Other</div>
+                    </div>
+                </div>
+                
+                <div class="onboarding-footer">
+                    <button class="btn-primary btn-onboarding" onclick="window.submitWebsiteOnboarding()">
+                        Generate My Website
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-7-7 7 7-7 7"/></svg>
+                    </button>
+                    <p style="font-size: 0.8rem; color: #94a3b8; text-align: center;">By continuing, you agree to our terms of service.</p>
+                </div>
+            </div>
+            
+            <div id="onboarding-success" style="display: none; text-align: center; padding: 40px 0;">
+                <div style="font-size: 4rem; margin-bottom: 12px;">🚀</div>
+                <h2 class="onboarding-title" style="margin-bottom: 8px;">Your website is live!</h2>
+                <p class="onboarding-subtitle" style="margin-bottom: 32px;">We've generated your full funnel structure and local SEO pages. You're ready to start receiving leads.</p>
+                
+                <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 24px;">
+                    <button class="btn-primary" style="width: 100%; padding: 18px; font-weight: 600;" onclick="window.location.href='/'">
+                        View Site
+                    </button>
+                    <button class="btn-secondary" style="width: 100%; padding: 18px; border: 1px solid #e2e8f0; background: white; font-weight: 600;" onclick="window.showWebsiteDashboard()">
+                        Manage Website
+                    </button>
+                </div>
+            </div>
         </div>
-      </div>
-
-      <div style="display: flex; gap: 16px;">
-        <button class="btn-primary" style="flex: 1; padding: 16px; background: white; color: #1e293b; border: 1px solid #e2e8f0;" onclick="window.testFunnel('${(window as any).lastCreatedFunnelId}')">Test My Funnel</button>
-        <button class="btn-primary" style="flex: 1; padding: 16px;" onclick="window.onboardingComplete()">Get My First Lead</button>
-      </div>
     `;
-  }
+    document.body.appendChild(modal);
+    
+    // Accessibility: focus the first field
+    setTimeout(() => document.getElementById('ob-business-name')?.focus(), 100);
 };
 
-(window as any).onboardingSelectService = (id: string) => {
-  onboardingState.service = id;
-  onboardingState.step = 2;
-  (window as any).renderOnboardingStep();
+(window as any).showWebsiteDashboard = () => {
+    (window as any).navigateTo('website-structure');
 };
 
-(window as any).onboardingSubmitCity = () => {
-  const city = (document.getElementById('onboarding-city') as HTMLInputElement).value;
-  if (!city) return (window as any).showToast('Please enter your city', 'error');
-  onboardingState.city = city;
-  onboardingState.step = 3;
-  (window as any).renderOnboardingStep();
+(window as any).toggleOnboardingService = (el: HTMLElement, service: string) => {
+    const index = onboardingState.services.indexOf(service);
+    if (index > -1) {
+        onboardingState.services.splice(index, 1);
+        el.classList.remove('selected');
+    } else {
+        onboardingState.services.push(service);
+        el.classList.add('selected');
+    }
+    // Update temp storage as we change chips
+    window.sessionStorage.setItem('onboarding_capture', JSON.stringify(onboardingState));
 };
 
-(window as any).onboardingFinish = async () => {
-  const phone = (document.getElementById('onboarding-phone') as HTMLInputElement).value;
-  if (!phone) return (window as any).showToast('Please enter your phone number', 'error');
-  onboardingState.phone = phone;
-  onboardingState.step = 4;
-  (window as any).renderOnboardingStep();
+(window as any).submitWebsiteOnboarding = () => {
+    const name = (document.getElementById('ob-business-name') as HTMLInputElement).value;
+    const city = (document.getElementById('ob-city') as HTMLInputElement).value;
+    const phone = (document.getElementById('ob-phone') as HTMLInputElement).value;
+    
+    if (!name || !city || !phone) {
+        (window as any).showToast('Please fill in all required fields.', 'error');
+        return;
+    }
+    
+    if (onboardingState.services.length === 0) {
+        (window as any).showToast('Please select at least one service.', 'error');
+        return;
+    }
+    
+    // Update state
+    onboardingState.businessName = name;
+    onboardingState.city = city;
+    onboardingState.phone = phone;
+    
+    console.log('[ONBOARDING] Data captured:', onboardingState);
+    
+    // Store temporarily in session/onboarding state
+    window.sessionStorage.setItem('onboarding_capture', JSON.stringify(onboardingState));
 
-  try {
-    // 1. Update Profile (Phone)
-    await fetch('/api/settings', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: onboardingState.phone })
+    // Phase W2.2 Integration: Generate full website + funnels from inputs
+    (window as any).showToast('Generating your premium website...', 'info');
+    
+    fetch('/api/websites/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+            business_name: onboardingState.businessName,
+            phone_number: onboardingState.phone,
+            city: onboardingState.city,
+            services: onboardingState.services
+        })
+    }).then(r => r.json())
+    .then(result => {
+        if (!result.success) throw new Error(result.error);
+        
+        console.log('[ONBOARDING] Website generated:', result.data);
+        window.localStorage.setItem('onboarding_seen', 'true');
+        
+        // Show success view
+        const form = document.getElementById('onboarding-form-container');
+        const success = document.getElementById('onboarding-success');
+        if (form && success) {
+            form.style.display = 'none';
+            success.style.display = 'block';
+            
+            // Update global settings as well for immediate feel
+            (window as any).updateGlobalSettings('businessName', name);
+            (window as any).updateGlobalSettings('phone', phone);
+        }
+    }).catch(err => {
+        console.error('[ONBOARDING] Generation failed:', err);
+        (window as any).showToast(err.message || 'Generation failed. Please try again.', 'error');
     });
-
-    // 2. Create Funnel
-    const res = await fetch('/api/funnels/from-template', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        template_id: onboardingState.service, 
-        city: onboardingState.city 
-      })
-    }).then(r => r.json());
-
-    if (!res.success) throw new Error(res.error || 'Failed to create funnel');
-
-    (window as any).lastCreatedFunnelId = res.data.funnel_id;
-    onboardingState.step = 5;
-    (window as any).renderOnboardingStep();
-
-  } catch (err: any) {
-    console.error('Onboarding failed:', err);
-    (window as any).showToast(err.message, 'error');
-    onboardingState.step = 3;
-    (window as any).renderOnboardingStep();
-  }
 };
 
-(window as any).onboardingComplete = () => {
-  window.localStorage.setItem('onboarding_seen', 'true');
-  document.getElementById('onboarding-modal')?.remove();
-  window.navigateTo('funnel-detail', (window as any).lastCreatedFunnelId);
+(window as any).closeOnboarding = () => {
+    document.getElementById('website-onboarding-modal')?.remove();
+    // Redirect to website structure as a way to show "site is ready"
+    window.navigateTo('website-structure');
 };
 
 // ── WB.6.4 Funnel Dashboard Checklist ────────────────────────────────

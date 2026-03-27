@@ -1,5 +1,5 @@
 import { supabase, safeDbCall } from './utils/db/supabase';
-import { Funnel, RepoResponse, User } from './types';
+import { Funnel, RepoResponse } from './types';
 
 /**
  * 🔒 SERVER-ONLY REPOSITORY
@@ -9,12 +9,14 @@ export const FunnelsRepo = {
   /**
    * Creates a new funnel.
    */
-  async createFunnel(userId: string, name: string): Promise<RepoResponse<Funnel>> {
+  async createFunnel(userId: string, name: string, service_type?: string, city?: string): Promise<RepoResponse<Funnel>> {
     const funnel: Partial<Funnel> = {
       id: `fnl_${Date.now()}`,
       user_id: userId,
       name,
       status: 'draft',
+      service_type,
+      city,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
