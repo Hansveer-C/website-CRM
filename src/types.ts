@@ -202,6 +202,47 @@ export interface WebsiteSettings {
   created_at: string;
 }
 
+export interface Website {
+  id: string;
+  user_id: string;
+  name: string;
+  domain: string | null;
+  subdomain: string;
+  homepage_funnel_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebsiteRoute {
+  id: string;
+  website_id: string;
+  path: string;
+  funnel_id: string;
+  created_at: string;
+}
+
+export interface NavItem {
+  label: string;
+  path: string;
+}
+
+export interface HeaderConfig {
+  logo_text: string;
+  logo_url?: string;
+  nav_items: NavItem[];
+  cta_text?: string;
+  cta_link?: string;
+}
+
+export interface WebsiteLayout {
+  id: string;
+  website_id: string;
+  header_config: HeaderConfig;
+  footer_config: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface EventLog {
   id: string;
   user_id: string;

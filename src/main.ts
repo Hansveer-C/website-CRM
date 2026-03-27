@@ -1,6 +1,6 @@
-import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings, mockFunnels } from './db';
+import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes } from './db';
 import { templates } from './templates';
-import { Activity } from './types';
+import { Activity, WebsiteLayout } from './types';
 import { normalizePhone, normalizeEmail, normalizeName } from './utils/validators';
 
 /**
@@ -9,6 +9,7 @@ import { normalizePhone, normalizeEmail, normalizeName } from './utils/validator
  * These utilize regional mock data (db.ts) to maintain UI functionality without direct DB access.
  */
 const getWebsiteSettings = () => mockWebsiteSettings;
+const getWebsiteLayout = (id?: string) => mockWebsiteLayouts[0]; // Simplified for now
 const persistWebsiteSettings = async (data: any) => { 
     console.log('[API STUB] Saving settings:', data);
     return { success: true }; 
@@ -473,11 +474,12 @@ function renderSidebar(activeView: string) {
           <div class="nav-group-title">Marketing & Sales</div>
           <li onclick="window.navigateTo('funnels')" class="${activeView === 'funnels' ? 'active' : ''}" style="font-weight: 700; color: var(--primary-color);">Funnels <span class="badge" style="background: #3b82f6; color: white;">New</span></li>
           
-          <div class="nav-group-title">Websites (Legacy)</div>
-          <li onclick="window.navigateTo('pages')" class="${activeView === 'pages' || activeView === 'page-sections' ? 'active' : ''}" style="opacity: 0.7;">Pages</li>
+          <div class="nav-group-title">Websites</div>
+          <li onclick="window.navigateTo('website-structure')" class="${activeView === 'website-structure' ? 'active' : ''}">Structure</li>
+          <li onclick="window.navigateTo('pages')" class="${activeView === 'pages' || activeView === 'page-sections' ? 'active' : ''}">Pages</li>
           <li onclick="window.navigateTo('templates')" class="${activeView === 'templates' ? 'active' : ''}" style="opacity: 0.7;">Templates</li>
           <li onclick="window.navigateTo('components')" class="${activeView === 'components' ? 'active' : ''}" style="opacity: 0.7;">Components</li>
-          <li onclick="window.navigateTo('website-settings')" class="${activeView === 'website-settings' ? 'active' : ''}" style="opacity: 0.7;">Settings</li>
+          <li onclick="window.navigateTo('website-settings')" class="${activeView === 'website-settings' ? 'active' : ''}">Settings</li>
           
           <div class="nav-group-title">System</div>
           <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
@@ -1928,6 +1930,101 @@ function renderSectionPreviewContent(section: any) {
   }
 };
 
+function renderPublicHeader(config: any, settings: any) {
+  return `
+    <header style="padding: 20px 40px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: rgba(255,255,255,0.9); backdrop-filter: blur(8px); z-index: 100; transition: top 0.3s ease;">
+      <div style="display: flex; align-items: center; gap: 15px;">
+         ${config.logo_url || settings.logo_url ? `<img src="${config.logo_url || settings.logo_url}" style="height: 40px; width: 40px; border-radius: 8px; object-fit: cover;">` : ''}
+         <span style="font-weight: 800; font-size: 1.25rem; color: #1e293b;">${config.logo_text || settings.business_name}</span>
+      </div>
+      <nav style="display: flex; gap: 24px; align-items: center;">
+         ${(config.nav_items || []).map((item: any) => `
+           <a href="#/site/${item.path === '/' ? 'home' : item.path.replace(/^\//, '')}" 
+              onclick="event.preventDefault(); window.navigateTo('site', '${item.path === '/' ? 'home' : item.path.replace(/^\//, '')}')"
+              style="text-decoration: none; color: #475569; font-weight: 600; font-size: 0.95rem; transition: color 0.2s;" 
+              onmouseover="this.style.color='var(--primary-color)'" 
+              onmouseout="this.style.color='#475569'">
+              ${item.label}
+           </a>
+         `).join('')}
+         ${config.cta_text ? `
+           <a href="${config.cta_link || '#'}" class="btn-primary" style="padding: 10px 20px; font-size: 0.9rem; border-radius: 8px; text-decoration: none;">${config.cta_text}</a>
+         ` : `
+           <a href="tel:${settings.phone}" style="color: var(--primary-color); font-weight: 700; text-decoration: none;">📞 ${settings.phone}</a>
+         `}
+      </nav>
+    </header>
+  `;
+}
+
+function renderPublicFooter(config: any, settings: any) {
+  const businessName = config.business_name || settings.business_name;
+  const phone = config.phone_number || settings.phone;
+  const serviceArea = config.service_area || 'Your Local Area';
+  const cta = config.cta_text || 'Get My Free Quote';
+  const links = config.links || [];
+  const copyright = `© ${new Date().getFullYear()} ${businessName}. All rights reserved.`;
+
+  return `
+    <footer style="padding: 60px 20px; background: #0f172a; color: #f8fafc; margin-top: 80px; border-top: 4px solid var(--primary-color);">
+      <div style="max-width: 1200px; margin: 0 auto;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 40px; margin-bottom: 40px;">
+          
+          <!-- Trust & Branding -->
+          <div>
+            <h3 style="color: white; font-size: 1.5rem; font-weight: 800; margin-bottom: 16px; letter-spacing: -0.5px;">${businessName}</h3>
+            <p style="color: #94a3b8; line-height: 1.6; font-size: 0.95rem; margin-bottom: 24px;">
+              Providing professional exterior cleaning and restoration services with a focus on quality, reliability, and customer satisfaction.
+            </p>
+            <div style="display: flex; align-items: center; gap: 10px; color: #3b82f6; font-weight: 600;">
+              <span style="font-size: 1.2rem;">📍</span>
+              <span>Serving ${serviceArea}</span>
+            </div>
+          </div>
+
+          <!-- Quick Navigation -->
+          <div>
+            <h4 style="color: white; font-size: 1.1rem; font-weight: 700; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px;">Navigation</h4>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+              ${links.map((l: any) => `
+                <a href="${l.path}" style="color: #94a3b8; text-decoration: none; font-size: 0.9rem; transition: all 0.2s;" onmouseover="this.style.color='white'; this.style.paddingLeft='4px'" onmouseout="this.style.color='#94a3b8'; this.style.paddingLeft='0'">
+                  ${l.label}
+                </a>
+              `).join('')}
+            </div>
+          </div>
+
+          <!-- Immediate Contact -->
+          <div>
+            <h4 style="color: white; font-size: 1.1rem; font-weight: 700; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px;">Contact Us</h4>
+            <p style="color: #94a3b8; font-size: 0.9rem; margin-bottom: 20px;">Questions? Call us directly for immediate assistance.</p>
+            <a href="tel:${phone}" style="display: flex; align-items: center; gap: 12px; color: white; text-decoration: none; font-size: 1.4rem; font-weight: 800; margin-bottom: 20px; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+               <span style="background: var(--primary-color); width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 1.1rem;">📞</span>
+               <span>${phone}</span>
+            </a>
+            <button class="btn-primary" style="width: 100%; padding: 14px; border-radius: 8px; font-weight: 700; font-size: 1rem; box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4); border: none; cursor: pointer;" onclick="document.querySelector('.site-form-section')?.scrollIntoView({behavior: 'smooth'})">
+              ${cta}
+            </button>
+          </div>
+
+        </div>
+
+        <!-- Footer Bottom -->
+        <div style="padding-top: 30px; border-top: 1px solid #1e293b; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 20px; color: #64748b; font-size: 0.85rem;">
+          <div>${copyright}</div>
+          <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+             <span style="display: flex; align-items: center; gap: 6px;"><span style="color: #22c55e;">●</span> Fully Insured</span>
+             <span style="display: flex; align-items: center; gap: 6px;"><span style="color: #22c55e;">●</span> Licensed Professionals</span>
+          </div>
+          <button onclick="window.navigateTo('dashboard')" style="background: none; border: 1px solid #334155; padding: 6px 16px; border-radius: 6px; cursor: pointer; color: inherit; font-weight: 600; transition: all 0.2s;" onmouseover="this.style.borderColor='#475569'; this.style.color='white'" onmouseout="this.style.borderColor='#334155'; this.style.color='inherit'">
+            Admin Access
+          </button>
+        </div>
+      </div>
+    </footer>
+  `;
+}
+
 function renderSitePage(slug: string, isPreview: boolean = false) {
   const page = mockPages.find(p => p.slug === slug);
   if (!page || (!isPreview && page.status !== 'published')) {
@@ -1945,6 +2042,7 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
   }
 
   const settings = getWebsiteSettings();
+  const layout = getWebsiteLayout(); // Phase W1.4: Injected layout
   const sections = mockPageSections
     .filter(s => s.page_id === page.id)
     .sort((a, b) => a.order - b.order);
@@ -1983,16 +2081,7 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
         </div>
       ` : ''}
 
-      <!-- Site Header with Global Info -->
-      <header style="padding: 20px 40px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: rgba(255,255,255,0.9); backdrop-filter: blur(8px); z-index: 100; transition: top 0.3s ease;">
-        <div style="display: flex; align-items: center; gap: 15px;">
-           ${settings.logo_url ? `<img src="${settings.logo_url}" style="height: 40px; width: 40px; border-radius: 8px; object-fit: cover;">` : ''}
-           <span style="font-weight: 800; font-size: 1.25rem; color: #1e293b;">${settings.business_name}</span>
-        </div>
-        <div>
-           <a href="tel:${settings.phone}" style="color: var(--primary-color); font-weight: 700; text-decoration: none;">📞 ${settings.phone}</a>
-        </div>
-      </header>
+      ${renderPublicHeader(layout.header_config, settings)}
 
       ${sections.map(section => {
     // Inject global variables into section content if needed
@@ -2000,11 +2089,7 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
     return renderSection(section.type, content, section.styles, section.id);
   }).join('')}
 
-      <!-- Public Footer -->
-      <footer style="padding: 40px; text-align: center; background: #f8fafc; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 0.9rem;">
-        <p>&copy; 2026 ${mockGlobalSettings.businessName}. Built with Hansveer CRM Website Builder.</p>
-        <button onclick="window.navigateTo('dashboard')" style="margin-top: 20px; background: none; border: 1px solid #cbd5e0; padding: 5px 15px; border-radius: 4px; cursor: pointer; color: #64748b;">Admin Login</button>
-      </footer>
+      ${renderPublicFooter(layout.footer_config, settings)}
     </div>
   `;
 
@@ -2758,13 +2843,169 @@ function renderWebsiteSettings() {
       </div>
     </main>
   `;
+}
 
-  (window as any).updateSettingsField = (field: string, value: string) => {
+function renderWebsiteStructure() {
+  const userId = (window as any).currentUser || 'system';
+  const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+  const routes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
+  
+  const websiteUrl = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
+
+  app.innerHTML = `
+    ${renderSidebar('website-structure')}
+    <main class="main-content">
+      <header class="view-header">
+        <div>
+          <h2>Website Structure</h2>
+          <p style="color: #64748b; margin-top: 4px;">Map your custom URLs to marketing funnels.</p>
+        </div>
+        <div style="display: flex; gap: 10px;">
+           <button class="btn-primary" onclick="window.showAddRouteModal('${website.id}')">Add New Route</button>
+        </div>
+      </header>
+      
+      <div class="card" style="margin-bottom: 24px; border-left: 4px solid var(--primary-color);">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+           <div>
+             <small style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em;">Public Website Address</small>
+             <div style="font-size: 1.2rem; font-weight: 600; color: #1e293b; margin-top: 4px;">${websiteUrl}</div>
+           </div>
+           <a href="${websiteUrl}" target="_blank" class="btn-primary" style="background: white; color: #1e293b; border: 1px solid #e2e8f0; font-size: 0.85rem;">Visit Site ↗</a>
+        </div>
+      </div>
+
+      <div class="card" style="padding: 0; overflow: hidden;">
+        <div style="padding: 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
+          <h3 style="margin: 0; font-size: 1.1rem;">Mapped Routes</h3>
+        </div>
+        
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="padding-left: 20px;">URL Path</th>
+              <th>Destination Funnel</th>
+              <th>Status</th>
+              <th style="text-align: right; padding-right: 20px;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${routes.map(route => {
+              const funnel = mockFunnels.find(f => f.id === route.funnel_id);
+              const isHome = route.path === '/';
+              return `
+                <tr>
+                  <td style="padding-left: 20px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <code style="font-size: 0.95rem; color: var(--primary-color); font-weight: 700; background: #eff6ff; padding: 4px 8px; border-radius: 4px;">${route.path}</code>
+                      ${isHome ? '<span class="badge" style="background: #ecfdf5; color: #059669; font-size: 0.7rem;">Homepage</span>' : ''}
+                    </div>
+                  </td>
+                  <td>
+                    <div style="font-weight: 500; color: #1e293b;">${funnel ? funnel.name : 'Unknown Funnel'}</div>
+                    <small style="color: #64748b;">${route.funnel_id}</small>
+                  </td>
+                  <td><span class="badge badge-published">Live</span></td>
+                  <td style="text-align: right; padding-right: 20px;">
+                    <button class="btn-outline" style="color: #64748b; border-color: #e2e8f0; padding: 4px 10px; font-size: 0.8rem;" onclick="window.navigateTo('funnel-detail', '${route.funnel_id}')">Edit Funnel</button>
+                    ${!isHome ? `<button class="btn-outline" style="color: #ef4444; border-color: #fee2e2; padding: 4px 10px; font-size: 0.8rem; margin-left: 5px;" onclick="window.deleteRoute('${route.id}')">Delete</button>` : ''}
+                  </td>
+                </tr>
+              `;
+            }).join('') || '<tr><td colspan="4" style="text-align:center; padding: 60px; color: #94a3b8;">No routes configured yet.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </main>
+  `;
+}
+
+(window as any).showAddRouteModal = (websiteId: string) => {
+  const modal = document.createElement('div');
+  modal.id = 'route-modal';
+  modal.innerHTML = `
+    <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10001; display: flex; align-items: center; justify-content: center;">
+      <div class="card" style="width: 100%; max-width: 450px; padding: 30px;">
+        <h3 style="margin-top: 0; margin-bottom: 20px;">Add Website Route</h3>
+        
+        <div class="form-group" style="margin-bottom: 20px;">
+          <label>URL Path</label>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="color: #64748b; font-weight: 600;">/</span>
+            <input type="text" id="route-path" placeholder="e.g. driveway-cleaning" style="flex: 1; padding: 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+          </div>
+          <small style="color: #64748b; margin-top: 4px; display: block;">The URL relative to your domain.</small>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 30px;">
+          <label>Destination Funnel</label>
+          <select id="route-funnel-id" style="width: 100%; padding: 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
+            ${mockFunnels.map(f => `<option value="${f.id}">${f.name}</option>`).join('')}
+          </select>
+          <small style="color: #64748b; margin-top: 4px; display: block;">Which funnel should load at this path?</small>
+        </div>
+
+        <div style="display: flex; gap: 12px; justify-content: flex-end;">
+          <button class="btn-outline" onclick="document.getElementById('route-modal').remove()">Cancel</button>
+          <button class="btn-primary" onclick="window.saveRoute('${websiteId}')">Create Route</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+};
+
+(window as any).saveRoute = async (websiteId: string) => {
+  const pathInput = document.getElementById('route-path') as HTMLInputElement;
+  const funnelSelect = document.getElementById('route-funnel-id') as HTMLSelectElement;
+  
+  if (!pathInput || !funnelSelect) return;
+  
+  const path = pathInput.value.trim().replace(/^\/+/, '');
+  const funnelId = funnelSelect.value;
+  
+  if (!path) {
+    alert('Please enter a valid path.');
+    return;
+  }
+
+  const normalizedPath = '/' + path;
+
+  // Check for duplicates
+  if (mockWebsiteRoutes.some(r => r.website_id === websiteId && r.path === normalizedPath)) {
+    alert('This route path is already in use.');
+    return;
+  }
+
+  const newRoute = {
+    id: `r-${Date.now()}`,
+    website_id: websiteId,
+    path: normalizedPath,
+    funnel_id: funnelId,
+    created_at: new Date().toISOString()
+  };
+
+  mockWebsiteRoutes.push(newRoute);
+  document.getElementById('route-modal')?.remove();
+  renderWebsiteStructure();
+  console.log('[UI: ROUTES] Added new route:', newRoute);
+};
+
+(window as any).deleteRoute = (id: string) => {
+  if (!confirm('Are you sure you want to delete this route? This path will no longer load its funnel.')) return;
+  
+  const index = mockWebsiteRoutes.findIndex(r => r.id === id);
+  if (index !== -1) {
+    mockWebsiteRoutes.splice(index, 1);
+    renderWebsiteStructure();
+  }
+};
+
+(window as any).updateSettingsField = (field: string, value: string) => {
     const s = getWebsiteSettings(); (s as any)[field] = value; require('./website_settings_repo').persistWebsiteSettings(s);
     renderWebsiteSettings();
     console.log('Settings updated:', field, value);
   };
-}
 
 function renderQuickstart() {
   app.innerHTML = `
@@ -3667,6 +3908,7 @@ function executeNavigation(view: string, id?: string) {
     case 'templates': renderTemplates(); break;
     case 'components': app.innerHTML = `${renderSidebar('components')}<main class="main-content"><h2>Components Shelf</h2><div class="empty-state">Library of pre-built UI components coming soon.</div></main>`; break;
     case 'website-settings': renderWebsiteSettings(); break;
+    case 'website-structure': renderWebsiteStructure(); break;
     case 'reports': renderReports(); break;
     case 'quickstart': renderQuickstart(); break;
     case 'event-logs': renderEventLogs(); break;

@@ -1,4 +1,4 @@
-import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component, Asset, Template, WebsiteSettings, EventLog, Message, Call, Funnel } from './types';
+import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component, Asset, Template, WebsiteSettings, EventLog, Message, Call, Funnel, WebsiteLayout, Website, WebsiteRoute } from './types';
 
 export const mockFunnels: Funnel[] = [
   {
@@ -543,6 +543,36 @@ export const mockTemplates: Template[] = [
   }
 ];
 
+export const mockWebsites: Website[] = [
+  {
+    id: 'ws-1',
+    user_id: 'system',
+    name: 'PressurePro Seattle',
+    domain: 'hanssays.com',
+    subdomain: 'hans-seattle',
+    homepage_funnel_id: 'f1',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }
+];
+
+export const mockWebsiteRoutes: WebsiteRoute[] = [
+  {
+    id: 'r1',
+    website_id: 'ws-1',
+    path: '/',
+    funnel_id: 'f1',
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'r2',
+    website_id: 'ws-1',
+    path: '/driveway',
+    funnel_id: 'f5',
+    created_at: new Date().toISOString()
+  }
+];
+
 export const mockWebsiteSettings: WebsiteSettings = {
   id: 'settings-001',
   business_name: 'Handyman Hans Pressure Washing',
@@ -558,5 +588,34 @@ export const mockWebsiteSettings: WebsiteSettings = {
   missed_call_sms_template: '',
   created_at: new Date().toISOString()
 };
+
+export const mockWebsiteLayouts: WebsiteLayout[] = [
+  {
+    id: 'layout-1',
+    website_id: 'ws-1',
+    header_config: {
+      logo_text: 'PressurePro',
+      nav_items: [
+        { label: 'Home', path: '/' },
+        { label: 'Driveway Cleaning', path: '/driveway' },
+        { label: 'About', path: '/about' }
+      ],
+      cta_text: 'Get Quote',
+      cta_link: '/quote'
+    },
+    footer_config: {
+      business_name: 'PressurePro cleaning solutions',
+      phone_number: '555-0199',
+      service_area: 'Seattle & surrounding areas',
+      cta_text: 'Get an Instant Estimate',
+      links: [
+        { label: 'Privacy Policy', path: '/privacy' },
+        { label: 'Terms of Service', path: '/terms' }
+      ]
+    },
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }
+];
 
 // End of db.ts
