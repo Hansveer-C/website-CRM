@@ -232,6 +232,11 @@ export async function createFunnelFromTemplateApi(req: ApiRequest) {
         : template.name;
 
     const funnelRes = await FunnelsRepo.createFunnel(req.user!.id, funnelName);
+    // 🌿 WB.6.2: Set to published by default for instant live state
+    if (funnelRes.success && funnelRes.data) {
+        await FunnelsRepo.updateFunnel(req.user!.id, funnelRes.data.id, { status: 'published' });
+        funnelRes.data.status = 'published';
+    }
 
     if (!funnelRes.success || !funnelRes.data) {
         return {
@@ -296,11 +301,8 @@ export async function createFunnelFromTemplateApi(req: ApiRequest) {
             user_id:         req.user!.id,
             name:            stepLabel,
             slug:            `${baseSlug}-${tplStep.order}-${Date.now()}`,
-            status:          'draft',
-            seo_title:       hydrate(content.headline || content.title || stepLabel),
-            seo_description: hydrate(content.subtext || content.confirmation_message || ''),
-            seo_keywords:    [],
             created_at:      new Date().toISOString(),
+            status:          'published', // 🌿 WB.6.2
             // Funnel linkage (WB.1.6 schema)
             funnel_id:       funnel.id,
             step_type:       tplStep.type,
