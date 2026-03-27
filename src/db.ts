@@ -355,13 +355,43 @@ export const mockComponents: Component[] = [
     default_content: {
       heading: 'Frequently Asked Questions',
       items: [
-        { question: 'How long does a typical job take?',   answer: 'Most residential jobs are completed in 1–3 hours depending on the size.' },
-        { question: 'Is pressure washing safe for my home?', answer: 'Yes — we use appropriate PSI and soft-wash techniques for every surface.' },
-        { question: 'Do I need to be home during the service?', answer: 'No, as long as we have access to an outdoor water source.' },
-        { question: 'How often should I get my driveway cleaned?', answer: 'We recommend once per year to prevent build-up and surface damage.' }
+        { question: 'How much does it cost?', answer: 'Driveway cleaning typically starts at $149, while full house washing varies by square footage. We provide instant, transparent quotes after a quick site visit (or even via photo!).' },
+        { question: 'How long does it take?', answer: 'Most residential driveways take 1.5 to 3 hours. A full house wash usually takes 3 to 5 hours depending on the size and complexity.' },
+        { question: 'Do I need to be home?', answer: 'No, you don’t need to be home! As long as we have access to an external water source and all windows are closed, we can complete the job and send you "After" photos immediately.' },
+        { question: 'What surfaces do you clean?', answer: 'We specialize in Concrete (Driveways/Patios), Siding (Vinyl/Stucco), Brick, and Roofs (Soft-wash). We use specialized equipment for each surface to ensure a deep clean without damage.' }
       ]
     },
     default_styles: { padding: '80px 20px', background: '#ffffff' }
+  },
+  {
+    id: 'comp-social',
+    name: 'Social Proof (Before/After)',
+    type: 'social-proof',
+    default_content: {
+      title: 'Don’t Just Take Our Word For It',
+      subtitle: 'See the transformations we’ve achieved for local homeowners.',
+      before_after: {
+        before: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&q=80&w=800',
+        after: 'https://images.unsplash.com/photo-1527335932348-4dbe058525cc?auto=format&fit=crop&q=80&w=800'
+      },
+      testimonials: [
+        { name: 'Sarah J.', quote: 'Our driveway went from gray to brilliant white in hours. Highly recommend!', stars: 5 },
+        { name: 'Mike T.', quote: 'Professional service and great communication. The house looks brand new.', stars: 5 },
+        { name: 'Linda W.', quote: 'The roof looks amazing. Fast, clean, and reliable service.', stars: 5 }
+      ]
+    },
+    default_styles: { padding: '80px 20px', background: '#ffffff' }
+  },
+  {
+    id: 'comp-urgency',
+    name: 'Urgency Banner',
+    type: 'urgency',
+    default_content: {
+      badge: 'Limited Time Offer',
+      headline: 'Same-Day Service Available This Week!',
+      subtext: 'Book now to secure your spot. Only 3 slots remaining for Friday.'
+    },
+    default_styles: { padding: '40px 20px', background: '#ffffff' }
   }
 ];
 
@@ -486,12 +516,20 @@ export const mockTemplates: Template[] = [
         order: 3
       },
       {
-        type: 'text',
-        content: { 
-          heading: 'Trusted by local homeowners', 
-          text: '<p style="text-align: center; max-width: 800px; margin: 0 auto;">We have helped over 500 families protect and beautify their homes with professional results and a local touch. Our specialized equipment ensures a deep clean without damaging your surfaces.</p>' 
+        type: 'social-proof',
+        content: {
+          title: 'See The Difference',
+          subtitle: 'Join over 500 local families who trust our results.',
+          before_after: {
+            before: 'https://images.unsplash.com/photo-1541888946425-d81bb19480c5?auto=format&fit=crop&q=80&w=800',
+            after: 'https://images.unsplash.com/photo-1517646288021-22c16196a60e?auto=format&fit=crop&q=80&w=800'
+          },
+          testimonials: [
+            { name: 'John D.', quote: 'Hans is the best! My driveway looks brand new.', stars: 5 },
+            { name: 'Sarah M.', quote: 'Professional service and great results.', stars: 5 }
+          ]
         },
-        styles: { padding: '60px 20px', background: '#f8fafc' },
+        styles: { padding: '80px 20px', background: '#f8fafc' },
         order: 4
       },
       {

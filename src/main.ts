@@ -1442,25 +1442,79 @@ function renderSectionPreviewContent(section: any) {
     case 'faq': {
       const faqs: any[] = content.items || [];
       return `
-        <div style="padding: 60px 40px; max-width: 760px; margin: 0 auto;">
+        <div style="padding: 60px 40px; max-width: 800px; margin: 0 auto;">
           <h2 style="font-size: 2.2rem; font-weight: 800; margin-bottom: 36px; text-align: center;">
             ${inlineText(id, 'heading', content.heading || 'Frequently Asked Questions', 'display:block;width:100%;')}
           </h2>
           <div style="display: flex; flex-direction: column; gap: 12px;">
             ${faqs.map((faq: any, idx: number) => `
-              <div class="pb-faq-item" style="border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; background: #fff;">
+              <div class="pb-faq-item" style="border: 2px solid #f1f5f9; border-radius: 12px; overflow: hidden; background: #fff; transition: border-color 0.2s;">
                 <button class="pb-faq-toggle" onclick="this.closest('.pb-faq-item').classList.toggle('open'); event.stopPropagation();"
-                        style="width: 100%; text-align: left; padding: 18px 20px; background: transparent; border: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 1rem; font-weight: 600; color: #1e293b;">
+                        style="width: 100%; text-align: left; padding: 20px 24px; background: transparent; border: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 1.1rem; font-weight: 700; color: #1e293b;">
                   <span>${faq.question || 'Question ' + (idx + 1)}</span>
-                  <span class="pb-faq-chevron" style="font-size: 0.85rem; color: #94a3b8; flex-shrink: 0; transition: transform 200ms ease;">▼</span>
+                  <span class="pb-faq-chevron" style="font-size: 0.85rem; color: #94a3b8; transition: transform 250ms ease;">▼</span>
                 </button>
-                <div class="pb-faq-answer" style="padding: 0 20px; max-height: 0; overflow: hidden; transition: max-height 250ms ease, padding 250ms ease;">
-                  <p style="padding-bottom: 16px; color: #475569; line-height: 1.7; font-size: 0.95rem;">${faq.answer || ''}</p>
+                <div class="pb-faq-answer" style="padding: 0 24px; max-height: 0; overflow: hidden; transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);">
+                  <p style="padding-bottom: 20px; color: #475569; line-height: 1.7; font-size: 1rem;">${faq.answer || 'Answer goes here...'}</p>
                 </div>
               </div>
             `).join('')}
           </div>
+          <style>
+            .pb-faq-item.open { border-color: var(--primary-color) !important; }
+            .pb-faq-item.open .pb-faq-chevron { transform: rotate(180deg); color: var(--primary-color) !important; }
+            .pb-faq-item.open .pb-faq-answer { max-height: 500px !important; padding-top: 5px !important; }
+          </style>
         </div>`;
+    }
+    case 'social-proof': {
+      const tests: any[] = content.testimonials || [];
+      const ba = content.before_after || {};
+      return `
+        <div class="social-proof-container" style="text-align: center;">
+          <h2 style="font-size: 2.2rem; font-weight: 800; margin-bottom: 12px;">
+            ${inlineText(id, 'title', content.title || 'Don’t Just Take Our Word For It', 'display:block;width:100%;')}
+          </h2>
+          <p style="font-size: 1.1rem; opacity: 0.7; margin-bottom: 48px;">
+            ${inlineText(id, 'subtitle', content.subtitle || 'See the results we achieve for homeowners like you.', 'display:block;width:100%;')}
+          </p>
+          
+          <div class="ba-grid">
+            <div class="ba-card" onclick="window.openImagePicker('${id}', 'before_after.before'); event.stopPropagation();" title="Click to replace BEFORE image">
+              <img src="${ba.before}" alt="Before">
+              <span class="ba-label">Before</span>
+              <div class="pb-image-overlay" style="display:flex; justify-content:center; align-items:center; background:rgba(0,0,0,0.4);"><span style="color:white; font-size:1.5rem;">📷 Replace</span></div>
+            </div>
+            <div class="ba-card" onclick="window.openImagePicker('${id}', 'before_after.after'); event.stopPropagation();" title="Click to replace AFTER image">
+              <img src="${ba.after}" alt="After">
+              <span class="ba-label">After</span>
+              <div class="pb-image-overlay" style="display:flex; justify-content:center; align-items:center; background:rgba(0,0,0,0.4);"><span style="color:white; font-size:1.5rem;">📷 Replace</span></div>
+            </div>
+          </div>
+
+          <div class="testimonials-row">
+            ${tests.map((t: any, idx: number) => `
+              <div class="testimonial-card">
+                <div class="testimonial-stars">
+                  ${'★'.repeat(t.stars || 5)}${'☆'.repeat(5 - (t.stars || 5))}
+                </div>
+                <p class="testimonial-quote">&ldquo;${t.quote}&rdquo;</p>
+                <div class="testimonial-author">&mdash; ${t.name}</div>
+              </div>
+            `).join('')}
+          </div>
+          <p style="font-size: 0.8rem; color: #94a3b8; margin-top: 15px;">* Testimonials can be edited via the data panel or direct JSON for now.</p>
+        </div>
+      `;
+    }
+    case 'urgency': {
+      return `
+        <div class="urgency-container">
+          <div class="urgency-badge">${inlineText(id, 'badge', content.badge || 'Limited Time', 'display:inline;')}</div>
+          <div class="urgency-headline">${inlineText(id, 'headline', content.headline || 'Same-Day Service Available', 'display:block;width:100%;')}</div>
+          <div class="urgency-subtext">${inlineText(id, 'subtext', content.subtext || 'Don’t wait — spots are filling up fast!', 'display:block;width:100%;')}</div>
+        </div>
+      `;
     }
     default:
       return `<pre>${JSON.stringify(content, null, 2)}</pre>`;
@@ -2064,6 +2118,91 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
     case 'button':
       const sizeMap: any = { small: '10px 20px', medium: '15px 35px', large: '20px 50px' };
       return `<a href="${content.link || '#'}" class="btn-primary" style="display: inline-block; text-decoration: none; background: ${styles.color || 'var(--primary-color)'}; padding: ${sizeMap[styles.size] || '15px 35px'}; border-radius: 8px; font-weight: 600; text-align: center;">${content.label || 'Click Here'}</a>`;
+    case 'social-proof': {
+      const tests: any[] = content.testimonials || [];
+      const ba = content.before_after || {};
+      return `
+        <div class="social-proof-container" style="text-align: center;">
+          <h2 style="font-size: clamp(1.8rem, 5vw, 2.5rem); font-weight: 800; margin-bottom: 12px; color: #1e293b;">${content.title || 'Don’t Just Take Our Word For It'}</h2>
+          <p style="font-size: 1.1rem; opacity: 0.8; margin-bottom: 48px; color: #475569;">${content.subtitle || ''}</p>
+          
+          <div class="ba-grid">
+            <div class="ba-card">
+              <img src="${ba.before}" alt="Before">
+              <span class="ba-label">Before</span>
+            </div>
+            <div class="ba-card">
+              <img src="${ba.after}" alt="After">
+              <span class="ba-label">After</span>
+            </div>
+          </div>
+
+          <div class="testimonials-row">
+            ${tests.map((t: any) => `
+              <div class="testimonial-card">
+                <div class="testimonial-stars">
+                  ${'★'.repeat(t.stars || 5)}${'☆'.repeat(5 - (t.stars || 5))}
+                </div>
+                <p class="testimonial-quote">&ldquo;${t.quote}&rdquo;</p>
+                <div class="testimonial-author">&mdash; ${t.name}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+    case 'urgency': {
+      return `
+        <div class="urgency-container">
+          ${content.badge ? `<div class="urgency-badge">${content.badge}</div>` : ''}
+          <div class="urgency-headline">${content.headline || 'Act Now!'}</div>
+          <div class="urgency-subtext">${content.subtext || ''}</div>
+        </div>
+      `;
+    }
+    case 'faq': {
+      const faqs: any[] = content.items || [];
+      const schema = {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": faqs.map(f => ({
+          "@type": "Question",
+          "name": f.question,
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": f.answer
+          }
+        }))
+      };
+      return `
+        <div style="padding: 60px 40px; max-width: 800px; margin: 0 auto;">
+          <h2 style="font-size: clamp(1.8rem, 5vw, 2.5rem); font-weight: 800; margin-bottom: 36px; text-align: center; color: #1e293b;">
+            ${content.heading || 'Frequently Asked Questions'}
+          </h2>
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            ${faqs.map((faq: any, idx: number) => `
+              <div class="pb-faq-item site-faq" style="border: 2px solid #f1f5f9; border-radius: 12px; overflow: hidden; background: #fff; transition: all 0.3s ease;">
+                <button class="pb-faq-toggle" onclick="this.closest('.pb-faq-item').classList.toggle('open')"
+                        style="width: 100%; text-align: left; padding: 20px 24px; background: transparent; border: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 1.1rem; font-weight: 700; color: #1e293b; outline: none;">
+                  <span>${faq.question}</span>
+                  <span class="pb-faq-chevron" style="font-size: 0.85rem; color: #94a3b8; transition: transform 0.3s ease;">▼</span>
+                </button>
+                <div class="pb-faq-answer" style="padding: 0 24px; max-height: 0; overflow: hidden; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);">
+                  <p style="padding-bottom: 20px; color: #475569; line-height: 1.7; font-size: 1.05rem;">${faq.answer}</p>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          <script type="application/ld+json">
+            ${JSON.stringify(schema)}
+          </script>
+          <style>
+            .site-faq.open { border-color: var(--primary-color) !important; box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
+            .site-faq.open .pb-faq-chevron { transform: rotate(180deg); color: var(--primary-color) !important; }
+            .site-faq.open .pb-faq-answer { max-height: 600px !important; padding-top: 10px !important; }
+          </style>
+        </div>`;
+    }
     default:
       return `<div>Component type "${type}" not implemented</div>`;
   }
