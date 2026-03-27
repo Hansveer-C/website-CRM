@@ -101,6 +101,7 @@ export async function createLead(data: {
       status: 'open',
       notes: `Service Type: ${data.service_type || 'N/A'}\nAddress: ${data.address || 'N/A'}\nMessage: ${data.message || 'N/A'}\n${funnelMetadata}`,
       source: data.source || 'api',
+      funnel_id: data.funnel_id,
       created_at: timestamp
     };
 

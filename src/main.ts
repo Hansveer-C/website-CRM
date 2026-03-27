@@ -3331,7 +3331,17 @@ async function renderFunnels() {
       return;
     }
 
-    const funnelsHtml = res.data.map((f: any) => `
+    // 🌿 WB.5.5: Fetch metrics for funnels
+    const oppsRes = await fetch('/api/opportunities').then(r => r.json());
+    const allOpps = oppsRes.success ? oppsRes.data : [];
+    const today = new Date().toISOString().split('T')[0];
+
+    const funnelsHtml = res.data.map((f: any) => {
+      const funnelOpps = allOpps.filter((o: any) => o.funnel_id === f.id);
+      const totalLeads = funnelOpps.length;
+      const leadsToday = funnelOpps.filter((o: any) => o.created_at.startsWith(today)).length;
+
+      return `
       <div class="card funnel-card" 
            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; transition: transform 0.2s; cursor: pointer; border: 1px solid #eef2f6;" 
            onclick="window.navigateTo('funnel-detail', '${f.id}')"
@@ -3345,14 +3355,22 @@ async function renderFunnels() {
           </div>
         </div>
         <div style="text-align: right; display: flex; align-items: center; gap: 30px;">
-          <div style="text-align: center;">
+          <div style="text-align: center; min-width: 60px;">
+            <div style="font-weight: 700; color: #1e293b; font-size: 1.1rem;">${totalLeads}</div>
+            <div style="font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Total Leads</div>
+          </div>
+          <div style="text-align: center; min-width: 80px; padding: 0 15px; border-left: 1px solid #eef2f6; border-right: 1px solid #eef2f6;">
+            <div style="font-weight: 700; color: var(--primary-color); font-size: 1.1rem;">${leadsToday}</div>
+            <div style="font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Leads Today</div>
+          </div>
+          <div style="text-align: center; min-width: 40px;">
             <div style="font-weight: 700; color: #1e293b; font-size: 1.1rem;">${f.step_count || 0}</div>
             <div style="font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Steps</div>
           </div>
           <span class="badge badge-${f.status}" style="text-transform: capitalize; padding: 6px 12px; border-radius: 6px; font-weight: 600;">${f.status}</span>
         </div>
       </div>
-    `).join('');
+    `;}).join('');
 
     container.innerHTML = `
       <div class="funnels-grid">
@@ -3417,17 +3435,80 @@ async function renderFunnelDetail(funnelId: string) {
         </div>
       </header>
 
-      <div style="max-width: 900px;">
-        <h3 style="margin-bottom: 24px; color: #1e293b; font-size: 1.25rem;">Funnel Steps</h3>
-        <div class="steps-flow">
-          ${stepsHtml}
+      <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 32px; max-width: 1200px;">
+        <div id="steps-section">
+          <h3 style="margin-bottom: 24px; color: #1e293b; font-size: 1.25rem;">Funnel Steps</h3>
+          <div class="steps-flow">
+            ${stepsHtml}
+          </div>
+          
+          <div style="margin-top: 32px; text-align: center; padding: 32px; border: 2px dashed #e2e8f0; border-radius: 12px;">
+            <button class="btn-primary" style="background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0;">+ Add New Step</button>
+          </div>
         </div>
-        
-        <div style="margin-top: 32px; text-align: center; padding: 32px; border: 2px dashed #e2e8f0; border-radius: 12px;">
-          <button class="btn-primary" style="background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0;">+ Add New Step</button>
+
+        <div id="activity-section">
+          <div class="card" style="padding: 24px; position: sticky; top: 20px;">
+            <h3 style="margin-top: 0; margin-bottom: 20px; color: #1e293b; font-size: 1.15rem; display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 1.25rem;">⚡</span> Recent Activity
+            </h3>
+            <div id="activity-feed-container">
+              <div class="loading">Loading activity...</div>
+            </div>
+          </div>
         </div>
       </div>
     `;
+
+    // 🌿 WB.5.6: Populate activity feed
+    const activityContainer = document.getElementById('activity-feed-container');
+    if (activityContainer) {
+      const [oppsRes, logsRes] = await Promise.all([
+        fetch('/api/opportunities').then(r => r.json()),
+        fetch('/api/events/logs').then(r => r.json())
+      ]);
+
+      const funnelOpps = (oppsRes.data || []).filter((o: any) => o.funnel_id === funnelId);
+      const contactIds = new Set(funnelOpps.map((o: any) => o.contact_id));
+      
+      const rawLogs = (logsRes.data || []).filter((l: any) => 
+        contactIds.has(l.payload?.contact_id || l.contact_id) || 
+        (l.payload?.funnel_id === funnelId)
+      );
+
+      // Sort logs by newest first
+      const sortedLogs = rawLogs.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 15);
+
+      if (sortedLogs.length === 0) {
+        activityContainer.innerHTML = '<div style="color: #64748b; font-size: 0.9rem; text-align: center; padding: 20px;">No activity yet. Share your funnel to start seeing leads!</div>';
+      } else {
+        activityContainer.innerHTML = sortedLogs.map((l: any) => {
+          let icon = '📝';
+          let label = l.event_name.replace(/_/g, ' ');
+          let color = '#64748b';
+
+          if (l.event_name.includes('lead')) { icon = '👤'; color = '#3b82f6'; label = 'Lead Captured'; }
+          if (l.event_name.includes('sms')) { icon = '💬'; color = '#10b981'; label = 'SMS Sent'; }
+          if (l.event_name.includes('call')) { icon = '📞'; color = '#f59e0b'; label = 'Missed Call'; }
+
+          const timeStr = new Date(l.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const contactName = l.payload?.name || 'Lead';
+
+          return `
+            <div style="padding: 12px 0; border-bottom: 1px solid #f1f5f9; display: flex; gap: 12px; align-items: flex-start;">
+              <div style="background: ${color}15; color: ${color}; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 0.9rem;">${icon}</div>
+              <div style="flex: 1; min-width: 0;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                  <span style="font-weight: 700; color: #1e293b; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${contactName}</span>
+                  <span style="font-size: 0.75rem; color: #94a3b8;">${timeStr}</span>
+                </div>
+                <div style="font-size: 0.8rem; color: #64748b; text-transform: capitalize;">${label}</span></div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
   } catch (err: any) {
     console.error('Failed to load funnel detail:', err);
     const container = document.getElementById('funnel-detail-container');
@@ -4388,10 +4469,18 @@ if (path.includes('/site/')) {
 setInterval(() => {
   let changeDetected = false;
 
-  // 1. Detect New Leads (Global Alert)
+  // 🌿 1. Detect New Leads (Global Alert - WB.5.4)
   if (mockContacts.length > lastContactCount) {
-    const diff = mockContacts.length - lastContactCount;
-    (window as any).showToast(diff === 1 ? 'New lead received' : `${diff} new leads received`);
+    const newLeads = mockContacts.slice(lastContactCount);
+    
+    // Detailed toast for the most recent lead
+    if (newLeads.length === 1) {
+      const lead = newLeads[0];
+      (window as any).showToast(`New lead: ${lead.name} (${lead.phone})`, 'info');
+    } else {
+      (window as any).showToast(`${newLeads.length} new leads received`, 'info');
+    }
+
     lastContactCount = mockContacts.length;
     changeDetected = true;
   }
@@ -4407,10 +4496,10 @@ setInterval(() => {
     // If a new lead was detected, re-render the active view to show it immediately
     if (changeDetected) {
       if (currentView === 'clients') renderClients();
-      if (currentView === 'dashboard') renderDashboard();
+      if (currentView === 'dashboard') (window as any).renderDashboard();
     }
   }
-}, 30000);
+}, 5000);
 // ── WB.4.1 Scroll Handler for Sticky CTA Bar ──
 let lastScrollTop = 0;
 window.addEventListener('scroll', () => {

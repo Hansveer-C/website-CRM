@@ -30,6 +30,7 @@ export interface Opportunity {
   status: OpportunityStatus;
   notes?: string;
   source?: string;
+  funnel_id?: string;
   created_at: string;
 }
 
