@@ -1804,7 +1804,16 @@ function renderSectionPreviewContent(section: any) {
   const serviceInput = document.getElementById(`${prefix}service_type-${sectionId}`) as HTMLSelectElement;
   const messageInput = document.getElementById(`${prefix}message-${sectionId}`) as HTMLTextAreaElement;
 
+  const sectionWrapper = document.getElementById(`form-wrapper-${sectionId}`);
+  const submitBtn = document.querySelector(`#form-wrapper-${sectionId} .btn-primary`) as HTMLButtonElement;
+  const originalBtnText = submitBtn?.innerHTML || 'Submit';
+
   try {
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span style="display:inline-flex; align-items:center; gap:8px;"><svg class="animate-spin" style="width:18px; height:18px;" viewBox="0 0 24 24"><circle style="opacity:0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path style="opacity:0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Sending...</span>';
+    }
+
     const res = await createLead({
       name: nameInput?.value || '',
       phone: phoneInput?.value,
@@ -1816,15 +1825,29 @@ function renderSectionPreviewContent(section: any) {
     });
 
     console.log("Lead created:", res);
-    alert('Thanks! We’ve received your request.');
-
-    // Clear form
-    [nameInput, phoneInput, emailInput, addressInput, serviceInput, messageInput].forEach(el => {
-      if (el) el.value = '';
-    });
+    
+    // Confident Success State (WB.4.3)
+    if (sectionWrapper) {
+      sectionWrapper.innerHTML = `
+        <div style="text-align: center; padding: 40px 10px; animation: fadeIn 0.5s ease-out;">
+          <div style="font-size: 4rem; margin-bottom: 24px; display: inline-block; animation: bounce 1s cubic-bezier(0.175, 0.885, 0.32, 1.275);">✅</div>
+          <h3 style="font-size: 2rem; font-weight: 800; margin-bottom: 16px; color: #1e293b; letter-spacing: -0.5px;">Thanks! We'll call you shortly.</h3>
+          <p style="font-size: 1.15rem; color: #64748b; line-height: 1.6; max-width: 320px; margin: 0 auto 30px;">
+            Most customers hear back within <b style="color: var(--primary-color);">5 minutes</b>.
+          </p>
+          <div style="padding-top: 20px; border-top: 1px solid #f1f5f9;">
+             <p style="font-weight: 700; color: #94a3b8; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px;">Request Captured Successfully</p>
+          </div>
+        </div>
+      `;
+    }
 
   } catch (error: any) {
     console.error("Lead submission failed:", error);
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = originalBtnText;
+    }
     alert('Something went wrong. Please try again.');
   }
 };
@@ -1868,11 +1891,24 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
   }
 
   app.innerHTML = `
-    <div class="public-site" style="min-height: 100vh; background: white; font-family: 'Inter', sans-serif;">
+    <div class="public-site ${!isPreview ? 'has-cta-bar' : ''}" style="min-height: 100vh; background: white; font-family: 'Inter', sans-serif;">
       ${isPreview ? `<div style="background: #fdf2f2; color: #dc2626; padding: 10px; text-align: center; font-weight: 700; border-bottom: 1px solid #fee2e2;">PREVIEW MODE: You are viewing a draft version of "${page.name}"</div>` : ''}
       
+      ${!isPreview ? `
+        <div id="site-cta-bar" class="cta-bar">
+          <a href="tel:${settings.phone}" class="cta-bar-btn cta-bar-btn--call">
+            <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>
+            <span>Call Now</span>
+          </a>
+          <button class="cta-bar-btn cta-bar-btn--quote" onclick="document.querySelector('.site-form-section')?.scrollIntoView({behavior: 'smooth'})">
+            <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            <span>Get Free Quote</span>
+          </button>
+        </div>
+      ` : ''}
+
       <!-- Site Header with Global Info -->
-      <header style="padding: 20px 40px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: rgba(255,255,255,0.9); backdrop-filter: blur(8px); z-index: 100;">
+      <header style="padding: 20px 40px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: rgba(255,255,255,0.9); backdrop-filter: blur(8px); z-index: 100; transition: top 0.3s ease;">
         <div style="display: flex; align-items: center; gap: 15px;">
            ${settings.logo_url ? `<img src="${settings.logo_url}" style="height: 40px; width: 40px; border-radius: 8px; object-fit: cover;">` : ''}
            <span style="font-weight: 800; font-size: 1.25rem; color: #1e293b;">${settings.business_name}</span>
@@ -1887,16 +1923,6 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
     const content = { ...section.content, business_name: settings.business_name, phone: settings.phone };
     return renderSection(section.type, content, section.styles, section.id);
   }).join('')}
-      
-      ${!isPreview ? `
-        <button id="sticky-cta" onclick="document.querySelector('.site-form-section')?.scrollIntoView({behavior: 'smooth'})" 
-          style="position: fixed; bottom: 25px; right: 25px; z-index: 9999; background: var(--primary-color); color: white; border: none; padding: 16px 32px; border-radius: 50px; font-weight: 700; box-shadow: 0 12px 30px rgba(0,0,0,0.25); cursor: pointer; display: flex; align-items: center; gap: 10px; font-size: 1.1rem; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);"
-          onmouseover="this.style.transform='scale(1.1) translateY(-5px)'; this.style.boxShadow='0 15px 35px rgba(0,0,0,0.3)';"
-          onmouseout="this.style.transform='scale(1) translateY(0)'; this.style.boxShadow='0 12px 30px rgba(0,0,0,0.25)';">
-          <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-          Get Quote
-        </button>
-      ` : ''}
 
       <!-- Public Footer -->
       <footer style="padding: 40px; text-align: center; background: #f8fafc; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 0.9rem;">
@@ -1997,39 +2023,41 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
       `;
     case 'form':
       return `
-        <div class="site-form-section" style="max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); color: #333; text-align: left;">
-          <h3 style="margin-bottom: 25px; font-size: 1.75rem; text-align: center;">${content.title || 'Contact Us'}</h3>
-          <div style="display: flex; flex-direction: column; gap: 20px;">
-            ${(content.fields || []).map((f: string) => {
-        if (f === 'message') {
-          return `
+        <div id="form-wrapper-${id}" class="site-form-section" style="max-width: 500px; margin: 0 auto; background: white; padding: 45px; border-radius: 20px; box-shadow: 0 15px 45px rgba(0,0,0,0.1); color: #1e293b; text-align: left;">
+          <h3 style="margin-bottom: 25px; font-size: 1.85rem; text-align: center; font-weight: 800; letter-spacing: -0.5px;">${content.title || 'Get My Free Quote'}</h3>
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            <div class="form-group">
+                <input type="text" id="site-f-name-${id}" placeholder="Your Full Name" required style="padding: 16px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 12px; width: 100%; font-family: inherit; font-size: 1.1rem; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'" onblur="this.style.borderColor='#f1f5f9'">
+            </div>
+            <div class="form-group">
+                <input type="tel" id="site-f-phone-${id}" placeholder="Phone Number" required style="padding: 16px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 12px; width: 100%; font-family: inherit; font-size: 1.1rem; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'" onblur="this.style.borderColor='#f1f5f9'">
+            </div>
+            
+            ${(content.fields || []).includes('service_type') ? `
+              <details style="margin-top: 8px;">
+                <summary style="cursor: pointer; color: #64748b; font-weight: 600; font-size: 0.9rem; padding: 8px 0;">+ Add Service Details (Optional)</summary>
+                <div style="padding-top: 15px;">
                   <div class="form-group">
-                    <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; color: #666;">Message</label>
-                    <textarea id="site-f-${f}-${id}" placeholder="Your message" style="padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; min-height: 100px; font-family: inherit; font-size: 1rem;"></textarea>
-                  </div>
-                `;
-        }
-        if (f === 'service_type') {
-          return `
-                  <div class="form-group">
-                    <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; color: #666;">Service Type</label>
-                    <select id="site-f-${f}-${id}" style="padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; background: white; font-family: inherit; font-size: 1rem;">
-                        <option value="Residential">Residential Cleaning</option>
-                        <option value="Commercial">Commercial Washing</option>
+                    <label style="display: block; font-weight: 700; margin-bottom: 8px; font-size: 0.85rem; color: #475569;">Preferred Service</label>
+                    <select id="site-f-service_type-${id}" style="padding: 14px; border: 2px solid #f1f5f9; border-radius: 12px; width: 100%; background: #f8fafc; font-family: inherit; font-size: 1rem;">
+                        <option value="Residential">Driveway Cleaning</option>
+                        <option value="Commercial">House Washing</option>
                         <option value="Roof/Gutter">Roof & Gutter</option>
                         <option value="Other">Other Service</option>
                     </select>
                   </div>
-                `;
-        }
-        return `
-                <div class="form-group">
-                  <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9rem; color: #666;">${f.charAt(0).toUpperCase() + f.slice(1).replace('_', ' ')}</label>
-                  <input type="${f === 'email' ? 'email' : f === 'phone' ? 'tel' : 'text'}" id="site-f-${f}-${id}" placeholder="Your ${f.replace('_', ' ')}" style="padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; font-family: inherit; font-size: 1rem;">
                 </div>
-              `;
-      }).join('')}
-            <button class="btn-primary" style="padding: 16px; margin-top: 10px; font-size: 1.1rem;" onclick="window.submitBuilderForm('${id}', true)">Send Message</button>
+              </details>
+            ` : ''}
+
+            <button class="btn-primary" 
+              style="padding: 20px; margin-top: 15px; font-size: 1.25rem; font-weight: 800; border-radius: 50px; background: var(--primary-color); color: white; border: none; cursor: pointer; transition: all 0.3s; box-shadow: 0 8px 25px rgba(79, 70, 229, 0.35);" 
+              onmouseover="this.style.transform='scale(1.02) translateY(-2px)'"
+              onmouseout="this.style.transform='scale(1) translateY(0)'"
+              onclick="window.submitBuilderForm('${id}', true)">
+              ${content.submit_label || 'Get My Free Quote ✨'}
+            </button>
+            <p style="text-align: center; font-size: 0.8rem; color: #94a3b8; margin-top: 15px;">🔒 Your data is safe. We value your privacy.</p>
           </div>
         </div>
       `;
@@ -3338,6 +3366,8 @@ function executeNavigation(view: string, id?: string) {
     case 'event-logs': renderEventLogs(); break;
     case 'qa-tools': renderQATools(); break;
     case 'quote-preview': if (id) renderQuotePreview(id); break;
+    case 'site': if (id) renderSitePage(id); break;
+    case 'preview': if (id) renderSitePage(id, true); break;
     default: renderDashboard();
   }
 
@@ -4236,3 +4266,19 @@ setInterval(() => {
     }
   }
 }, 30000);
+// ── WB.4.1 Scroll Handler for Sticky CTA Bar ──
+let lastScrollTop = 0;
+window.addEventListener('scroll', () => {
+  const bar = document.getElementById('site-cta-bar');
+  if (!bar) return;
+
+  const st = window.pageYOffset || document.documentElement.scrollTop;
+  if (st > lastScrollTop && st > 100) {
+    // Scrolling down -> hide
+    bar.classList.add('cta-bar-offscreen');
+  } else {
+    // Scrolling up -> show
+    bar.classList.remove('cta-bar-offscreen');
+  }
+  lastScrollTop = st <= 0 ? 0 : st;
+}, false);

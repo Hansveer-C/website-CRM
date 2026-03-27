@@ -1750,3 +1750,93 @@ html {
     min-width: 80px;
     justify-content: flex-end;
 }
+/* ── WB.4.1 Sticky CTA Bar ── */
+.cta-bar {
+  position: fixed;
+  left: 0;
+  width: 100%;
+  z-index: 10000;
+  display: flex;
+  gap: 12px;
+  padding: 12px 20px;
+  background: white;
+  border-top: 1px solid #e2e8f0;
+  box-shadow: 0 -8px 30px rgba(0,0,0,0.1);
+  transition: transform 0.3s cubic-bezier(0.165, 0.84, 0.44, 1);
+  box-sizing: border-box;
+}
+
+/* Mobile: Bottom */
+@media (max-width: 768px) {
+  .cta-bar {
+    bottom: 0;
+    top: auto;
+  }
+  .public-site {
+    padding-bottom: 72px; /* Prevent footer clipping */
+  }
+}
+
+/* Desktop: Top */
+@media (min-width: 769px) {
+  .cta-bar {
+    top: 0;
+    bottom: auto;
+    border-top: none;
+    border-bottom: 1px solid #e2e8f0;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+  }
+  
+  .has-cta-bar .public-site header {
+    top: 72px !important; /* Offset header when cta-bar is at the top */
+  }
+  .has-cta-bar .public-site {
+     padding-top: 72px; /* Push content down */
+  }
+}
+
+.cta-bar-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 48px;
+  border-radius: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  font-size: 0.95rem;
+  transition: all 0.2s;
+  border: none;
+  cursor: pointer;
+}
+
+.cta-bar-btn--call {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+.cta-bar-btn--call:hover {
+  background: #e2e8f0;
+}
+
+.cta-bar-btn--quote {
+  background: var(--primary-color);
+  color: white;
+}
+
+.cta-bar-btn--quote:hover {
+  opacity: 0.9;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.cta-bar-offscreen {
+  transform: translateY(110%);
+}
+
+@media (min-width: 769px) {
+  .cta-bar-offscreen {
+    transform: translateY(-110%);
+  }
+}

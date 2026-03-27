@@ -269,9 +269,9 @@ export const mockComponents: Component[] = [
     id: 'comp3',
     name: 'Lead Capture Form',
     type: 'form',
-    default_content: { 
-      title: 'Get a Free Quote',
-      fields: ['name', 'phone', 'email', 'address', 'service_type', 'message'],
+    default_content: {
+      title: 'Get My Free Quote',
+      fields: ['name', 'phone'],
       pipeline_id: 'p1'
     },
     default_styles: { 
