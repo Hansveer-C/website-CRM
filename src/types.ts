@@ -31,6 +31,9 @@ export interface Opportunity {
   notes?: string;
   source?: string;
   funnel_id?: string;
+  page_slug?: string;
+  service?: string;
+  city?: string;
   created_at: string;
 }
 
@@ -109,6 +112,7 @@ export interface Page {
   seo_title: string;
   seo_description: string;
   seo_keywords: string[];
+  schema_markup?: string; // JSON-LD
   created_at: string;
   funnel_id?: string;
   step_type?: string;
@@ -219,7 +223,11 @@ export interface WebsiteRoute {
   id: string;
   website_id: string;
   path: string;
+  slug?: string;
   funnel_id: string;
+  is_seo_page?: boolean;
+  city?: string;
+  service?: string;
   created_at: string;
 }
 

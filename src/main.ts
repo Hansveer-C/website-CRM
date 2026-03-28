@@ -298,6 +298,51 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                 headers: { 'Content-Type': 'application/json' }
             });
         }
+
+        // ── WB.3.4 Bulk SEO Generation ──────────────────────────────────
+        if (url === '/api/websites/bulk-seo' && method === 'POST') {
+            const { services, cities } = reqContext.body || {};
+            console.log(`[MOCK] Bulk SEO Generation for ${services.length} services in ${cities.length} cities`);
+            
+            // Simulation of generation
+            const website = mockWebsites[0];
+            const timestamp = new Date().toISOString();
+            
+            services.forEach((s: string) => {
+                cities.forEach((c: string) => {
+                    const slug = (s + '-' + c).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+                    const existing = mockWebsiteRoutes.find(r => r.website_id === website.id && r.slug === slug);
+                    if (!existing) {
+                        mockWebsiteRoutes.push({
+                            id: `r-seo-${Date.now()}-${Math.random().toString(36).substr(2,9)}`,
+                            website_id: website.id,
+                            path: `/${slug}`,
+                            slug,
+                            funnel_id: 'fnl-1',
+                            is_seo_page: true,
+                            city: c,
+                            service: s,
+                            created_at: timestamp
+                        });
+                    }
+                });
+            });
+
+            return new Response(JSON.stringify({ success: true, count: services.length * cities.length }), { 
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        }
+
+        if (url.startsWith('/api/websites/routes/') && method === 'DELETE') {
+            const routeId = url.split('/')[4];
+            const idx = mockWebsiteRoutes.findIndex(r => r.id === routeId);
+            if (idx > -1) {
+                mockWebsiteRoutes.splice(idx, 1);
+                return new Response(JSON.stringify({ success: true }), { status: 200 });
+            }
+            return new Response(JSON.stringify({ success: false, error: 'Route not found' }), { status: 404 });
+        }
     }
     
     return originalFetch(input, init);
@@ -486,6 +531,7 @@ function renderSidebar(activeView: string) {
           <div class="nav-group-title">Websites</div>
           <li onclick="window.navigateTo('website-structure')" class="${activeView === 'website-structure' ? 'active' : ''}">Structure</li>
           <li onclick="window.navigateTo('pages')" class="${activeView === 'pages' || activeView === 'page-sections' ? 'active' : ''}">Pages</li>
+          <li onclick="window.navigateTo('seo-pages')" class="${activeView === 'seo-pages' ? 'active' : ''}">SEO Pages</li>
           <li onclick="window.navigateTo('templates')" class="${activeView === 'templates' ? 'active' : ''}" style="opacity: 0.7;">Templates</li>
           <li onclick="window.navigateTo('components')" class="${activeView === 'components' ? 'active' : ''}" style="opacity: 0.7;">Components</li>
           <li onclick="window.navigateTo('website-settings')" class="${activeView === 'website-settings' ? 'active' : ''}">Settings</li>
@@ -3940,6 +3986,7 @@ async function executeNavigation(view: string, id?: string, context?: any) {
     case 'templates': renderTemplates(); break;
     case 'components': app.innerHTML = `${renderSidebar('components')}<main class="main-content"><h2>Components Shelf</h2><div class="empty-state">Library of pre-built UI components coming soon.</div></main>`; break;
     case 'website-settings': renderWebsiteSettings(); break;
+    case 'seo-pages': (window as any).renderSeoPages(); break;
     case 'website-structure': renderWebsiteStructure(); break;
     case 'reports': renderReports(); break;
     case 'quickstart': renderQuickstart(); break;
@@ -5197,4 +5244,164 @@ window.addEventListener('scroll', () => {
   });
 
   (window as any).toggleCheckItem('test');
+};
+
+(window as any).renderSeoPages = async () => {
+    app.innerHTML = `
+        ${renderSidebar('seo-pages')}
+        <main class="main-content">
+            <header class="view-header">
+                <h2>SEO Optimization Hub</h2>
+                <div style="display: flex; gap: 12px;">
+                    <button class="btn-primary" onclick="window.showBulkSeoModal()" style="background: #10b981;">+ Bulk Generate Pages</button>
+                </div>
+            </header>
+
+            <div class="card" style="margin-bottom: 24px; padding: 24px; background: #f0f9ff; border: 1px solid #bae6fd;">
+                <div style="display: flex; gap: 20px; align-items: center;">
+                    <div style="font-size: 2.5rem;">📈</div>
+                    <div>
+                        <h4 style="margin: 0; color: #0369a1;">Organic Reach Strategy</h4>
+                        <p style="margin: 4px 0 0 0; color: #0c4a6e; font-size: 0.9rem;">
+                            Generated pages target specific <strong>Service + City</strong> combinations to capture high-intent local search traffic.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="seo-pages-list-container">
+                <div class="loading">Loading SEO pages...</div>
+            </div>
+        </main>
+    `;
+
+    try {
+        // Fetch routes and filter for SEO pages
+        const seoPages = mockWebsiteRoutes.filter(r => r.is_seo_page);
+        const container = document.getElementById('seo-pages-list-container');
+        if (!container) return;
+
+        const rows = seoPages.map(page => `
+            <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 16px;">
+                    <div style="font-weight: 600; color: #1e293b;">${page.service}</div>
+                    <div style="font-size: 0.8rem; color: #64748b;">${page.city}</div>
+                </td>
+                <td>
+                    <code style="background: #f1f5f9; padding: 4px 8px; border-radius: 4px; font-size: 0.85rem;">/${page.slug}</code>
+                </td>
+                <td>
+                    <span class="badge badge-published" style="font-size: 0.7rem;">Active</span>
+                </td>
+                <td style="text-align: right;">
+                    <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                        <button class="btn-primary" style="background: white; color: #64748b; border: 1px solid #e2e8f0; padding: 6px 12px; font-size: 0.8rem;" onclick="window.open('/${page.slug}', '_blank')">View</button>
+                        <button class="btn-primary" style="background: white; color: #dc2626; border: 1px solid #fecaca; padding: 6px 12px; font-size: 0.8rem;" onclick="window.deleteSeoPage('${page.id}')">Delete</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+
+        container.innerHTML = `
+            <div class="card" style="padding: 0; overflow: hidden;">
+                <table class="clients-table" style="box-shadow: none; border: none; margin-top: 0;">
+                    <thead>
+                        <tr>
+                            <th>Service & City</th>
+                            <th>Slug</th>
+                            <th>Status</th>
+                            <th style="text-align: right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows || '<tr><td colspan="4" style="text-align: center; padding: 60px; color: #64748b;">No SEO pages generated yet.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    } catch (err) {
+        console.error('Failed to load SEO pages:', err);
+    }
+};
+
+(window as any).showBulkSeoModal = () => {
+    const modal = document.createElement('div');
+    modal.id = 'bulk-seo-modal';
+    modal.style.cssText = `
+        position: fixed; inset: 0; background: rgba(0,0,0,0.5); 
+        display: flex; align-items: center; justify-content: center; z-index: 10000;
+    `;
+    modal.innerHTML = `
+        <div class="card" style="width: 500px; padding: 30px; animation: pb-slide-in 0.3s ease-out; background: white; border-radius: 12px; border: 4px solid var(--primary-color);">
+            <h3 style="margin-top: 0; margin-bottom: 8px;">Bulk Generation</h3>
+            <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 24px;">Enter your target services and cities to create high-ranking landing pages instantly.</p>
+            
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+                <div class="onboarding-form-group">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px;">Target Services (comma separated)</label>
+                    <textarea id="bulk-seo-services" class="onboarding-input" style="height: 80px; width: 100%; border-radius: 8px; border: 1px solid #e2e8f0; padding: 12px;" placeholder="e.g. Driveway Cleaning, House Washing, Roof Cleaning"></textarea>
+                </div>
+                
+                <div class="onboarding-form-group">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px;">Target Cities (comma separated)</label>
+                    <textarea id="bulk-seo-cities" class="onboarding-input" style="height: 80px; width: 100%; border-radius: 8px; border: 1px solid #e2e8f0; padding: 12px;" placeholder="e.g. Seattle, Bellevue, Tacoma"></textarea>
+                </div>
+            </div>
+            
+            <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 32px;">
+                <button class="btn-secondary" onclick="document.getElementById('bulk-seo-modal').remove()">Cancel</button>
+                <button class="btn-primary" onclick="window.runBulkSeoGen()" style="padding: 12px 24px; font-weight: 700;">Generate Pages</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+};
+
+(window as any).runBulkSeoGen = async () => {
+    const servicesText = (document.getElementById('bulk-seo-services') as HTMLTextAreaElement).value;
+    const citiesText = (document.getElementById('bulk-seo-cities') as HTMLTextAreaElement).value;
+    
+    const services = servicesText.split(',').map(s => s.trim()).filter(s => s);
+    const cities = citiesText.split(',').map(c => c.trim()).filter(c => c);
+    
+    if (services.length === 0 || cities.length === 0) {
+        alert('Please enter at least one service and one city.');
+        return;
+    }
+    
+    (window as any).showToast(`Generating ${services.length * cities.length} SEO pages...`, 'info');
+    document.getElementById('bulk-seo-modal')?.remove();
+    
+    try {
+        const res = await fetch('/api/websites/bulk-seo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ services, cities })
+        }).then(r => r.json());
+        
+        if (res.success) {
+            (window as any).showToast(`Successfully generated ${res.count} pages!`, 'success');
+            (window as any).renderSeoPages();
+        } else {
+            alert('Failed: ' + res.error);
+        }
+    } catch (err: any) {
+        alert('Error: ' + err.message);
+    }
+};
+
+(window as any).deleteSeoPage = async (routeId: string) => {
+    if (!confirm('Are you sure you want to delete this SEO page? This cannot be undone.')) return;
+    
+    try {
+        const res = await fetch(`/api/websites/routes/${routeId}`, { method: 'DELETE' }).then(r => r.json());
+        if (res.success) {
+            (window as any).showToast('SEO page deleted.');
+            (window as any).renderSeoPages();
+        } else {
+            alert('Delete failed: ' + res.error);
+        }
+    } catch (err: any) {
+        alert('Error: ' + err.message);
+    }
 };

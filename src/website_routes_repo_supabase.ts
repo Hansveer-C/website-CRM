@@ -9,8 +9,8 @@ export const WebsiteRoutesRepo = {
   /**
    * Adds a new route to a website or updates an existing one.
    */
-  async addRoute(website_id: string, path: string, funnel_id: string): Promise<WebsiteRoute> {
-    console.log(`[DB: ROUTES] Adding route ${path} for website ${website_id} -> funnel ${funnel_id}`);
+  async addRoute(website_id: string, path: string, funnel_id: string, seoData?: { is_seo_page?: boolean; city?: string; service?: string; slug?: string }): Promise<WebsiteRoute> {
+    console.log(`[DB: ROUTES] Adding route ${path} for website ${website_id} -> funnel ${funnel_id}${seoData?.is_seo_page ? ' (SEO PAGE)' : ''}`);
     
     const normalizedPath = path.startsWith('/') ? path : `/${path}`;
 
@@ -18,6 +18,10 @@ export const WebsiteRoutesRepo = {
       website_id,
       path: normalizedPath,
       funnel_id,
+      is_seo_page: seoData?.is_seo_page ?? false,
+      city: seoData?.city || null as any,
+      service: seoData?.service || null as any,
+      slug: seoData?.slug || null as any,
       created_at: new Date().toISOString()
     };
 

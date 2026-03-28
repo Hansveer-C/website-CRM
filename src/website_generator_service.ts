@@ -5,7 +5,9 @@ import { WebsiteRoutesRepo } from './website_routes_repo_supabase';
 import { WebsiteLayoutsRepo } from './website_layouts_repo_supabase';
 import { FunnelTemplatesRepo } from './funnel_templates_repo';
 import { SectionsRepo } from './sections_repo_supabase';
+import { getWebsiteSettings } from './website_settings_repo';
 import { Funnel, Page, HeaderConfig, NavItem } from './types';
+import { generateServiceCitySlug } from './utils/url_utils';
 
 /**
  * Service for automated website and funnel generation.
@@ -78,11 +80,13 @@ export const WebsiteGeneratorService = {
         };
         const defaultTplId = '0d3214fb-2777-41fa-9837-4a6fddc660ec';
 
+        const serviceLinks = input.services.map(s => ({ name: s, path: generateServiceCitySlug(s, input.city) }));
+
         // ── 3. Create Homepage Funnel ───────────────────────────────────────
         // Only if no homepage is set yet
         let homeFunnelId = website.homepage_funnel_id;
         if (!homeFunnelId) {
-            const homeFunnel = await this.createFunnelFromTemplate(userId, defaultTplId, 'Home', input.city, createdIds);
+            const homeFunnel = await this.createFunnelFromTemplate(userId, defaultTplId, 'Home', input.city, createdIds, { businessName: input.business_name });
             createdIds.funnel_ids.push(homeFunnel.id);
             homeFunnelId = homeFunnel.id;
             
@@ -90,7 +94,7 @@ export const WebsiteGeneratorService = {
             const homepageLandingPageId = createdIds.page_ids.find(pid => pid.startsWith(`pg_${homeFunnelId}_1`));
             if (homepageLandingPageId) {
                 const primaryService = input.services[0] || 'Professional Service';
-                await this.createHomepageSections(homepageLandingPageId, primaryService, input.city, userId, createdIds);
+                await this.createHomepageSections(homepageLandingPageId, primaryService, input.city, userId, createdIds, serviceLinks);
             }
             
             // Update website with homepage reference
@@ -103,14 +107,13 @@ export const WebsiteGeneratorService = {
         const existingFunnels = existingFunnelsRes.data || [];
 
         for (const service of input.services) {
-            const slug = service.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-            const path = `/${slug}`; // W2.4: /{{service-slug}}
+            const path = generateServiceCitySlug(service, input.city);
 
             // Check if funnel already exists by name (minimal idempotency)
             let serviceFunnel = existingFunnels.find(f => f.name === service);
             if (!serviceFunnel) {
                 const tplId = templateMap[service] || defaultTplId;
-                serviceFunnel = await this.createFunnelFromTemplate(userId, tplId, service, input.city, createdIds);
+                serviceFunnel = await this.createFunnelFromTemplate(userId, tplId, service, input.city, createdIds, { businessName: input.business_name, serviceName: service });
                 createdIds.funnel_ids.push(serviceFunnel.id);
                 
                 // W2.4: Add service-specific content
@@ -132,42 +135,51 @@ export const WebsiteGeneratorService = {
         // ── 5. Create Contact Funnel ─────────────────────────────────────
         let contactFunnel = existingFunnels.find(f => f.name === 'Contact Us');
         if (!contactFunnel) {
-            contactFunnel = await this.createFunnelFromTemplate(userId, defaultTplId, 'Contact Us', input.city, createdIds);
-            createdIds.funnel_ids.push(contactFunnel.id);
+            const cf = await this.createFunnelFromTemplate(userId, defaultTplId, 'Contact Us', input.city, createdIds, { businessName: input.business_name });
+            contactFunnel = cf;
+            createdIds.funnel_ids.push(cf.id);
             
             // W2.5: Add contact-specific content
-            if (contactFunnel) {
-                const contactLandingPageId = createdIds.page_ids.find(pid => pid.startsWith(`pg_${contactFunnel.id}_1`));
-                if (contactLandingPageId) {
-                    await this.createContactSections(contactLandingPageId, input.phone_number, input.business_name, userId, createdIds);
-                }
+            const contactLandingPageId = createdIds.page_ids.find(pid => pid.startsWith(`pg_${cf.id}_1`));
+            if (contactLandingPageId) {
+                await this.createContactSections(contactLandingPageId, input.phone_number, input.business_name, userId, createdIds);
             }
         }
 
         // ── 6. Assign Routes ───────────────────────────────────────────────
         const existingRoutes = await WebsiteRoutesRepo.getAllRoutes(website.id);
 
-        const upsertRouteHelper = async (path: string, funnel_id: string) => {
+        const upsertRouteHelper = async (path: string, funnel_id: string, isSeo?: boolean, service?: string) => {
             const exists = existingRoutes.find(r => r.path === path);
             if (exists) {
                 if (exists.funnel_id !== funnel_id) {
                     // Update if pointing to different funnel
                     await WebsiteRoutesRepo.deleteRoute(exists.id); // Re-add or update
-                    const route = await WebsiteRoutesRepo.addRoute(website.id, path, funnel_id);
+                    const route = await WebsiteRoutesRepo.addRoute(website.id, path, funnel_id, {
+                        is_seo_page: isSeo,
+                        service: service,
+                        city: input.city,
+                        slug: path.replace(/^\//, '') || 'home'
+                    });
                     createdIds.route_ids.push(route.id);
                 }
             } else {
-                const route = await WebsiteRoutesRepo.addRoute(website.id, path, funnel_id);
+                const route = await WebsiteRoutesRepo.addRoute(website.id, path, funnel_id, {
+                    is_seo_page: isSeo,
+                    service: service,
+                    city: input.city,
+                    slug: path.replace(/^\//, '') || 'home'
+                });
                 createdIds.route_ids.push(route.id);
             }
         };
 
         // Homepage
-        await upsertRouteHelper('/', homeFunnelId);
+        await upsertRouteHelper('/', homeFunnelId, false);
 
         // Services
         for (const s of serviceFunnelEntries) {
-            await upsertRouteHelper(s.path, s.funnel_id);
+            await upsertRouteHelper(s.path, s.funnel_id, true, s.name);
         }
 
         // Contact
@@ -177,7 +189,7 @@ export const WebsiteGeneratorService = {
             contactFunnel = found.data?.find(f => f.name === 'Contact Us');
         }
         if (contactFunnel) {
-            await upsertRouteHelper('/contact', contactFunnel.id);
+            await upsertRouteHelper('/contact', contactFunnel.id, false);
         }
 
         // ── 7. Generate Navigation & Layout ────────────────────────────────
@@ -229,7 +241,7 @@ export const WebsiteGeneratorService = {
   /**
    * Internal helper to create a funnel and its steps from a template.
    */
-  async createFunnelFromTemplate(userId: string, templateId: string, name: string, city: string, createdIds: any): Promise<Funnel> {
+  async createFunnelFromTemplate(userId: string, templateId: string, name: string, city: string, createdIds: any, options: { businessName?: string, serviceName?: string } = {}): Promise<Funnel> {
     const tplRes = await FunnelTemplatesRepo.getTemplateById(templateId);
     if (!tplRes.success || !tplRes.data) {
         throw new Error(`TEMPLATE_NOT_FOUND: ${templateId}`);
@@ -246,7 +258,13 @@ export const WebsiteGeneratorService = {
     await FunnelsRepo.updateFunnel(userId, funnel.id, { status: 'published' });
     funnel.status = 'published';
 
-    const hydrate = (text: string): string => city ? text.replace(/\{\{city\}\}/gi, city) : text;
+    const hydrate = (text: string): string => {
+        let out = text;
+        if (city) out = out.replace(/\{\{city\}\}/gi, city);
+        if (options.serviceName) out = out.replace(/\{\{service\}\}/gi, options.serviceName);
+        if (options.businessName) out = out.replace(/\{\{business_name\}\}/gi, options.businessName);
+        return out;
+    };
     const hydrateContent = (obj: any): any => {
         if (typeof obj === 'string') return hydrate(obj);
         if (Array.isArray(obj)) return obj.map(i => hydrateContent(i));
@@ -274,8 +292,12 @@ export const WebsiteGeneratorService = {
             funnel_id:  funnel.id,
             step_type:  tplStep.type,
             step_order: tplStep.order,
-            seo_title:  hydrate(content.headline || name),
-            seo_description: '',
+            seo_title:  options.serviceName && city && options.businessName 
+                        ? `${options.serviceName} in ${city} | ${options.businessName}`
+                        : hydrate(content.headline || content.title || name),
+            seo_description: options.serviceName && city 
+                        ? `Affordable ${options.serviceName} in ${city}. Get a free quote today.`
+                        : '',
             seo_keywords: []
         };
 
@@ -292,7 +314,7 @@ export const WebsiteGeneratorService = {
   /**
    * Internal helper to create high-converting sections for the homepage.
    */
-  async createHomepageSections(pageId: string, service: string, city: string, userId: string, createdIds: any) {
+  async createHomepageSections(pageId: string, service: string, city: string, userId: string, createdIds: any, serviceLinks: {name: string, path: string}[] = []) {
     // Prevent duplication: check if sections already exist (WB.2.10)
     const existing = await SectionsRepo.getSectionsForPage(pageId, userId);
     if (existing && (existing as any).data?.length > 0) {
@@ -353,6 +375,14 @@ export const WebsiteGeneratorService = {
                     { q: 'How do I get an estimate?', a: 'Simply fill out our online form or give us a call for a free, no-obligation quote.' },
                     { q: 'What coverage areas do you serve?', a: hydrate('We serve {{city}} and the surrounding communities.') }
                 ]
+            }
+        },
+        {
+            type: 'services',
+            order: 6,
+            content: {
+                title: hydrate('Our Services in {{city}}'),
+                service_links: serviceLinks.map(s => ({ label: s.name, path: s.path }))
             }
         }
     ];
@@ -522,5 +552,220 @@ export const WebsiteGeneratorService = {
             createdIds.section_ids.push(sectionId);
         }
     }
+  },
+
+  /**
+   * Generates a high-intent SEO funnel for a specific service and city.
+   * PROMPT W3.3
+   */
+  async generateSeoFunnel(userId: string, websiteId: string, service: string, city: string, businessName?: string) {
+    console.log(`[GENERATOR] Generating SEO funnel for ${service} in ${city} (user: ${userId})`);
+
+    const createdIds = {
+        funnel_ids: [] as string[],
+        page_ids: [] as string[],
+        route_ids: [] as string[],
+        section_ids: [] as string[]
+    };
+
+    // 1. Identify Template
+    const defaultTplId = '0d3214fb-2777-41fa-9837-4a6fddc660ec';
+    
+    // 2. Create Funnel
+    const funnel = await this.createFunnelFromTemplate(userId, defaultTplId, `${service} - ${city}`, city, createdIds, { businessName, serviceName: service });
+    await FunnelsRepo.updateFunnel(userId, funnel.id, { 
+        service_type: service, 
+        city: city 
+    });
+
+    // 3. Create Custom SEO Sections (W3.3)
+    const landingPageId = createdIds.page_ids.find(pid => pid.startsWith(`pg_${funnel.id}_1`));
+    if (landingPageId) {
+        await this.createSeoSpecificSections(landingPageId, service, city, userId, createdIds);
+    }
+
+    // 4. Register Route
+    const path = generateServiceCitySlug(service, city);
+    const route = await WebsiteRoutesRepo.addRoute(websiteId, path, funnel.id, {
+        is_seo_page: true,
+        service: service,
+        city: city,
+        slug: path.replace(/^\//, '')
+    });
+    createdIds.route_ids.push(route.id);
+
+    return {
+        funnel_id: funnel.id,
+        path: path,
+        route_id: route.id,
+        page_id: landingPageId
+    };
+  },
+
+  /**
+   * Internal helper for SEO-specific high-intent sections.
+   * W3.3
+   */
+  async createSeoSpecificSections(pageId: string, service: string, city: string, userId: string, createdIds: any) {
+    const hydrate = (text: string) => text.replace(/\{\{service\}\}/gi, service).replace(/\{\{city\}\}/gi, city);
+
+    const sections = [
+        {
+            type: 'hero',
+            order: 1,
+            content: {
+                headline: hydrate('{{service}} in {{city}}'),
+                subtext: hydrate('Professional {{service}} with fast turnaround'),
+                cta: 'Get Free Quote'
+            }
+        },
+        {
+            type: 'benefits',
+            order: 2,
+            content: {
+                title: hydrate('Expert {{service}} for your home'),
+                benefits: [
+                    'Professional-grade equipment',
+                    '100% Satisfaction Guarantee',
+                    'Eco-friendly cleaning solutions'
+                ]
+            }
+        },
+        {
+            type: 'before_after',
+            order: 3,
+            content: {
+                title: 'See the results for yourself',
+                description: hydrate('Actual {{service}} results from our recent work in {{city}}.'),
+                before_image: 'https://placehold.co/600x400/333333/FFFFFF?text=BEFORE',
+                after_image: 'https://placehold.co/600x400/2563eb/FFFFFF?text=AFTER'
+            }
+        },
+        {
+            type: 'cta',
+            order: 4,
+            content: {
+                headline: hydrate('Ready for your {{service}} transformation?'),
+                subtext: 'Contact us today for a free estimate.',
+                cta: 'Request Quote',
+                form_enabled: true,
+                secondary_cta: 'Contact Us',
+                secondary_link: '/contact'
+            }
+        },
+        {
+            type: 'faq',
+            order: 5,
+            content: {
+                title: 'Frequently Asked Questions',
+                items: [
+                    { question: hydrate('How much does {{service}} cost in {{city}}?'), answer: hydrate('Pricing for {{service}} varies based on project size, but we offer instant, transparent quotes for all {{city}} homeowners.') },
+                    { question: hydrate('Do you offer same-day {{service}}?'), answer: 'Yes, we strive to accommodate same-day requests whenever possible.' }
+                ],
+                footer_links: [
+                    { label: 'Back to Home', path: '/' },
+                    { label: 'Contact Us', path: '/contact' }
+                ]
+            }
+        }
+    ];
+
+    for (const s of sections) {
+        const sectionId = `sec_${pageId}_${s.order}_${Date.now()}`;
+        await SectionsRepo.persistSection({
+            id: sectionId,
+            page_id: pageId,
+            type: s.type,
+            content: s.content,
+            order: s.order,
+            styles: {}
+        }, userId);
+        createdIds.section_ids = createdIds.section_ids || [];
+        createdIds.section_ids.push(sectionId);
+    }
+
+    // ── 6. Generate FAQ Schema (JSON-LD) (PROMPT W3.7) ───────────────────
+    const faqData = sections.find(s => s.type === 'faq')?.content;
+    if (faqData && faqData.items) {
+        const schema = {
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            "mainEntity": faqData.items.map((item: any) => ({
+                "@type": "Question",
+                "name": item.question,
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": item.answer
+                }
+            }))
+        };
+        
+        const pageRes = await PagesRepo.getPage(pageId, userId);
+        if (pageRes.success && pageRes.data) {
+            const updatedPage = {
+                ...pageRes.data,
+                schema_markup: JSON.stringify(schema, null, 2)
+            };
+            await PagesRepo.persistPage(updatedPage, userId);
+        }
+    }
+  },
+
+  /**
+   * Generates a bulk set of SEO pages for multiple services and cities.
+   * PROMPT W3.4
+   */
+  async generateBulkSeoPages(userId: string, websiteId: string, services: string[], cities: string[]) {
+    console.log(`[GENERATOR] Starting bulk SEO generation for ${userId} (services: ${services.length}, cities: ${cities.length})`);
+    
+    // Fetch business name for SEO metadata (W3.6)
+    const settingsRes = await getWebsiteSettings();
+    const businessName = settingsRes.data?.business_name;
+
+    // 1. Build and limit combinations
+    const combinations: { service: string; city: string }[] = [];
+    for (const s of services) {
+        for (const c of cities) {
+            combinations.push({ service: s, city: c });
+        }
+    }
+
+    const MAX_PAGES = 50;
+    const batch = combinations.slice(0, MAX_PAGES);
+    console.log(`[GENERATOR] Processing batch of ${batch.length} combinations...`);
+
+    // 2. Fetch existing routes for idempotency (W3.4)
+    const existingRoutes = await WebsiteRoutesRepo.getAllRoutes(websiteId);
+    const existingPaths = new Set(existingRoutes.map(r => r.path));
+
+    const results = {
+        created: 0,
+        skipped: 0,
+        errors: 0
+    };
+
+    // 3. Process batch sequentially to avoid overloading
+    for (const combo of batch) {
+        const path = generateServiceCitySlug(combo.service, combo.city);
+        
+        if (existingPaths.has(path)) {
+            console.log(`[GENERATOR] Skipping duplicate path: ${path}`);
+            results.skipped++;
+            continue;
+        }
+
+        try {
+            await this.generateSeoFunnel(userId, websiteId, combo.service, combo.city, businessName);
+            results.created++;
+            existingPaths.add(path); // Update local set
+        } catch (e: any) {
+            // Log error but continue with other combinations
+            console.error(`[GENERATOR] Error creating SEO page for ${combo.service} in ${combo.city}:`, e.message);
+            results.errors++;
+        }
+    }
+
+    console.log(`[GENERATOR] Bulk generation complete: Created ${results.created}, Skipped ${results.skipped}, Errors ${results.errors}`);
+    return results;
   }
 };

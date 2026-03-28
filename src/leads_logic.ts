@@ -19,6 +19,8 @@ export async function createLead(data: {
   source?: string;
   funnel_id?: string;
   page_id?: string;
+  page_slug?: string;
+  city?: string;
 }, request?: ApiRequest) {
   const user_id = request?.user?.id || 'system';
   const timestamp = new Date().toISOString();
@@ -33,7 +35,7 @@ export async function createLead(data: {
   const { name: normalizedName, phone: phoneNormValue, invalid_phone: isPhoneInvalid, email: emailNorm } = validated;
 
   // 1. Check for Existing Contact (Duplicate Protection - Persistently)
-  const contactRes = await findContact(phoneNormValue, emailNorm, request?.user);
+  const contactRes = await findContact(phoneNormValue, emailNorm, user_id);
   if (!contactRes.success) {
       throw new Error(`DB_SEARCH_ERROR: ${contactRes.error}`);
   }
@@ -85,7 +87,7 @@ export async function createLead(data: {
   try {
     // 2. Resolve/Create Opportunity (F1 Logic)
   let activeOpp: Opportunity | null = null;
-  const openOppRes = await getOpenOpportunityByContact(contactIdToUseValue, request?.user);
+  const openOppRes = await getOpenOpportunityByContact(contactIdToUseValue, user_id);
   if (openOppRes.success && openOppRes.data) {
     activeOpp = openOppRes.data;
     console.log(`Active opportunity ${activeOpp.id} found for contact. Reusing instead of creating.`);
@@ -100,8 +102,10 @@ export async function createLead(data: {
       assigned_to: 'Unassigned',
       status: 'open',
       notes: `Service Type: ${data.service_type || 'N/A'}\nAddress: ${data.address || 'N/A'}\nMessage: ${data.message || 'N/A'}\n${funnelMetadata}`,
-      source: data.source || 'api',
       funnel_id: data.funnel_id,
+      page_slug: data.page_slug,
+      service: data.service_type,
+      city: data.city,
       created_at: timestamp
     };
 
@@ -110,7 +114,7 @@ export async function createLead(data: {
         if (saveOppRes.code === '23505') {
             // 🛡️ REUSE (F3): Another thread beat us to it - locate the open deal.
             console.log(`[Concurrency] Opportunity duplicate detected. Resolving to existing.`);
-            const openWinner = await getOpenOpportunityByContact(contactIdToUseValue, request?.user);
+            const openWinner = await getOpenOpportunityByContact(contactIdToUseValue, user_id);
             if (openWinner.data) {
                 activeOpp = openWinner.data;
             } else {
@@ -144,7 +148,10 @@ export async function createLead(data: {
     phone: phoneNormValue,
     email: emailNorm,
     pipeline_stage: 'New Lead',
-    source: data.source || 'api'
+    source: data.source || 'api',
+    page_slug: data.page_slug,
+    service: data.service_type,
+    city: data.city
   });
 
   // 4. Trigger Automations
