@@ -1,4 +1,4 @@
-import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes } from './db';
+import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
 import { templates } from './templates';
 import { Activity, WebsiteLayout } from './types';
 import { resolveWebsiteRequest } from './website_resolver';
@@ -574,11 +574,11 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('funnels')" class="${activeView === 'funnels' ? 'active' : ''}" style="font-weight: 700; color: var(--primary-color);">Funnels <span class="badge" style="background: #3b82f6; color: white;">New</span></li>
           
           <div class="nav-group-title">Websites</div>
+          <li onclick="window.navigateTo('website-dashboard')" class="${activeView === 'website-dashboard' ? 'active' : ''}">My Website</li>
           <li onclick="window.navigateTo('website-structure')" class="${activeView === 'website-structure' ? 'active' : ''}">Structure</li>
           <li onclick="window.navigateTo('pages')" class="${activeView === 'pages' || activeView === 'page-sections' ? 'active' : ''}">Pages</li>
+          <li onclick="window.navigateTo('website-navigation')" class="${activeView === 'website-navigation' ? 'active' : ''}">Navigation</li>
           <li onclick="window.navigateTo('seo-pages')" class="${activeView === 'seo-pages' ? 'active' : ''}">SEO Pages</li>
-          <li onclick="window.navigateTo('templates')" class="${activeView === 'templates' ? 'active' : ''}" style="opacity: 0.7;">Templates</li>
-          <li onclick="window.navigateTo('components')" class="${activeView === 'components' ? 'active' : ''}" style="opacity: 0.7;">Components</li>
           <li onclick="window.navigateTo('website-settings')" class="${activeView === 'website-settings' ? 'active' : ''}">Settings</li>
           
           <div class="nav-group-title">System</div>
@@ -2147,6 +2147,7 @@ function renderPublicHeader(config: any, settings: any) {
 function renderPublicFooter(config: any, settings: any) {
   const businessName = config.business_name || settings.business_name;
   const phone = config.phone_number || settings.phone;
+  const email = settings.email || config.email || '';
   const serviceArea = config.service_area || 'Your Local Area';
   const cta = config.cta_text || 'Get My Free Quote';
   const links = config.links || [];
@@ -2191,6 +2192,12 @@ function renderPublicFooter(config: any, settings: any) {
                <span style="background: var(--primary-color); width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 1.1rem;">📞</span>
                <span>${phone}</span>
             </a>
+            ${email ? `
+              <a href="mailto:${email}" style="display: flex; align-items: center; gap: 12px; color: #94a3b8; text-decoration: none; font-size: 0.95rem; margin-bottom: 20px; font-weight: 500;">
+                 <span style="background: #1e293b; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 0.8rem;">✉️</span>
+                 <span>${email}</span>
+              </a>
+            ` : ''}
             <button class="btn-primary" style="width: 100%; padding: 14px; border-radius: 8px; font-weight: 700; font-size: 1rem; box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4); border: none; cursor: pointer;" onclick="document.querySelector('.site-form-section')?.scrollIntoView({behavior: 'smooth'})">
               ${cta}
             </button>
@@ -2294,10 +2301,16 @@ async function renderSitePage(funnel_id: string, websiteOrContext: any, isPrevie
       ${renderPublicHeader(layout.header_config, settings)}
 
       ${sections.map(section => {
-    // Inject global variables into section content if needed
-    const content = { ...section.content, business_name: settings.business_name, phone: settings.phone };
-    return renderSection(section.type, content, section.styles, section.id);
-  }).join('')}
+        // 🌿 Fix.7: Inject global variables into section content with auto-replacement (Phase Fix.7)
+        let contentJson = JSON.stringify(section.content);
+        contentJson = contentJson
+          .replace(/{{business_name}}/g, settings.business_name)
+          .replace(/{{phone}}/g, settings.phone)
+          .replace(/{{email}}/g, settings.email || '');
+          
+        const content = { ...JSON.parse(contentJson), business_name: settings.business_name, phone: settings.phone, email: settings.email };
+        return renderSection(section.type, content, section.styles, section.id);
+      }).join('')}
 
       ${renderPublicFooter(layout.footer_config, settings)}
     </div>
@@ -2500,84 +2513,147 @@ function renderReports() {
   `;
 }
 
-(window as any).openNewPageModal = (type: string) => {
-  if (type === 'template') {
-    (window as any).navigateTo('templates');
-    return;
-  }
-  const titles: Record<string, string> = {
-    'blank': 'Create Blank Page',
-    'ai': 'Generate Page with AI'
-  };
-
+(window as any).openNewPageModal = (sourceType: string = 'blank') => {
+  // Step 1: Select Template
   const modal = document.createElement('div');
-  modal.id = 'page-name-modal';
+  modal.id = 'page-creation-modal';
   modal.innerHTML = `
-    <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;">
-      <div style="background: white; padding: 40px; border-radius: 12px; width: 400px; box-shadow: var(--shadow-lg);">
-        <h2 style="margin-top: 0; margin-bottom: 20px; font-size: 1.5rem;">${titles[type]}</h2>
-        <div class="form-group" style="margin-bottom: 20px;">
-          <label style="display: block; font-weight: 600; margin-bottom: 8px;">Page Name</label>
-          <input type="text" id="new_page_name_input" placeholder="e.g. About Us" style="padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; width: 100%; box-sizing: border-box;" onkeydown="if(event.key === 'Enter') window.submitNewPage('${type}')">
+    <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(5px); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 20px;">
+      <div id="modal-content" style="background: white; border-radius: 20px; width: 100%; max-width: 900px; max-height: 90vh; overflow-y: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); display: flex; flex-direction: column;">
+        
+        <div style="padding: 30px; border-bottom: 1px solid #eef2f6; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border-radius: 20px 20px 0 0;">
+          <div>
+            <h2 style="margin: 0; font-size: 1.5rem; color: #1e293b;">Step 1: Select a Template</h2>
+            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 0.9rem;">Choose a starting point for your new page.</p>
+          </div>
+          <button onclick="document.getElementById('page-creation-modal').remove()" style="background: none; border: none; font-size: 1.5rem; color: #94a3b8; cursor: pointer;">&times;</button>
         </div>
-        <div style="display: flex; gap: 10px; justify-content: flex-end;">
-          <button onclick="document.getElementById('page-name-modal').remove()" style="padding: 10px 20px; border: 1px solid #e2e8f0; background: white; border-radius: 8px; cursor: pointer; font-weight: 600; color: #666;">Cancel</button>
-          <button onclick="window.submitNewPage('${type}')" class="btn-primary" style="padding: 10px 20px;">Create Page</button>
+
+        <div style="padding: 30px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 24px;">
+           <div class="template-card" onclick="window.confirmPageTemplate('blank')" style="border: 2px dashed #cbd5e1; border-radius: 16px; padding: 40px 20px; text-align: center; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'; this.style.background='#f0f7ff'" onmouseout="this.style.borderColor='#cbd5e1'; this.style.background='white'">
+             <div style="font-size: 3rem; margin-bottom: 16px;">📄</div>
+             <h3 style="margin: 0; color: #1e293b;">Blank Canvas</h3>
+             <p style="color: #64748b; font-size: 0.85rem; margin-top: 8px;">Start from scratch and build it your way.</p>
+           </div>
+           ${mockTemplates.map(tpl => `
+             <div class="template-card" onclick="window.confirmPageTemplate('${tpl.id}')" style="border: 2px solid #e2e8f0; border-radius: 16px; overflow: hidden; cursor: pointer; transition: all 0.3s;" onmouseover="this.style.borderColor='var(--primary-color)'; this.style.transform='translateY(-4px)'" onmouseout="this.style.borderColor='#e2e8f0'; this.style.transform='translateY(0)'">
+               <div style="height: 140px; background: #f1f5f9; display: flex; align-items: center; justify-content: center; font-size: 2.5rem;">🎨</div>
+               <div style="padding: 16px;">
+                 <h3 style="margin: 0; color: #1e293b; font-size: 1.1rem;">${tpl.name}</h3>
+                 <p style="color: #64748b; font-size: 0.8rem; margin-top: 4px;">${tpl.category}</p>
+               </div>
+             </div>
+           `).join('')}
         </div>
+
       </div>
     </div>
   `;
   document.body.appendChild(modal);
-  setTimeout(() => document.getElementById('new_page_name_input')?.focus(), 100);
 };
 
-(window as any).submitNewPage = (type: string) => {
-  const input = document.getElementById('new_page_name_input') as HTMLInputElement;
-  const newName = input.value.trim();
-  if (!newName) {
-    alert('Please enter a page name');
-    return;
-  }
+(window as any).confirmPageTemplate = (templateId: string) => {
+    const modalContent = document.getElementById('modal-content');
+    if (!modalContent) return;
 
-  document.getElementById('page-name-modal')?.remove();
+    const tpl = templateId === 'blank' ? null : mockTemplates.find(t => t.id === templateId);
 
-  const slug = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-  const newPage = {
-    id: `p${Date.now()}`,
-    name: newName,
-    slug: slug,
-    status: 'draft',
-    seo_title: newName,
-    seo_description: '',
-    seo_keywords: [],
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  };
-  mockPages.push(newPage as any);
+    modalContent.innerHTML = `
+        <div style="padding: 30px; border-bottom: 1px solid #eef2f6; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border-radius: 20px 20px 0 0;">
+          <div>
+            <h2 style="margin: 0; font-size: 1.5rem; color: #1e293b;">Step 2: Name Your Page</h2>
+            <p style="margin: 4px 0 0 0; color: #64748b; font-size: 0.9rem;">Give it a name that makes sense for your site.</p>
+          </div>
+          <button onclick="document.getElementById('page-creation-modal').remove()" style="background: none; border: none; font-size: 1.5rem; color: #94a3b8; cursor: pointer;">&times;</button>
+        </div>
 
-  if (type === 'template') {
-    mockPageSections.push({
-      id: `ps-tpl-${Date.now()}`,
-      page_id: newPage.id,
-      type: 'hero',
-      content: { heading: 'Stunning Template Applied', subheading: 'Ready for you to customize visually!' },
-      order: 1,
-      styles: { background: '#2c3e50', color: '#ffffff' }
-    });
-  } else if (type === 'ai') {
-    mockPageSections.push({
-      id: `ps-ai-${Date.now()}`,
-      page_id: newPage.id,
-      type: 'text',
-      content: { text: '✨ This content was generated by AI specifically for ' + newName },
-      order: 1,
-      styles: { padding: '40px', background: '#fdfbfe' }
-    });
-  }
-
-  (window as any).switchBuilderPage(newPage.id);
-  (window as any).navigateTo('builder');
+        <div style="padding: 40px; max-width: 500px; margin: 0 auto;">
+           <div class="form-group" style="margin-bottom: 24px;">
+              <label style="display: block; font-weight: 700; font-size: 0.9rem; color: #475569; margin-bottom: 10px;">Page Name</label>
+              <input type="text" id="finalize_page_name" placeholder="e.g. Roof Cleaning Special" style="width: 100%; padding: 14px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1.1rem; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'" onblur="this.style.borderColor='#e2e8f0'" onkeydown="if(event.key === 'Enter') window.finalizePageCreation('${templateId}')">
+              <small style="color: #94a3b8; display: block; margin-top: 8px;">This will automatically create a web address at /${tpl?.name?.toLowerCase().replace(/\\s+/g, '-') || 'new-page'}</small>
+           </div>
+           
+           <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 32px;">
+              <button onclick="window.openNewPageModal()" style="padding: 12px 24px; border: none; background: #f1f5f9; color: #475569; font-weight: 700; border-radius: 12px; cursor: pointer;">Back</button>
+              <button onclick="window.finalizePageCreation('${templateId}')" class="btn-primary" style="padding: 12px 32px; font-weight: 800; border-radius: 12px;">Create & Build</button>
+           </div>
+        </div>
+    `;
+    setTimeout(() => document.getElementById('finalize_page_name')?.focus(), 100);
 };
+
+(window as any).finalizePageCreation = (templateId: string) => {
+    const input = document.getElementById('finalize_page_name') as HTMLInputElement;
+    const name = input?.value.trim();
+    if (!name) { alert('Please enter a name for your page.'); return; }
+
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const funnelId = `fnl-${Date.now()}`;
+    const pageId = `p-${Date.now()}`;
+    const websiteId = mockWebsites[0].id; // Default site
+
+    // 1. Create Funnel
+    mockFunnels.push({
+        id: funnelId,
+        user_id: (window as any).currentUser || 'system',
+        name: name,
+        status: 'published',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+    });
+
+    // 2. Create Page
+    const newPage = {
+        id: pageId,
+        user_id: (window as any).currentUser || 'system',
+        funnel_id: funnelId,
+        name: name,
+        slug: slug,
+        status: 'published',
+        seo_title: `${name} | ${mockWebsites[0].name}`,
+        seo_description: '',
+        seo_keywords: [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+    };
+    mockPages.push(newPage as any);
+
+    // 3. Create Route
+    mockWebsiteRoutes.push({
+        id: `r-${Date.now()}`,
+        website_id: websiteId,
+        path: `/${slug}`,
+        funnel_id: funnelId,
+        created_at: new Date().toISOString()
+    } as any);
+
+    // 4. Apply Template Sections
+    if (templateId !== 'blank') {
+        const tpl = mockTemplates.find(t => t.id === templateId);
+        if (tpl) {
+            tpl.sections.forEach((sec: any, idx: number) => {
+                mockPageSections.push({
+                    id: `ps-${Date.now()}-${idx}`,
+                    page_id: pageId,
+                    type: sec.type,
+                    content: { ...sec.content },
+                    order: sec.order,
+                    styles: { ...sec.styles }
+                });
+            });
+        }
+    }
+
+    // 5. Success & Transition
+    document.getElementById('page-creation-modal')?.remove();
+    (window as any).showToast('Page created! Opening builder...', 2000);
+    
+    // Switch to builder for the new page
+    (window as any).switchBuilderPage(pageId);
+    (window as any).navigateTo('builder');
+};
+
 
 (window as any).duplicatePage = (id: string) => {
   const page = mockPages.find(p => p.id === id);
@@ -2660,12 +2736,12 @@ function renderPages() {
         <span class="badge" style="background: #eef2f6; color: #333;">${mockPageSections.filter(s => s.page_id === page.id).length}</span>
       </td>
       <td>
-        <div style="display: flex; gap: 5px; flex-wrap: wrap; max-width: 380px;">
-          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="event.stopPropagation(); window.switchBuilderPage('${page.id}'); window.navigateTo('builder');">Edit</button>
+        <div style="display: flex; gap: 5px; flex-wrap: wrap; max-width: 420px;">
+          <button class="btn-primary" style="padding: 5px 12px; font-size: 0.8rem;" onclick="event.stopPropagation(); window.switchBuilderPage('${page.id}'); window.navigateTo('builder');">Edit Page</button>
+          <button class="btn-outline" style="padding: 5px 12px; font-size: 0.8rem; border-color: #e2e8f0; color: #475569;" onclick="event.stopPropagation(); window.open('/site/${page.slug}', '_blank')">View Live</button>
           <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #6c757d;" onclick="event.stopPropagation(); window.duplicatePage('${page.id}')">Duplicate</button>
           <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: ${page.status === 'published' ? '#ea580c' : '#28a745'};" onclick="event.stopPropagation(); window.togglePublish('${page.id}')">${page.status === 'published' ? 'Unpublish' : 'Publish'}</button>
           <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #8a2be2;" onclick="event.stopPropagation(); window.generatePageWithAI('${page.id}')">✨ AI Gen</button>
-          <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #17a2b8;" onclick="event.stopPropagation(); window.applyTemplate('${page.id}')">Template</button>
         </div>
       </td>
     </tr>
@@ -2998,6 +3074,223 @@ function renderWebsiteSettings() {
   `;
 }
 
+
+function renderWebsiteNavigation() {
+  const userId = (window as any).currentUser || 'system';
+  const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+  const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+  
+  if (!layout.header_config.nav_items) layout.header_config.nav_items = [];
+  const navItems = layout.header_config.nav_items;
+
+  // 🌿 Fix.2: Get available pages for the dropdown
+  const siteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
+
+  const itemsHtml = navItems.map((item: any, index: number) => `
+    <div class="card" style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; padding: 20px; border: 1px solid #eef2f6; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <button class="btn-outline" style="padding: 4px 10px; font-size: 0.8rem; background: white;" onclick="window.reorderNavItem(${index}, -1)" ${index === 0 ? 'disabled' : ''}>▲</button>
+        <button class="btn-outline" style="padding: 4px 10px; font-size: 0.8rem; background: white;" onclick="window.reorderNavItem(${index}, 1)" ${index === navItems.length - 1 ? 'disabled' : ''}>▼</button>
+      </div>
+      
+      <div style="flex: 2;">
+        <label style="font-size: 0.7rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; display: block; margin-bottom: 8px;">Menu Label</label>
+        <input type="text" value="${item.label}" onchange="window.updateNavItem(${index}, 'label', this.value)" style="width: 100%; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 0.95rem;">
+      </div>
+
+      <div style="flex: 2;">
+        <label style="font-size: 0.7rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; display: block; margin-bottom: 8px;">Linked Page</label>
+        <select onchange="window.updateNavItem(${index}, 'path', this.value)" style="width: 100%; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: white; font-size: 0.95rem; cursor: pointer;">
+          <option value="" ${!item.path ? 'selected' : ''}>-- Select a Page --</option>
+          ${siteRoutes.map(route => {
+             const funnel = mockFunnels.find(f => f.id === route.funnel_id);
+             return `<option value="${route.path}" ${item.path === route.path ? 'selected' : ''}>${funnel?.name || 'Page'} (${route.path})</option>`;
+          }).join('')}
+        </select>
+        <small style="color: #94a3b8; margin-top: 6px; display: block;">Link points to: ${item.path || 'None'}</small>
+      </div>
+
+      <div style="flex: 0.5; text-align: center;">
+        <label style="font-size: 0.7rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; display: block; margin-bottom: 8px;">Visible</label>
+        <input type="checkbox" ${item.visible !== false ? 'checked' : ''} onchange="window.updateNavItem(${index}, 'visible', this.checked)" style="width: 24px; height: 24px; cursor: pointer; accent-color: var(--primary-color);">
+      </div>
+
+      <button class="btn-outline" style="background: #fff5f5; color: #ef4444; border-color: #fee2e2; padding: 10px; border-radius: 10px;" onclick="window.deleteNavItem(${index})">
+        <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+      </button>
+    </div>
+  `).join('');
+
+  app.innerHTML = `
+    ${renderSidebar('website-navigation')}
+    <main class="main-content">
+      <header class="view-header">
+        <div>
+          <h2 style="margin: 0; font-size: 1.75rem;">Website Navigation</h2>
+          <p style="color: #64748b; margin-top: 6px;">Manage your site's header menu. Links are restricted to your published pages to prevent dead ends.</p>
+        </div>
+        <div style="display: flex; gap: 12px;">
+           <button class="btn-primary" style="background: #8a2be2; border: none; padding: 12px 24px;" onclick="window.addNavItem()">+ Add Menu Item</button>
+           <button class="btn-primary" style="padding: 12px 24px;" onclick="window.saveWebsiteLayout()">Save Configuration</button>
+        </div>
+      </header>
+
+      <div style="max-width: 1000px; padding: 10px;">
+        ${itemsHtml || '<div class="empty-state" style="padding: 80px; text-align: center; background: white; border-radius: 20px; border: 2px dashed #e2e8f0; color: #64748b;"><div style="font-size: 3rem; margin-bottom: 16px;">📂</div><h3>No menu items here</h3><p>Start building your navigation menu by adding your first link.</p><button class="btn-primary" style="margin-top: 20px;" onclick="window.addNavItem()">Add Item</button></div>'}
+      </div>
+    </main>
+  `;
+}
+
+(window as any).addNavItem = () => {
+    const userId = (window as any).currentUser || 'system';
+    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    
+    if (!layout.header_config.nav_items) layout.header_config.nav_items = [];
+    layout.header_config.nav_items.push({ label: 'New Link', path: '/', visible: true });
+    renderWebsiteNavigation();
+};
+
+(window as any).updateNavItem = (index: number, field: string, value: any) => {
+    const userId = (window as any).currentUser || 'system';
+    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    
+    (layout.header_config.nav_items[index] as any)[field] = value;
+    renderWebsiteNavigation();
+};
+
+(window as any).reorderNavItem = (index: number, direction: number) => {
+    const userId = (window as any).currentUser || 'system';
+    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    
+    const items = layout.header_config.nav_items;
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= items.length) return;
+    
+    const temp = items[index];
+    items[index] = items[newIndex];
+    items[newIndex] = temp;
+    
+    renderWebsiteNavigation();
+};
+
+(window as any).deleteNavItem = (index: number) => {
+    const userId = (window as any).currentUser || 'system';
+    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    
+    layout.header_config.nav_items.splice(index, 1);
+    renderWebsiteNavigation();
+};
+
+(window as any).saveWebsiteLayout = async () => {
+    (window as any).showToast('Saving navigation layout...', 2000);
+    setTimeout(() => {
+        (window as any).showToast('Navigation updated successfully!', 2000);
+    }, 600);
+};
+
+
+function renderWebsiteDashboard() {
+  const userId = (window as any).currentUser || 'system';
+  const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+  const domain = website.domain || `${website.subdomain}.hanssays.com`;
+  const previewUrl = `${window.location.protocol}//${window.location.host}/?subdomain=${website.subdomain}`;
+
+  const homeRoute = mockWebsiteRoutes.find(r => r.website_id === website.id && r.path === '/');
+  const homePage = mockPages.find(p => p.funnel_id === homeRoute?.funnel_id);
+
+  app.innerHTML = `
+    ${renderSidebar('website-dashboard')}
+    <main class="main-content">
+      <header class="view-header">
+        <div>
+          <h2 style="margin: 0; font-size: 1.75rem;">My Website</h2>
+          <p style="color: #64748b; margin-top: 6px;">Manage your online presence and tracks its performance.</p>
+        </div>
+        <div style="display: flex; gap: 12px;">
+           <button class="btn-primary" style="background: white; color: var(--primary-color); border: 2px solid var(--primary-color);" onclick="window.open('${previewUrl}', '_blank')">View Live Site</button>
+           <button class="btn-primary" onclick="window.openNewPageModal()">+ Add Page</button>
+        </div>
+      </header>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; margin-bottom: 40px;">
+        <div class="card" style="padding: 24px; display: flex; align-items: center; gap: 24px;">
+           <div style="font-size: 2.5rem; background: #f0f7ff; width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; border-radius: 20px;">🌐</div>
+           <div>
+              <label style="font-size: 0.75rem; color: #94a3b8; font-weight: 800; text-transform: uppercase;">Domain Mode</label>
+              <h3 style="margin: 4px 0; font-size: 1.25rem;">${domain}</h3>
+              <p style="margin: 0; font-size: 0.85rem; color: #10b981; font-weight: 600;">● Live & Secured</p>
+           </div>
+        </div>
+
+        <div class="card" style="padding: 24px; display: flex; align-items: center; gap: 24px;">
+           <div style="font-size: 2.5rem; background: #fff7ed; width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; border-radius: 20px;">⚡</div>
+           <div>
+              <label style="font-size: 0.75rem; color: #94a3b8; font-weight: 800; text-transform: uppercase;">Site Health</label>
+              <h3 style="margin: 4px 0; font-size: 1.25rem;">98 / 100</h3>
+              <p style="margin: 0; font-size: 0.85rem; color: #64748b;">Optimized for Speed</p>
+           </div>
+        </div>
+      </div>
+
+      <div class="card" style="padding: 30px; margin-bottom: 40px;">
+         <h3 style="margin-top: 0; margin-bottom: 24px;">Quick Actions</h3>
+         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px;">
+            <div class="card" style="border: 1px solid #eef2f6; text-align: center; padding: 30px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#eef2f6'" onclick="${homePage ? `window.switchBuilderPage('${homePage.id}'); window.navigateTo('builder')` : 'alert(\'No Home Page found\')'}">
+               <div style="font-size: 2rem; margin-bottom: 15px;">🏠</div>
+               <h4 style="margin: 0; color: #1e293b;">Edit Home Page</h4>
+               <p style="color: #64748b; font-size: 0.85rem; margin-top: 8px;">Modify your hero, services, and branding visually.</p>
+            </div>
+            
+            <div class="card" style="border: 1px solid #eef2f6; text-align: center; padding: 30px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#eef2f6'" onclick="window.navigateTo('website-navigation')">
+               <div style="font-size: 2rem; margin-bottom: 15px;">🗺️</div>
+               <h4 style="margin: 0; color: #1e293b;">Site Navigation</h4>
+               <p style="color: #64748b; font-size: 0.85rem; margin-top: 8px;">Control the menu links in your site header.</p>
+            </div>
+
+            <div class="card" style="border: 1px solid #eef2f6; text-align: center; padding: 30px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#eef2f6'" onclick="window.navigateTo('seo-pages')">
+               <div style="font-size: 2rem; margin-bottom: 15px;">🚀</div>
+               <h4 style="margin: 0; color: #1e293b;">SEO Boost</h4>
+               <p style="color: #64748b; font-size: 0.85rem; margin-top: 8px;">Generate local landing pages to rank higher.</p>
+            </div>
+         </div>
+      </div>
+
+      <div class="card" style="padding: 0; overflow: hidden; border-radius: 16px;">
+        <div style="padding: 20px 30px; border-bottom: 1px solid #f1f5f9; background: #f8fafc; display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="margin: 0; font-size: 1.1rem; color: #1e293b;">Active Site Structure</h3>
+            <button class="btn-primary" style="padding: 6px 16px; font-size: 0.85rem;" onclick="window.navigateTo('website-structure')">Manage Routes</button>
+        </div>
+        <table class="clients-table" style="box-shadow: none; border: none; margin: 0;">
+           <thead>
+              <tr>
+                 <th>Path</th>
+                 <th>Resource</th>
+                 <th style="text-align: right;">Activity</th>
+              </tr>
+           </thead>
+           <tbody>
+              ${mockWebsiteRoutes.filter(r => r.website_id === website.id).slice(0, 5).map(route => {
+                  const funnel = mockFunnels.find(f => f.id === route.funnel_id);
+                  return `
+                    <tr>
+                       <td style="font-weight: 700;">${route.path}</td>
+                       <td><span class="badge" style="background: #eef2f6; color: #64748b;">${funnel?.name || 'Unknown'}</span></td>
+                       <td style="text-align: right;"><span style="color: #10b981; font-weight: 600;">Active</span></td>
+                    </tr>
+                  `;
+              }).join('')}
+           </tbody>
+        </table>
+      </div>
+    </main>
+  `;
+}
+
 function renderWebsiteStructure() {
   const userId = (window as any).currentUser || 'system';
   const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
@@ -3060,7 +3353,8 @@ function renderWebsiteStructure() {
                   </td>
                   <td><span class="badge badge-published">Live</span></td>
                   <td style="text-align: right; padding-right: 20px;">
-                    <button class="btn-outline" style="color: #64748b; border-color: #e2e8f0; padding: 4px 10px; font-size: 0.8rem;" onclick="window.navigateTo('funnel-detail', '${route.funnel_id}')">Edit Funnel</button>
+                    <button class="btn-primary" style="padding: 4px 12px; font-size: 0.8rem;" onclick="event.stopPropagation(); const p = mockPages.find(pg => pg.funnel_id === '${route.funnel_id}'); if(p) { window.switchBuilderPage(p.id); window.navigateTo('builder'); } else { window.navigateTo('funnel-detail', '${route.funnel_id}'); }">Edit Page</button>
+                    <button class="btn-outline" style="color: #64748b; border-color: #e2e8f0; padding: 4px 10px; font-size: 0.8rem; margin-left: 5px;" onclick="event.stopPropagation(); window.open('/site${route.path}', '_blank')">View Live</button>
                     ${!isHome ? `<button class="btn-outline" style="color: #ef4444; border-color: #fee2e2; padding: 4px 10px; font-size: 0.8rem; margin-left: 5px;" onclick="window.deleteRoute('${route.id}')">Delete</button>` : ''}
                   </td>
                 </tr>
@@ -3756,18 +4050,17 @@ async function renderFunnels() {
 
       return `
       <div class="card funnel-card" 
-           style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; transition: transform 0.2s; cursor: pointer; border: 1px solid #eef2f6;" 
-           onclick="window.navigateTo('funnel-detail', '${f.id}')"
+           style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; transition: transform 0.2s; border: 1px solid #eef2f6;" 
            onmouseover="this.style.boxShadow='0 10px 25px rgba(0,0,0,0.05)'; this.style.borderColor='var(--primary-color)';"
            onmouseout="this.style.boxShadow='none'; this.style.borderColor='#eef2f6';">
-        <div style="display: flex; align-items: center; gap: 20px;">
+        <div style="display: flex; align-items: center; gap: 20px;" onclick="window.navigateTo('funnel-detail', '${f.id}')" style="cursor: pointer;">
           <div style="background: #f0f7ff; width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">🎯</div>
           <div>
             <h4 style="margin: 0; color: #1e293b; font-size: 1.1rem;">${f.name}</h4>
             <div style="font-size: 0.85rem; color: #64748b; margin-top: 4px;">Created ${new Date(f.created_at).toLocaleDateString()}</div>
           </div>
         </div>
-        <div style="text-align: right; display: flex; align-items: center; gap: 30px;">
+        <div style="text-align: right; display: flex; align-items: center; gap: 25px;">
           <div style="text-align: center; min-width: 60px;">
             <div style="font-weight: 700; color: #1e293b; font-size: 1.1rem;">${totalLeads}</div>
             <div style="font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Total Leads</div>
@@ -3776,11 +4069,10 @@ async function renderFunnels() {
             <div style="font-weight: 700; color: var(--primary-color); font-size: 1.1rem;">${leadsToday}</div>
             <div style="font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Leads Today</div>
           </div>
-          <div style="text-align: center; min-width: 40px;">
-            <div style="font-weight: 700; color: #1e293b; font-size: 1.1rem;">${f.step_count || 0}</div>
-            <div style="font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Steps</div>
+          <div style="display: flex; gap: 8px;">
+             <button class="btn-primary" style="padding: 8px 16px; font-size: 0.85rem;" onclick="event.stopPropagation(); const p = mockPages.find(pg => pg.funnel_id === '${f.id}'); if(p) { window.switchBuilderPage(p.id); window.navigateTo('builder'); } else { window.navigateTo('funnel-detail', '${f.id}'); }">Edit Page</button>
+             <button class="btn-outline" style="padding: 8px 16px; font-size: 0.85rem; border-color: #e2e8f0; color: #475569;" onclick="event.stopPropagation(); const r = mockWebsiteRoutes.find(rt => rt.funnel_id === '${f.id}'); window.open(r ? '/site' + r.path : '/preview/${f.id}', '_blank')">View Live</button>
           </div>
-          <span class="badge badge-${f.status}" style="text-transform: capitalize; padding: 6px 12px; border-radius: 6px; font-weight: 600;">${f.status}</span>
         </div>
       </div>
     `;}).join('');
@@ -4069,6 +4361,8 @@ async function executeNavigation(view: string, id?: string, context?: any) {
     case 'templates': renderTemplates(); break;
     case 'components': app.innerHTML = `${renderSidebar('components')}<main class="main-content"><h2>Components Shelf</h2><div class="empty-state">Library of pre-built UI components coming soon.</div></main>`; break;
     case 'website-settings': renderWebsiteSettings(); break;
+    case 'website-navigation': renderWebsiteNavigation(); break;
+    case 'website-dashboard': renderWebsiteDashboard(); break;
     case 'seo-pages': (window as any).renderSeoPages(); break;
     case 'website-structure': renderWebsiteStructure(); break;
     case 'reports': renderReports(); break;
@@ -5329,162 +5623,233 @@ window.addEventListener('scroll', () => {
   (window as any).toggleCheckItem('test');
 };
 
+let seoWizardState = {
+    mode: 'list' as 'list' | 'wizard',
+    step: 1,
+    services: [] as string[],
+    cities: [] as string[]
+};
+
 (window as any).renderSeoPages = async () => {
+    const seoPages = mockWebsiteRoutes.filter(r => r.is_seo_page);
+    
+    // Auto-switch to wizard if empty
+    if (seoPages.length === 0 && seoWizardState.mode !== 'wizard') {
+        seoWizardState.mode = 'wizard';
+        seoWizardState.step = 1;
+    }
+
+    if (seoWizardState.mode === 'wizard') {
+        renderSeoWizard();
+        return;
+    }
+
     app.innerHTML = `
         ${renderSidebar('seo-pages')}
         <main class="main-content">
             <header class="view-header">
-                <h2>SEO Optimization Hub</h2>
+                <div>
+                    <h2 style="margin: 0; font-size: 1.75rem;">Local SEO Hub</h2>
+                    <p style="color: #64748b; margin-top: 6px;">Target specific neighborhoods and service types to dominate local search results.</p>
+                </div>
                 <div style="display: flex; gap: 12px;">
-                    <button class="btn-primary" onclick="window.showBulkSeoModal()" style="background: #10b981;">+ Bulk Generate Pages</button>
+                    <button class="btn-primary" onclick="window.startSeoWizard()" style="background: #10b981; border: none; padding: 12px 24px;">+ Batch Generate Pages</button>
                 </div>
             </header>
 
-            <div class="card" style="margin-bottom: 24px; padding: 24px; background: #f0f9ff; border: 1px solid #bae6fd;">
-                <div style="display: flex; gap: 20px; align-items: center;">
-                    <div style="font-size: 2.5rem;">📈</div>
+            <div class="card" style="margin-bottom: 30px; padding: 24px; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border: 1px solid #bae6fd; border-radius: 16px;">
+                <div style="display: flex; gap: 24px; align-items: center;">
+                    <div style="font-size: 3rem; background: white; width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; border-radius: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">📈</div>
                     <div>
-                        <h4 style="margin: 0; color: #0369a1;">Organic Reach Strategy</h4>
-                        <p style="margin: 4px 0 0 0; color: #0c4a6e; font-size: 0.9rem;">
-                            Generated pages target specific <strong>Service + City</strong> combinations to capture high-intent local search traffic.
+                        <h4 style="margin: 0; color: #0369a1; font-size: 1.25rem;">Organic Search Strategy</h4>
+                        <p style="margin: 6px 0 0 0; color: #0c4a6e; font-size: 1rem; line-height: 1.5;">
+                            Generated pages target <strong>Service + City</strong> combinations to capture high-intent local traffic.
                         </p>
                     </div>
                 </div>
             </div>
 
-            <div id="seo-pages-list-container">
-                <div class="loading">Loading SEO pages...</div>
-            </div>
-        </main>
-    `;
-
-    try {
-        // Fetch routes and filter for SEO pages
-        const seoPages = mockWebsiteRoutes.filter(r => r.is_seo_page);
-        const container = document.getElementById('seo-pages-list-container');
-        if (!container) return;
-
-        const rows = seoPages.map(page => `
-            <tr style="border-bottom: 1px solid #f1f5f9;">
-                <td style="padding: 16px;">
-                    <div style="font-weight: 600; color: #1e293b;">${page.service}</div>
-                    <div style="font-size: 0.8rem; color: #64748b;">${page.city}</div>
-                </td>
-                <td>
-                    <code style="background: #f1f5f9; padding: 4px 8px; border-radius: 4px; font-size: 0.85rem;">/${page.slug}</code>
-                </td>
-                <td>
-                    <span class="badge badge-published" style="font-size: 0.7rem;">Active</span>
-                </td>
-                <td style="text-align: right;">
-                    <div style="display: flex; gap: 8px; justify-content: flex-end;">
-                        <button class="btn-primary" style="background: white; color: #64748b; border: 1px solid #e2e8f0; padding: 6px 12px; font-size: 0.8rem;" onclick="window.open('/${page.slug}', '_blank')">View</button>
-                        <button class="btn-primary" style="background: white; color: #dc2626; border: 1px solid #fecaca; padding: 6px 12px; font-size: 0.8rem;" onclick="window.deleteSeoPage('${page.id}')">Delete</button>
-                    </div>
-                </td>
-            </tr>
-        `).join('');
-
-        container.innerHTML = `
-            <div class="card" style="padding: 0; overflow: hidden;">
+            <div class="card" style="padding: 0; overflow: hidden; border-radius: 16px;">
                 <table class="clients-table" style="box-shadow: none; border: none; margin-top: 0;">
-                    <thead>
+                    <thead style="background: #f8fafc;">
                         <tr>
-                            <th>Service & City</th>
-                            <th>Slug</th>
-                            <th>Status</th>
-                            <th style="text-align: right;">Actions</th>
+                            <th style="padding: 16px 24px;">Service & Region</th>
+                            <th>Calculated URL Slug</th>
+                            <th>Live Status</th>
+                            <th style="text-align: right; padding: 16px 24px;">Management</th>
                         </tr>
                     </thead>
                     <tbody>
-                        ${rows || '<tr><td colspan="4" style="text-align: center; padding: 60px; color: #64748b;">No SEO pages generated yet.</td></tr>'}
+                        ${seoPages.map(page => `
+                            <tr style="border-bottom: 1px solid #f1f5f9;">
+                                <td style="padding: 16px 24px;">
+                                    <div style="font-weight: 700; color: #1e293b; font-size: 1rem;">${page.service}</div>
+                                    <div style="font-size: 0.85rem; color: #64748b; font-weight: 500;">${page.city}</div>
+                                </td>
+                                <td>
+                                    <code style="background: #f1f5f9; padding: 6px 10px; border-radius: 8px; font-size: 0.9rem; color: #475569; border: 1px solid #e2e8f0;">/${page.slug}</code>
+                                </td>
+                                <td>
+                                    <span class="badge" style="background: #ecfdf5; color: #059669; border: 1px solid #d1fae5; padding: 4px 10px; font-size: 0.75rem; font-weight: 700;">ACTIVE</span>
+                                </td>
+                                <td style="text-align: right; padding: 16px 24px;">
+                                    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                                        <button class="btn-primary" style="background: white; color: #64748b; border: 1px solid #e2e8f0; padding: 8px 16px; font-size: 0.85rem; font-weight: 600;" onclick="window.open('/${page.slug}', '_blank')">View Live</button>
+                                        <button class="btn-primary" style="background: #fff5f5; color: #ef4444; border: 1px solid #fee2e2; padding: 8px 12px;" onclick="window.deleteSeoPage('${page.id}')">
+                                            <svg style="width: 18px; height: 18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `).join('') || '<tr><td colspan="4" style="text-align: center; padding: 80px; color: #94a3b8;">No SEO pages found. Use the Batched Generator to get started.</td></tr>'}
                     </tbody>
                 </table>
             </div>
+        </main>
+    `;
+};
+
+(window as any).startSeoWizard = () => {
+    seoWizardState.mode = 'wizard';
+    seoWizardState.step = 1;
+    (window as any).renderSeoPages();
+};
+
+function renderSeoWizard() {
+    let content = '';
+    const progress = (seoWizardState.step / 3) * 100;
+
+    if (seoWizardState.step === 1) {
+        content = `
+            <div style="max-width: 600px; margin: 40px auto;">
+                <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Step 1: What services do you offer?</h3>
+                <p style="color: #64748b; margin-bottom: 24px;">Enter the services you want to rank for locally. Use commas to separate them.</p>
+                <textarea id="wizard-services" placeholder="e.g. Driveway Cleaning, Roof Cleaning, House Washing" style="width: 100%; height: 120px; padding: 15px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1.1rem; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'">${seoWizardState.services.join(', ')}</textarea>
+                <div style="margin-top: 30px; display: flex; justify-content: flex-end;">
+                    <button class="btn-primary" style="padding: 12px 32px; border-radius: 12px; font-weight: 800;" onclick="window.nextSeoStep(2)">Next: Location Selection →</button>
+                </div>
+            </div>
         `;
-    } catch (err) {
-        console.error('Failed to load SEO pages:', err);
-    }
-};
-
-(window as any).showBulkSeoModal = () => {
-    const modal = document.createElement('div');
-    modal.id = 'bulk-seo-modal';
-    modal.style.cssText = `
-        position: fixed; inset: 0; background: rgba(0,0,0,0.5); 
-        display: flex; align-items: center; justify-content: center; z-index: 10000;
-    `;
-    modal.innerHTML = `
-        <div class="card" style="width: 500px; padding: 30px; animation: pb-slide-in 0.3s ease-out; background: white; border-radius: 12px; border: 4px solid var(--primary-color);">
-            <h3 style="margin-top: 0; margin-bottom: 8px;">Bulk Generation</h3>
-            <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 24px;">Enter your target services and cities to create high-ranking landing pages instantly.</p>
-            
-            <div style="display: flex; flex-direction: column; gap: 20px;">
-                <div class="onboarding-form-group">
-                    <label style="display: block; font-weight: 600; margin-bottom: 8px;">Target Services (comma separated)</label>
-                    <textarea id="bulk-seo-services" class="onboarding-input" style="height: 80px; width: 100%; border-radius: 8px; border: 1px solid #e2e8f0; padding: 12px;" placeholder="e.g. Driveway Cleaning, House Washing, Roof Cleaning"></textarea>
-                </div>
-                
-                <div class="onboarding-form-group">
-                    <label style="display: block; font-weight: 600; margin-bottom: 8px;">Target Cities (comma separated)</label>
-                    <textarea id="bulk-seo-cities" class="onboarding-input" style="height: 80px; width: 100%; border-radius: 8px; border: 1px solid #e2e8f0; padding: 12px;" placeholder="e.g. Seattle, Bellevue, Tacoma"></textarea>
+    } else if (seoWizardState.step === 2) {
+        content = `
+            <div style="max-width: 600px; margin: 40px auto;">
+                <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Step 2: Where do you offer them?</h3>
+                <p style="color: #64748b; margin-bottom: 24px;">Enter the cities or neighborhoods you target. Use commas to separate them.</p>
+                <textarea id="wizard-cities" placeholder="e.g. Seattle, Bellevue, Kirkland, Redmond" style="width: 100%; height: 120px; padding: 15px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1.1rem; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'">${seoWizardState.cities.join(', ')}</textarea>
+                <div style="margin-top: 30px; display: flex; justify-content: space-between;">
+                    <button class="btn-outline" style="padding: 12px 24px; border-radius: 12px; font-weight: 700;" onclick="window.nextSeoStep(1)">← Back</button>
+                    <button class="btn-primary" style="padding: 12px 32px; border-radius: 12px; font-weight: 800;" onclick="window.nextSeoStep(3)">Next: Preview Generation →</button>
                 </div>
             </div>
-            
-            <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 32px;">
-                <button class="btn-secondary" onclick="document.getElementById('bulk-seo-modal').remove()">Cancel</button>
-                <button class="btn-primary" onclick="window.runBulkSeoGen()" style="padding: 12px 24px; font-weight: 700;">Generate Pages</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(modal);
-};
+        `;
+    } else if (seoWizardState.step === 3) {
+        const previews: string[] = [];
+        seoWizardState.services.forEach(s => {
+            seoWizardState.cities.forEach(c => {
+                const slug = (s + '-' + c).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+                previews.push(`/${slug}`);
+            });
+        });
 
-(window as any).runBulkSeoGen = async () => {
-    const servicesText = (document.getElementById('bulk-seo-services') as HTMLTextAreaElement).value;
-    const citiesText = (document.getElementById('bulk-seo-cities') as HTMLTextAreaElement).value;
-    
-    const services = servicesText.split(',').map(s => s.trim()).filter(s => s);
-    const cities = citiesText.split(',').map(c => c.trim()).filter(c => c);
-    
-    if (services.length === 0 || cities.length === 0) {
-        alert('Please enter at least one service and one city.');
-        return;
+        content = `
+            <div style="max-width: 800px; margin: 40px auto;">
+                <header style="text-align: center; margin-bottom: 40px;">
+                    <h3 style="font-size: 1.75rem; margin-bottom: 12px;">Step 3: Preview Local Strategy</h3>
+                    <p style="color: #64748b; font-size: 1.1rem;">We are about to generate <strong>${previews.length}</strong> targeted landing pages.</p>
+                </header>
+
+                <div class="card" style="background: #f8fafc; border: 2px dashed #e2e8f0; padding: 30px; margin-bottom: 40px;">
+                    <h4 style="margin-top: 0; color: #475569; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 1px; margin-bottom: 15px;">URL Structure Previews</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        ${previews.slice(0, 10).map(p => `<div style="color: var(--primary-color); font-weight: 600; font-family: monospace;">${p}</div>`).join('')}
+                        ${previews.length > 10 ? `<div style="color: #94a3b8; font-style: italic;">...and ${previews.length - 10} more pages</div>` : ''}
+                    </div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: 15px; background: #fffbeb; border: 1px solid #fde68a; padding: 20px; border-radius: 12px; margin-bottom: 40px;">
+                   <div style="display: flex; gap: 12px; align-items: flex-start;">
+                      <span style="font-size: 1.25rem;">💡</span>
+                      <p style="margin: 0; color: #92400e; font-size: 0.95rem;"><strong>Pro Tip:</strong> These pages will automatically be added to your Sitemap and linked within your website to boost search ranking.</p>
+                   </div>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <button class="btn-outline" style="padding: 12px 24px; border-radius: 12px; font-weight: 700;" onclick="window.nextSeoStep(2)">← Change Inputs</button>
+                    <button class="btn-primary" style="padding: 15px 40px; border-radius: 12px; font-weight: 800; font-size: 1.1rem; background: #10b981; border: none; box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.4);" onclick="window.finalizeSeoGen()">🚀 Generate & Go Live</button>
+                </div>
+            </div>
+        `;
+    }
+
+    app.innerHTML = `
+        ${renderSidebar('seo-pages')}
+        <main class="main-content">
+            <header class="view-header">
+                <div>
+                    <h2 style="margin: 0; font-size: 1.75rem;">Build Your Local Presence</h2>
+                    <p style="color: #64748b; margin-top: 6px;">Step ${seoWizardState.step} of 3</p>
+                </div>
+                <div style="width: 200px; height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden; position: relative;">
+                    <div style="width: ${progress}%; height: 100%; background: var(--primary-color); transition: width 0.4s ease-out;"></div>
+                </div>
+            </header>
+            ${content}
+        </main>
+    `;
+}
+
+(window as any).nextSeoStep = (step: number) => {
+    if (seoWizardState.step === 1 && step === 2) {
+        const text = (document.getElementById('wizard-services') as HTMLTextAreaElement).value;
+        seoWizardState.services = text.split(',').map(s => s.trim()).filter(s => s);
+        if (seoWizardState.services.length === 0) { alert('Please enter at least one service.'); return; }
+    } else if (seoWizardState.step === 2 && step === 3) {
+        const text = (document.getElementById('wizard-cities') as HTMLTextAreaElement).value;
+        seoWizardState.cities = text.split(',').map(c => c.trim()).filter(c => c);
+        if (seoWizardState.cities.length === 0) { alert('Please enter at least one city.'); return; }
     }
     
-    (window as any).showToast(`Generating ${services.length * cities.length} SEO pages...`, 'info');
-    document.getElementById('bulk-seo-modal')?.remove();
+    seoWizardState.step = step;
+    (window as any).renderSeoPages();
+};
+
+(window as any).finalizeSeoGen = async () => {
+    (window as any).showToast(`Broadcasting Local Authority...`, 'info');
     
     try {
         const res = await fetch('/api/websites/bulk-seo', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ services, cities })
+            body: JSON.stringify({ services: seoWizardState.services, cities: seoWizardState.cities })
         }).then(r => r.json());
         
         if (res.success) {
-            (window as any).showToast(`Successfully generated ${res.count} pages!`, 'success');
+            (window as any).showToast(`Mission Accomplished: ${res.count} SEO pages are now live!`, 'success');
+            seoWizardState.mode = 'list';
+            seoWizardState.services = [];
+            seoWizardState.cities = [];
             (window as any).renderSeoPages();
         } else {
-            alert('Failed: ' + res.error);
+            alert('Generation error: ' + res.error);
+        }
+    } catch (err: any) {
+        alert('Exception: ' + err.message);
+    }
+};
+
+(window as any).deleteSeoPage = async (routeId: string) => {
+    if (!confirm('Are you sure you want to delete this SEO page? It will be removed from your public website instantly.')) return;
+    
+    try {
+        const res = await fetch(`/api/websites/routes/${routeId}`, { method: 'DELETE' }).then(r => r.json());
+        if (res.success) {
+            (window as any).showToast('SEO page removed successfully.');
+            (window as any).renderSeoPages();
+        } else {
+            alert('Removal failed: ' + res.error);
         }
     } catch (err: any) {
         alert('Error: ' + err.message);
     }
 };
 
-(window as any).deleteSeoPage = async (routeId: string) => {
-    if (!confirm('Are you sure you want to delete this SEO page? This cannot be undone.')) return;
-    
-    try {
-        const res = await fetch(`/api/websites/routes/${routeId}`, { method: 'DELETE' }).then(r => r.json());
-        if (res.success) {
-            (window as any).showToast('SEO page deleted.');
-            (window as any).renderSeoPages();
-        } else {
-            alert('Delete failed: ' + res.error);
-        }
-    } catch (err: any) {
-        alert('Error: ' + err.message);
-    }
-};
