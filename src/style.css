@@ -2106,3 +2106,101 @@ html {
     font-size: 1.1rem;
     font-weight: 700;
 }
+/* ── Funnel / Public Site Styles ─────────────────────────── */
+.public-site {
+    background: #fff;
+    color: #1a1a1a;
+}
+
+.public-site.has-cta-bar {
+    padding-bottom: 80px; /* Space for sticky bar on mobile */
+}
+
+.cta-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: none; /* Desktop hidden */
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 12px 20px 24px 20px; /* Extra bottom padding for safe area */
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid rgba(0, 0, 0, 0.05);
+    z-index: 9999;
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.05);
+}
+
+/* 🍎 iOS Safe Area Support */
+@supports (padding: env(safe-area-inset-bottom)) {
+    .cta-bar {
+        padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    }
+}
+
+/* Show only on small screens */
+@media (max-width: 768px) {
+    .cta-bar {
+        display: grid;
+        animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+}
+
+@keyframes slideUp {
+    from { transform: translateY(100px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.cta-bar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 12px;
+    font-weight: 800;
+    font-size: 0.95rem;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cta-bar-btn--call {
+    background: #f0fdf4;
+    color: #16a34a;
+    border: 1.5px solid #bbf7d0;
+}
+
+.cta-bar-btn--quote {
+    background: #2563EB;
+    color: white;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+}
+
+.cta-bar-btn:active {
+    transform: scale(0.96);
+    opacity: 0.9;
+}
+
+.site-form-section {
+    transition: all 0.3s ease;
+}
+
+.site-form-section:has(input:focus) {
+    transform: scale(1.01) translateY(-2px);
+    box-shadow: 0 25px 60px rgba(0,0,0,0.12) !important;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes bounce {
+    0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+    40% { transform: translateY(-30px); }
+    60% { transform: translateY(-15px); }
+}

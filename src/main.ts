@@ -20,7 +20,30 @@ const getAllMessagesOrdered = (user?: any) => [];
 const getConversation = (id: string, user?: any) => [];
 const getCallsForContact = (id: string, phone?: string, user?: any) => [];
 const getCall = (id: string) => null;
-const runAutomations = (type: string, data: any) => {};
+const mockAutomationLogs: string[] = [];
+
+function runAutomations(type: string, data: any) {
+  const settings = getWebsiteSettings();
+  
+  if (type === 'LEAD_CAPTURED') {
+    const lead = data;
+    const triggerId = `auto_sms_lead_${lead.id}`;
+    
+    // 🌿 WB.5.2: Idempotency check (Zero Lead Loss / No Spam)
+    if (mockAutomationLogs.includes(triggerId)) return;
+    mockAutomationLogs.push(triggerId);
+
+    const msg = `Hi ${lead.name}, thanks for reaching out to ${settings.business_name}. We’ll get back to you shortly.`;
+    
+    console.log(`[AUTOMATION] Triggering LEAD_CAPTURED Response for ${lead.phone}`);
+    sendMessageToContact(lead.id, msg, 'automation');
+  }
+
+  if (type === 'OPPORTUNITY_CREATED') {
+    const opp = data;
+    console.log(`[AUTOMATION] Opportunity created for contact ${opp.contact_id}`);
+  }
+}
 const checkOverdueInvoices = () => { console.log('[API STUB] Checking overdue invoices'); };
 const emitEvent = (name: string, payload: any, user_id?: string) => {
     console.log(`[FRONTEND EVENT] ${name}:`, payload);
@@ -136,24 +159,46 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         }
 
         if (url === '/api/leads' && method === 'POST') {
-            console.log('[MOCK] Intercepting Lead Submission:', reqContext.body);
-            const isTest = reqContext.body.is_test;
-            const newLead = { 
-                id: `c-${Date.now()}`, 
-                ...reqContext.body, 
-                status: 'lead', 
-                created_at: new Date().toISOString(),
-                user_id: (window as any).currentUser || 'system',
-                source: isTest ? 'test_submission' : 'website_form'
-            };
-            mockContacts.push(newLead as any);
+            const body = reqContext.body;
+            console.log('[MOCK] Lead Submission:', body);
             
-            if (isTest) {
-                (window as any).showToast('Test lead received! Redirecting to CRM...', 'success');
-                setTimeout(() => window.navigateTo('contact-detail', newLead.id), 2000);
+            // 🌿 WB.5.2: Deduplication (Phase W4.7)
+            let contact = mockContacts.find(c => c.phone === body.phone);
+            let isNew = false;
+
+            if (contact) {
+                console.log('[MOCK] Existing contact found, updating record:', contact.id);
+                // Update profile info if more complete data provided
+                if (body.name && contact.name === 'Anonymous') contact.name = body.name;
+                if (body.email && !contact.email) contact.email = body.email;
+                if (body.address && !contact.address) contact.address = body.address;
+            } else {
+                isNew = true;
+                contact = { 
+                    id: `c-${Date.now()}`, 
+                    name: body.name || 'Anonymous',
+                    phone: body.phone,
+                    email: body.email || '',
+                    address: body.address || '',
+                    status: 'lead', 
+                    created_at: new Date().toISOString(),
+                    user_id: (window as any).currentUser || 'system',
+                    source: body.is_test ? 'test_submission' : 'website_form',
+                    tags: []
+                } as any;
+                mockContacts.push(contact as any);
+            }
+            
+            // 🌿 WB.5.4 Trigger Automation (Phase W4.4)
+            // Even if repeat, we may want to trigger automations (but runAutomations is idempotent for SMS)
+            runAutomations('LEAD_CAPTURED', contact);
+
+            if (body.is_test) {
+                (window as any).showToast(isNew ? 'Test lead received! Redirecting to CRM...' : 'Repeat test lead received!', 'success');
+                setTimeout(() => window.navigateTo('contact-detail', contact!.id), 2000);
             }
 
-            return new Response(JSON.stringify({ success: true, data: newLead }), { 
+            return new Response(JSON.stringify({ success: true, data: contact, is_repeat: !isNew }), { 
                 status: 201,
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -1430,24 +1475,7 @@ function renderSectionPreviewContent(section: any) {
         </div>`;
     }
     case 'form': {
-      return `
-        <h3 style="margin-bottom: 20px; color: var(--primary-color);">
-          ${inlineText(id, 'title', content.title || 'Contact Form', 'display:block;width:100%;')}
-        </h3>
-        <div style="display: flex; flex-direction: column; gap: 15px;">
-          ${(content.fields || []).map((f: string) => `
-            <div class="form-group" style="margin-bottom: 0;">
-              <input type="${f === 'email' ? 'email' : 'text'}"
-                     id="pf-${f}-${id}"
-                     placeholder="Your ${f.charAt(0).toUpperCase() + f.slice(1)}"
-                     style="padding: 12px; border: 1px solid #cbd5e0; border-radius: 6px; width: 100%;">
-            </div>
-          `).join('')}
-          <button class="btn-primary" style="padding: 14px; font-weight: 700; margin-top: 10px; pointer-events: none;">
-            ${inlineText(id, 'submit_label', content.submit_label || 'Submit Request')}
-          </button>
-        </div>
-      `;
+      return renderStandardForm(id, content, false);
     }
     case 'button': {
       const sizeMap: any = { small: '8px 16px', medium: '12px 24px', large: '16px 32px' };
@@ -1918,6 +1946,86 @@ function renderSectionPreviewContent(section: any) {
 // Attach to window for global access/testing
 (window as any).createLead = createLead;
 
+function renderStandardForm(id: string, content: any, isPublic: boolean) {
+  const prefix = isPublic ? 'site-f-' : 'pf-';
+  const title = content.title || 'Get Your Free Quote';
+  
+  // 🌿 Context-Aware CTA (Phase W4.8)
+  let submitLabel = content.submit_label || 'Get My Free Quote ✨';
+  if (isPublic) {
+    if (activeWebsiteContext?.service) {
+      submitLabel = `Get ${activeWebsiteContext.service} Quote`;
+    } else {
+      submitLabel = 'Get Free Quote';
+    }
+  }
+  
+  // 🌿 WB.5.2: Input Memory (Repeat Visit Support - Phase W4.6)
+  const savedName = window.localStorage.getItem('crm_lead_name') || '';
+  const savedPhone = window.localStorage.getItem('crm_lead_phone') || '';
+  
+  return `
+    <div id="form-wrapper-${id}" class="site-form-section" style="max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.1); color: #1e293b; text-align: left; border: 1px solid #f1f5f9;">
+      <h3 style="margin-bottom: 30px; font-size: 1.85rem; text-align: center; font-weight: 800; letter-spacing: -0.5px; color: #0f172a;">${title}</h3>
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <div class="form-group">
+          <label style="display: block; font-weight: 700; margin-bottom: 6px; font-size: 0.85rem; color: #64748b;">Full Name <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="${prefix}name-${id}" 
+                 value="${savedName}"
+                 placeholder="e.g. John Doe" required 
+                 autocomplete="name"
+                 oninput="window.localStorage.setItem('crm_lead_name', this.value)"
+                 style="padding: 14px 18px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 14px; width: 100%; font-family: inherit; font-size: 1rem; transition: all 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'; this.style.background='white'; this.style.boxShadow='0 0 0 4px rgba(37, 99, 235, 0.1)';" onblur="this.style.borderColor='#f1f5f9'; this.style.background='#f8fafc'; this.style.boxShadow='none'">
+        </div>
+        <div class="form-group">
+          <label style="display: block; font-weight: 700; margin-bottom: 6px; font-size: 0.85rem; color: #64748b;">Phone Number <span style="color: #ef4444;">*</span></label>
+          <input type="tel" id="${prefix}phone-${id}" 
+                 value="${savedPhone}"
+                 placeholder="e.g. (555) 000-0000" required 
+                 autocomplete="tel"
+                 oninput="window.localStorage.setItem('crm_lead_phone', this.value)"
+                 style="padding: 14px 18px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 14px; width: 100%; font-family: inherit; font-size: 1rem; transition: all 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'; this.style.background='white'; this.style.boxShadow='0 0 0 4px rgba(37, 99, 235, 0.1)';" onblur="this.style.borderColor='#f1f5f9'; this.style.background='#f8fafc'; this.style.boxShadow='none'">
+        </div>
+        
+        <div class="form-group">
+          <label style="display: block; font-weight: 700; margin-bottom: 6px; font-size: 0.85rem; color: #64748b;">Service Needed</label>
+          <select id="${prefix}service-${id}" 
+                  autocomplete="off"
+                  style="padding: 14px 18px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 14px; width: 100%; font-family: inherit; font-size: 1rem; appearance: none; background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%2364748b%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C/polyline%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 15px center; background-size: 18px;">
+            <option value="General Inquiry">Select a service...</option>
+            <option value="Driveway Cleaning">Driveway Cleaning</option>
+            <option value="House Washing">House Washing</option>
+            <option value="Roof Cleaning">Roof Cleaning</option>
+            <option value="Gutter Cleaning">Gutter Cleaning</option>
+            <option value="Commercial Cleaning">Commercial Cleaning</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label style="display: block; font-weight: 700; margin-bottom: 6px; font-size: 0.85rem; color: #64748b;">Message (Optional)</label>
+          <textarea id="${prefix}message-${id}" 
+                    autocomplete="off"
+                    placeholder="Tell us more about your project..." 
+                    style="padding: 14px 18px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 14px; width: 100%; font-family: inherit; font-size: 1rem; min-height: 100px; resize: vertical; transition: all 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'; this.style.background='white'; this.style.boxShadow='0 0 0 4px rgba(37, 99, 235, 0.1)';" onblur="this.style.borderColor='#f1f5f9'; this.style.background='#f8fafc'; this.style.boxShadow='none'"></textarea>
+        </div>
+
+        <button class="btn-primary" 
+          style="padding: 22px; margin-top: 10px; font-size: 1.25rem; font-weight: 800; border-radius: 16px; background: var(--primary-color); color: white; border: none; cursor: pointer; transition: all 0.3s; box-shadow: 0 10px 30px rgba(37, 99, 235, 0.3); display: flex; align-items: center; justify-content: center; gap: 10px;" 
+          onmouseover="this.style.transform='translateY(-3px)'; this.style.boxShadow='0 15px 40px rgba(37, 99, 235, 0.4)';"
+          onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 10px 30px rgba(37, 99, 235, 0.3)';"
+          onclick="window.submitBuilderForm('${id}', ${isPublic})">
+          ${submitLabel}
+        </button>
+        <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 15px; color: #94a3b8; font-size: 0.85rem; font-weight: 600;">
+          <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+          Secure & Private Inquiry
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 (window as any).submitBuilderForm = async (sectionId: string, isPublic: boolean = false) => {
   const section = mockPageSections.find(s => s.id === sectionId);
   if (!section) return;
@@ -1928,60 +2036,128 @@ function renderSectionPreviewContent(section: any) {
   const phoneInput = document.getElementById(`${prefix}phone-${sectionId}`) as HTMLInputElement;
   const emailInput = document.getElementById(`${prefix}email-${sectionId}`) as HTMLInputElement;
   const addressInput = document.getElementById(`${prefix}address-${sectionId}`) as HTMLInputElement;
-  const serviceInput = document.getElementById(`${prefix}service_type-${sectionId}`) as HTMLSelectElement;
+  const serviceInput = (document.getElementById(`${prefix}service-${sectionId}`) || document.getElementById(`${prefix}service_type-${sectionId}`)) as HTMLSelectElement;
   const messageInput = document.getElementById(`${prefix}message-${sectionId}`) as HTMLTextAreaElement;
+
+  if (!nameInput?.value || !phoneInput?.value) {
+    alert('Please fill in your name and phone number.');
+    return;
+  }
 
   const sectionWrapper = document.getElementById(`form-wrapper-${sectionId}`);
   const submitBtn = document.querySelector(`#form-wrapper-${sectionId} .btn-primary`) as HTMLButtonElement;
-  const originalBtnText = submitBtn?.innerHTML || 'Submit';
+  
+  if (!submitBtn || submitBtn.disabled) return; // Zero loss: prevent double submit
+
+  const originalBtnText = submitBtn.innerHTML;
+  const settings = getWebsiteSettings();
 
   try {
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.innerHTML = '<span style="display:inline-flex; align-items:center; gap:8px;"><svg class="animate-spin" style="width:18px; height:18px;" viewBox="0 0 24 24"><circle style="opacity:0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path style="opacity:0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Sending...</span>';
-    }
+    // 1. Disable immediately & Loading State
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span style="display:inline-flex; align-items:center; gap:8px;"><svg class="animate-spin" style="width:18px; height:18px;" viewBox="0 0 24 24"><circle style="opacity:0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path style="opacity:0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Sending Request…</span>';
 
-    // 🌿 WB.5.1: Attach Funnel Attribution
+    // 🌿 WB.5.1: Attach Funnel Attribution + SEO Metadata (W3.8)
     const page = mockPages.find(p => p.id === section.page_id);
     const leadData = {
       name: nameInput?.value || '',
       phone: phoneInput?.value,
-      email: emailInput?.value,
-      address: addressInput?.value,
-      service_type: serviceInput?.value,
-      message: messageInput?.value,
+      email: emailInput?.value || '',
+      address: addressInput?.value || '',
+      service_type: serviceInput?.value || 'General Inquiry',
+      message: messageInput?.value || '',
       source: 'funnel',
       funnel_id: page?.funnel_id,
-      page_id: section.page_id
+      page_id: section.page_id,
+      page_slug: activeWebsiteContext?.slug || page?.slug || '',
+      city: activeWebsiteContext?.city || '',
+      service: activeWebsiteContext?.service || ''
     };
 
-    const res = await createLead(leadData);
+    // Timeout & Retry Logic (W4.2)
+    const MAX_TIMEOUT = 10000;
+    const withTimeout = (promise: Promise<any>, ms: number) => 
+      Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms))
+      ]);
 
-    console.log("Lead created:", res);
+    const performSubmission = async (canRetry: boolean = true): Promise<any> => {
+      try {
+        return await withTimeout(createLead(leadData), MAX_TIMEOUT);
+      } catch (err: any) {
+        if (canRetry) {
+          console.warn('[CRM: FORM] Submission failed/timed out. Retrying once...', err);
+          return await withTimeout(createLead(leadData), MAX_TIMEOUT);
+        }
+        throw err;
+      }
+    };
+
+    const res = await performSubmission(true); // Initial try + 1 retry
+
+    console.log("[CRM: FORM] Success:", res);
     
-    // Confident Success State (WB.4.3)
+    // Success State (W4.3)
     if (sectionWrapper) {
       sectionWrapper.innerHTML = `
-        <div style="text-align: center; padding: 40px 10px; animation: fadeIn 0.5s ease-out;">
-          <div style="font-size: 4rem; margin-bottom: 24px; display: inline-block; animation: bounce 1s cubic-bezier(0.175, 0.885, 0.32, 1.275);">✅</div>
-          <h3 style="font-size: 2rem; font-weight: 800; margin-bottom: 16px; color: #1e293b; letter-spacing: -0.5px;">Thanks! We'll call you shortly.</h3>
-          <p style="font-size: 1.15rem; color: #64748b; line-height: 1.6; max-width: 320px; margin: 0 auto 30px;">
-            Most customers hear back within <b style="color: var(--primary-color);">5 minutes</b>.
+        <div id="form-success-confirmation" style="text-align: center; padding: 60px 20px; animation: fadeIn 0.5s ease-out; background: #f0fff4; border-radius: 24px; border: 2px solid #c6f6d5;">
+          <div style="font-size: 4.5rem; margin-bottom: 24px; display: inline-block; animation: bounce 1s cubic-bezier(0.175, 0.885, 0.32, 1.275);">🚀</div>
+          <h3 style="font-size: 2.25rem; font-weight: 800; margin-bottom: 16px; color: #22543d; letter-spacing: -0.5px;">Thanks! We'll contact you shortly.</h3>
+          <p style="font-size: 1.2rem; color: #2f855a; line-height: 1.6; max-width: 400px; margin: 0 auto 30px; font-weight: 500;">
+            We've received your request. In the meantime, you can reach us directly at:
           </p>
-          <div style="padding-top: 20px; border-top: 1px solid #f1f5f9;">
-             <p style="font-weight: 700; color: #94a3b8; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px;">Request Captured Successfully</p>
+          <a href="tel:${settings.phone}" style="display: inline-block; font-size: 1.75rem; font-weight: 900; color: #22543d; text-decoration: none; border-bottom: 3px solid #68d391; padding-bottom: 4px; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+            ${settings.phone}
+          </a>
+          <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #c6f6d5;">
+             <p style="font-weight: 700; color: #38a169; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1.5px;">Request Confirmed</p>
           </div>
         </div>
       `;
+      // Auto-scroll to confirmation
+      setTimeout(() => {
+        sectionWrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
     }
 
   } catch (error: any) {
-    console.error("Lead submission failed:", error);
-    if (submitBtn) {
-      submitBtn.disabled = false;
-      submitBtn.innerHTML = originalBtnText;
+    console.error("[CRM: FORM] Persistent failure after retry:", error);
+    
+    // Persistent Failure Fallback UI (W4.10 Zero Loss)
+    if (sectionWrapper) {
+      sectionWrapper.innerHTML = `
+        <div style="text-align: center; padding: 50px 20px; animation: fadeIn 0.5s ease-out; background: #fffaf0; border-radius: 24px; border: 2px dashed #f6ad55; box-shadow: 0 10px 25px rgba(192, 86, 33, 0.05);">
+          <div style="font-size: 4.5rem; margin-bottom: 24px;">🆘</div>
+          <h3 style="font-size: 1.85rem; font-weight: 900; margin-bottom: 12px; color: #c05621; letter-spacing: -0.5px;">Submission Interrupted</h3>
+          <p style="font-size: 1.1rem; color: #7b341e; margin-bottom: 30px; line-height: 1.6; max-width: 320px; margin-left: auto; margin-right: auto;">
+            Our server is having trouble connecting. To ensure we save your spot, please <b>call or text</b> us directly:
+          </p>
+          
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            <a href="tel:${settings.phone}" 
+               style="display: flex; align-items: center; justify-content: center; gap: 10px; padding: 18px; background: #c05621; color: white; text-decoration: none; border-radius: 16px; font-weight: 800; font-size: 1.15rem; box-shadow: 0 6px 15px rgba(192, 86, 33, 0.3); transition: transform 0.2s;">
+               <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>
+               Call ${settings.phone}
+            </a>
+            
+            <a href="sms:${settings.phone}?body=Hi, I tried to submit your website form but it failed. Please contact me about a cleaning quote." 
+               style="display: flex; align-items: center; justify-content: center; gap: 10px; padding: 18px; background: white; color: #c05621; text-decoration: none; border-radius: 16px; font-weight: 800; font-size: 1.15rem; border: 2px solid #ed8936; transition: transform 0.2s;">
+               <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+               Text ${settings.phone}
+            </a>
+          </div>
+          
+          <p style="margin-top: 25px; font-size: 0.85rem; color: #a0522d; font-weight: 600;">Hans personally monitors this line 24/7</p>
+        </div>
+      `;
+    } else {
+      alert(`Something went wrong. Please call us directly at ${settings.phone}`);
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalBtnText;
+      }
     }
-    alert('Something went wrong. Please try again.');
   }
 };
 
@@ -2098,7 +2274,13 @@ function render404(message?: string) {
   `;
 }
 
-async function renderSitePage(funnel_id: string, website: any, isPreview: boolean = false) {
+let activeWebsiteContext: any = null;
+
+async function renderSitePage(funnel_id: string, websiteOrContext: any, isPreview: boolean = false) {
+  // Store context for lead submission (Phase W3.8)
+  activeWebsiteContext = websiteOrContext;
+  const website = websiteOrContext.website_id ? websiteOrContext : websiteOrContext; // Handle both Website and WebsiteRoute
+  
   // 1. Fetch Funnel Data
   const funnel = mockFunnels.find(f => f.id === funnel_id);
   // In the resolver, it correctly identifies the funnel_id.
@@ -2237,7 +2419,7 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
     case 'text':
       return `<div style="line-height: 1.8; font-size: ${styles.font_size || '1.1rem'}; max-width: 800px; margin: 0 auto;">${content.text || ''}</div>`;
     case 'image':
-      return `<img src="${content.image_url}" alt="Site Image" style="width: 100%; height: auto; border-radius: ${styles.border_radius || '0'}; display: block; margin: 0 auto;">`;
+      return `<img src="${content.image_url}" alt="Site Image" loading="lazy" decoding="async" style="width: 100%; height: auto; border-radius: ${styles.border_radius || '0'}; display: block; margin: 0 auto;">`;
     case 'cta':
       return `
         <div style="background: ${styles.cta_background || 'var(--primary-color)'}; color: white; padding: 60px 40px; border-radius: 20px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
@@ -2253,45 +2435,7 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
         </div>
       `;
     case 'form':
-      return `
-        <div id="form-wrapper-${id}" class="site-form-section" style="max-width: 500px; margin: 0 auto; background: white; padding: 45px; border-radius: 20px; box-shadow: 0 15px 45px rgba(0,0,0,0.1); color: #1e293b; text-align: left;">
-          <h3 style="margin-bottom: 25px; font-size: 1.85rem; text-align: center; font-weight: 800; letter-spacing: -0.5px;">${content.title || 'Get My Free Quote'}</h3>
-          <div style="display: flex; flex-direction: column; gap: 12px;">
-            <div class="form-group">
-                <input type="text" id="site-f-name-${id}" placeholder="Your Full Name" required style="padding: 16px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 12px; width: 100%; font-family: inherit; font-size: 1.1rem; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'" onblur="this.style.borderColor='#f1f5f9'">
-            </div>
-            <div class="form-group">
-                <input type="tel" id="site-f-phone-${id}" placeholder="Phone Number" required style="padding: 16px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 12px; width: 100%; font-family: inherit; font-size: 1.1rem; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'" onblur="this.style.borderColor='#f1f5f9'">
-            </div>
-            
-            ${(content.fields || []).includes('service_type') ? `
-              <details style="margin-top: 8px;">
-                <summary style="cursor: pointer; color: #64748b; font-weight: 600; font-size: 0.9rem; padding: 8px 0;">+ Add Service Details (Optional)</summary>
-                <div style="padding-top: 15px;">
-                  <div class="form-group">
-                    <label style="display: block; font-weight: 700; margin-bottom: 8px; font-size: 0.85rem; color: #475569;">Preferred Service</label>
-                    <select id="site-f-service_type-${id}" style="padding: 14px; border: 2px solid #f1f5f9; border-radius: 12px; width: 100%; background: #f8fafc; font-family: inherit; font-size: 1rem;">
-                        <option value="Residential">Driveway Cleaning</option>
-                        <option value="Commercial">House Washing</option>
-                        <option value="Roof/Gutter">Roof & Gutter</option>
-                        <option value="Other">Other Service</option>
-                    </select>
-                  </div>
-                </div>
-              </details>
-            ` : ''}
-
-            <button class="btn-primary" 
-              style="padding: 20px; margin-top: 15px; font-size: 1.25rem; font-weight: 800; border-radius: 50px; background: var(--primary-color); color: white; border: none; cursor: pointer; transition: all 0.3s; box-shadow: 0 8px 25px rgba(79, 70, 229, 0.35);" 
-              onmouseover="this.style.transform='scale(1.02) translateY(-2px)'"
-              onmouseout="this.style.transform='scale(1) translateY(0)'"
-              onclick="window.submitBuilderForm('${id}', true)">
-              ${content.submit_label || 'Get My Free Quote ✨'}
-            </button>
-            <p style="text-align: center; font-size: 0.8rem; color: #94a3b8; margin-top: 15px;">🔒 Your data is safe. We value your privacy.</p>
-          </div>
-        </div>
-      `;
+      return renderStandardForm(id, content, true);
     case 'button':
       const sizeMap: any = { small: '10px 20px', medium: '15px 35px', large: '20px 50px' };
       return `<a href="${content.link || '#'}" class="btn-primary" style="display: inline-block; text-decoration: none; background: ${styles.color || 'var(--primary-color)'}; padding: ${sizeMap[styles.size] || '15px 35px'}; border-radius: 8px; font-weight: 600; text-align: center;">${content.label || 'Click Here'}</a>`;
@@ -2305,11 +2449,11 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
           
           <div class="ba-grid">
             <div class="ba-card">
-              <img src="${ba.before}" alt="Before">
+              <img src="${ba.before}" alt="Before" loading="lazy" decoding="async">
               <span class="ba-label">Before</span>
             </div>
             <div class="ba-card">
-              <img src="${ba.after}" alt="After">
+              <img src="${ba.after}" alt="After" loading="lazy" decoding="async">
               <span class="ba-label">After</span>
             </div>
           </div>
