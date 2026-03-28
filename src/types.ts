@@ -161,6 +161,7 @@ export interface PageSection {
   content: any; // JSON
   order: number;
   styles: any; // JSON
+  variant?: string; // variant switcher (A/B/C)
 }
 
 export interface Component {

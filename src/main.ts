@@ -1044,16 +1044,17 @@ let autoSaveTimeout: any;
 
 
 // Builder Rendering Logic
-let builderRightPanelTab: 'content' | 'styles' = 'content';
-(window as any).setBuilderTab = (tab: 'content' | 'styles') => {
-  builderRightPanelTab = tab;
-  renderBuilder();
-};
+
+let builderMode: 'edit' | 'preview' = 'edit';
 
 // WB.3.4 — Viewport toggle handler
 (window as any).setBuilderViewport = (vp: 'mobile' | 'desktop') => {
   builderViewport = vp;
-  // Preserve the selected section while re-rendering (no selection reset)
+  renderBuilder();
+};
+
+(window as any).setBuilderMode = (mode: 'edit' | 'preview') => {
+  builderMode = mode;
   renderBuilder();
 };
 
@@ -1075,346 +1076,247 @@ function _renderBuilder() {
     .filter(s => s.page_id === builderPageId)
     .sort((a, b) => a.order - b.order);
 
-  const selectedSection = sections.find(s => s.id === builderSelectedSectionId);
-
   app.innerHTML = `
-    <main style="width: 100vw; padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column; background: #1a1a1a;">
+    <main style="width: 100vw; padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column; background: #000; color: white; font-family: 'Inter', system-ui, sans-serif;">
 
-      <!-- WB.3.6 Sticky Top Bar: always visible, 64px, 44px touch targets -->
-      <header class="pb-topbar">
-
-        <!-- Left zone: Back + Page name -->
-        <div class="pb-topbar-left">
-          <button class="pb-topbar-btn pb-topbar-btn--ghost"
-                  id="pb-back-btn"
-                  onclick="window.builderGoBack()"
-                  title="${builderReturnTo === 'funnels' ? 'Back to Funnels' : 'Back to Pages'}">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-            ${builderReturnTo === 'funnels' ? 'Funnels' : 'Pages'}
+      <header class="pb-topbar" style="height: 64px; background: #111; border-bottom: 1px solid #222; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; z-index: 100;">
+        <div style="display: flex; align-items: center; gap: 15px;">
+          <button onclick="window.builderGoBack()" style="background: transparent; border: 1px solid #333; color: #888; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem; display: flex; align-items: center; gap: 8px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            Exit
           </button>
-
-          <div class="pb-topbar-divider"></div>
-
-          <input type="text"
-                 id="pb-page-name-input"
-                 value="${page.name}"
-                 onchange="window.updatePageName('${page.id}', this.value)"
-                 class="pb-topbar-pagename"
-                 title="Click to rename page">
+          <div style="width: 1px; height: 24px; background: #222;"></div>
+          <div style="display: flex; gap: 4px; background: #000; border: 1px solid #333; padding: 4px; border-radius: 10px;">
+             <button onclick="window.setBuilderMode('edit')" style="padding: 8px 16px; border-radius: 7px; border: none; font-size: 0.75rem; font-weight: 700; cursor: pointer; background: ${builderMode === 'edit' ? '#2563EB' : 'transparent'}; color: ${builderMode === 'edit' ? 'white' : '#888'};">Studio</button>
+             <button onclick="window.setBuilderMode('preview')" style="padding: 8px 16px; border-radius: 7px; border: none; font-size: 0.75rem; font-weight: 700; cursor: pointer; background: ${builderMode === 'preview' ? '#2563EB' : 'transparent'}; color: ${builderMode === 'preview' ? 'white' : '#888'};">Preview</button>
+          </div>
         </div>
 
-        <!-- Center: Viewport toggle (WB.3.4) -->
-        <div class="pb-viewport-toggle" role="group" aria-label="Preview viewport">
-          <button id="pb-toggle-mobile"
-                  class="pb-vt-btn ${builderViewport === 'mobile' ? 'active' : ''}"
-                  onclick="window.setBuilderViewport('mobile')"
-                  title="Mobile view (375px)">
+        <div style="display: flex; background: #000; padding: 4px; border-radius: 10px; border: 1px solid #222; gap: 4px;">
+          <button onclick="window.setBuilderViewport('mobile')" style="padding: 6px 16px; border-radius: 7px; border: none; cursor: pointer; font-size: 0.8rem; font-weight: 700; display: flex; align-items: center; gap: 8px; ${builderViewport === 'mobile' ? 'background: #2563EB; color: white; box-shadow: 0 4px 12px rgba(37,99,235,0.4);' : 'background: transparent; color: #555;'}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
             Mobile
           </button>
-          <button id="pb-toggle-desktop"
-                  class="pb-vt-btn ${builderViewport === 'desktop' ? 'active' : ''}"
-                  onclick="window.setBuilderViewport('desktop')"
-                  title="Desktop view (full width)">
+          <button onclick="window.setBuilderViewport('desktop')" style="padding: 6px 16px; border-radius: 7px; border: none; cursor: pointer; font-size: 0.8rem; font-weight: 700; display: flex; align-items: center; gap: 8px; ${builderViewport === 'desktop' ? 'background: #2563EB; color: white; box-shadow: 0 4px 12px rgba(37,99,235,0.4);' : 'background: transparent; color: #555;'}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><polyline points="8 22 12 18 16 22"/></svg>
             Desktop
           </button>
         </div>
 
-        <!-- Right zone: autosave + actions -->
-        <div class="pb-topbar-right">
-
-          <!-- Auto-save indicator (WB.3.5) -->
-          <span id="pb-autosave-indicator" class="pb-topbar-save-status">
-            <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${isAutoSaving ? '#ffc107' : '#22c55e'};box-shadow:${isAutoSaving ? '0 0 6px #ffc107' : 'none'};"></span>
-            ${isAutoSaving ? 'Saving…' : 'Saved'}
+        <div style="display: flex; align-items: center; gap: 15px;">
+           <span id="pb-autosave-indicator" style="font-size: 0.75rem; color: #666; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+            <span style="width: 7px; height: 7px; border-radius: 50%; background: ${isAutoSaving ? '#fbbf24' : '#10b981'}; box-shadow: 0 0 8px ${isAutoSaving ? '#fbbf24' : '#10b981'};"></span>
+            ${isAutoSaving ? 'Auto-saving...' : 'Cloud Saved'}
           </span>
-
-          <div class="pb-topbar-divider"></div>
-
-          <!-- Preview -->
-          <button class="pb-topbar-btn pb-topbar-btn--secondary"
-                  id="pb-preview-btn"
-                  onclick="window.navigateTo('preview', '${page.slug}')"
-                  title="Open live preview in this tab">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            Preview
-          </button>
-
-          <!-- Publish / Unpublish -->
-          <button class="pb-topbar-btn ${page.status === 'published' ? 'pb-topbar-btn--warning' : 'pb-topbar-btn--primary'}"
-                  id="pb-publish-btn"
-                  onclick="window.togglePublishFromBuilder('${page.id}')"
-                  title="${page.status === 'published' ? 'Take page offline' : 'Make page live'}">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${page.status === 'published'
-              ? '<path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/>'
-              : '<polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/>'
-            }</svg>
-            ${page.status === 'published' ? 'Unpublish' : 'Publish'}
-          </button>
+          <button onclick="window.navigateTo('preview', '${page.slug}')" style="background: #1e1e1e; border: 1px solid #333; color: white; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 0.85rem;">Live Preview</button>
         </div>
       </header>
 
-      <div class="pb-layout" style="flex: 1;">
+      <div class="pb-layout" style="flex: 1; display: flex; overflow: hidden;">
         <!-- Left Panel: Structured Sections -->
-        <aside class="pb-left-panel">
-          <div class="pb-panel-header">
-            <h3>Sections</h3>
-            <span style="font-size: 0.7rem; background: #1a472a; color: #4ade80; padding: 2px 8px; border-radius: 4px; font-weight: 700;">WB.3.3</span>
+        ${builderMode === 'edit' ? `
+        <aside class="pb-left-panel" style="width: 260px; border-right: 1px solid #222; background: #111; display: flex; flex-direction: column;">
+          <div class="pb-panel-header" style="padding: 24px 20px; border-bottom: 1px solid #222;">
+            <h3 style="font-size: 0.7rem; color: #555; text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin: 0;">Add Components</h3>
           </div>
 
-          <div class="pb-component-list">
-            <div style="font-size: 0.65rem; color: #555; margin-bottom: 14px; line-height: 1.5; padding: 10px; background: #111; border-radius: 6px; border: 1px solid #1e1e1e;">
-              Click a section type below to add it to your page. Use ↑↓ on the canvas to reorder.
-            </div>
-
+          <div class="pb-component-list" style="flex: 1; overflow-y: auto; padding: 20px;">
             ${[
-      { id: 'comp1',            icon: '🦸',  label: 'Hero',          desc: 'Full-width headline + CTA' },
-      { id: 'comp-services',    icon: '⚙️',  label: 'Services',      desc: '4-card service grid' },
-      { id: 'comp-testimonials', icon: '💬', label: 'Testimonials',  desc: 'Customer quote block' },
-      { id: 'comp6',            icon: '🎯',  label: 'CTA',           desc: 'Conversion call-to-action' },
-      { id: 'comp-faq',         icon: '❓',  label: 'FAQ',           desc: 'Expandable Q&A list' },
-      { id: 'comp3',            icon: '📋',  label: 'Form',          desc: 'Lead capture form' },
-      { id: 'comp4',            icon: '🖼️', label: 'Image',         desc: 'Full-width image' },
-      { id: 'comp2',            icon: '📄',  label: 'Text',          desc: 'Rich text block' }
-    ].map(item => `
-              <div class="pb-component-item" onclick="window.addStructuredSection('${item.id}')">
-                <div class="pb-component-icon" style="font-size: 1.2rem;">${item.icon}</div>
-                <div>
-                  <div style="font-weight: 700; font-size: 0.85rem; color: white;">${item.label}</div>
-                  <div style="font-size: 0.7rem; color: #666; margin-top: 2px;">${item.desc}</div>
-                </div>
+        { id: 'comp-hero', icon: '🦸', label: 'Hero' },
+        { id: 'comp-proof', icon: '🏆', label: 'Proof' },
+        { id: 'comp-offer', icon: '💰', label: 'Offer' },
+        { id: 'comp-gallery', icon: '🖼️', label: 'Gallery' },
+        { id: 'comp-form', icon: '📋', label: 'Form' },
+        { id: 'comp-faq', icon: '❓', label: 'FAQ' }
+      ].map(item => `
+              <div class="pb-component-item" onclick="window.addStructuredSection('${item.id}')" style="display: flex; align-items: center; gap: 15px; padding: 15px; background: #1a1a1a; border-radius: 12px; border: 1px solid #222; cursor: pointer; margin-bottom: 12px; transition: all 200ms ease;">
+                <div style="font-size: 1.5rem;">${item.icon}</div>
+                <div style="font-weight: 700; font-size: 0.9rem; color: #eee;">${item.label}</div>
               </div>
             `).join('')}
           </div>
 
-          <div style="margin-top: auto; padding: 15px; background: #111; border-top: 1px solid #222;">
-             <select onchange="window.switchBuilderPage(this.value)" style="width: 100%; padding: 10px; border-radius: 6px; background: #000; border: 1px solid #333; color: white; font-size: 0.8rem; font-weight: 600;">
+          <div style="padding: 20px; border-top: 1px solid #222; background: #0a0a0a;">
+             <div style="font-size: 0.6rem; color: #444; text-transform: uppercase; font-weight: 800; margin-bottom: 10px; letter-spacing: 0.05em;">Switch Page</div>
+             <select onchange="window.switchBuilderPage(this.value)" style="width: 100%; padding: 12px; border-radius: 8px; background: #111; border: 1px solid #333; color: #eee; font-size: 0.85rem; font-weight: 700; cursor: pointer;">
                 ${mockPages.map(p => `<option value="${p.id}" ${p.id === builderPageId ? 'selected' : ''}>${p.name}</option>`).join('')}
              </select>
           </div>
         </aside>
+        ` : ''}
 
         <!-- Center Panel: Live Canvas -->
-        <section class="pb-canvas-area" style="overflow-y: auto; height: 100%; padding-bottom: 50px;">
-
-          <!-- Viewport indicator bar -->
-          <div style="display:flex; justify-content:center; align-items:center; gap:10px; padding: 14px 0 8px 0; position: sticky; top: 0; z-index: 20; background: #000; border-bottom: 1px solid #111;">
-            <span style="font-size:0.7rem; color:#555; font-weight:700; text-transform:uppercase; letter-spacing:0.08em;">Previewing at</span>
-            <span style="font-size:0.75rem; font-weight:800; color: ${builderViewport === 'mobile' ? '#60a5fa' : '#a78bfa'}; background: ${builderViewport === 'mobile' ? 'rgba(59,130,246,0.12)' : 'rgba(139,92,246,0.12)'}; padding: 3px 10px; border-radius: 20px;">
-              ${builderViewport === 'mobile' ? '📱 375px — Mobile' : '🖥️ Full Width — Desktop'}
-            </span>
-          </div>
-
-          <div class="pb-canvas-inner pb-canvas-${builderViewport}" style="padding-top: 25px;">
-            ${['Add Initial', ...sections].map((item) => {
-      const isInitial = item === 'Add Initial';
-      const section = isInitial ? null : (item as any);
-      const order = isInitial ? 0 : section.order + 0.5;
-
-      return `
-                <div class="pb-add-between" onclick="window.showComponentPickerAt('${order}')">
-                   <div class="pb-add-btn">+</div>
+        <section class="pb-canvas-area" style="flex: 1; overflow-y: auto; height: 100%; padding: 40px 20px; background: #000; display: flex; flex-direction: column; align-items: center; position: relative;">
+          
+          ${(() => {
+            if (builderMode === 'preview') return '';
+            const hasCTA = sections.some(s => ['hero', 'offer', 'form'].includes(s.type));
+            if (!hasCTA && sections.length > 0) {
+              return `
+                <div class="pb-conversion-warning">
+                  <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 1.5rem;">⚠️</span>
+                    <strong style="color: #991B1B; font-size: 0.9rem; font-weight: 800;">Conversion Risk</strong>
+                  </div>
+                  <p style="font-size: 0.8rem; color: #7F1D1D; line-height: 1.5; margin: 0;">This page has no Call-to-Action. Add a <b>Hero</b>, <b>Offer</b>, or <b>Form</b> to capture leads.</p>
+                  <button onclick="window.addStructuredSection('comp-hero')" style="background: #991B1B; color: white; border: none; padding: 10px; border-radius: 8px; font-weight: 900; font-size: 0.7rem; cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em;">Fix Now: Add Hero</button>
                 </div>
+              `;
+            }
+            return '';
+          })()}
+
+          <div class="pb-canvas-inner pb-canvas-${builderViewport}" style="border-radius: ${builderViewport === 'mobile' ? '40px' : '12px'}; overflow: visible; position: relative;">
+            
+            ${(() => {
+                if (localStorage.getItem('pb_onboarding_hints_seen') || builderMode === 'preview') return '';
+                // Only show hints if we have at least one hero/offer section
+                const hasHero = sections.find(s => s.type === 'hero');
+                if (!hasHero) return '';
+
+                return `
+                    <div class="pb-onboarding-hint" style="top: 140px; left: 10%;">
+                        <div class="pb-onboarding-hint-content">Edit your headline here ✍️</div>
+                    </div>
+                `;
+            })()}
+
+            ${builderViewport === 'mobile' ? `
+              <div class="pb-sticky-cta">
+                 <button class="btn-primary" style="width: 100%; box-shadow: 0 10px 25px rgba(37,99,235,0.4);">Ready to Start?</button>
+              </div>
+            ` : ''}
+
+            ${['Add Initial', ...sections].map((item) => {
+        const isInitial = item === 'Add Initial';
+        const section = isInitial ? null : (item as any);
+        const order = isInitial ? 0 : section.order + 0.5;
+
+        return `
+                ${builderMode === 'edit' ? `
+                <div class="pb-add-between" onclick="window.addStructuredSectionAt('${order}')" style="height: 12px; opacity: 0; transition: opacity 200ms; cursor: cell;">
+                   <div style="width: 100%; height: 2px; background: #2563EB;"></div>
+                </div>
+                ` : ''}
                 ${!isInitial ? `
-                  <div class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''}" 
-                       onclick="window.selectSectionForBuilder('${section.id}')">
+                  <div class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''} ${section.styles?.visible === false ? 'pb-section--hidden' : ''}" 
+                       onclick="${builderMode === 'edit' ? `window.selectSectionForBuilder('${section.id}')` : ''}"
+                       style="position: relative; border: 2px solid transparent; transition: border-color 0.2s; background: white; cursor: ${builderMode === 'edit' ? 'pointer' : 'default'};">
                       
-                      <div style="padding: ${section.styles.padding || '60px 20px'}; 
+                      ${builderMode === 'edit' ? `
+                        <div style="position: absolute; top: 12px; left: 12px; background: #111; color: #555; padding: 4px 10px; border-radius: 6px; font-size: 0.6rem; font-weight: 800; z-index: 40; text-transform: uppercase; letter-spacing: 0.1em; border: 1px solid #222; pointer-events: none; opacity: 0.8;">
+                          ${(() => {
+                            switch(section.type) {
+                              case 'hero': return 'Hero Section';
+                              case 'proof': return 'Testimonials';
+                              case 'offer': return 'Deal / Offer';
+                              case 'form': return 'Lead Capture';
+                              case 'gallery': return 'Gallery';
+                              case 'faq': return 'FAQ';
+                              default: return section.type;
+                            }
+                          })()}
+                        </div>
+                      ` : ''}
+
+                      ${builderMode === 'edit' && section.styles?.visible === false ? `
+                        <div style="position: absolute; top: 12px; right: 12px; background: #ef4444; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.6rem; font-weight: 900; z-index: 40; pointer-events: none;">HIDDEN</div>
+                      ` : ''}
+
+                      <div style="padding: ${section.styles.padding || '80px 40px'}; 
                                   text-align: ${section.styles.text_alignment || section.styles.alignment || section.styles.textAlign || 'left'}; 
                                   background-image: ${section.content.background_image ? `url('${section.content.background_image}')` : 'none'};
                                   background-size: cover;
                                   background-position: center;
                                   background-color: ${section.styles.background || section.styles.backgroundColor || 'white'}; 
                                   color: ${section.styles.color || (section.content.background_image ? 'white' : 'inherit')}; 
-                                  width: ${section.styles.width || '100%'};
-                                  margin-left: auto; margin-right: auto;
-                                  min-height: ${section.type === 'hero' ? '500px' : 'auto'};
+                                  width: 100%;
+                                  min-height: ${section.type === 'hero' ? '600px' : 'auto'};
                                   display: flex;
                                   flex-direction: column;
                                   justify-content: ${section.type === 'hero' ? 'center' : 'flex-start'};
                                   position: relative;
-                                  overflow: hidden;">
-                        ${section.content.background_image ? `<div style="position: absolute; inset: 0; background: rgba(0,0,0,0.4);"></div>` : ''}
-                        <div style="position: relative; z-index: 1;">
+                                  overflow: hidden;
+                                  opacity: ${section.styles?.visible === false ? '0.4' : '1'};
+                                  filter: ${section.styles?.visible === false ? 'grayscale(0.8)' : 'none'};">
+                        ${section.content.background_image ? `<div style="position: absolute; inset: 0; background: rgba(0,0,0,0.45);"></div>` : ''}
+                        <div style="position: relative; z-index: 10; width: 100%; max-width: 1000px; margin: 0 auto;">
                           ${renderSectionPreviewContent(section)}
                         </div>
                       </div>
 
-                      <div class="pb-section-controls">
-                        <span style="font-size: 0.65rem; color: #888; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em; margin-right: 4px;">${section.type}</span>
-                        <button title="Move Up" onclick="event.stopPropagation(); window.moveSection('${section.id}', -1)" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">↑ Up</button>
-                        <button title="Move Down" onclick="event.stopPropagation(); window.moveSection('${section.id}', 1)" style="background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">↓ Down</button>
-                        <button title="Duplicate section" onclick="event.stopPropagation(); window.duplicateBuilderSection('${section.id}')" style="background: #78350f; color: #fcd34d; border: 1px solid #92400e; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">Copy</button>
-                        <button title="Delete section" onclick="event.stopPropagation(); window.removeSection('${section.id}')" style="background: #7f1d1d; color: #fca5a5; border: 1px solid #991b1b; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">🗑 Delete</button>
+                      <div class="pb-section-controls" style="position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); display: none; gap: 4px; background: #111; border: 1px solid #333; padding: 4px; border-radius: 10px; z-index: 50; box-shadow: 0 10px 30px rgba(0,0,0,0.5); align-items: center;">
+                        <span style="font-size: 0.6rem; color: #555; text-transform: uppercase; font-weight: 800; letter-spacing: 0.1em; margin: 0 10px;">${section.type}</span>
+                        <div style="width: 1px; height: 16px; background: #222;"></div>
+                        <button title="Switch Layout" onclick="event.stopPropagation(); window.switchSectionVariant('${section.id}')" style="background: transparent; border: none; color: #2563EB; cursor: pointer; padding: 8px 16px; font-size: 0.75rem; font-weight: 800; display: flex; align-items: center; gap: 6px;">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                          Switch Layout
+                        </button>
+                        <div style="width: 1px; height: 16px; background: #222;"></div>
+                        <button title="Move Up" onclick="event.stopPropagation(); window.moveSection('${section.id}', -1)" style="background: transparent; border: none; color: #eee; cursor: pointer; padding: 8px 12px; font-size: 0.9rem;">↑</button>
+                        <button title="Move Down" onclick="event.stopPropagation(); window.moveSection('${section.id}', 1)" style="background: transparent; border: none; color: #eee; cursor: pointer; padding: 8px 12px; font-size: 0.9rem;">↓</button>
+                        <button title="Toggle Visibility" onclick="event.stopPropagation(); window.toggleSectionVisibility('${section.id}')" style="background: transparent; border: none; color: ${section.styles?.visible === false ? '#10b981' : '#ff4d4d'}; cursor: pointer; padding: 8px 12px; font-size: 0.75rem; font-weight: 800;">${section.styles?.visible === false ? 'Show' : 'Hide'}</button>
+                        <div style="width: 1px; height: 16px; background: #222;"></div>
+                        <button title="Delete" onclick="event.stopPropagation(); window.removeSection('${section.id}')" style="background: transparent; border: none; color: #666; cursor: pointer; padding: 8px 12px; font-size: 0.8rem;">🗑</button>
                       </div>
                   </div>
                 ` : ''}
               `;
-    }).join('') || `
-              <div style="padding: 100px 40px; text-align: center; color: #999; border: 2px dashed #eee; margin: 40px;">
-                <h3 style="margin-bottom: 10px;">Your Canvas is Empty</h3>
-                <p>Click components on the left to start building your page.</p>
+      }).join('') || `
+              <div style="padding: 120px 40px; text-align: center; color: #555; border: 2px dashed #222; margin: 60px; border-radius: 20px;">
+                <h3 style="margin-bottom: 20px; font-size: 1.5rem; font-weight: 800; color: #eee;">Canvas Ready</h3>
+                <p style="font-size: 0.9rem;">Click components on the left to start building.</p>
               </div>
             `}
           </div>
         </section>
-
-        <!-- Right Panel: Settings -->
-        <aside class="pb-right-panel">
-          <div class="pb-panel-header">
-             <h3>Inspector</h3>
-          </div>
-          
-          <div class="pb-settings-form">
-            ${selectedSection ? renderSectionSettings(selectedSection) : `
-              <div style="height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #555; padding: 40px; border: 1px dashed #333; margin: 20px; border-radius: 8px;">
-                <div style="font-size: 2rem; margin-bottom: 15px; opacity: 0.3;">✨</div>
-                <div style="font-weight: 700; color: #666; text-transform: uppercase; font-size: 0.65rem; letter-spacing: 1px;">Ready</div>
-                <p style="font-size: 0.75rem; margin-top: 10px; color: #444;">Select a page section to edit its content and appearance</p>
-              </div>
-            `}
-          </div>
-        </aside>
       </div>
     </main>
   `;
 }
 
-function renderSectionSettings(section: any) {
-  const isContent = builderRightPanelTab === 'content';
-  const isStyles = builderRightPanelTab === 'styles';
 
-  const settingsMarkup = [];
 
-  settingsMarkup.push(`
-    <div style="display: flex; border-bottom: 1px solid #333; margin-bottom: 20px;">
-      <button style="flex: 1; padding: 10px; background: ${isContent ? '#222' : 'transparent'}; border: none; color: ${isContent ? 'white' : '#888'}; cursor: pointer; border-bottom: ${isContent ? '2px solid var(--primary-color)' : 'none'}; font-weight: 600;" onclick="window.setBuilderTab('content')">Content</button>
-      <button style="flex: 1; padding: 10px; background: ${isStyles ? '#222' : 'transparent'}; border: none; color: ${isStyles ? 'white' : '#888'}; cursor: pointer; border-bottom: ${isStyles ? '2px solid var(--primary-color)' : 'none'}; font-weight: 600;" onclick="window.setBuilderTab('styles')">Styles</button>
-    </div>
-  `);
 
-  if (isContent) {
-    settingsMarkup.push(`
-      <div style="display: flex; flex-direction: column; gap: 5px;">
-    `);
-
-    for (const key in section.content) {
-      const val = section.content[key];
-      const isImageField = key === 'background_image' || key === 'image_url' || key === 'url' && section.type === 'image';
-
-      if (typeof val === 'string' && !isImageField && key !== 'pipeline_id') {
-        settingsMarkup.push(`
-           <div class="pb-control-group">
-             <label>${key.replace(/_/g, ' ').toUpperCase()}</label>
-             <input type="text" class="pb-control-input" value="${val.replace(/"/g, '&quot;')}" oninput="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)">
-           </div>
-         `);
-      } else if (key === 'pipeline_id') {
-        settingsMarkup.push(`
-           <div class="pb-control-group">
-             <label>Target Pipeline</label>
-             <select class="pb-control-input" onchange="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)">
-               ${mockPipelines.map(p => `<option value="${p.id}" ${p.id === val ? 'selected' : ''}>${p.name}</option>`).join('')}
-             </select>
-           </div>
-         `);
-      } else if (isImageField) {
-        settingsMarkup.push(`
-           <div class="pb-control-group">
-             <label>${key.replace(/_/g, ' ').toUpperCase()}</label>
-             <div class="pb-asset-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-bottom: 10px;">
-               ${mockMedia.map(asset => `
-                 <div class="pb-asset-thumb ${val === asset.url ? 'active' : ''}" 
-                      style="width: 100%; aspect-ratio: 1; background-image: url('${asset.url}'); background-size: cover; background-position: center; border-radius: 4px; cursor: pointer; border: 2px solid ${val === asset.url ? '#2563EB' : 'transparent'};" 
-                      title="${asset.name}"
-                      onclick="window.updateSpecificField('${section.id}', 'content', '${key}', '${asset.url}')">
-                 </div>
-               `).join('')}
-             </div>
-             <input type="text" class="pb-control-input" style="font-size: 0.7rem;" value="${val}" 
-                    oninput="window.updateSpecificField('${section.id}', 'content', '${key}', this.value)" 
-                    placeholder="Or paste custom URL...">
-           </div>
-         `);
-      }
-    }
-    settingsMarkup.push(`</div>`);
+function setNestedValue(obj: any, path: string, value: any) {
+  const keys = path.split('.');
+  let current = obj;
+  for (let i = 0; i < keys.length - 1; i++) {
+    const key = keys[i];
+    if (!current[key]) current[key] = isNaN(Number(keys[i + 1])) ? {} : [];
+    current = current[key];
   }
-
-  if (isStyles) {
-    settingsMarkup.push(`
-      <div style="display: flex; flex-direction: column; gap: 5px;">
-    `);
-
-    const designFields = [
-      { label: 'Background Color', key: 'background', type: 'color' },
-      { label: 'Text Alignment', key: 'text_alignment', type: 'select', options: ['left', 'center', 'right'] },
-      { label: 'Vertical Padding', key: 'padding', type: 'text' },
-      { label: 'Container Width', key: 'width', type: 'text' }
-    ];
-
-    designFields.forEach(field => {
-      const val = section.styles[field.key] || '';
-      settingsMarkup.push(`
-        <div class="pb-control-group">
-          <label>${field.label.toUpperCase()}</label>
-          ${field.type === 'select'
-          ? `<select class="pb-control-input" onchange="window.updateSpecificField('${section.id}', 'styles', '${field.key}', this.value)">
-                ${field.options!.map(opt => `<option value="${opt}" ${opt === val ? 'selected' : ''}>${opt.toUpperCase()}</option>`).join('')}
-               </select>`
-          : `<input type="${field.type}" class="pb-control-input" value="${val}" oninput="window.updateSpecificField('${section.id}', 'styles', '${field.key}', this.value)">`
-        }
-        </div>
-      `);
-    });
-    settingsMarkup.push(`</div>`);
-  }
-
-  return settingsMarkup.join('');
+  current[keys[keys.length - 1]] = value;
 }
 
-(window as any).updateSpecificField = (sectionId: string, area: 'content' | 'styles', key: string, value: string) => {
-  const section = mockPageSections.find(s => s.id === sectionId);
-  if (section) {
-    (section as any)[area][key] = value;
+(window as any).saveInlineEdit = (sectionId: string, field: string, el: HTMLElement) => {
+  const section = mockPageSections.find((s: any) => s.id === sectionId);
+  if (!section) return;
+  const newValue = el.innerText;
+  setNestedValue(section.content, field, newValue);
+  
+  // Dismiss onboarding hints on first interaction
+  if (!localStorage.getItem('pb_onboarding_hints_seen')) {
+    localStorage.setItem('pb_onboarding_hints_seen', 'true');
     renderBuilder();
+  } else {
     (window as any).triggerAutoSave();
   }
 };
 
 /**
- * WB.3.1 — Inline text edit: save without re-rendering the builder.
- * Called from contenteditable onblur. Persists value to the in-memory
- * store and triggers the autosave indicator only.
- */
-(window as any).saveInlineEdit = (sectionId: string, field: string, el: HTMLElement) => {
-  const section = mockPageSections.find((s: any) => s.id === sectionId);
-  if (!section) return;
-  const value = el.innerText;
-  (section as any).content[field] = value;
-  (window as any).triggerAutoSave();
-  // Sync inspector panel value if it exists (non-destructive)
-  const inspectorInput = document.querySelector(
-    `[data-inspector-field="${sectionId}:${field}"]`
-  ) as HTMLInputElement | null;
-  if (inspectorInput) inspectorInput.value = value;
-};
-
-/**
  * WB.3.1 — Inline editable text span helper.
- * Renders a contenteditable span that saves on blur without re-rendering the builder.
  */
 function inlineText(sectionId: string, field: string, value: string, extraStyle: string = ''): string {
   const safe = (value || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const canEdit = builderMode === 'edit';
   return `<span
     class="pb-inline-text"
-    contenteditable="true"
+    ${canEdit ? 'contenteditable="true"' : ''}
     data-section-id="${sectionId}"
     data-field="${field}"
-    style="${extraStyle}"
+    style="${extraStyle} ${canEdit ? '' : 'pointer-events: none;'}"
     onclick="event.stopPropagation()"
-    onblur="window.saveInlineEdit('${sectionId}', '${field}', this)"
     onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.blur();}"
   >${safe}</span>`;
 }
@@ -1428,199 +1330,260 @@ function renderSectionPreviewContent(section: any) {
       const headingField = content.heading !== undefined ? 'heading' : 'title';
       const subField = content.subheading !== undefined ? 'subheading' : 'subtitle';
       const btnField = content.button_text !== undefined ? 'button_text' : 'buttonText';
-      const textAlign = section.styles.text_alignment === 'center' ? 'auto' : '0';
+      const textAlign = section.styles?.text_alignment === 'center' ? 'center' : 'left';
+      const marginSide = textAlign === 'center' ? 'auto' : '0';
+
+      if (section.variant === 'split') {
+        return `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 40px; align-items: center; text-align: left;">
+            <div>
+              <h1 style="font-size: clamp(2.2rem, 8vw, 3rem); margin-bottom: 1.5rem; font-weight: 900; line-height: 1.1; letter-spacing: -0.02em; color: inherit;">
+                ${inlineText(id, headingField, content[headingField] || 'Hero Heading', 'display:block;width:100%;')}
+              </h1>
+              <p style="font-size: clamp(1rem, 3vw, 1.25rem); opacity: 0.85; margin-bottom: 2.5rem; line-height: 1.5; color: inherit;">
+                ${inlineText(id, subField, content[subField] || 'Hero Subheading', 'display:block;width:100%;')}
+              </p>
+              <button class="btn-primary" style="padding: 16px 36px; font-size: 1.15rem; border-radius: 50px; pointer-events: none; border: none; background: #2563EB; color: white; width: fit-content;">
+                ${inlineText(id, btnField, content[btnField] || 'Action')}
+              </button>
+            </div>
+            <div style="border-radius: 24px; overflow: hidden; aspect-ratio: 4/3; box-shadow: 0 20px 40px rgba(0,0,0,0.2); position: relative; border: 4px solid white; background: #eee;">
+              <img src="${content.background_image || 'https://images.unsplash.com/photo-1541604193435-22077a288934'}" style="width: 100%; height: 100%; object-fit: cover;">
+              <div style="position: absolute; inset: 0; cursor: crosshair; background: rgba(37,99,235,0); transition: background 0.2s; display: flex; align-items: center; justify-content: center;"
+                   onmouseover="this.style.background='rgba(37,99,235,0.1)'" 
+                   onmouseout="this.style.background='rgba(37,99,235,0)'"
+                   onclick="window.openImagePicker('${id}', 'background_image')">
+                 <span style="background: white; color: #2563EB; padding: 8px 16px; border-radius: 50px; font-weight: 800; font-size: 0.75rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1); opacity: 0; transition: opacity 0.2s;" class="pb-img-edit-hint">Change Photo</span>
+              </div>
+              <style>.pb-canvas-inner:hover .pb-img-edit-hint { opacity: 1 !important; }</style>
+            </div>
+          </div>
+        `;
+      }
+      if (section.variant === 'minimal') {
+        return `
+          <div style="text-align: center; max-width: 700px; margin: 0 auto; color: #1e293b; padding: 40px 0;">
+            <h1 style="font-size: 2.5rem; font-weight: 900; margin-bottom: 1.2rem; color: #0f172a; line-height: 1.2;">
+              ${inlineText(id, headingField, content[headingField] || 'Hero Heading')}
+            </h1>
+            <p style="font-size: 1.15rem; color: #64748b; margin-bottom: 2rem; line-height: 1.6;">
+              ${inlineText(id, subField, content[subField] || 'Hero Subheading')}
+            </p>
+            <button class="btn-primary" style="padding: 14px 32px; font-size: 1rem; border-radius: 12px; pointer-events: none; border: none; background: #2563EB; color: white;">
+              ${inlineText(id, btnField, content[btnField] || 'Action')}
+            </button>
+          </div>
+        `;
+      }
+      // Standard Centered
       return `
-        <h1 style="font-size: 3rem; margin-bottom: 1.5rem; font-weight: 800;">
-          ${inlineText(id, headingField, content[headingField] || 'Hero Heading', 'display:block;width:100%;')}
-        </h1>
-        <p style="font-size: 1.5rem; opacity: 0.9; margin-bottom: 2.5rem; max-width: 600px; margin-left: ${textAlign}; margin-right: ${textAlign};">
-          ${inlineText(id, subField, content[subField] || 'Hero Subheading', 'display:block;width:100%;')}
-        </p>
-        <button class="btn-primary" style="padding: 15px 30px; font-size: 1.1rem; border-radius: 50px; pointer-events: none;">
-          ${inlineText(id, btnField, content[btnField] || 'Action')}
-        </button>
+        <div style="text-align: ${textAlign};">
+          <h1 style="font-size: clamp(2.2rem, 8vw, 3.5rem); margin-bottom: 1.5rem; font-weight: 900; line-height: 1.1; letter-spacing: -0.02em; color: inherit;">
+            ${inlineText(id, headingField, content[headingField] || 'Hero Heading', 'display:block;width:100%;')}
+          </h1>
+          <p style="font-size: clamp(1.1rem, 3vw, 1.4rem); opacity: 0.85; margin-bottom: 2.5rem; max-width: 650px; margin-left: ${marginSide}; margin-right: ${marginSide}; line-height: 1.5; color: inherit;">
+            ${inlineText(id, subField, content[subField] || 'Hero Subheading', 'display:block;width:100%;')}
+          </p>
+              <button class="btn-primary" onclick="event.stopPropagation()">
+                ${inlineText(id, btnField, content[btnField] || 'Action')}
+              </button>
+        </div>
       `;
     }
-    case 'text': {
-      return `
-        <div style="line-height: 1.6; font-size: ${section.styles.font_size || 'inherit'}">
-          ${inlineText(id, 'text', content.text || 'Text content goes here...', 'display:block;width:100%;white-space:pre-wrap;')}
-        </div>`;
-    }
-    case 'image': {
-      const imgSrc = content.image_url || content.url || '';
-      const imgField = content.image_url !== undefined ? 'image_url' : 'url';
-      const hasImage = Boolean(imgSrc);
-      return `
-        <div class="pb-image-wrapper"
-             id="imgwrap-${id}"
-             onclick="window.openImagePicker('${id}', '${imgField}')"
-             title="Click to replace image">
-          ${hasImage
-            ? `<img id="pb-img-${id}" src="${imgSrc}" alt="Section image"
-                    style="width: 100%; height: auto; display: block; border-radius: inherit;">`
-            : `<div class="pb-image-placeholder" id="pb-img-${id}">
-                 <span style="font-size:2.5rem;">🖼️</span>
-                 <span style="font-size:0.9rem; font-weight:600; color:#94a3b8;">Click to add an image</span>
-               </div>`
-          }
-          <div class="pb-image-overlay">
-            <span class="pb-image-overlay-icon">📷</span>
-            <span>Click to replace</span>
-          </div>
-          <div class="pb-image-upload-progress" id="pb-img-progress-${id}" style="display:none;">
-            <div class="pb-image-spinner"></div>
-            <span>Reading file…</span>
-          </div>
-        </div>`;
-    }
-    case 'form': {
-      return renderStandardForm(id, content, false);
-    }
-    case 'button': {
-      const sizeMap: any = { small: '8px 16px', medium: '12px 24px', large: '16px 32px' };
-      const btnField = content.label !== undefined ? 'label' : 'text';
-      return `<button class="btn-primary" style="background: ${section.styles.color || 'var(--primary-color)'}; padding: ${sizeMap[section.styles.size] || '12px 24px'}; pointer-events: none;">
-        ${inlineText(id, btnField, content[btnField] || 'Click Here')}
-      </button>`;
-    }
-    case 'cta': {
-      return `
-        <div style="text-align: center; padding: 40px 20px;">
-          <h2 style="font-size: 2.2rem; margin-bottom: 12px; font-weight: 800;">
-            ${inlineText(id, 'heading', content.heading || 'Ready to get started?', 'display:block;width:100%;')}
-          </h2>
-          <p style="font-size: 1.1rem; opacity: 0.8; margin-bottom: 28px;">
-            ${inlineText(id, 'subtext', content.subtext || 'Join thousands of happy customers.', 'display:block;width:100%;')}
-          </p>
-          <button class="btn-primary" style="padding: 14px 32px; font-size: 1.1rem; border-radius: 50px; pointer-events: none;">
-            ${inlineText(id, 'button_text', content.button_text || 'Get Started')}
-          </button>
-        </div>`;
-    }
-    case 'testimonial': {
-      return `
-        <div style="text-align: center; padding: 40px 20px;">
-          <p style="font-size: 1.3rem; font-style: italic; margin-bottom: 20px; opacity: 0.9;">
-            &ldquo;${inlineText(id, 'quote', content.quote || 'This service changed everything for us.', 'display:inline;')}&rdquo;
-          </p>
-          <strong style="font-size: 1rem;">&mdash; ${inlineText(id, 'author', content.author || 'Happy Customer', 'display:inline;')}</strong>
-        </div>`;
-    }
-    case 'pricing': {
-      return `
-        <div style="text-align: center; padding: 40px 20px;">
-          <h2 style="font-size: 2rem; font-weight: 800; margin-bottom: 8px;">${inlineText(id, 'plan_name', content.plan_name || 'Standard Plan', 'display:block;width:100%;')}</h2>
-          <div style="font-size: 3rem; font-weight: 900; color: var(--primary-color); margin: 12px 0;">${inlineText(id, 'price', content.price || '$99', 'display:inline;')}</div>
-          <p style="opacity: 0.7; margin-bottom: 24px;">${inlineText(id, 'description', content.description || 'Everything you need to get started.', 'display:block;width:100%;')}</p>
-          <button class="btn-primary" style="padding: 14px 32px; font-size: 1.1rem; pointer-events: none;">${inlineText(id, 'cta', content.cta || 'Choose Plan')}</button>
-        </div>`;
-    }
-    // ── WB.3.3 Structured Section Types ─────────────────────────────────────
-    case 'services': {
-      const items: any[] = content.items || [];
-      return `
-        <div style="padding: 60px 40px;">
-          <div style="text-align: center; margin-bottom: 48px;">
-            <h2 style="font-size: 2.2rem; font-weight: 800; margin-bottom: 12px;">
-              ${inlineText(id, 'heading', content.heading || 'Our Services', 'display:block;width:100%;')}
+    case 'proof': {
+      const tests: any[] = content.testimonials || [];
+      if (section.variant === 'list') {
+        return `
+          <div style="max-width: 700px; margin: 0 auto;">
+            <h2 style="font-size: 1.8rem; font-weight: 800; margin-bottom: 40px; text-align: center; color: inherit;">
+               ${inlineText(id, 'title', content.title || 'What People Say', 'display:block;width:100%;')}
             </h2>
-            <p style="font-size: 1.1rem; opacity: 0.7; max-width: 560px; margin: 0 auto;">
-              ${inlineText(id, 'subheading', content.subheading || 'Everything you need, done right.', 'display:block;width:100%;')}
-            </p>
+            <div style="display: flex; flex-direction: column; gap: 24px;">
+              ${tests.map((t: any, idx: number) => `
+                <div style="padding: 24px; border-left: 4px solid #2563EB; background: #f8fafc; border-radius: 0 16px 16px 0;">
+                  <p style="font-size: 1.1rem; line-height: 1.6; font-style: italic; margin-bottom: 12px; color: #1e293b;">
+                    &ldquo;${inlineText(id, `testimonials.${idx}.quote`, t.quote || 'Great service!')}&rdquo;
+                  </p>
+                  <div style="font-weight: 800; color: #64748b; font-size: 0.9rem;">
+                    &mdash; ${inlineText(id, `testimonials.${idx}.name`, t.name || 'Customer')}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
           </div>
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px;">
-            ${items.map((item: any, idx: number) => `
-              <div style="background: #f8fafc; border-radius: 12px; padding: 28px 20px; text-align: center; border: 1px solid #e2e8f0; transition: box-shadow 0.2s;">
-                <div style="font-size: 2.5rem; margin-bottom: 14px;">${item.icon || '✨'}</div>
-                <h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 8px; color: #1e293b;">${item.title || 'Service ' + (idx + 1)}</h3>
-                <p style="font-size: 0.875rem; color: #64748b; line-height: 1.6;">${item.description || ''}</p>
+        `;
+      }
+      return `
+        <div style="text-align: center;">
+          <h2 style="font-size: clamp(1.6rem, 5vw, 2.22rem); font-weight: 800; margin-bottom: 40px; color: inherit;">
+            ${inlineText(id, 'title', content.title || 'Don’t Just Take Our Word For It', 'display:block;width:100%;')}
+          </h2>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 24px;">
+            ${tests.map((t: any, idx: number) => `
+              <div style="background: #fff; padding: 24px; border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); border: 1px solid #eee; text-align: left;">
+                <div style="color: #fbbf24; font-size: 1rem; margin-bottom: 12px;">
+                  ${'★'.repeat(t.stars || 5)}${'☆'.repeat(5 - (t.stars || 5))}
+                </div>
+                <p style="font-size: 0.95rem; line-height: 1.6; font-style: italic; margin-bottom: 16px; color: #475569;">
+                  &ldquo;${inlineText(id, `testimonials.${idx}.quote`, t.quote || 'Great service!')}&rdquo;
+                </p>
+                <div style="font-weight: 800; color: #1e293b; font-size: 0.85rem;">
+                  &mdash; ${inlineText(id, `testimonials.${idx}.name`, t.name || 'Customer')}
+                </div>
               </div>
             `).join('')}
           </div>
         </div>`;
     }
+    case 'offer': {
+      if (section.variant === 'card') {
+        return `
+          <div style="max-width: 600px; margin: 0 auto; padding: 40px; text-align: center; background: white; color: #1e293b; border-radius: 32px; border: 2px solid #e2e8f0; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.1);">
+            <div style="display: inline-block; background: #EEF2FF; color: #4338CA; padding: 6px 16px; border-radius: 20px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; margin-bottom: 24px;">Limited Offer</div>
+            <h2 style="font-size: 2.5rem; font-weight: 900; margin-bottom: 12px; color: #0f172a;">
+               ${inlineText(id, 'headline', content.headline || 'Special Package Deal')}
+            </h2>
+            <p style="font-size: 1.1rem; color: #64748b; margin-bottom: 32px; line-height: 1.6;">
+               ${inlineText(id, 'description', content.description || 'Get our most popular service at a special rate.')}
+            </p>
+            <button class="btn-primary" style="background: #2563EB; color: white; padding: 18px 40px; font-size: 1.15rem; font-weight: 800; border-radius: 12px; border: none; pointer-events: none; width: 100%;">
+               ${inlineText(id, 'button_text', content.button_text || 'Claim Offer')}
+            </button>
+            <div style="margin-top: 20px; font-size: 0.85rem; color: #94a3b8; font-weight: 600;">
+               ${inlineText(id, 'expiry', content.expiry || 'Hurry, ends soon!')}
+            </div>
+          </div>
+        `;
+      }
+      return `
+        <div style="padding: clamp(40px, 10vw, 60px) clamp(20px, 5vw, 40px); text-align: center; background: #4f46e5; color: white; border-radius: 24px; box-shadow: 0 20px 50px rgba(79,70,229,0.3);">
+          <div style="display: inline-block; background: rgba(255,255,255,0.2); padding: 6px 16px; border-radius: 20px; font-size: 0.7rem; font-weight: 800; text-transform: uppercase; margin-bottom: 20px; letter-spacing: 0.1em; backdrop-filter: blur(4px);">Limited Offer</div>
+          <h2 style="font-size: clamp(2rem, 7vw, 3rem); font-weight: 900; margin-bottom: 12px;">
+            ${inlineText(id, 'headline', content.headline || 'Special Package Deal', 'display:block;width:100%;')}
+          </h2>
+          <p style="font-size: clamp(1rem, 3vw, 1.25rem); opacity: 0.9; margin-bottom: 24px; max-width: 600px; margin-left: auto; margin-right: auto; line-height: 1.6;">
+            ${inlineText(id, 'description', content.description || 'Get our most popular service at a special rate.', 'display:block;width:100%;')}
+          </p>
+          <button class="btn-primary" onclick="event.stopPropagation()">
+            ${inlineText(id, 'button_text', content.button_text || 'Claim Offer')}
+          </button>
+          <div style="margin-top: 20px; font-size: 0.9rem; opacity: 0.8; font-weight: 700;">
+            ${inlineText(id, 'expiry', content.expiry || 'Hurry, ends soon!')}
+          </div>
+        </div>`;
+    }
+    case 'gallery': {
+      const items: any[] = content.items || [];
+      if (section.variant === 'grid') {
+        return `
+          <div>
+            <h2 style="font-size: 1.8rem; font-weight: 800; margin-bottom: 40px; text-align: center; color: inherit;">
+               ${inlineText(id, 'title', content.title || 'Work Gallery')}
+            </h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px;">
+               ${items.map((item: any, idx: number) => `
+                 <div style="aspect-ratio: 1; border-radius: 12px; overflow: hidden; position: relative; background: #eee; cursor: crosshair;" onclick="window.openImagePicker('${id}', 'items.${idx}.after')">
+                    <img src="${item.after}" style="width: 100%; height: 100%; object-fit: cover;">
+                 </div>
+               `).join('')}
+            </div>
+          </div>
+        `;
+      }
+      return `
+        <div>
+          <h2 style="font-size: clamp(1.6rem, 5vw, 2.2rem); font-weight: 800; margin-bottom: 40px; text-align: center; color: inherit;">
+            ${inlineText(id, 'title', content.title || 'Our Recent Transformations', 'display:block;width:100%;')}
+          </h2>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 24px;">
+            ${items.map((item: any, idx: number) => `
+              <div style="background: #fff; border-radius: 20px; overflow: hidden; border: 1px solid #eee; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.05);">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid #eee; position: relative;">
+                   <div style="position: relative; overflow: hidden; cursor: crosshair;" onclick="window.openImagePicker('${id}', 'items.${idx}.before')">
+                    <img src="${item.before}" style="width: 100%; aspect-ratio: 1; object-fit: cover;">
+                    <span style="position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,0.8); color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6rem; font-weight: 900; letter-spacing: 0.1em; backdrop-filter: blur(4px);">BEFORE</span>
+                  </div>
+                  <div style="position: relative; overflow: hidden; cursor: crosshair;" onclick="window.openImagePicker('${id}', 'items.${idx}.after')">
+                    <img src="${item.after}" style="width: 100%; aspect-ratio: 1; object-fit: cover;">
+                    <span style="position: absolute; bottom: 8px; right: 8px; background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.6rem; font-weight: 900; letter-spacing: 0.1em; box-shadow: 0 4px 10px rgba(16,185,129,0.3);">AFTER</span>
+                  </div>
+                </div>
+                <div style="padding: 15px; text-align: center; font-size: 0.75rem; color: #999; font-weight: 700; background: #fafafa; text-transform: uppercase;">
+                   Tap to swap photos
+                </div>
+              </div>
+            `).join('')}
+          </div>
+          <div style="text-align: center; margin-top: 40px;">
+             <button onclick="event.stopPropagation(); window.duplicateGalleryItem('${id}')" style="background: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; padding: 12px 24px; border-radius: 12px; font-weight: 800; font-size: 0.8rem; cursor: pointer; transition: all 0.2s;">+ Add Another Transformation</button>
+          </div>
+        </div>`;
+    case 'form': {
+      return renderStandardForm(id, content, false);
+    }
     case 'faq': {
       const faqs: any[] = content.items || [];
+      if (section.variant === 'split') {
+        return `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 40px; text-align: left;">
+            <div style="max-width: 400px;">
+              <h2 style="font-size: clamp(1.8rem, 5vw, 2.5rem); font-weight: 900; margin-bottom: 20px; line-height: 1.1; color: #0f172a;">
+                ${inlineText(id, 'heading', content.heading || 'Got Questions?', 'display:block;width:100%;')}
+              </h2>
+              <p style="font-size: 1.1rem; color: #64748b; line-height: 1.6; opacity: 0.8;">
+                We have answers. If you can't find what you're looking for, feel free to contact our team.
+              </p>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 32px;">
+              ${faqs.map((faq: any, idx: number) => `
+                <div style="padding-bottom: 32px; border-bottom: 1px solid #f1f5f9;">
+                  <h3 style="font-size: 1.2rem; font-weight: 800; margin-bottom: 12px; color: #1e293b; letter-spacing: -0.01em;">
+                    ${inlineText(id, `items.${idx}.question`, faq.question || 'New Question')}
+                  </h3>
+                  <div style="color: #475569; line-height: 1.7; font-size: 1rem;">
+                    ${inlineText(id, `items.${idx}.answer`, faq.answer || 'Answer goes here...', 'display:block;width:100%;')}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>`;
+      }
       return `
-        <div style="padding: 60px 40px; max-width: 800px; margin: 0 auto;">
-          <h2 style="font-size: 2.2rem; font-weight: 800; margin-bottom: 36px; text-align: center;">
+        <div style="max-width: 800px; margin: 0 auto;">
+          <h2 style="font-size: 2.2rem; font-weight: 800; margin-bottom: 48px; text-align: center; color: inherit;">
             ${inlineText(id, 'heading', content.heading || 'Frequently Asked Questions', 'display:block;width:100%;')}
           </h2>
-          <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; flex-direction: column; gap: 16px;">
             ${faqs.map((faq: any, idx: number) => `
-              <div class="pb-faq-item" style="border: 2px solid #f1f5f9; border-radius: 12px; overflow: hidden; background: #fff; transition: border-color 0.2s;">
+              <div class="pb-faq-item" style="border: 1px solid #eee; border-radius: 16px; overflow: hidden; background: #fff; transition: all 0.3s ease;">
                 <button class="pb-faq-toggle" onclick="this.closest('.pb-faq-item').classList.toggle('open'); event.stopPropagation();"
-                        style="width: 100%; text-align: left; padding: 20px 24px; background: transparent; border: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 1.1rem; font-weight: 700; color: #1e293b;">
-                  <span>${faq.question || 'Question ' + (idx + 1)}</span>
-                  <span class="pb-faq-chevron" style="font-size: 0.85rem; color: #94a3b8; transition: transform 250ms ease;">▼</span>
+                        style="width: 100%; text-align: left; padding: 24px; background: transparent; border: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 1.1rem; font-weight: 800; color: #1e293b;">
+                  <span>${inlineText(id, `items.${idx}.question`, faq.question || 'New Question')}</span>
+                  <span class="pb-faq-chevron" style="font-size: 0.8rem; color: #cbd5e1; transition: transform 0.3s;">▼</span>
                 </button>
-                <div class="pb-faq-answer" style="padding: 0 24px; max-height: 0; overflow: hidden; transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);">
-                  <p style="padding-bottom: 20px; color: #475569; line-height: 1.7; font-size: 1rem;">${faq.answer || 'Answer goes here...'}</p>
+                <div class="pb-faq-answer" style="padding: 0 24px; max-height: 0; overflow: hidden; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);">
+                  <div style="padding-bottom: 24px; color: #64748b; line-height: 1.7; font-size: 1rem;">
+                    ${inlineText(id, `items.${idx}.answer`, faq.answer || 'Answer goes here...', 'display:block;width:100%;')}
+                  </div>
                 </div>
               </div>
             `).join('')}
           </div>
           <style>
-            .pb-faq-item.open { border-color: var(--primary-color) !important; }
-            .pb-faq-item.open .pb-faq-chevron { transform: rotate(180deg); color: var(--primary-color) !important; }
-            .pb-faq-item.open .pb-faq-answer { max-height: 500px !important; padding-top: 5px !important; }
+            .pb-faq-item.open { border-color: #2563EB; box-shadow: 0 20px 40px -10px rgba(37,99,235,0.1); }
+            .pb-faq-item.open .pb-faq-chevron { transform: rotate(180deg); color: #2563EB; }
+            .pb-faq-item.open .pb-faq-answer { max-height: 1000px; }
           </style>
         </div>`;
     }
-    case 'social-proof': {
-      const tests: any[] = content.testimonials || [];
-      const ba = content.before_after || {};
-      return `
-        <div class="social-proof-container" style="text-align: center;">
-          <h2 style="font-size: 2.2rem; font-weight: 800; margin-bottom: 12px;">
-            ${inlineText(id, 'title', content.title || 'Don’t Just Take Our Word For It', 'display:block;width:100%;')}
-          </h2>
-          <p style="font-size: 1.1rem; opacity: 0.7; margin-bottom: 48px;">
-            ${inlineText(id, 'subtitle', content.subtitle || 'See the results we achieve for homeowners like you.', 'display:block;width:100%;')}
-          </p>
-          
-          <div class="ba-grid">
-            <div class="ba-card" onclick="window.openImagePicker('${id}', 'before_after.before'); event.stopPropagation();" title="Click to replace BEFORE image">
-              <img src="${ba.before}" alt="Before">
-              <span class="ba-label">Before</span>
-              <div class="pb-image-overlay" style="display:flex; justify-content:center; align-items:center; background:rgba(0,0,0,0.4);"><span style="color:white; font-size:1.5rem;">📷 Replace</span></div>
-            </div>
-            <div class="ba-card" onclick="window.openImagePicker('${id}', 'before_after.after'); event.stopPropagation();" title="Click to replace AFTER image">
-              <img src="${ba.after}" alt="After">
-              <span class="ba-label">After</span>
-              <div class="pb-image-overlay" style="display:flex; justify-content:center; align-items:center; background:rgba(0,0,0,0.4);"><span style="color:white; font-size:1.5rem;">📷 Replace</span></div>
-            </div>
-          </div>
-
-          <div class="testimonials-row">
-            ${tests.map((t: any, idx: number) => `
-              <div class="testimonial-card">
-                <div class="testimonial-stars">
-                  ${'★'.repeat(t.stars || 5)}${'☆'.repeat(5 - (t.stars || 5))}
-                </div>
-                <p class="testimonial-quote">&ldquo;${t.quote}&rdquo;</p>
-                <div class="testimonial-author">&mdash; ${t.name}</div>
-              </div>
-            `).join('')}
-          </div>
-          <p style="font-size: 0.8rem; color: #94a3b8; margin-top: 15px;">* Testimonials can be edited via the data panel or direct JSON for now.</p>
-        </div>
-      `;
-    }
-    case 'urgency': {
-      return `
-        <div class="urgency-container">
-          <div class="urgency-badge">${inlineText(id, 'badge', content.badge || 'Limited Time', 'display:inline;')}</div>
-          <div class="urgency-headline">${inlineText(id, 'headline', content.headline || 'Same-Day Service Available', 'display:block;width:100%;')}</div>
-          <div class="urgency-subtext">${inlineText(id, 'subtext', content.subtext || 'Don’t wait — spots are filling up fast!', 'display:block;width:100%;')}</div>
-        </div>
-      `;
-    }
     default:
-      return `<pre>${JSON.stringify(content, null, 2)}</pre>`;
+      return `<div style="padding: 60px; background: #fff; border-radius: 20px; border: 2px dashed #eee; text-align: center; color: #999;">
+                <strong style="color: #666; font-size: 1.1rem;">LEGACY SECTION: ${section.type.toUpperCase()}</strong><br>
+                <p style="margin-top: 10px; font-size: 0.9rem;">This section will not appear on the live site.</p>
+              </div>`;
   }
 }
+
 
 // ── WB.3.2 Image Picker ─────────────────────────────────────────────────────
 /**
@@ -1629,7 +1592,6 @@ function renderSectionPreviewContent(section: any) {
  * persists to the in-memory store, and fires auto-save.
  */
 (window as any).openImagePicker = (sectionId: string, field: string) => {
-  // Avoid stacking inputs
   const existingInput = document.getElementById('pb-hidden-file-input');
   if (existingInput) existingInput.remove();
 
@@ -1644,7 +1606,6 @@ function renderSectionPreviewContent(section: any) {
     const file = input.files?.[0];
     if (!file) return;
 
-    // Show loading overlay on the image wrapper
     const progress = document.getElementById(`pb-img-progress-${sectionId}`);
     const wrapper  = document.getElementById(`imgwrap-${sectionId}`);
     if (progress) progress.style.display = 'flex';
@@ -1653,61 +1614,31 @@ function renderSectionPreviewContent(section: any) {
     const reader = new FileReader();
     reader.onload = (e) => {
       const dataUrl = e.target?.result as string;
-
-      // ── 1. Instant DOM patch (no full re-render) ──────────────────────
       const imgEl = document.getElementById(`pb-img-${sectionId}`) as HTMLImageElement | null;
-      if (imgEl && imgEl.tagName === 'IMG') {
-        imgEl.src = dataUrl;
-      } else if (imgEl) {
-        // Was placeholder div — replace with real img
-        const newImg = document.createElement('img');
-        newImg.id = `pb-img-${sectionId}`;
-        newImg.src = dataUrl;
-        newImg.alt = 'Section image';
-        newImg.style.cssText = 'width:100%;height:auto;display:block;border-radius:inherit;';
-        imgEl.replaceWith(newImg);
-      }
+      if (imgEl) imgEl.src = dataUrl;
 
-      // ── 2. Persist to in-memory store ──────────────────────────────────
       const section = mockPageSections.find((s: any) => s.id === sectionId);
       if (section) {
-        (section as any).content[field] = dataUrl;
+        setNestedValue(section.content, field, dataUrl);
         (window as any).triggerAutoSave();
       }
 
-
-(window as any).openBuilderFromFunnel = (pageId: string, funnelId: string) => {
-  builderPageId = pageId;
-  builderReturnTo = 'funnels';
-  builderReturnFunnelId = funnelId;
-  (window as any).navigateTo('builder');
-};
-
-      // ── 3. Dismiss loading state ──────────────────────────────────────
       if (progress) progress.style.display = 'none';
       if (wrapper)  wrapper.style.pointerEvents = '';
       (window as any).showToast('Image updated ✓');
-
       input.remove();
     };
-
     reader.onerror = () => {
       if (progress) progress.style.display = 'none';
-      if (wrapper)  wrapper.style.pointerEvents = '';
       (window as any).showToast('Could not read image file.');
       input.remove();
     };
-
     reader.readAsDataURL(file);
   });
-
-  // Trigger the native file picker
   input.click();
 };
 
-// Global functions for Builder interaction
-
-// WB.3.6 — Builder Navigation Handlers
+// ── WB.3.6 — Builder Navigation Handlers ────────────────────────────────────
 (window as any).builderGoBack = () => {
   const target = builderReturnTo === 'funnels' ? 'funnel-detail' : 'pages';
   const param = builderReturnTo === 'funnels' ? builderReturnFunnelId : undefined;
@@ -1721,40 +1652,15 @@ function renderSectionPreviewContent(section: any) {
   (window as any).navigateTo('builder');
 };
 
-(window as any).switchBuilderPage = (id: string, source: 'pages' | 'footer' = 'pages', noSkeleton = false) => {
+(window as any).switchBuilderPage = (id: string, source: 'pages' | 'footer' = 'pages') => {
   builderPageId = id;
   builderSelectedSectionId = null;
   builderInsertOrder = null;
-
   if (source === 'pages') {
     builderReturnTo = 'pages';
     builderReturnFunnelId = null;
   }
-
-  if (!noSkeleton) {
-    app.innerHTML = `
-      <main style="width: 100vw; padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column; background: #1a1a1a;">
-        <header style="background: #111; border-bottom: 1px solid #333; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; z-index: 100; flex-shrink: 0; height: 60px; box-sizing: border-box;">
-           <div class="skeleton skeleton-title" style="width: 200px; margin: 0;"></div>
-           <div class="skeleton skeleton-title" style="width: 300px; margin: 0;"></div>
-        </header>
-        <div class="pb-layout" style="flex: 1; display: flex;">
-           <div style="width: 280px; background: #161616; padding: 20px; border-right: 1px solid #222;">
-              <div class="skeleton skeleton-row" style="margin-bottom: 20px;"></div>
-              <div class="skeleton skeleton-rect" style="height: 120px; margin-bottom: 20px;"></div>
-              <div class="skeleton skeleton-rect" style="height: 120px; margin-bottom: 20px;"></div>
-           </div>
-           <div style="flex: 1; padding: 40px; display: flex; flex-direction: column; gap: 30px; background: #000;">
-              <div class="skeleton skeleton-rect" style="height: 400px; border-radius: 8px;"></div>
-              <div class="skeleton skeleton-rect" style="height: 200px; border-radius: 8px;"></div>
-           </div>
-        </div>
-      </main>
-    `;
-    setTimeout(() => renderBuilder(), 400);
-  } else {
-    renderBuilder();
-  }
+  renderBuilder();
 };
 
 (window as any).selectSectionForBuilder = (id: string) => {
@@ -1767,19 +1673,27 @@ function renderSectionPreviewContent(section: any) {
   builderInsertOrder = parseFloat(order);
   (window as any).navigateTo('components');
 };
-(window as any).duplicateBuilderSection = (id: string) => {
+(window as any).toggleSectionVisibility = (id: string) => {
   const section = mockPageSections.find(s => s.id === id);
-  if (!section) return;
-  const newSection = {
-    ...section,
-    id: `sec-${Date.now()}`,
-    content: JSON.parse(JSON.stringify(section.content)),
-    styles: JSON.parse(JSON.stringify(section.styles)),
-    order: section.order + 0.1
-  };
-  mockPageSections.push(newSection);
-  renderBuilder();
-  (window as any).triggerAutoSave();
+  if (section) {
+    if (!section.styles) section.styles = {};
+    section.styles.visible = section.styles.visible === false ? true : false;
+    renderBuilder();
+    (window as any).triggerAutoSave();
+  }
+};
+
+(window as any).duplicateGalleryItem = (id: string) => {
+  const section = mockPageSections.find(s => s.id === id);
+  if (section && section.type === 'gallery') {
+    const items = section.content.items || [];
+    items.push({ 
+        before: 'https://images.unsplash.com/photo-1541604193435-22077a288934?auto=format&fit=crop&q=80&w=600', 
+        after: 'https://images.unsplash.com/photo-1527335932348-4dbe058525cc?auto=format&fit=crop&q=80&w=600' 
+    });
+    renderBuilder();
+    (window as any).triggerAutoSave();
+  }
 };
 
 (window as any).addStructuredSection = (componentId: string) => {
@@ -1817,6 +1731,25 @@ function renderSectionPreviewContent(section: any) {
   (window as any).addStructuredSection(componentId);
 };
 
+(window as any).addStructuredSectionAt = (order: string) => {
+  builderInsertOrder = parseFloat(order);
+  (window as any).showToast('Select a component to insert', 'info');
+  // Just show the toast, the user then clicks a component on the left
+};
+
+(window as any).duplicateGalleryItem = (id: string) => {
+  const section = mockPageSections.find(s => s.id === id);
+  if (section && section.type === 'gallery') {
+    const items = section.content.items || [];
+    items.push({ 
+        before: 'https://images.unsplash.com/photo-1541604193435-22077a288934?auto=format&fit=crop&q=80&w=600', 
+        after: 'https://images.unsplash.com/photo-1527335932348-4dbe058525cc?auto=format&fit=crop&q=80&w=600' 
+    });
+    renderBuilder();
+    (window as any).triggerAutoSave();
+  }
+};
+
 (window as any).removeSection = (id: string) => {
   const index = mockPageSections.findIndex(s => s.id === id);
   if (index !== -1) {
@@ -1847,6 +1780,31 @@ function renderSectionPreviewContent(section: any) {
     renderBuilder();
     (window as any).triggerAutoSave();
   }
+};
+
+(window as any).switchSectionVariant = (id: string) => {
+  const section = mockPageSections.find(s => s.id === id);
+  if (!section) return;
+
+  const variantsByType: Record<string, string[]> = {
+    hero: ['standard', 'split', 'minimal'],
+    proof: ['grid', 'list'],
+    offer: ['banner', 'card'],
+    gallery: ['comparison', 'grid'],
+    form: ['embedded', 'compact'],
+    faq: ['accordion', 'split']
+  };
+
+  const currentVariant = section.variant || variantsByType[section.type]?.[0] || 'standard';
+  const available = variantsByType[section.type] || ['standard'];
+  const currentIndex = available.indexOf(currentVariant);
+  const nextIndex = (currentIndex + 1) % available.length;
+  
+  section.variant = available[nextIndex];
+  
+  renderBuilder();
+  (window as any).triggerAutoSave();
+  (window as any).showToast(`Switched to ${available[nextIndex]} layout`, 'success');
 };
 
 (window as any).updateSectionData = (id: string, field: 'content' | 'styles', value: string) => {
@@ -2011,9 +1969,7 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
         </div>
 
         <button class="btn-primary" 
-          style="padding: 22px; margin-top: 10px; font-size: 1.25rem; font-weight: 800; border-radius: 16px; background: var(--primary-color); color: white; border: none; cursor: pointer; transition: all 0.3s; box-shadow: 0 10px 30px rgba(37, 99, 235, 0.3); display: flex; align-items: center; justify-content: center; gap: 10px;" 
-          onmouseover="this.style.transform='translateY(-3px)'; this.style.boxShadow='0 15px 40px rgba(37, 99, 235, 0.4)';"
-          onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 10px 30px rgba(37, 99, 235, 0.3)';"
+          style="width: 100%; margin-top: 10px; font-size: 1.3rem; height: 64px;"
           onclick="window.submitBuilderForm('${id}', ${isPublic})">
           ${submitLabel}
         </button>
@@ -2298,7 +2254,7 @@ async function renderSitePage(funnel_id: string, websiteOrContext: any, isPrevie
   const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || getWebsiteLayout(); 
   
   const sections = mockPageSections
-    .filter(s => s.page_id === page.id)
+    .filter(s => s.page_id === page.id && s.styles?.visible !== false)
     .sort((a, b) => a.order - b.order);
 
   // Inject Tracking Scripts
@@ -2412,122 +2368,110 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
   switch (type) {
     case 'hero':
       return `
-        <h1 style="font-size: clamp(2.5rem, 8vw, 4rem); margin-bottom: 1.5rem; font-weight: 800; line-height: 1.1;">${content.heading || 'Hero Heading'}</h1>
-        <p style="font-size: clamp(1.1rem, 3vw, 1.5rem); opacity: 0.9; margin-bottom: 2.5rem; max-width: 700px; margin-left: ${styles.text_alignment === 'center' ? 'auto' : '0'}; margin-right: ${styles.text_alignment === 'center' ? 'auto' : '0'};">${content.subheading || 'Hero Subheading'}</p>
-        <a href="${content.button_link || '#'}" class="btn-primary" style="display: inline-block; text-decoration: none; padding: 18px 40px; font-size: 1.2rem; border-radius: 50px; text-align: center;">${content.button_text || 'Get Started'}</a>
+        <h1 style="font-size: clamp(2.8rem, 8vw, 4.5rem); margin-bottom: 1.5rem; font-weight: 900; line-height: 1.05; letter-spacing: -0.02em;">${content.heading || 'Hero Heading'}</h1>
+        <p style="font-size: clamp(1.1rem, 3vw, 1.4rem); opacity: 0.9; margin-bottom: 3rem; max-width: 700px; margin-left: ${styles.text_alignment === 'center' ? 'auto' : '0'}; margin-right: ${styles.text_alignment === 'center' ? 'auto' : '0'}; line-height: 1.6;">${content.subheading || 'Hero Subheading'}</p>
+        <button class="btn-primary" style="padding: 20px 48px; font-size: 1.25rem; border-radius: 60px; font-weight: 800; cursor: pointer; border: none; box-shadow: 0 20px 40px -10px rgba(0,0,0,0.2);"
+                onclick="document.querySelector('.site-form-section')?.scrollIntoView({behavior: 'smooth'})">
+          ${content.button_text || 'Get Started'}
+        </button>
       `;
-    case 'text':
-      return `<div style="line-height: 1.8; font-size: ${styles.font_size || '1.1rem'}; max-width: 800px; margin: 0 auto;">${content.text || ''}</div>`;
-    case 'image':
-      return `<img src="${content.image_url}" alt="Site Image" loading="lazy" decoding="async" style="width: 100%; height: auto; border-radius: ${styles.border_radius || '0'}; display: block; margin: 0 auto;">`;
-    case 'cta':
-      return `
-        <div style="background: ${styles.cta_background || 'var(--primary-color)'}; color: white; padding: 60px 40px; border-radius: 20px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
-          <h2 style="font-size: clamp(2rem, 5vw, 3rem); margin-bottom: 1rem; font-weight: 800;">${content.heading || 'Ready to Start?'}</h2>
-          <p style="font-size: 1.25rem; opacity: 0.9; margin-bottom: 2.5rem; max-width: 600px; margin-left: auto; margin-right: auto;">${content.subheading || 'Join hundreds of happy customers today.'}</p>
-          <button class="btn-primary" 
-                  style="background: white; color: var(--primary-color); border: none; padding: 18px 45px; font-size: 1.2rem; border-radius: 50px; font-weight: 700; cursor: pointer; transition: transform 0.2s;"
-                  onmouseover="this.style.transform='scale(1.05)'"
-                  onmouseout="this.style.transform='scale(1)'"
-                  onclick="document.querySelector('.site-form-section')?.scrollIntoView({behavior: 'smooth'})">
-            ${content.button_text || 'Get Quote Now'}
-          </button>
-        </div>
-      `;
-    case 'form':
-      return renderStandardForm(id, content, true);
-    case 'button':
-      const sizeMap: any = { small: '10px 20px', medium: '15px 35px', large: '20px 50px' };
-      return `<a href="${content.link || '#'}" class="btn-primary" style="display: inline-block; text-decoration: none; background: ${styles.color || 'var(--primary-color)'}; padding: ${sizeMap[styles.size] || '15px 35px'}; border-radius: 8px; font-weight: 600; text-align: center;">${content.label || 'Click Here'}</a>`;
-    case 'social-proof': {
+    case 'proof': {
       const tests: any[] = content.testimonials || [];
-      const ba = content.before_after || {};
       return `
-        <div class="social-proof-container" style="text-align: center;">
-          <h2 style="font-size: clamp(1.8rem, 5vw, 2.5rem); font-weight: 800; margin-bottom: 12px; color: #1e293b;">${content.title || 'Don’t Just Take Our Word For It'}</h2>
-          <p style="font-size: 1.1rem; opacity: 0.8; margin-bottom: 48px; color: #475569;">${content.subtitle || ''}</p>
-          
-          <div class="ba-grid">
-            <div class="ba-card">
-              <img src="${ba.before}" alt="Before" loading="lazy" decoding="async">
-              <span class="ba-label">Before</span>
-            </div>
-            <div class="ba-card">
-              <img src="${ba.after}" alt="After" loading="lazy" decoding="async">
-              <span class="ba-label">After</span>
-            </div>
-          </div>
-
-          <div class="testimonials-row">
+        <div style="text-align: center;">
+          <h2 style="font-size: clamp(2rem, 5vw, 3rem); font-weight: 900; margin-bottom: 50px;">${content.title || 'Trusted By Local Homeowners'}</h2>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 32px;">
             ${tests.map((t: any) => `
-              <div class="testimonial-card">
-                <div class="testimonial-stars">
+              <div style="background: white; padding: 40px; border-radius: 20px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.05); border: 1px solid #f1f5f9; text-align: left;">
+                <div style="color: #fbbf24; font-size: 1.2rem; margin-bottom: 16px;">
                   ${'★'.repeat(t.stars || 5)}${'☆'.repeat(5 - (t.stars || 5))}
                 </div>
-                <p class="testimonial-quote">&ldquo;${t.quote}&rdquo;</p>
-                <div class="testimonial-author">&mdash; ${t.name}</div>
+                <p style="font-size: 1rem; line-height: 1.7; font-style: italic; margin-bottom: 24px; color: #475569;">&ldquo;${t.quote}&rdquo;</p>
+                <div style="font-weight: 800; color: #1e293b; font-size: 0.95rem;">&mdash; ${t.name}</div>
               </div>
             `).join('')}
           </div>
-        </div>
-      `;
+        </div>`;
     }
-    case 'urgency': {
+    case 'offer':
       return `
-        <div class="urgency-container">
-          ${content.badge ? `<div class="urgency-badge">${content.badge}</div>` : ''}
-          <div class="urgency-headline">${content.headline || 'Act Now!'}</div>
-          <div class="urgency-subtext">${content.subtext || ''}</div>
-        </div>
-      `;
-    }
-    case 'faq': {
-      const faqs: any[] = content.items || [];
-      const schema = {
-        "@context": "https://schema.org",
-        "@type": "FAQPage",
-        "mainEntity": faqs.map(f => ({
-          "@type": "Question",
-          "name": f.question,
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": f.answer
-          }
-        }))
-      };
+        <div style="background: #4f46e5; color: white; padding: 80px 40px; border-radius: 30px; text-align: center; box-shadow: 0 30px 60px -12px rgba(79, 70, 229, 0.25);">
+          <div style="display: inline-block; background: rgba(255,255,255,1); color: #4f46e5; padding: 6px 18px; border-radius: 30px; font-size: 0.75rem; font-weight: 900; text-transform: uppercase; margin-bottom: 24px; letter-spacing: 0.1em;">Special Deal</div>
+          <h2 style="font-size: clamp(2.5rem, 6vw, 3.5rem); margin-bottom: 1.5rem; font-weight: 900; line-height: 1.1;">${content.headline || 'Ready to Start?'}</h2>
+          <p style="font-size: 1.3rem; opacity: 0.9; margin-bottom: 3.5rem; max-width: 650px; margin-left: auto; margin-right: auto; line-height: 1.6;">${content.description || 'Join hundreds of happy customers today.'}</p>
+          <button class="btn-primary" 
+                  style="background: white; color: #4f46e5; border: none; padding: 22px 55px; font-size: 1.35rem; border-radius: 60px; font-weight: 900; cursor: pointer; transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 20px 40px -10px rgba(0,0,0,0.2);"
+                  onmouseover="this.style.transform='translateY(-4px) scale(1.05)'; this.style.boxShadow='0 30px 60px -15px rgba(0,0,0,0.3)'"
+                  onmouseout="this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 20px 40px -10px rgba(0,0,0,0.2)'"
+                  onclick="document.querySelector('.site-form-section')?.scrollIntoView({behavior: 'smooth'})">
+            ${content.button_text || 'Claim My Offer'}
+          </button>
+          <div style="margin-top: 30px; font-size: 1rem; opacity: 0.8; font-weight: 700; letter-spacing: 0.02em;">${content.expiry || 'Limited time remaining.'}</div>
+        </div>`;
+    case 'gallery': {
+      const items: any[] = content.items || [];
       return `
-        <div style="padding: 60px 40px; max-width: 800px; margin: 0 auto;">
-          <h2 style="font-size: clamp(1.8rem, 5vw, 2.5rem); font-weight: 800; margin-bottom: 36px; text-align: center; color: #1e293b;">
-            ${content.heading || 'Frequently Asked Questions'}
-          </h2>
-          <div style="display: flex; flex-direction: column; gap: 12px;">
-            ${faqs.map((faq: any, idx: number) => `
-              <div class="pb-faq-item site-faq" style="border: 2px solid #f1f5f9; border-radius: 12px; overflow: hidden; background: #fff; transition: all 0.3s ease;">
-                <button class="pb-faq-toggle" onclick="this.closest('.pb-faq-item').classList.toggle('open')"
-                        style="width: 100%; text-align: left; padding: 20px 24px; background: transparent; border: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 1.1rem; font-weight: 700; color: #1e293b; outline: none;">
-                  <span>${faq.question}</span>
-                  <span class="pb-faq-chevron" style="font-size: 0.85rem; color: #94a3b8; transition: transform 0.3s ease;">▼</span>
-                </button>
-                <div class="pb-faq-answer" style="padding: 0 24px; max-height: 0; overflow: hidden; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);">
-                  <p style="padding-bottom: 20px; color: #475569; line-height: 1.7; font-size: 1.05rem;">${faq.answer}</p>
+        <div style="text-align: center;">
+          <h2 style="font-size: clamp(2rem, 5vw, 3rem); font-weight: 900; margin-bottom: 50px;">${content.title || 'Before & After Results'}</h2>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 40px;">
+            ${items.map((item: any) => `
+              <div style="background: white; border-radius: 24px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.05);">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid #e2e8f0; position: relative;">
+                  <div style="position: relative;">
+                    <img src="${item.before}" style="width: 100%; aspect-ratio: 1.2; object-fit: cover;">
+                    <span style="position: absolute; bottom: 15px; left: 15px; background: rgba(0,0,0,0.8); color: white; padding: 4px 14px; border-radius: 6px; font-size: 0.7rem; font-weight: 900; letter-spacing: 0.1em;">BEFORE</span>
+                  </div>
+                  <div style="position: relative;">
+                    <img src="${item.after}" style="width: 100%; aspect-ratio: 1.2; object-fit: cover;">
+                    <span style="position: absolute; bottom: 15px; right: 15px; background: #10b981; color: white; padding: 4px 14px; border-radius: 6px; font-size: 0.7rem; font-weight: 900; letter-spacing: 0.1em;">AFTER</span>
+                  </div>
+                </div>
+                <div style="padding: 24px; font-size: 0.95rem; color: #64748b; font-weight: 700; background: #f8fafc; letter-spacing: 0.01em;">
+                  Property Restoration Complete.
                 </div>
               </div>
             `).join('')}
           </div>
-          <script type="application/ld+json">
-            ${JSON.stringify(schema)}
-          </script>
+        </div>`;
+    }
+    case 'form':
+      return `
+        <div class="site-form-section" style="max-width: 600px; margin: 0 auto; background: white; padding: 50px; border-radius: 30px; box-shadow: 0 40px 60px -15px rgba(0,0,0,0.1); border: 1px solid #f1f5f9;">
+          <h2 style="font-size: 2.2rem; font-weight: 900; margin-bottom: 15px; text-align: center;">${content.title || 'Get My Free Quote'}</h2>
+          <p style="text-align: center; color: #64748b; margin-bottom: 40px; font-weight: 600;">Fill out the form below and we'll be in touch within 15 minutes.</p>
+          ${renderStandardForm(id, content, true)}
+        </div>`;
+    case 'faq': {
+      const faqs: any[] = content.items || [];
+      return `
+        <div style="max-width: 800px; margin: 0 auto;">
+          <h2 style="font-size: clamp(2rem, 5vw, 3rem); font-weight: 900; margin-bottom: 50px; text-align: center;">${content.heading || 'Frequently Asked Questions'}</h2>
+          <div style="display: flex; flex-direction: column; gap: 16px;">
+            ${faqs.map((faq: any, idx: number) => `
+              <div class="site-faq-item" style="border: 2px solid #f1f5f9; border-radius: 20px; overflow: hidden; background: white; transition: all 0.3s ease;">
+                <button onclick="this.closest('.site-faq-item').classList.toggle('open')"
+                        style="width: 100%; text-align: left; padding: 28px 32px; background: transparent; border: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 1.2rem; font-weight: 800; color: #1e293b; outline: none;">
+                  <span>${faq.question || 'Question ' + (idx + 1)}</span>
+                  <span class="faq-chevron" style="font-size: 0.9rem; color: #94a3b8; transition: transform 0.3s ease;">▼</span>
+                </button>
+                <div class="faq-answer-wrap" style="padding: 0 32px; max-height: 0; overflow: hidden; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);">
+                  <p style="padding-bottom: 32px; color: #475569; line-height: 1.8; font-size: 1.1rem; font-weight: 500;">${faq.answer || 'Answer goes here...'}</p>
+                </div>
+              </div>
+            `).join('')}
+          </div>
           <style>
-            .site-faq.open { border-color: var(--primary-color) !important; box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
-            .site-faq.open .pb-faq-chevron { transform: rotate(180deg); color: var(--primary-color) !important; }
-            .site-faq.open .pb-faq-answer { max-height: 600px !important; padding-top: 10px !important; }
+            .site-faq-item.open { border-color: #4f46e5 !important; box-shadow: 0 20px 25px -5px rgba(79, 70, 229, 0.1); transform: translateY(-2px); }
+            .site-faq-item.open .faq-chevron { transform: rotate(180deg); color: #4f46e5 !important; }
+            .site-faq-item.open .faq-answer-wrap { max-height: 500px !important; }
           </style>
         </div>`;
     }
     default:
-      return `<div>Component type "${type}" not implemented</div>`;
+      return `<div style="padding: 40px; text-align: center; color: #999; border: 2px dashed #eee; border-radius: 12px; margin: 40px;">Legacy Section Type: ${type}</div>`;
   }
 }
+
 
 function renderReports() {
   app.innerHTML = `
@@ -2832,12 +2776,7 @@ function renderComponents() {
   if (compSearchQuery) {
     filtered = filtered.filter(c => c.name.toLowerCase().includes(compSearchQuery) || c.type.toLowerCase().includes(compSearchQuery));
   }
-  if (compCategoryFilter !== 'all') {
-    if (compCategoryFilter === 'basic') filtered = filtered.filter(c => ['text', 'button', 'image'].includes(c.type));
-    else if (compCategoryFilter === 'layout') filtered = filtered.filter(c => ['hero', 'section'].includes(c.type));
-    else if (compCategoryFilter === 'forms') filtered = filtered.filter(c => ['form'].includes(c.type));
-    else if (compCategoryFilter === 'advanced') filtered = filtered.filter(c => !['text', 'button', 'image', 'hero', 'section', 'form'].includes(c.type));
-  }
+  // All components are now top-tier structured sections, no categories needed.
 
   const gridItems = filtered.map(comp => `
     <div class="card" style="display: flex; flex-direction: column; gap: 15px;">

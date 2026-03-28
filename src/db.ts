@@ -238,35 +238,56 @@ export const mockPageSections: PageSection[] = [
 
 export const mockComponents: Component[] = [
   {
-    id: 'comp1',
-    name: 'Advanced Hero',
+    id: 'comp-hero',
+    name: 'Hero Section',
     type: 'hero',
     default_content: { 
-      heading: 'Experience the Power of Clean', 
-      subheading: 'Professional pressure washing for your home and business.',
-      button_text: 'Get a Free Quote',
-      button_link: '#contact',
-      background_image: 'https://images.unsplash.com/photo-1521791136064-7986c2959210?auto=format&fit=crop&w=1200&q=80'
+      heading: 'Restore Your Home’s Beauty', 
+      subheading: 'Professional pressure washing that makes your surfaces look like new again.',
+      button_text: 'Get a Free Estimate',
+      background_image: 'https://images.unsplash.com/photo-1541604193435-22077a288934?auto=format&fit=crop&w=1200&q=80'
     },
-    default_styles: { 
-      padding: '100px 20px', 
-      text_alignment: 'center' 
-    }
+    default_styles: { padding: '100px 20px', text_alignment: 'center', background: '#ffffff', visible: true }
   },
   {
-    id: 'comp2',
-    name: 'Rich Text Block',
-    type: 'text',
-    default_content: { 
-      text: '<p>Standard text block for your content. Supporting <b>bold</b> and <i>italic</i> styling where needed.</p>' 
+    id: 'comp-proof',
+    name: 'Proof (Testimonials)',
+    type: 'proof',
+    default_content: {
+      title: 'Trusted by Hundreds of Local Homeowners',
+      testimonials: [
+        { name: 'Sarah J.', quote: 'Our driveway went from gray to brilliant white in hours. Highly recommend!', stars: 5 },
+        { name: 'Mike T.', quote: 'Professional service and great communication. The house looks brand new.', stars: 5 }
+      ]
     },
-    default_styles: { 
-      font_size: '18px', 
-      alignment: 'left' 
-    }
+    default_styles: { padding: '80px 20px', background: '#f8fafc', visible: true }
   },
   {
-    id: 'comp3',
+    id: 'comp-offer',
+    name: 'Offer Section',
+    type: 'offer',
+    default_content: {
+      headline: 'Special Driveway Cleaning Package',
+      description: 'Get your driveway and walkway cleaned for just $199. Limited time offer!',
+      button_text: 'Claim Offer',
+      expiry: 'Offer ends this Sunday'
+    },
+    default_styles: { padding: '80px 20px', background: '#4f46e5', color: '#ffffff', visible: true }
+  },
+  {
+    id: 'comp-gallery',
+    name: 'Gallery (Before/After)',
+    type: 'gallery',
+    default_content: {
+      title: 'Our Recent Work',
+      items: [
+        { before: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&q=80&w=600', after: 'https://images.unsplash.com/photo-1527335932348-4dbe058525cc?auto=format&fit=crop&q=80&w=600' }
+      ]
+    },
+    default_styles: { padding: '80px 20px', background: '#ffffff', visible: true }
+  },
+  {
+    id: 'comp-form',
     name: 'Lead Capture Form',
     type: 'form',
     default_content: {
@@ -274,126 +295,23 @@ export const mockComponents: Component[] = [
       fields: ['name', 'phone'],
       pipeline_id: 'p1'
     },
-    default_styles: { 
-      padding: '30px', 
-      background: '#f8fafc' 
-    }
-  },
-  {
-    id: 'comp4',
-    name: 'Styled Image',
-    type: 'image',
-    default_content: { 
-      image_url: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=800&q=80' 
-    },
-    default_styles: { 
-      width: '100%', 
-      border_radius: '12px' 
-    }
-  },
-  {
-    id: 'comp5',
-    name: 'Link Button',
-    type: 'button',
-    default_content: { 
-      label: 'Visit Website', 
-      link: '#' 
-    },
-    default_styles: { 
-      color: '#007bff', 
-      size: 'medium' 
-    }
-  },
-  {
-    id: 'comp6',
-    name: 'Conversion CTA',
-    type: 'cta',
-    default_content: { 
-      heading: 'Ready to Transform Your Home?', 
-      subtext: 'Book your free estimate today and see the difference professional cleaning makes.',
-      button_text: 'Get My Free Quote',
-      button_link: '#form'
-    },
-    default_styles: { 
-      padding: '80px 20px', 
-      background: '#4f46e5',
-      color: '#ffffff'
-    }
-  },
-  // ── WB.3.3 Structured Section Types ─────────────────────────────────────
-  {
-    id: 'comp-services',
-    name: 'Services Grid',
-    type: 'services',
-    default_content: {
-      heading: 'Our Services',
-      subheading: 'Everything you need, done right.',
-      items: [
-        { icon: '🚿', title: 'Driveway Cleaning', description: 'Remove oil, algae and grime from any surface.' },
-        { icon: '🏠', title: 'House Washing',     description: 'Gentle soft-wash for siding, brick and stucco.' },
-        { icon: '🌿', title: 'Roof Treatment',    description: 'Kill moss and extend your roof\'s life span.' },
-        { icon: '✨', title: 'Patio & Deck',      description: 'Restore natural colour and prevent slipping.' }
-      ]
-    },
-    default_styles: { padding: '80px 20px', background: '#ffffff', text_alignment: 'center' }
-  },
-  {
-    id: 'comp-testimonials',
-    name: 'Testimonials',
-    type: 'testimonial',
-    default_content: {
-      quote: 'The best pressure washing service we\'ve ever used. The driveway looks brand new!',
-      author: 'Sarah M.',
-      location: 'Austin, TX'
-    },
-    default_styles: { padding: '80px 20px', background: '#f8fafc', text_alignment: 'center' }
+    default_styles: { padding: '60px 20px', background: '#f8fafc', visible: true }
   },
   {
     id: 'comp-faq',
-    name: 'FAQ',
+    name: 'FAQ Section',
     type: 'faq',
     default_content: {
       heading: 'Frequently Asked Questions',
       items: [
-        { question: 'How much does it cost?', answer: 'Driveway cleaning typically starts at $149, while full house washing varies by square footage. We provide instant, transparent quotes after a quick site visit (or even via photo!).' },
-        { question: 'How long does it take?', answer: 'Most residential driveways take 1.5 to 3 hours. A full house wash usually takes 3 to 5 hours depending on the size and complexity.' },
-        { question: 'Do I need to be home?', answer: 'No, you don’t need to be home! As long as we have access to an external water source and all windows are closed, we can complete the job and send you "After" photos immediately.' },
-        { question: 'What surfaces do you clean?', answer: 'We specialize in Concrete (Driveways/Patios), Siding (Vinyl/Stucco), Brick, and Roofs (Soft-wash). We use specialized equipment for each surface to ensure a deep clean without damage.' }
+        { question: 'How long does it take?', answer: 'Most residential driveways take 1.5 to 3 hours.' },
+        { question: 'Do I need to be home?', answer: 'No, as long as we have access to an external water source.' }
       ]
     },
-    default_styles: { padding: '80px 20px', background: '#ffffff' }
-  },
-  {
-    id: 'comp-social',
-    name: 'Social Proof (Before/After)',
-    type: 'social-proof',
-    default_content: {
-      title: 'Don’t Just Take Our Word For It',
-      subtitle: 'See the transformations we’ve achieved for local homeowners.',
-      before_after: {
-        before: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&q=80&w=800',
-        after: 'https://images.unsplash.com/photo-1527335932348-4dbe058525cc?auto=format&fit=crop&q=80&w=800'
-      },
-      testimonials: [
-        { name: 'Sarah J.', quote: 'Our driveway went from gray to brilliant white in hours. Highly recommend!', stars: 5 },
-        { name: 'Mike T.', quote: 'Professional service and great communication. The house looks brand new.', stars: 5 },
-        { name: 'Linda W.', quote: 'The roof looks amazing. Fast, clean, and reliable service.', stars: 5 }
-      ]
-    },
-    default_styles: { padding: '80px 20px', background: '#ffffff' }
-  },
-  {
-    id: 'comp-urgency',
-    name: 'Urgency Banner',
-    type: 'urgency',
-    default_content: {
-      badge: 'Limited Time Offer',
-      headline: 'Same-Day Service Available This Week!',
-      subtext: 'Book now to secure your spot. Only 3 slots remaining for Friday.'
-    },
-    default_styles: { padding: '40px 20px', background: '#ffffff' }
+    default_styles: { padding: '80px 20px', background: '#ffffff', visible: true }
   }
 ];
+
 
 export const mockMedia: Asset[] = [
   {
