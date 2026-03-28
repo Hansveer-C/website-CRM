@@ -550,7 +550,7 @@ export const mockWebsites: Website[] = [
     name: 'PressurePro Seattle',
     domain: 'hanssays.com',
     subdomain: 'hans-seattle',
-    homepage_funnel_id: 'f1',
+    homepage_funnel_id: 'fnl-1',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   }
@@ -561,14 +561,21 @@ export const mockWebsiteRoutes: WebsiteRoute[] = [
     id: 'r1',
     website_id: 'ws-1',
     path: '/',
-    funnel_id: 'f1',
+    funnel_id: 'fnl-1',
     created_at: new Date().toISOString()
   },
   {
     id: 'r2',
     website_id: 'ws-1',
     path: '/driveway',
-    funnel_id: 'f5',
+    funnel_id: 'fnl-1',
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'r3',
+    website_id: 'ws-1',
+    path: '/driveway-cleaning',
+    funnel_id: 'fnl-1',
     created_at: new Date().toISOString()
   }
 ];

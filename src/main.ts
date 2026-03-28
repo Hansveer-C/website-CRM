@@ -1,6 +1,7 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes } from './db';
 import { templates } from './templates';
 import { Activity, WebsiteLayout } from './types';
+import { resolveWebsiteRequest } from './website_resolver';
 import { normalizePhone, normalizeEmail, normalizeName } from './utils/validators';
 
 /**
@@ -1947,8 +1948,8 @@ function renderPublicHeader(config: any, settings: any) {
       </div>
       <nav style="display: flex; gap: 24px; align-items: center;">
          ${(config.nav_items || []).map((item: any) => `
-           <a href="#/site/${item.path === '/' ? 'home' : item.path.replace(/^\//, '')}" 
-              onclick="event.preventDefault(); window.navigateTo('site', '${item.path === '/' ? 'home' : item.path.replace(/^\//, '')}')"
+           <a href="${item.path}" 
+              onclick="event.preventDefault(); window.navigateTo('site', '${item.path}')"
               style="text-decoration: none; color: #475569; font-weight: 600; font-size: 0.95rem; transition: color 0.2s;" 
               onmouseover="this.style.color='var(--primary-color)'" 
               onmouseout="this.style.color='#475569'">
@@ -1995,7 +1996,9 @@ function renderPublicFooter(config: any, settings: any) {
             <h4 style="color: white; font-size: 1.1rem; font-weight: 700; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px;">Navigation</h4>
             <div style="display: flex; flex-direction: column; gap: 12px;">
               ${links.map((l: any) => `
-                <a href="${l.path}" style="color: #94a3b8; text-decoration: none; font-size: 0.9rem; transition: all 0.2s;" onmouseover="this.style.color='white'; this.style.paddingLeft='4px'" onmouseout="this.style.color='#94a3b8'; this.style.paddingLeft='0'">
+                <a href="${l.path}" 
+                   onclick="event.preventDefault(); window.navigateTo('site', '${l.path}')"
+                   style="color: #94a3b8; text-decoration: none; font-size: 0.9rem; transition: all 0.2s;" onmouseover="this.style.color='white'; this.style.paddingLeft='4px'" onmouseout="this.style.color='#94a3b8'; this.style.paddingLeft='0'">
                   ${l.label}
                 </a>
               `).join('')}
@@ -2033,24 +2036,39 @@ function renderPublicFooter(config: any, settings: any) {
   `;
 }
 
-function renderSitePage(slug: string, isPreview: boolean = false) {
-  const page = mockPages.find(p => p.slug === slug);
-  if (!page || (!isPreview && page.status !== 'published')) {
-    app.innerHTML = `<div style="padding: 100px; text-align: center; font-family: sans-serif;">
-      <h1 style="font-size: 4rem; color: #cbd5e0;">404</h1>
-      <h2 style="margin-bottom: 20px;">${!page ? 'Page Not Found' : 'Draft Page'}</h2>
-      <p style="color: #666; margin-bottom: 30px;">
-        ${!page
-        ? `The requested URL "/site/${slug}" was not found.`
-        : 'This page is currently a draft and is not publicly accessible.'}
+function render404(message?: string) {
+  app.innerHTML = `
+    <div style="padding: 100px; text-align: center; font-family: 'Inter', sans-serif; background: #f8fafc; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+      <h1 style="font-size: 8rem; font-weight: 900; color: #e2e8f0; margin: 0; line-height: 1;">404</h1>
+      <h2 style="font-size: 2rem; color: #1e293b; margin-top: -20px; font-weight: 800;">Page Not Found</h2>
+      <p style="color: #64748b; margin: 20px 0 40px; font-size: 1.1rem; max-width: 400px; line-height: 1.6;">
+        ${message || 'The requested URL was not found on this server.'}
       </p>
-      <button class="btn-primary" onclick="window.navigateTo('dashboard')">Back to CRM</button>
-    </div>`;
+      <div style="display: flex; gap: 16px;">
+        <button class="btn-primary" onclick="window.location.href='/'" style="padding: 12px 30px; border-radius: 50px;">Go Home</button>
+        <button style="background: white; border: 1px solid #e2e8f0; padding: 12px 30px; border-radius: 50px; cursor: pointer; font-weight: 600; color: #475569;" onclick="window.navigateTo('dashboard')">Back to CRM</button>
+      </div>
+    </div>
+  `;
+}
+
+async function renderSitePage(funnel_id: string, website: any, isPreview: boolean = false) {
+  // 1. Fetch Funnel Data
+  const funnel = mockFunnels.find(f => f.id === funnel_id);
+  // In the resolver, it correctly identifies the funnel_id.
+  
+  // 2. Identify primary page/step in that funnel
+  const page = mockPages.find(p => p.funnel_id === funnel_id);
+  
+  if (!page || (!isPreview && page.status !== 'published')) {
+    render404(!page ? 'No page mapped to this funnel.' : 'This page is currently a draft.');
     return;
   }
 
   const settings = getWebsiteSettings();
-  const layout = getWebsiteLayout(); // Phase W1.4: Injected layout
+  // Fetch layout for this specific website
+  const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || getWebsiteLayout(); 
+  
   const sections = mockPageSections
     .filter(s => s.page_id === page.id)
     .sort((a, b) => a.order - b.order);
@@ -2074,7 +2092,7 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
 
   app.innerHTML = `
     <div class="public-site ${!isPreview ? 'has-cta-bar' : ''}" style="min-height: 100vh; background: white; font-family: 'Inter', sans-serif;">
-      ${isPreview ? `<div style="background: #fdf2f2; color: #dc2626; padding: 10px; text-align: center; font-weight: 700; border-bottom: 1px solid #fee2e2;">PREVIEW MODE: You are viewing a draft version of "${page.name}"</div>` : ''}
+      ${isPreview ? `<div style="background: #fdf2f2; color: #dc2626; padding: 10px; text-align: center; font-weight: 700; border-bottom: 1px solid #fee2e2; position: sticky; top: 0; z-index: 9999;">PREVIEW MODE: You are viewing a draft version of "${page.name}"</div>` : ''}
       
       ${!isPreview ? `
         <div id="site-cta-bar" class="cta-bar">
@@ -2101,28 +2119,26 @@ function renderSitePage(slug: string, isPreview: boolean = false) {
     </div>
   `;
 
-  const finalTitle = mockGlobalSettings.seoTitleFormat
-    .replace('{page_name}', page.seo_title || page.name)
-    .replace('{business_name}', mockGlobalSettings.businessName);
-  document.title = finalTitle;
-  updateMetaTag('description', page.seo_description || mockGlobalSettings.seoDescriptionFallback);
+  // Update SEO
+  const seoTitle = page.seo_title || page.name;
+  document.title = `${seoTitle} | ${settings.business_name}`;
+  updateMetaTag('description', page.seo_description || '');
   updateMetaTag('keywords', (page.seo_keywords || []).join(', '));
 
-  if (mockGlobalSettings.fbPixelId) {
+  // Tracking Simulations (Phase Debug)
+  if ((window as any).mockGlobalSettings?.fbPixelId) {
     if (!document.getElementById('fb-pixel-sim')) {
-      console.log('Injecting FB Pixel: ' + mockGlobalSettings.fbPixelId);
       const t = document.createElement('script');
       t.id = 'fb-pixel-sim';
-      t.innerHTML = `console.log("FB Pixel [${mockGlobalSettings.fbPixelId}] Initialized"); window.fbq = function() { console.log('fbq:', arguments); };`;
+      t.innerHTML = `console.log("FB Pixel [${(window as any).mockGlobalSettings.fbPixelId}] Initialized"); window.fbq = function() { console.log('fbq:', arguments); };`;
       document.head.appendChild(t);
     }
   }
-  if (mockGlobalSettings.gtmId) {
+  if ((window as any).mockGlobalSettings?.gtmId) {
     if (!document.getElementById('gtm-sim')) {
-      console.log('Injecting GTM: ' + mockGlobalSettings.gtmId);
       const t = document.createElement('script');
       t.id = 'gtm-sim';
-      t.innerHTML = `console.log("GTM [${mockGlobalSettings.gtmId}] Initialized"); window.dataLayer = window.dataLayer || [];`;
+      t.innerHTML = `console.log("GTM [${(window as any).mockGlobalSettings.gtmId}] Initialized"); window.dataLayer = window.dataLayer || [];`;
       document.head.appendChild(t);
     }
   }
@@ -3868,7 +3884,7 @@ async function renderFunnelDetail(funnelId: string) {
     }
 };
 
-(window as any).navigateTo = (view: string, id?: string) => {
+(window as any).navigateTo = async (view: string, id?: string, context?: any) => {
   const previousView = currentView;
   currentView = view;
   if (id) selectedContactId = id;
@@ -3887,13 +3903,21 @@ async function renderFunnelDetail(funnelId: string) {
         ${renderSkeleton(view as any)}
       </main>
     `;
-    setTimeout(() => executeNavigation(view, id), 350);
+    setTimeout(() => executeNavigation(view, id, context), 350);
   } else {
-    executeNavigation(view, id);
+    executeNavigation(view, id, context);
+  }
+
+  // Update URL for standard CRM navigation
+  if (!['site', 'preview'].includes(view)) {
+    const newHash = id ? `#/${view}/${id}` : `#/${view}`;
+    if (window.location.hash !== newHash) {
+       window.history.pushState({}, "", newHash);
+    }
   }
 };
 
-function executeNavigation(view: string, id?: string) {
+async function executeNavigation(view: string, id?: string, context?: any) {
   switch (view) {
     case 'dashboard': renderDashboard(); break;
     case 'clients': renderClients(); break;
@@ -3922,8 +3946,29 @@ function executeNavigation(view: string, id?: string) {
     case 'event-logs': renderEventLogs(); break;
     case 'qa-tools': renderQATools(); break;
     case 'quote-preview': if (id) renderQuotePreview(id); break;
-    case 'site': if (id) renderSitePage(id); break;
-    case 'preview': if (id) renderSitePage(id, true); break;
+    case 'site': 
+      if (id && context) renderSitePage(id, context); 
+      else if (id) {
+         // This is a direct slug navigation, we need to resolve it
+         const result = await resolveWebsiteRequest(window.location.hostname, id);
+         if (result && result.funnel_id) {
+            renderSitePage(result.funnel_id, result.website);
+         } else {
+            render404();
+         }
+      }
+      break;
+    case 'preview': 
+      if (id && context) renderSitePage(id, context, true); 
+      else if (id) {
+         const result = await resolveWebsiteRequest(window.location.hostname, id);
+         if (result && result.funnel_id) {
+           renderSitePage(result.funnel_id, result.website, true);
+         } else {
+           render404('Preview target not found.');
+         }
+      }
+      break;
     default: renderDashboard();
   }
 
@@ -4782,18 +4827,48 @@ function renderQATools() {
 
 checkOverdueInvoices();
 
-// Basic Path Routing
-const path = window.location.pathname;
+// 🌿 WB.6.4 INTEGRATED ROUTING RESOLVER (Step 2 & 3)
+async function bootRouter() {
+  const host = window.location.hostname;
+  const rawPath = window.location.pathname;
 
-if (path.includes('/site/')) {
-  const slug = path.split('/site/')[1];
-  (window as any).navigateTo('site', slug);
-} else if (path.includes('/preview/')) {
-  const slug = path.split('/preview/')[1];
-  (window as any).navigateTo('preview', slug);
-} else {
-  renderDashboard();
+  // 1. Check for Admin Hash Routes First
+  if (window.location.hash) {
+     const parts = window.location.hash.slice(2).split('/');
+     const view = parts[0];
+     const id = parts[1];
+     if (view) {
+       (window as any).navigateTo(view, id);
+       return;
+     }
+  }
+
+  // 2. Resolve Public Website Route
+  // Map /site/X or /preview/X to just X for the resolver if needed, 
+  // but resolver usually handles the full path.
+  let targetPath = rawPath === '/' ? '/' : rawPath;
+  
+  // Clean up legacy paths for the resolver if they exist
+  if (targetPath.startsWith('/site/')) targetPath = targetPath.replace('/site/', '/');
+  if (targetPath.startsWith('/preview/')) targetPath = targetPath.replace('/preview/', '/');
+
+  const result = await resolveWebsiteRequest(host, targetPath);
+
+  if (result && result.funnel_id) {
+    (window as any).navigateTo('site', result.funnel_id, result.website);
+  } else if (rawPath === '/') {
+    // If root doesn't resolve to a website, show dashboard
+    renderDashboard();
+  } else {
+    render404();
+  }
 }
+
+bootRouter();
+
+window.addEventListener('popstate', () => {
+    bootRouter();
+});
 
 // Auto-refresh Sidebar Counts & New Lead Alerts (PROMPT 8, 9, 10)
 setInterval(() => {
