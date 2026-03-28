@@ -4,7 +4,7 @@ export const mockFunnels: Funnel[] = [
   {
     id: 'fnl-1',
     user_id: 'system',
-    name: 'Driveway Cleaning Funnel',
+    name: 'Home Page',
     status: 'published',
     created_at: '2026-03-24T10:00:00Z',
     updated_at: '2026-03-24T10:00:00Z'
@@ -12,7 +12,7 @@ export const mockFunnels: Funnel[] = [
   {
     id: 'fnl-2',
     user_id: 'system',
-    name: 'House Washing Funnel',
+    name: 'House Washing Page',
     status: 'draft',
     created_at: '2026-03-25T14:30:00Z',
     updated_at: '2026-03-25T14:30:00Z'
@@ -204,6 +204,14 @@ export const mockPageSections: PageSection[] = [
     },
     order: 1,
     styles: { text_alignment: 'center' }
+  },
+  {
+    id: 'ps-home-services',
+    page_id: 'fnl-1',
+    type: 'services',
+    content: { title: 'Our Core Services', subtitle: 'Explore how we can restore your home and business.' },
+    order: 2,
+    styles: { padding: '80px 20px', background: '#ffffff' }
   },
   {
     id: 'ps-p1',
@@ -412,7 +420,7 @@ export const mockTemplates: Template[] = [
   },
   {
     id: 'tpl-quote-funnel',
-    name: 'Quote Funnel Template',
+    name: 'Quote Page Template',
     category: 'conversion',
     sections: [
       {

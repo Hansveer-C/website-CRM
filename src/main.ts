@@ -16,7 +16,7 @@ const persistWebsiteSettings = async (data: any) => {
     return { success: true }; 
 };
 const getEvents = (user?: any) => [];
-const getAllMessagesOrdered = (user?: any) => [];
+const getAllMessagesOrdered = (user?: any) => [] as any[];
 const getConversation = (id: string, user?: any) => [];
 const getCallsForContact = (id: string, phone?: string, user?: any) => [];
 const getCall = (id: string) => null;
@@ -267,7 +267,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                 const newFunnel = {
                     id: `fnl-${Date.now()}`,
                     user_id: 'system',
-                    name: name || 'Untitled Funnel',
+                    name: name || 'Untitled Page',
                     status: 'draft',
                     created_at: new Date().toISOString(),
                     updated_at: new Date().toISOString()
@@ -287,7 +287,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                     const steps = mockPages.filter(p => (p as any).funnel_id === id);
                     response = { success: true, data: { ...funnel, steps } };
                 } else {
-                    response = { success: false, error: 'Funnel not found' };
+                    response = { success: false, error: 'Page not found' };
                 }
             } else if (url.startsWith('/api/funnels/') && method === 'PATCH') {
                 const id = url.split('/')[3];
@@ -298,12 +298,12 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                     if (status) funnel.status = status;
                     response = { success: true, data: funnel };
                 } else {
-                    response = { success: false, error: 'Funnel not found' };
+                    response = { success: false, error: 'Page not found' };
                 }
             }
             
             if (response) {
-                return new Response(JSON.stringify(response), { status: response.success ? 200 : (response.error === 'Funnel not found' ? 404 : 500) });
+                return new Response(JSON.stringify(response), { status: response.success ? 200 : (response.error === 'Page not found' ? 404 : 500) });
             }
         }
 
@@ -568,14 +568,15 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('opportunities')" class="${activeView === 'opportunities' ? 'active' : ''}">Opportunities</li>
           <li onclick="window.navigateTo('quotes')" class="${activeView === 'quotes' ? 'active' : ''}">Quotes</li>
           <li onclick="window.navigateTo('invoices')" class="${activeView === 'invoices' ? 'active' : ''}">Invoices</li>
-          <li onclick="window.navigateTo('lead-capture')" class="${activeView === 'lead-capture' ? 'active' : ''}">Lead Capture</li>
           
-          <div class="nav-group-title">Marketing & Sales</div>
-          <li onclick="window.navigateTo('funnels')" class="${activeView === 'funnels' ? 'active' : ''}" style="font-weight: 700; color: var(--primary-color);">Funnels <span class="badge" style="background: #3b82f6; color: white;">New</span></li>
+          <div class="nav-group-title">Marketing & Outreach</div>
+          <li onclick="window.navigateTo('lead-capture')" class="${activeView === 'lead-capture' ? 'active' : ''}">Lead Capture</li>
+          <li onclick="window.navigateTo('marketing-funnels')" class="${activeView === 'marketing-funnels' || activeView === 'funnels' && (window as any).funnelMode === 'marketing' ? 'active' : ''}">Ad Landing Pages</li>
           
           <div class="nav-group-title">Websites</div>
-          <li onclick="window.navigateTo('website-structure')" class="${activeView === 'website-structure' ? 'active' : ''}">Structure</li>
-          <li onclick="window.navigateTo('pages')" class="${activeView === 'pages' || activeView === 'page-sections' ? 'active' : ''}">Pages</li>
+          <li onclick="window.navigateTo('website-dashboard')" class="${activeView === 'website-dashboard' ? 'active' : ''}" style="font-weight: 700; color: var(--primary-color);">My Website</li>
+          <li onclick="window.navigateTo('funnels')" class="${activeView === 'funnels' && (window as any).funnelMode !== 'marketing' ? 'active' : ''}">Site Pages</li>
+          <li onclick="window.navigateTo('website-navigation')" class="${activeView === 'website-navigation' ? 'active' : ''}">Navigation</li>
           <li onclick="window.navigateTo('seo-pages')" class="${activeView === 'seo-pages' ? 'active' : ''}">SEO Pages</li>
           <li onclick="window.navigateTo('templates')" class="${activeView === 'templates' ? 'active' : ''}" style="opacity: 0.7;">Templates</li>
           <li onclick="window.navigateTo('components')" class="${activeView === 'components' ? 'active' : ''}" style="opacity: 0.7;">Components</li>
@@ -2126,7 +2127,7 @@ function renderPublicHeader(config: any, settings: any) {
       </div>
       <nav style="display: flex; gap: 24px; align-items: center;">
          ${(config.nav_items || []).map((item: any) => `
-           <a href="${item.path}" 
+           <a href="/site${item.path.startsWith('/') ? item.path : '/' + item.path}" 
               onclick="event.preventDefault(); window.navigateTo('site', '${item.path}')"
               style="text-decoration: none; color: #475569; font-weight: 600; font-size: 0.95rem; transition: color 0.2s;" 
               onmouseover="this.style.color='var(--primary-color)'" 
@@ -2237,25 +2238,58 @@ async function renderSitePage(funnel_id: string, websiteOrContext: any, isPrevie
   activeWebsiteContext = websiteOrContext;
   const website = websiteOrContext.website_id ? websiteOrContext : websiteOrContext; // Handle both Website and WebsiteRoute
   
-  // 1. Fetch Funnel Data
-  const funnel = mockFunnels.find(f => f.id === funnel_id);
+  // 1. Resolve Data
   // In the resolver, it correctly identifies the funnel_id.
   
   // 2. Identify primary page/step in that funnel
   const page = mockPages.find(p => p.funnel_id === funnel_id);
   
   if (!page || (!isPreview && page.status !== 'published')) {
-    render404(!page ? 'No page mapped to this funnel.' : 'This page is currently a draft.');
+    render404(!page ? 'No content mapped to this page.' : 'This page is currently a draft.');
     return;
   }
 
   const settings = getWebsiteSettings();
-  // Fetch layout for this specific website
   const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || getWebsiteLayout(); 
   
+  // W6.5: Robust Internal Linking System
+  const contactRoute = mockWebsiteRoutes.find(r => r.website_id === website.id && (r.path === '/contact' || r.path === '/quote'));
+  const contactLink = contactRoute ? `/site${contactRoute.path}` : '/site/contact';
+  const homeLink = '/site/';
+  
+  // Identify all service routes for cross-linking
+  const serviceRoutes = mockWebsiteRoutes
+    .filter(r => r.website_id === website.id && r.path !== '/' && r.path !== '/contact' && r.path !== '/quote')
+    .map(r => ({ 
+      ...r, 
+      funnel_name: mockFunnels.find(f => f.id === r.funnel_id)?.name || 'Service' 
+    }));
+
   const sections = mockPageSections
     .filter(s => s.page_id === page.id && s.styles?.visible !== false)
-    .sort((a, b) => a.order - b.order);
+    .sort((a, b) => a.order - b.order)
+    .map(section => {
+      // Create a copy of content to avoid mutating the mock database directly every render
+      const content = { ...section.content, business_name: settings.business_name, phone: settings.phone };
+      
+      // Smart Link CTAs based on page context
+      if (['hero', 'offer', 'cta'].includes(section.type) && !content.button_link) {
+        if (page.name.toLowerCase().includes('contact')) {
+          content.button_link = homeLink; // Contact pages link back home
+          if (!content.button_text) content.button_text = 'Back to Homepage';
+        } else {
+          content.button_link = contactLink; // Service pages link to contact
+          if (!content.button_text) content.button_text = 'Get Free Estimate';
+        }
+      }
+
+      // Populate service lists automatically
+      if (section.type === 'services') {
+        content.service_routes = serviceRoutes;
+      }
+      
+      return { ...section, content };
+    });
 
   // Inject Tracking Scripts
   if (!isPreview) {
@@ -2370,10 +2404,10 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
       return `
         <h1 style="font-size: clamp(2.8rem, 8vw, 4.5rem); margin-bottom: 1.5rem; font-weight: 900; line-height: 1.05; letter-spacing: -0.02em;">${content.heading || 'Hero Heading'}</h1>
         <p style="font-size: clamp(1.1rem, 3vw, 1.4rem); opacity: 0.9; margin-bottom: 3rem; max-width: 700px; margin-left: ${styles.text_alignment === 'center' ? 'auto' : '0'}; margin-right: ${styles.text_alignment === 'center' ? 'auto' : '0'}; line-height: 1.6;">${content.subheading || 'Hero Subheading'}</p>
-        <button class="btn-primary" style="padding: 20px 48px; font-size: 1.25rem; border-radius: 60px; font-weight: 800; cursor: pointer; border: none; box-shadow: 0 20px 40px -10px rgba(0,0,0,0.2);"
-                onclick="document.querySelector('.site-form-section')?.scrollIntoView({behavior: 'smooth'})">
+        <${content.button_link ? 'a href="' + content.button_link + '"' : 'button'} class="btn-primary" style="display: ${styles.text_alignment === 'center' ? 'inline-block' : 'inline-flex'}; text-decoration: none; padding: 20px 48px; font-size: 1.25rem; border-radius: 60px; font-weight: 800; cursor: pointer; border: none; box-shadow: 0 20px 40px -10px rgba(0,0,0,0.2);"
+                ${!content.button_link ? 'onclick="document.querySelector(\'.site-form-section\')?.scrollIntoView({behavior: \'smooth\'})"' : ''}>
           ${content.button_text || 'Get Started'}
-        </button>
+        </${content.button_link ? 'a' : 'button'}>
       `;
     case 'proof': {
       const tests: any[] = content.testimonials || [];
@@ -2399,13 +2433,13 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
           <div style="display: inline-block; background: rgba(255,255,255,1); color: #4f46e5; padding: 6px 18px; border-radius: 30px; font-size: 0.75rem; font-weight: 900; text-transform: uppercase; margin-bottom: 24px; letter-spacing: 0.1em;">Special Deal</div>
           <h2 style="font-size: clamp(2.5rem, 6vw, 3.5rem); margin-bottom: 1.5rem; font-weight: 900; line-height: 1.1;">${content.headline || 'Ready to Start?'}</h2>
           <p style="font-size: 1.3rem; opacity: 0.9; margin-bottom: 3.5rem; max-width: 650px; margin-left: auto; margin-right: auto; line-height: 1.6;">${content.description || 'Join hundreds of happy customers today.'}</p>
-          <button class="btn-primary" 
-                  style="background: white; color: #4f46e5; border: none; padding: 22px 55px; font-size: 1.35rem; border-radius: 60px; font-weight: 900; cursor: pointer; transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 20px 40px -10px rgba(0,0,0,0.2);"
+          <${content.button_link ? 'a href="' + content.button_link + '"' : 'button'} class="btn-primary" 
+                  style="display: inline-block; text-decoration: none; background: white; color: #4f46e5; border: none; padding: 22px 55px; font-size: 1.35rem; border-radius: 60px; font-weight: 900; cursor: pointer; transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 20px 40px -10px rgba(0,0,0,0.2);"
                   onmouseover="this.style.transform='translateY(-4px) scale(1.05)'; this.style.boxShadow='0 30px 60px -15px rgba(0,0,0,0.3)'"
                   onmouseout="this.style.transform='translateY(0) scale(1)'; this.style.boxShadow='0 20px 40px -10px rgba(0,0,0,0.2)'"
-                  onclick="document.querySelector('.site-form-section')?.scrollIntoView({behavior: 'smooth'})">
+                  ${!content.button_link ? 'onclick="document.querySelector(\'.site-form-section\')?.scrollIntoView({behavior: \'smooth\'})"' : ''}>
             ${content.button_text || 'Claim My Offer'}
-          </button>
+          </${content.button_link ? 'a' : 'button'}>
           <div style="margin-top: 30px; font-size: 1rem; opacity: 0.8; font-weight: 700; letter-spacing: 0.02em;">${content.expiry || 'Limited time remaining.'}</div>
         </div>`;
     case 'gallery': {
@@ -2441,6 +2475,24 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
           <p style="text-align: center; color: #64748b; margin-bottom: 40px; font-weight: 600;">Fill out the form below and we'll be in touch within 15 minutes.</p>
           ${renderStandardForm(id, content, true)}
         </div>`;
+    case 'services': {
+      const routes: any[] = content.service_routes || [];
+      return `
+        <div style="text-align: center;">
+          <h2 style="font-size: clamp(2.2rem, 5vw, 3.2rem); font-weight: 900; margin-bottom: 15px;">${content.title || 'Our Services'}</h2>
+          <p style="color: #64748b; font-size: 1.15rem; margin-bottom: 50px; max-width: 600px; margin-left: auto; margin-right: auto; line-height: 1.6;">${content.subtitle || 'Professional cleaning solutions for every part of your property.'}</p>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 30px;">
+            ${routes.map((r: any) => `
+              <div class="service-card" style="background: white; padding: 40px; border-radius: 24px; border: 1px solid #e2e8f0; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05); transition: all 0.3s;" onmouseover="this.style.transform='translateY(-8px)'; this.style.borderColor='var(--primary-color)'" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='#e2e8f0'">
+                <div style="background: #f0f7ff; width: 64px; height: 64px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 2rem; margin: 0 auto 24px;">✨</div>
+                <h3 style="font-size: 1.4rem; font-weight: 800; margin-bottom: 12px; color: #1e293b;">${r.funnel_name}</h3>
+                <p style="color: #64748b; font-size: 0.95rem; line-height: 1.6; margin-bottom: 24px;">Professional restoration for your ${r.funnel_name.toLowerCase()}.</p>
+                <a href="#/site${r.path}" style="color: var(--primary-color); font-weight: 700; text-decoration: none; font-size: 1rem; display: inline-flex; align-items: center; gap: 8px;">Learn More <svg style="width: 18px; height: 18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg></a>
+              </div>
+            `).join('')}
+          </div>
+        </div>`;
+    }
     case 'faq': {
       const faqs: any[] = content.items || [];
       return `
@@ -2499,6 +2551,85 @@ function renderReports() {
     </main>
   `;
 }
+
+(window as any).showAttachToWebsiteModal = (funnelId: string) => {
+    const userId = (window as any).currentUser || 'system';
+    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+    const existingRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
+    
+    const modal = document.createElement('div');
+    modal.id = 'attach-modal';
+    modal.innerHTML = `
+        <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10001; display: flex; align-items: center; justify-content: center;">
+            <div class="card" style="width: 100%; max-width: 500px; padding: 35px; box-shadow: var(--shadow-lg);">
+                <h3 style="margin-top: 0; margin-bottom: 24px;">Connect Page to Web Address</h3>
+                
+                <div class="form-group" style="margin-bottom: 24px;">
+                    <label style="font-weight: 700; font-size: 0.9rem; margin-bottom: 10px; display: block;">Option 1: Use an Existing Web Address</label>
+                    <select id="existing-route-select" style="width: 100%; padding: 14px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc;">
+                        <option value="">-- Or Create New Address Below --</option>
+                        ${existingRoutes.map(r => {
+                          const fName = mockFunnels.find(f => f.id === r.funnel_id)?.name || 'Untitled';
+                          return `<option value="${r.id}">${r.path} (Currently shows: ${fName})</option>`;
+                        }).join('')}
+                    </select>
+                </div>
+
+                <div style="text-align: center; margin: 24px 0; position: relative;">
+                    <hr style="border: 0; border-top: 1px solid #e2e8f0;">
+                    <span style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 0 15px; color: #94a3b8; font-weight: 800; font-size: 0.7rem;">OR</span>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 30px;">
+                    <label style="font-weight: 700; font-size: 0.9rem; margin-bottom: 10px; display: block;">Option 2: Create a NEW Web Address</label>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 1.2rem; font-weight: 800; color: #64748b;">/</span>
+                        <input type="text" id="new-route-path-inp" placeholder="e.g. spring-special-2026" style="flex: 1; padding: 14px; border: 1px solid #e2e8f0; border-radius: 10px;">
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                    <button class="btn-outline" style="padding: 12px 24px; border-radius: 8px;" onclick="document.getElementById('attach-modal').remove()">Cancel</button>
+                    <button class="btn-primary" style="padding: 12px 24px; border-radius: 8px; font-weight: 700;" onclick="window.saveWebsiteAttachment('${funnelId}', '${website.id}')">Confirm Connection</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+};
+
+(window as any).saveWebsiteAttachment = (funnelId: string, websiteId: string) => {
+    const existingId = (document.getElementById('existing-route-select') as HTMLSelectElement).value;
+    const newPath = (document.getElementById('new-route-path-inp') as HTMLInputElement).value.trim();
+    
+    if (existingId) {
+        const route = mockWebsiteRoutes.find(r => r.id === existingId);
+        if (route) {
+            route.funnel_id = funnelId;
+            (window as any).showToast(`Path ${route.path} updated successfully!`, 2000);
+        }
+    } else if (newPath) {
+        const normalized = '/' + newPath.replace(/^\/+/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        if (mockWebsiteRoutes.some(r => r.website_id === websiteId && r.path === normalized)) {
+            alert('This URL path is already assigned to another page.');
+            return;
+        }
+        mockWebsiteRoutes.push({
+            id: `r-${Date.now()}`,
+            website_id: websiteId,
+            path: normalized,
+            funnel_id: funnelId,
+            created_at: new Date().toISOString()
+        } as any);
+        (window as any).showToast(`Assigned to new path: ${normalized}`, 2000);
+    } else {
+        alert('Please select an existing path or define a new one.');
+        return;
+    }
+    
+    document.getElementById('attach-modal')?.remove();
+    renderFunnelDetail(funnelId);
+};
 
 (window as any).openNewPageModal = (type: string) => {
   if (type === 'template') {
@@ -2677,7 +2808,7 @@ function renderPages() {
     <main class="main-content">
       <header class="view-header">
         <div style="display: flex; gap: 10px; align-items: center;">
-          <h2>Website Pages</h2>
+          <h2>All Website Sections</h2>
           <button class="btn-primary" style="background: #6c757d; padding: 5px 15px; font-size: 0.85rem;" onclick="window.downloadSitemap()">Export sitemap.xml</button>
         </div>
         <div style="display: flex; gap: 10px; align-items: center;">
@@ -2998,6 +3129,115 @@ function renderWebsiteSettings() {
   `;
 }
 
+function renderWebsiteNavigation() {
+  const userId = (window as any).currentUser || 'system';
+  const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+  const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+  
+  if (!layout.header_config.nav_items) layout.header_config.nav_items = [];
+  const navItems = layout.header_config.nav_items;
+
+  const itemsHtml = navItems.map((item: any, index: number) => `
+    <div class="card" style="display: flex; align-items: center; gap: 15px; margin-bottom: 12px; padding: 15px; border: 1px solid #eef2f6;">
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <button class="btn-outline" style="padding: 2px 10px; font-size: 0.7rem; background: white;" onclick="window.reorderNavItem(${index}, -1)" ${index === 0 ? 'disabled' : ''}>▲</button>
+        <button class="btn-outline" style="padding: 2px 10px; font-size: 0.7rem; background: white;" onclick="window.reorderNavItem(${index}, 1)" ${index === navItems.length - 1 ? 'disabled' : ''}>▼</button>
+      </div>
+      
+      <div style="flex: 2;">
+        <label style="font-size: 0.75rem; color: #64748b; font-weight: 600; text-transform: uppercase; display: block; margin-bottom: 4px;">Label</label>
+        <input type="text" value="${item.label}" onchange="window.updateNavItem(${index}, 'label', this.value)" style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px;">
+      </div>
+
+      <div style="flex: 2;">
+        <label style="font-size: 0.75rem; color: #64748b; font-weight: 600; text-transform: uppercase; display: block; margin-bottom: 4px;">URL Path</label>
+        <input type="text" value="${item.path}" onchange="window.updateNavItem(${index}, 'path', this.value)" style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px;">
+      </div>
+
+      <div style="flex: 0.5; text-align: center;">
+        <label style="font-size: 0.75rem; color: #64748b; font-weight: 600; text-transform: uppercase; display: block; margin-bottom: 4px;">Show</label>
+        <input type="checkbox" ${item.visible !== false ? 'checked' : ''} onchange="window.updateNavItem(${index}, 'visible', this.checked)" style="width: 20px; height: 20px; cursor: pointer;">
+      </div>
+
+      <button class="btn-outline" style="background: #fff; color: #ef4444; border-color: #fee2e2; padding: 8px 12px;" onclick="window.deleteNavItem(${index})">
+        <svg style="width: 18px; height: 18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+      </button>
+    </div>
+  `).join('');
+
+  app.innerHTML = `
+    ${renderSidebar('website-navigation')}
+    <main class="main-content">
+      <header class="view-header">
+        <div>
+          <h2>Website Navigation</h2>
+          <p style="color: #64748b; margin-top: 4px;">Control the links in your site's top navigation bar.</p>
+        </div>
+        <div style="display: flex; gap: 10px;">
+           <button class="btn-primary" style="background: #8a2be2;" onclick="window.addNavItem()">+ Add Item</button>
+           <button class="btn-primary" onclick="window.saveWebsiteLayout()">Save Changes</button>
+        </div>
+      </header>
+
+      <div style="max-width: 900px; padding: 10px;">
+        ${itemsHtml || '<div class="empty-state" style="padding: 60px; text-align: center; background: white; border-radius: 12px; border: 2px dashed #e2e8f0; color: #64748b;"><div style="font-size: 2rem; margin-bottom: 10px;">🗺️</div><h3>No menu items found</h3><p>Click "Add Item" to build your site menu.</p></div>'}
+      </div>
+    </main>
+  `;
+}
+
+(window as any).addNavItem = () => {
+    const userId = (window as any).currentUser || 'system';
+    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    
+    layout.header_config.nav_items.push({ label: 'New Link', path: '/', visible: true });
+    renderWebsiteNavigation();
+};
+
+(window as any).updateNavItem = (index: number, field: string, value: any) => {
+    const userId = (window as any).currentUser || 'system';
+    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    
+    (layout.header_config.nav_items[index] as any)[field] = value;
+    // Don't re-render for input changes to keep focus, but re-render for visibility toggle
+    if (field === 'visible') renderWebsiteNavigation();
+};
+
+(window as any).reorderNavItem = (index: number, direction: number) => {
+    const userId = (window as any).currentUser || 'system';
+    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    
+    const items = layout.header_config.nav_items;
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= items.length) return;
+    
+    const temp = items[index];
+    items[index] = items[newIndex];
+    items[newIndex] = temp;
+    
+    renderWebsiteNavigation();
+};
+
+(window as any).deleteNavItem = (index: number) => {
+    const userId = (window as any).currentUser || 'system';
+    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    
+    layout.header_config.nav_items.splice(index, 1);
+    renderWebsiteNavigation();
+};
+
+(window as any).saveWebsiteLayout = async () => {
+    (window as any).showToast('Saving navigation...', 2000);
+    // In a real app, this would be a POST to /api/websites/layout
+    setTimeout(() => {
+        (window as any).showToast('Navigation saved successfully!', 2000);
+    }, 500);
+};
+
 function renderWebsiteStructure() {
   const userId = (window as any).currentUser || 'system';
   const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
@@ -3010,8 +3250,8 @@ function renderWebsiteStructure() {
     <main class="main-content">
       <header class="view-header">
         <div>
-          <h2>Website Structure</h2>
-          <p style="color: #64748b; margin-top: 4px;">Map your custom URLs to marketing funnels.</p>
+          <h2>Website Configuration</h2>
+          <p style="color: #64748b; margin-top: 4px;">Map your custom URLs to website pages.</p>
         </div>
         <div style="display: flex; gap: 10px;">
            <button class="btn-primary" onclick="window.showAddRouteModal('${website.id}')">Add New Route</button>
@@ -3037,7 +3277,7 @@ function renderWebsiteStructure() {
           <thead>
             <tr>
               <th style="padding-left: 20px;">URL Path</th>
-              <th>Destination Funnel</th>
+              <th>Destination Page</th>
               <th>Status</th>
               <th style="text-align: right; padding-right: 20px;">Actions</th>
             </tr>
@@ -3055,12 +3295,12 @@ function renderWebsiteStructure() {
                     </div>
                   </td>
                   <td>
-                    <div style="font-weight: 500; color: #1e293b;">${funnel ? funnel.name : 'Unknown Funnel'}</div>
-                    <small style="color: #64748b;">${route.funnel_id}</small>
+                    <div style="font-weight: 500; color: #1e293b;">${funnel ? funnel.name : 'Unknown Page'}</div>
+                    <!-- Internal ID hidden -->
                   </td>
                   <td><span class="badge badge-published">Live</span></td>
                   <td style="text-align: right; padding-right: 20px;">
-                    <button class="btn-outline" style="color: #64748b; border-color: #e2e8f0; padding: 4px 10px; font-size: 0.8rem;" onclick="window.navigateTo('funnel-detail', '${route.funnel_id}')">Edit Funnel</button>
+                    <button class="btn-outline" style="color: #64748b; border-color: #e2e8f0; padding: 4px 10px; font-size: 0.8rem;" onclick="window.navigateTo('funnel-detail', '${route.funnel_id}')">Edit Page</button>
                     ${!isHome ? `<button class="btn-outline" style="color: #ef4444; border-color: #fee2e2; padding: 4px 10px; font-size: 0.8rem; margin-left: 5px;" onclick="window.deleteRoute('${route.id}')">Delete</button>` : ''}
                   </td>
                 </tr>
@@ -3091,11 +3331,11 @@ function renderWebsiteStructure() {
         </div>
 
         <div class="form-group" style="margin-bottom: 30px;">
-          <label>Destination Funnel</label>
+          <label>Destination Page</label>
           <select id="route-funnel-id" style="width: 100%; padding: 12px; border: 1px solid #e2e8f0; border-radius: 6px;">
             ${mockFunnels.map(f => `<option value="${f.id}">${f.name}</option>`).join('')}
           </select>
-          <small style="color: #64748b; margin-top: 4px; display: block;">Which funnel should load at this path?</small>
+          <small style="color: #64748b; margin-top: 4px; display: block;">Which page should load at this path?</small>
         </div>
 
         <div style="display: flex; gap: 12px; justify-content: flex-end;">
@@ -3145,7 +3385,7 @@ function renderWebsiteStructure() {
 };
 
 (window as any).deleteRoute = (id: string) => {
-  if (!confirm('Are you sure you want to delete this route? This path will no longer load its funnel.')) return;
+  if (!confirm('Are you sure you want to delete this route? This path will no longer load its page.')) return;
   
   const index = mockWebsiteRoutes.findIndex(r => r.id === id);
   if (index !== -1) {
@@ -3709,100 +3949,200 @@ function renderSkeleton(type: 'pages' | 'templates' | 'builder' | 'generic') {
   return `<div class="skeleton skeleton-rect" style="height: 100%; border-radius: 12px;"></div>`;
 }
 
-async function renderFunnels() {
+async function renderWebsiteDashboard() {
+  const userId = (window as any).currentUser || 'system';
+  const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+  const routes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
+  const homePage = mockFunnels.find(f => f.name.toLowerCase().includes('home')) || mockFunnels[0];
+  
+  const siteUrl = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
+
+  app.innerHTML = `
+    ${renderSidebar('website-dashboard')}
+    <main class="main-content">
+      <header class="view-header">
+        <div>
+          <h2>My Website Dashboard</h2>
+          <p style="color: #64748b; margin-top: 4px;">Overview of your online presence.</p>
+        </div>
+      </header>
+
+      <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 30px; align-items: start;">
+        <div style="display: flex; flex-direction: column; gap: 30px;">
+          <!-- Site Preview Card -->
+          <div class="card" style="padding: 30px; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border-left: 6px solid #0ea5e9;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span class="badge" style="background: #0ea5e9; color: white; margin-bottom: 12px;">Live & Published</span>
+                <h3 style="margin: 0; font-size: 1.5rem; color: #1e3a8a;">${website.name || 'Your Website'}</h3>
+                <div style="font-size: 1.1rem; color: #0369a1; margin-top: 8px; font-weight: 600;">${siteUrl}</div>
+              </div>
+              <a href="${siteUrl}" target="_blank" class="btn-primary" style="background: #0ea5e9; border: none; padding: 14px 28px; font-weight: 800; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(14, 165, 233, 0.4);">View Live Site ↗</a>
+            </div>
+          </div>
+
+          <!-- Pages List -->
+          <div class="card" style="padding: 0; overflow: hidden;">
+            <div style="padding: 20px; border-bottom: 1px solid #eef2f6; display: flex; justify-content: space-between; align-items: center;">
+              <h3 style="margin: 0;">Active Pages (${routes.length})</h3>
+              <button class="btn-outline" style="font-size: 0.85rem;" onclick="window.navigateTo('funnels')">Manage All</button>
+            </div>
+            <table class="data-table">
+              <tbody>
+                ${routes.map(r => {
+                  const funnel = mockFunnels.find(f => f.id === r.funnel_id);
+                  return `
+                    <tr>
+                      <td style="padding-left: 20px;">
+                        <div style="font-weight: 700;">${funnel?.name}</div>
+                        <code style="color: var(--primary-color); font-size: 0.8rem;">${r.path}</code>
+                      </td>
+                      <td style="text-align: right; padding-right: 20px;">
+                        <button class="btn-outline" style="padding: 4px 12px; border-radius: 6px; font-size: 0.8rem;" onclick="window.navigateTo('funnel-detail', '${r.funnel_id}')">Edit Sections</button>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 30px;">
+          <!-- Quick Actions -->
+          <div class="card" style="padding: 24px;">
+            <h3 style="margin-top: 0; margin-bottom: 20px;">Quick Actions</h3>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+              <button class="btn-primary" style="width: 100%; text-align: left; padding: 16px; border-radius: 12px; display: flex; align-items: center; gap: 12px;" onclick="window.navigateTo('funnel-detail', '${homePage?.id}')">
+                <span style="font-size: 1.5rem;">🏠</span>
+                <div>
+                  <div style="font-weight: 800;">Edit Home Page</div>
+                  <div style="font-size: 0.75rem; opacity: 0.8;">Modify your primary landing page structure.</div>
+                </div>
+              </button>
+              <button class="btn-primary" style="width: 100%; text-align: left; padding: 16px; border-radius: 12px; background: #8a2be2; display: flex; align-items: center; gap: 12px;" onclick="window.showAddPageModal('${website.id}')">
+                <span style="font-size: 1.5rem;">📄</span>
+                <div>
+                  <div style="font-weight: 800;">Add Service Page</div>
+                  <div style="font-size: 0.75rem; opacity: 0.8;">Expand your site with an automated page.</div>
+                </div>
+              </button>
+              <button class="btn-outline" style="width: 100%; text-align: left; padding: 16px; border-radius: 12px; display: flex; align-items: center; gap: 12px;" onclick="window.navigateTo('website-settings')">
+                <span style="font-size: 1.5rem;">⚙️</span>
+                <div>
+                  <div style="font-weight: 700;">Branding & SEO</div>
+                  <div style="font-size: 0.75rem; color: #64748b;">Configure logos and site-wide tracking.</div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Stats Summary -->
+          <div class="card" style="padding: 24px; background: #fafafa;">
+             <h4 style="margin: 0; font-size: 0.8rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Site Health</h4>
+             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
+                <div style="text-align: center; padding: 15px; background: white; border-radius: 12px; border: 1px solid #eef2f6;">
+                   <div style="font-size: 1.5rem; font-weight: 800; color: #10b981;">A+</div>
+                   <div style="font-size: 0.65rem; color: #64748b; margin-top: 4px;">CORE VITALS</div>
+                </div>
+                <div style="text-align: center; padding: 15px; background: white; border-radius: 12px; border: 1px solid #eef2f6;">
+                   <div style="font-size: 1.5rem; font-weight: 800; color: #0ea5e9;">100%</div>
+                   <div style="font-size: 0.65rem; color: #64748b; margin-top: 4px;">RESPONSIVE</div>
+                </div>
+             </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  `;
+}
+
+function renderFunnels(mode: 'website' | 'marketing' = 'website') {
   currentView = 'funnels';
+  (window as any).funnelMode = mode;
+  const userId = (window as any).currentUser || 'system';
+  const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+  
+  const siteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
+  const routedFunnelIds = new Set(siteRoutes.map(r => r.funnel_id));
+  
+  const allFunnels = mockFunnels.filter(f => f.user_id === userId);
+  
+  const displayFunnels = mode === 'website'
+    ? allFunnels.filter(f => routedFunnelIds.has(f.id))
+    : allFunnels.filter(f => !routedFunnelIds.has(f.id));
+
+  const viewTitle = mode === 'website' ? 'Site Pages' : 'Marketing Pages';
+  const viewDesc = mode === 'website' 
+    ? 'Manage the core pages that make up your business website.' 
+    : 'Standalone lead-capture pages for ads and seasonal marketing.';
+
+  const rowsHtml = displayFunnels.map(funnel => {
+    const route = siteRoutes.find(r => r.funnel_id === funnel.id);
+    return `
+      <tr class="clickable-row" onclick="window.navigateTo('funnel-detail', '${funnel.id}')">
+        <td style="font-weight: 600; color: var(--primary-color); padding-left: 20px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 1.2rem;">${mode === 'website' ? '📄' : '🎯'}</span>
+            ${funnel.name || 'Untitled Page'}
+          </div>
+        </td>
+        <td><code>${route ? route.path : '(Standalone)'}</code></td>
+        <td><span class="badge badge-${funnel.status}">${funnel.status}</span></td>
+        <td style="text-align: right; padding-right: 20px;">
+           <button class="btn-primary" style="padding: 6px 14px; font-size: 0.85rem;" onclick="event.stopPropagation(); window.navigateTo('funnel-detail', '${funnel.id}')">Manage</button>
+           ${route && route.path !== '/' ? `<button class="btn-primary" style="padding: 6px 14px; font-size: 0.85rem; background: #ef4444; border: none; margin-left: 5px;" onclick="event.stopPropagation(); window.deletePage('${route.id}', '${funnel.id}')">Delete</button>` : ''}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
   app.innerHTML = `
     ${renderSidebar('funnels')}
     <main class="main-content">
       <header class="view-header">
-        <h2>Funnels</h2>
-        <button class="btn-primary" onclick="window.createFunnelPrompt()">+ Create New Funnel</button>
+        <div>
+          <h2 style="margin: 0;">${viewTitle}</h2>
+          <p style="color: #64748b; margin-top: 4px; font-size: 0.9rem;">${viewDesc}</p>
+        </div>
+        <div style="display: flex; gap: 12px;">
+          ${mode === 'website' 
+            ? `<button class="btn-primary" onclick="window.showAddPageModal('${website.id}')">+ New Website Page</button>`
+            : `<button class="btn-primary" style="background: #4f46e5; border: none;" onclick="window.openNewPageModal('template')">+ New Marketing Page</button>`
+          }
+        </div>
       </header>
-      <div id="funnels-top-container" style="padding: 0 20px;">
-        ${(window as any).renderFunnelsChecklist()}
-      </div>
-      <div id="funnels-container" style="padding: 20px;">
-        <div class="loading">Loading your funnels...</div>
+      
+      <div id="pages-list-container" style="padding: 20px;">
+        <div class="card" style="padding: 0; overflow: hidden;">
+          <table class="clients-table" style="box-shadow: none; margin-top: 0;">
+            <thead>
+              <tr>
+                <th style="padding-left: 20px;">${mode === 'website' ? 'Page Name' : 'Page Name'}</th>
+                <th>Web Address</th>
+                <th>Status</th>
+                <th style="text-align: right; padding-right: 20px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml || `<tr><td colspan="4" style="text-align: center; padding: 60px; color: #94a3b8;">No ${mode === 'website' ? 'pages' : 'funnels'} found.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
       </div>
     </main>
   `;
-
-  try {
-    const res = await fetch('/api/funnels').then(r => r.json());
-    const container = document.getElementById('funnels-container');
-    if (!container) return;
-
-    if (!res.success || !res.data || res.data.length === 0) {
-      container.innerHTML = `
-        <div class="empty-state" style="text-align: center; padding: 60px 20px; background: white; border-radius: 12px; border: 2px dashed #e2e8f0;">
-          <div style="font-size: 3rem; margin-bottom: 16px;">🚀</div>
-          <h3 style="color: #1e293b; margin-bottom: 8px;">No funnels yet</h3>
-          <p style="color: #64748b; max-width: 400px; margin: 0 auto 24px;">Your first funnel will help you capture leads fast. Create one to start growing your business.</p>
-          <button class="btn-primary" onclick="window.createFunnelPrompt()">Build My First Funnel</button>
-        </div>
-      `;
-      return;
-    }
-
-    // 🌿 WB.5.5: Fetch metrics for funnels
-    const oppsRes = await fetch('/api/opportunities').then(r => r.json());
-    const allOpps = oppsRes.success ? oppsRes.data : [];
-    const today = new Date().toISOString().split('T')[0];
-
-    const funnelsHtml = res.data.map((f: any) => {
-      const funnelOpps = allOpps.filter((o: any) => o.funnel_id === f.id);
-      const totalLeads = funnelOpps.length;
-      const leadsToday = funnelOpps.filter((o: any) => o.created_at.startsWith(today)).length;
-
-      return `
-      <div class="card funnel-card" 
-           style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; transition: transform 0.2s; cursor: pointer; border: 1px solid #eef2f6;" 
-           onclick="window.navigateTo('funnel-detail', '${f.id}')"
-           onmouseover="this.style.boxShadow='0 10px 25px rgba(0,0,0,0.05)'; this.style.borderColor='var(--primary-color)';"
-           onmouseout="this.style.boxShadow='none'; this.style.borderColor='#eef2f6';">
-        <div style="display: flex; align-items: center; gap: 20px;">
-          <div style="background: #f0f7ff; width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">🎯</div>
-          <div>
-            <h4 style="margin: 0; color: #1e293b; font-size: 1.1rem;">${f.name}</h4>
-            <div style="font-size: 0.85rem; color: #64748b; margin-top: 4px;">Created ${new Date(f.created_at).toLocaleDateString()}</div>
-          </div>
-        </div>
-        <div style="text-align: right; display: flex; align-items: center; gap: 30px;">
-          <div style="text-align: center; min-width: 60px;">
-            <div style="font-weight: 700; color: #1e293b; font-size: 1.1rem;">${totalLeads}</div>
-            <div style="font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Total Leads</div>
-          </div>
-          <div style="text-align: center; min-width: 80px; padding: 0 15px; border-left: 1px solid #eef2f6; border-right: 1px solid #eef2f6;">
-            <div style="font-weight: 700; color: var(--primary-color); font-size: 1.1rem;">${leadsToday}</div>
-            <div style="font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Leads Today</div>
-          </div>
-          <div style="text-align: center; min-width: 40px;">
-            <div style="font-weight: 700; color: #1e293b; font-size: 1.1rem;">${f.step_count || 0}</div>
-            <div style="font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Steps</div>
-          </div>
-          <span class="badge badge-${f.status}" style="text-transform: capitalize; padding: 6px 12px; border-radius: 6px; font-weight: 600;">${f.status}</span>
-        </div>
-      </div>
-    `;}).join('');
-
-    container.innerHTML = `
-      <div class="funnels-grid">
-        ${funnelsHtml}
-      </div>
-    `;
-  } catch (err) {
-    console.error('Failed to load funnels:', err);
-    const container = document.getElementById('funnels-container');
-    if (container) container.innerHTML = '<div class="error">Failed to load funnels. Please try again.</div>';
-  }
 }
+
+
+
 
 async function renderFunnelDetail(funnelId: string) {
   app.innerHTML = `
     ${renderSidebar('funnels')}
     <main class="main-content">
       <div id="funnel-detail-container" style="padding: 20px;">
-        <div class="loading">Loading funnel details...</div>
+        <div class="loading">Loading page details...</div>
       </div>
     </main>
   `;
@@ -3855,32 +4195,45 @@ async function renderFunnelDetail(funnelId: string) {
           <div>
             <div style="font-size: 0.75rem; color: #3b82f6; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px;">${step.step_type}</div>
             <h4 style="margin: 0; font-size: 1.1rem; color: #1e293b;">${step.name}</h4>
-            <div style="font-size: 0.85rem; color: #64748b; margin-top: 4px;">Linked Page: <span style="font-family: monospace; background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">/${step.slug}</span></div>
+            <div style="font-size: 0.85rem; color: #64748b; margin-top: 4px;">Path: <span style="font-family: monospace; background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">/${step.slug}</span></div>
           </div>
-          <button class="btn-primary" style="background: white; color: var(--primary-color); border: 1px solid var(--primary-color); padding: 8px 16px; font-weight: 600;" onclick="window.openBuilderFromFunnel('${step.id}', '${funnelId}')">Edit Step</button>
+          <button class="btn-primary" style="background: white; color: var(--primary-color); border: 1px solid var(--primary-color); padding: 8px 16px; font-weight: 600;" onclick="window.openBuilderFromFunnel('${step.id}', '${funnelId}')">Edit Section</button>
         </div>
       </div>
       ${index < steps.length - 1 ? `<div style="width: 2px; height: 30px; background: #e2e8f0; margin-left: 19px; margin-top: -24px; margin-bottom: 4px;"></div>` : ''}
     `).join('');
 
+    const website = mockWebsites[0]; // Assuming user has one website
+    const routes = mockWebsiteRoutes.filter(r => r.funnel_id === funnelId);
+    const siteUrlBase = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
+
     container.innerHTML = `
-      <div id="live-url-banner" class="card" style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 20px; margin-bottom: 24px;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <span style="font-size: 1.5rem;">🌐</span>
+      <!-- Website Attachment Card (W6.7) -->
+      <div id="website-attachment-card" class="card" style="background: ${routes.length > 0 ? '#f0fdf4' : '#fffbeb'}; border: 1px solid ${routes.length > 0 ? '#bbf7d0' : '#fde68a'}; padding: 25px; margin-bottom: 32px; border-left: 6px solid ${routes.length > 0 ? '#10b981' : '#f59e0b'};">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: ${routes.length > 0 ? '0' : '20px'};">
+          <div style="display: flex; align-items: center; gap: 15px;">
+            <span style="font-size: 2rem;">${routes.length > 0 ? '🌐' : '🔗'}</span>
             <div>
-              <div style="font-size: 0.75rem; color: #166534; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Your Funnel is Live & Public</div>
-              <div id="funnel-public-url" style="font-weight: 600; color: #1e293b; font-family: monospace; font-size: 1rem;">https://${(window as any).userSlug || 'app'}.pressurepro.io/${funnel.id}</div>
+              <div style="font-size: 0.75rem; color: ${routes.length > 0 ? '#166534' : '#92400e'}; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">
+                ${routes.length > 0 ? 'Connected to Website' : 'Not Connected to Website'}
+              </div>
+              <h3 style="margin: 0; font-size: 1.25rem; color: #1e293b; font-family: 'Inter', sans-serif;">
+                ${routes.length > 0 
+                  ? routes.map(r => `<a href="${siteUrlBase}${r.path}" target="_blank" style="color: inherit; text-decoration: none; border-bottom: 2px dashed #bbf7d0;">${siteUrlBase}${r.path} ↗</a>`).join(', ') 
+                  : 'Standalone Funnel (Not on Website)'}
+              </h3>
             </div>
           </div>
-          <button class="btn-primary" style="background: white; color: #166534; border: 1px solid #166534; padding: 8px 16px; font-size: 0.85rem;" onclick="window.copyFunnelUrl()">Copy Link</button>
+          <button class="btn-primary" style="background: #1e293b; color: white; border: none; padding: 12px 24px; font-weight: 700; border-radius: 10px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);" onclick="window.showAttachToWebsiteModal('${funnelId}')">
+            ${routes.length > 0 ? 'Manage Connection' : 'Attach to Website Page'}
+          </button>
         </div>
         
-        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-          <button class="btn-primary" style="background: #1877f2; border: none; padding: 10px 20px; font-size: 0.9rem; flex: 1; min-width: 140px;" onclick="window.shareToSocial('${funnel.id}', 'facebook')">Share to Facebook</button>
-          <button class="btn-primary" style="background: #25d366; border: none; padding: 10px 20px; font-size: 0.9rem; flex: 1; min-width: 140px;" onclick="window.shareToSocial('${funnel.id}', 'whatsapp')">Share to WhatsApp</button>
-          <button class="btn-primary" style="background: #6366f1; border: none; padding: 10px 20px; font-size: 0.9rem; flex: 1; min-width: 140px;" onclick="window.testFunnel('${funnel.id}')">Test My Funnel</button>
-        </div>
+        ${routes.length === 0 ? `
+           <div style="font-size: 0.9rem; color: #92400e; font-weight: 600; background: rgba(255,255,255,0.4); padding: 14px; border-radius: 10px; margin-top: 15px; border: 1px dashed #fde68a;">
+              💡 This page is currently a standalone project. Connecting it to your website allows it to appear in your site navigation and use your custom domain URL.
+           </div>
+        ` : ''}
       </div>
 
       <div style="margin-bottom: 12px; font-size: 0.9rem; color: #475569; font-weight: 600; display: flex; align-items: center; gap: 8px;">
@@ -3912,14 +4265,14 @@ async function renderFunnelDetail(funnelId: string) {
               <h2 style="margin: 0;">${funnel.name}</h2>
               <span class="badge badge-${funnel.status}" style="text-transform: capitalize; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem;">${funnel.status}</span>
             </div>
-            <p style="color: #64748b; margin: 4px 0 0 0; font-size: 0.9rem;">Configure your automation flow and pages</p>
+            <p style="color: #64748b; margin: 4px 0 0 0; font-size: 0.9rem;">Configure your sections and layout</p>
           </div>
         </div>
       </header>
 
       <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 32px; max-width: 1200px;">
         <div id="steps-section">
-          <h3 style="margin-bottom: 24px; color: #1e293b; font-size: 1.25rem;">Funnel Steps</h3>
+          <h3 style="margin-bottom: 24px; color: #1e293b; font-size: 1.25rem;">Page Sections</h3>
           <div class="steps-flow">
             ${stepsHtml}
           </div>
@@ -3954,7 +4307,7 @@ async function renderFunnelDetail(funnelId: string) {
       const sortedLogs = rawLogs.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 15);
 
       if (sortedLogs.length === 0) {
-        activityList.innerHTML = '<div style="color: #64748b; font-size: 0.9rem; text-align: center; padding: 20px;">No activity yet. Share your funnel to start seeing leads!</div>';
+        activityList.innerHTML = '<div style="color: #64748b; font-size: 0.9rem; text-align: center; padding: 20px;">No activity yet. Share your page to start seeing leads!</div>';
       } else {
         activityList.innerHTML = sortedLogs.map((l: any) => {
           let icon = '📝';
@@ -3984,18 +4337,82 @@ async function renderFunnelDetail(funnelId: string) {
       }
     }
   } catch (err: any) {
-    console.error('Failed to load funnel detail:', err);
+    console.error('Failed to load page detail:', err);
     const container = document.getElementById('funnel-detail-container');
-    if (container) container.innerHTML = `<div class="error">Failed to load funnel: ${err.message}</div>`;
+    if (container) container.innerHTML = `<div class="error">Failed to load page: ${err.message}</div>`;
   }
 }
 
-(window as any).createFunnelPrompt = async () => {
-    const name = prompt("Enter a name for your new funnel:");
-    if (!name) return;
+(window as any).showAddPageModal = (websiteId: string) => {
+    const modal = document.createElement('div');
+    modal.id = 'page-modal';
+    modal.innerHTML = `
+        <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10001; display: flex; align-items: center; justify-content: center;">
+            <div class="card" style="width: 100%; max-width: 480px; padding: 30px; box-shadow: var(--shadow-lg);">
+                <h3 style="margin-top: 0; margin-bottom: 24px; font-size: 1.5rem;">Add New Website Page</h3>
+                
+                <div class="form-group" style="margin-bottom: 24px;">
+                    <label style="font-weight: 600; font-size: 0.9rem; margin-bottom: 8px; display: block;">Page Name</label>
+                    <input type="text" id="new-page-name" placeholder="e.g. Roof Cleaning" style="width: 100%; padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 1rem;">
+                </div>
+
+                <div class="form-group" style="margin-bottom: 30px;">
+                    <label style="font-weight: 600; font-size: 0.9rem; margin-bottom: 12px; display: block;">Page Type</label>
+                    <div style="display: grid; grid-template-columns: 1fr; gap: 10px;">
+                        <label class="type-option" style="display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid #e2e8f0; border-radius: 10px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#e2e8f0'">
+                            <input type="radio" name="page-type" value="service" checked style="width: 18px; height: 18px;">
+                            <div>
+                                <div style="font-weight: 700; color: #1e293b;">Service Page</div>
+                                <div style="font-size: 0.8rem; color: #64748b; margin-top: 2px;">Pre-built sections for showcasing specific services.</div>
+                            </div>
+                        </label>
+                        <label class="type-option" style="display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid #e2e8f0; border-radius: 10px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#e2e8f0'">
+                            <input type="radio" name="page-type" value="contact" style="width: 18px; height: 18px;">
+                            <div>
+                                <div style="font-weight: 700; color: #1e293b;">Contact & Quote Page</div>
+                                <div style="font-size: 0.8rem; color: #64748b; margin-top: 2px;">Optimized for lead capture and quote requests.</div>
+                            </div>
+                        </label>
+                        <label class="type-option" style="display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid #e2e8f0; border-radius: 10px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#e2e8f0'">
+                            <input type="radio" name="page-type" value="custom" style="width: 18px; height: 18px;">
+                            <div>
+                                <div style="font-weight: 700; color: #1e293b;">Custom Page</div>
+                                <div style="font-size: 0.8rem; color: #64748b; margin-top: 2px;">Start with a blank canvas for complete control.</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                    <button class="btn-outline" style="padding: 12px 24px; border-radius: 8px;" onclick="document.getElementById('page-modal').remove()">Cancel</button>
+                    <button class="btn-primary" style="padding: 12px 24px; border-radius: 8px; font-weight: 700;" onclick="window.saveNewPage('${websiteId}')">Create & Publish</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+};
+
+(window as any).saveNewPage = async (websiteId: string) => {
+    const nameInput = document.getElementById('new-page-name') as HTMLInputElement;
+    const typeInput = document.querySelector('input[name="page-type"]:checked') as HTMLInputElement;
+    
+    if (!nameInput?.value) {
+        alert('Please enter a page name.');
+        return;
+    }
+
+    const name = nameInput.value.trim();
+    const type = typeInput?.value || 'service';
+    
+    // Auto-generate slug and path
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const path = '/' + slug;
 
     try {
-        (window as any).showToast('Creating funnel and setting up steps...', 3000);
+        (window as any).showToast('Auto-generating page structure...', 3000);
+        
+        // 1. Create Page (Funnel) via API
         const res = await fetch('/api/funnels', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4003,14 +4420,56 @@ async function renderFunnelDetail(funnelId: string) {
         }).then(r => r.json());
 
         if (res.success) {
-            (window as any).showToast('Funnel created successfully!', 2000);
-            window.navigateTo('funnel-detail', res.data.id);
+            const funnelId = res.data.id;
+
+            // 2. Create Route in mock data
+            if (!mockWebsiteRoutes.some(r => r.website_id === websiteId && r.path === path)) {
+              const newRoute = {
+                  id: `r-${Date.now()}`,
+                  website_id: websiteId,
+                  path: path,
+                  funnel_id: funnelId,
+                  created_at: new Date().toISOString()
+              };
+              mockWebsiteRoutes.push(newRoute as any);
+            }
+            
+            // 3. Add to Website Navigation automatically
+            const layout = mockWebsiteLayouts.find(l => l.website_id === websiteId) || mockWebsiteLayouts[0];
+            if (layout && layout.header_config) {
+                if (!layout.header_config.nav_items) layout.header_config.nav_items = [];
+                // Check if already in nav
+                if (!layout.header_config.nav_items.some(item => item.path === path)) {
+                    layout.header_config.nav_items.push({ label: name, path: path, visible: true });
+                }
+            }
+
+            (window as any).showToast('Page Created & Added to Menu!', 2000);
+            document.getElementById('page-modal')?.remove();
+            
+            // Jump to the detail view immediately for customization
+            window.navigateTo('funnel-detail', funnelId);
         } else {
-            alert('Failed to create funnel: ' + res.error);
+            alert('Error: ' + res.error);
         }
     } catch (err: any) {
-        alert('Error creating funnel: ' + err.message);
+        alert('Failed to automate page creation: ' + err.message);
     }
+};
+
+(window as any).deletePage = (routeId: string, funnelId: string) => {
+    if (!confirm('Are you sure? This will delete the page and its URL path.')) return;
+
+    // 1. Remove Route
+    const rIdx = mockWebsiteRoutes.findIndex(r => r.id === routeId);
+    if (rIdx !== -1) mockWebsiteRoutes.splice(rIdx, 1);
+
+    // 2. Remove Funnel
+    const fIdx = mockFunnels.findIndex(f => f.id === funnelId);
+    if (fIdx !== -1) mockFunnels.splice(fIdx, 1);
+
+    (window as any).showToast('Page deleted', 2000);
+    renderFunnels();
 };
 
 (window as any).navigateTo = async (view: string, id?: string, context?: any) => {
@@ -4037,11 +4496,23 @@ async function renderFunnelDetail(funnelId: string) {
     executeNavigation(view, id, context);
   }
 
-  // Update URL for standard CRM navigation
+  // Update URL for standard CRM navigation (Hash based)
   if (!['site', 'preview'].includes(view)) {
     const newHash = id ? `#/${view}/${id}` : `#/${view}`;
     if (window.location.hash !== newHash) {
        window.history.pushState({}, "", newHash);
+    }
+  } else {
+    // Phase W6.9: Real URLs for Public Site (No Hashes)
+    let newPath = '';
+    if (view === 'site') {
+      newPath = id ? `/site${id.startsWith('/') ? id : '/' + id}` : '/site/';
+    } else if (view === 'preview') {
+      newPath = id ? `/preview/${id}` : '/preview/';
+    }
+    
+    if (newPath && window.location.pathname !== newPath) {
+      window.history.pushState({}, "", newPath);
     }
   }
 };
@@ -4061,7 +4532,9 @@ async function executeNavigation(view: string, id?: string, context?: any) {
       break;
     case 'invoices': renderInvoices(); break;
     case 'lead-capture': renderLeadCapture(); break;
-    case 'funnels': renderFunnels(); break;
+    case 'funnels': renderFunnels('website'); break;
+    case 'marketing-funnels': renderFunnels('marketing'); break;
+    case 'website-dashboard': renderWebsiteDashboard(); break;
     case 'funnel-detail': if (id) renderFunnelDetail(id); break;
     case 'pages': renderPages(); break;
     case 'page-sections': if (id) renderPageSections(id); break;
@@ -4069,6 +4542,7 @@ async function executeNavigation(view: string, id?: string, context?: any) {
     case 'templates': renderTemplates(); break;
     case 'components': app.innerHTML = `${renderSidebar('components')}<main class="main-content"><h2>Components Shelf</h2><div class="empty-state">Library of pre-built UI components coming soon.</div></main>`; break;
     case 'website-settings': renderWebsiteSettings(); break;
+    case 'website-navigation': renderWebsiteNavigation(); break;
     case 'seo-pages': (window as any).renderSeoPages(); break;
     case 'website-structure': renderWebsiteStructure(); break;
     case 'reports': renderReports(); break;
@@ -4962,7 +5436,20 @@ async function bootRouter() {
   const host = window.location.hostname;
   const rawPath = window.location.pathname;
 
-  // 1. Check for Admin Hash Routes First
+  // 1. Phase W6.9: Resolve Public Website Route first (Real URLs)
+  if (rawPath.startsWith('/site/') || rawPath.startsWith('/preview/')) {
+    let targetPath = rawPath;
+    if (targetPath.startsWith('/site/')) targetPath = targetPath.replace('/site/', '/');
+    if (targetPath.startsWith('/preview/')) targetPath = targetPath.replace('/preview/', '/');
+    
+    const result = await resolveWebsiteRequest(host, targetPath);
+    if (result && result.funnel_id) {
+       renderSitePage(result.funnel_id, result.website);
+       return;
+    }
+  }
+
+  // 2. Check for Admin Hash Routes (Standard CRM)
   if (window.location.hash) {
      const parts = window.location.hash.slice(2).split('/');
      const view = parts[0];
@@ -4973,22 +5460,15 @@ async function bootRouter() {
      }
   }
 
-  // 2. Resolve Public Website Route
-  // Map /site/X or /preview/X to just X for the resolver if needed, 
-  // but resolver usually handles the full path.
-  let targetPath = rawPath === '/' ? '/' : rawPath;
-  
-  // Clean up legacy paths for the resolver if they exist
-  if (targetPath.startsWith('/site/')) targetPath = targetPath.replace('/site/', '/');
-  if (targetPath.startsWith('/preview/')) targetPath = targetPath.replace('/preview/', '/');
-
-  const result = await resolveWebsiteRequest(host, targetPath);
-
-  if (result && result.funnel_id) {
-    (window as any).navigateTo('site', result.funnel_id, result.website);
-  } else if (rawPath === '/') {
-    // If root doesn't resolve to a website, show dashboard
-    renderDashboard();
+  // 3. Fallback to Dashboard
+  if (rawPath === '/' || rawPath === '/index.html' || rawPath === '') {
+    // If we're at root, try to resolve as homepage first
+    const homeResult = await resolveWebsiteRequest(host, '/');
+    if (homeResult && homeResult.funnel_id && rawPath !== '/index.html') {
+      renderSitePage(homeResult.funnel_id, homeResult.website);
+    } else {
+      (window as any).navigateTo('dashboard');
+    }
   } else {
     render404();
   }
@@ -5228,7 +5708,7 @@ let onboardingState = {
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
         <div style="display: flex; align-items: center; gap: 10px;">
           <input type="checkbox" id="check-copy" ${state.copy ? 'checked' : ''} onchange="window.toggleCheckItem('copy')">
-          <label for="check-copy" style="font-size: 0.9rem; color: #92400e; cursor: pointer;">Copy your funnel link</label>
+          <label for="check-copy" style="font-size: 0.9rem; color: #92400e; cursor: pointer;">Copy your page link</label>
         </div>
         <div style="display: flex; align-items: center; gap: 10px;">
           <input type="checkbox" id="check-share" ${state.share ? 'checked' : ''} onchange="window.toggleCheckItem('share')">

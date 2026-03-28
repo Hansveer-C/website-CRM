@@ -235,6 +235,7 @@ export interface WebsiteRoute {
 export interface NavItem {
   label: string;
   path: string;
+  visible?: boolean;
   children?: NavItem[];
 }
 

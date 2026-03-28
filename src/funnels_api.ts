@@ -24,7 +24,7 @@ export async function getFunnelsApi(req: ApiRequest) {
         return {
             status: 500,
             success: false,
-            error: res.error || 'Internal server error while fetching funnels.'
+            error: res.error || 'Internal server error while fetching pages.'
         };
     }
 
@@ -59,7 +59,7 @@ export async function getFunnelByIdApi(req: ApiRequest, id: string) {
         return {
             status: !res.success ? 500 : 404,
             success: false,
-            error: res.error || 'Funnel not found or unauthorized access.'
+            error: res.error || 'Page not found or unauthorized access.'
         };
     }
 
@@ -95,7 +95,7 @@ export async function createFunnelApi(req: ApiRequest) {
         return {
             status: 400,
             success: false,
-            error: 'Funnel name is required and must be a string.'
+            error: 'Page name is required and must be a string.'
         };
     }
 
@@ -105,7 +105,7 @@ export async function createFunnelApi(req: ApiRequest) {
         return {
             status: 500,
             success: false,
-            error: res.error || 'Could not create funnel.'
+            error: res.error || 'Could not create page.'
         };
     }
 
@@ -160,7 +160,7 @@ export async function updateFunnelApi(req: ApiRequest, id: string) {
         return {
             status: !res.success ? 500 : 404,
             success: false,
-            error: res.error || 'Failed to update funnel or target not found.'
+            error: res.error || 'Failed to update page or target not found.'
         };
     }
 
@@ -242,7 +242,7 @@ export async function createFunnelFromTemplateApi(req: ApiRequest) {
         return {
             status: 500,
             success: false,
-            error: funnelRes.error || 'Failed to create funnel record.'
+            error: funnelRes.error || 'Failed to create page record.'
         };
     }
 
@@ -303,6 +303,9 @@ export async function createFunnelFromTemplateApi(req: ApiRequest) {
             slug:            `${baseSlug}-${tplStep.order}-${Date.now()}`,
             created_at:      new Date().toISOString(),
             status:          'published', // 🌿 WB.6.2
+            seo_title:       stepLabel,
+            seo_description: '',
+            seo_keywords:    [],
             // Funnel linkage (WB.1.6 schema)
             funnel_id:       funnel.id,
             step_type:       tplStep.type,
@@ -316,7 +319,7 @@ export async function createFunnelFromTemplateApi(req: ApiRequest) {
             return {
                 status: 500,
                 success: false,
-                error: `Funnel creation aborted – could not create step ${tplStep.order} (${tplStep.type}). All changes rolled back.`
+                error: `Page creation aborted – could not create step ${tplStep.order} (${tplStep.type}). All changes rolled back.`
             };
         }
 
