@@ -4,6 +4,18 @@ import { Activity, WebsiteLayout } from './types';
 import { resolveWebsiteRequest } from './website_resolver';
 import { normalizePhone, normalizeEmail, normalizeName } from './utils/validators';
 
+declare global {
+  interface Window {
+    navigateTo: (view: string, id?: string, context?: any) => Promise<void>;
+    resolveWebsiteRequest: typeof resolveWebsiteRequest;
+    showToast: (msg: string, type?: 'info' | 'success' | 'error' | 'warning', duration?: number) => void;
+    funnelMode?: 'website' | 'marketing';
+    currentUser?: string;
+    userSlug?: string;
+    [key: string]: any;
+  }
+}
+
 /**
  * 🌐 FRONTEND API BRIDGE
  * These stubs replace direct backend function calls to prevent credential leakage.
@@ -15,10 +27,10 @@ const persistWebsiteSettings = async (data: any) => {
     console.log('[API STUB] Saving settings:', data);
     return { success: true }; 
 };
-const getEvents = (user?: any) => [];
+const getEvents = (user?: any) => [] as any[];
 const getAllMessagesOrdered = (user?: any) => [] as any[];
-const getConversation = (id: string, user?: any) => [];
-const getCallsForContact = (id: string, phone?: string, user?: any) => [];
+const getConversation = (id: string, user?: any) => [] as any[];
+const getCallsForContact = (id: string, phone?: string, user?: any) => [] as any[];
 const getCall = (id: string) => null;
 const mockAutomationLogs: string[] = [];
 
@@ -48,7 +60,7 @@ const checkOverdueInvoices = () => { console.log('[API STUB] Checking overdue in
 const emitEvent = (name: string, payload: any, user_id?: string) => {
     console.log(`[FRONTEND EVENT] ${name}:`, payload);
 };
-const getContactTimeline = (id: string, user?: any) => [];
+const getContactTimeline = (id: string, user?: any) => [] as any[];
 const getLatestActivity = (id: string, user?: any) => null;
 const createLead = async (data: any, request?: any) => {
     return fetch('/api/leads', {
@@ -1519,6 +1531,7 @@ function renderSectionPreviewContent(section: any) {
              <button onclick="event.stopPropagation(); window.duplicateGalleryItem('${id}')" style="background: #f1f5f9; border: 1px solid #e2e8f0; color: #475569; padding: 12px 24px; border-radius: 12px; font-weight: 800; font-size: 0.8rem; cursor: pointer; transition: all 0.2s;">+ Add Another Transformation</button>
           </div>
         </div>`;
+    }
     case 'form': {
       return renderStandardForm(id, content, false);
     }
@@ -5442,32 +5455,39 @@ async function bootRouter() {
     if (targetPath.startsWith('/site/')) targetPath = targetPath.replace('/site/', '/');
     if (targetPath.startsWith('/preview/')) targetPath = targetPath.replace('/preview/', '/');
     
+    // Ensure root path consistency for the resolver
+    if (!targetPath || targetPath === '') targetPath = '/';
+    
     const result = await resolveWebsiteRequest(host, targetPath);
     if (result && result.funnel_id) {
-       renderSitePage(result.funnel_id, result.website);
+       await renderSitePage(result.funnel_id, result.website);
        return;
     }
   }
 
   // 2. Check for Admin Hash Routes (Standard CRM)
   if (window.location.hash) {
-     const parts = window.location.hash.slice(2).split('/');
-     const view = parts[0];
-     const id = parts[1];
-     if (view) {
-       (window as any).navigateTo(view, id);
+     const hashContent = window.location.hash.slice(2);
+     if (hashContent) {
+       const parts = hashContent.split('/');
+       (window as any).navigateTo(parts[0], parts[1]);
        return;
      }
   }
 
-  // 3. Fallback to Dashboard
+  // 3. Fallback Logic
   if (rawPath === '/' || rawPath === '/index.html' || rawPath === '') {
-    // If we're at root, try to resolve as homepage first
-    const homeResult = await resolveWebsiteRequest(host, '/');
-    if (homeResult && homeResult.funnel_id && rawPath !== '/index.html') {
-      renderSitePage(homeResult.funnel_id, homeResult.website);
+    // On localhost, ROOT always defaults to Dashboard to allow admin access
+    if (host === 'localhost' || host === '127.0.0.1') {
+       (window as any).navigateTo('dashboard');
     } else {
-      (window as any).navigateTo('dashboard');
+       // On real domains, ROOT defaults to the website homepage
+       const homeResult = await resolveWebsiteRequest(host, '/');
+       if (homeResult && homeResult.funnel_id) {
+          await renderSitePage(homeResult.funnel_id, homeResult.website);
+       } else {
+          (window as any).navigateTo('dashboard');
+       }
     }
   } else {
     render404();
