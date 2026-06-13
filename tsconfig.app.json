@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/main.ts",
+    "src/**/*.d.ts"
+  ],
+  "exclude": [
+    "src/test_*.ts",
+    "src/verify_*.ts",
+    "src/debug_*.ts",
+    "test_*.ts",
+    "verify_*.ts",
+    "scripts",
+    "supabase",
+    "dist",
+    "node_modules"
+  ]
+}
