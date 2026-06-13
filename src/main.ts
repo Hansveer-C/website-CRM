@@ -709,14 +709,8 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('marketing-funnels')" class="${activeView === 'marketing-funnels' || activeView === 'funnels' && (window as any).funnelMode === 'marketing' ? 'active' : ''}">Ad Landing Pages</li>
           
           <div class="nav-group-title">Websites</div>
-<<<<<<< HEAD
           <li onclick="window.navigateTo('website-dashboard')" class="${activeView === 'website-dashboard' ? 'active' : ''}" style="font-weight: 700; color: var(--primary-color);">My Website</li>
           <li onclick="window.navigateTo('funnels')" class="${activeView === 'funnels' && (window as any).funnelMode !== 'marketing' ? 'active' : ''}">Site Pages</li>
-=======
-          <li onclick="window.navigateTo('website-dashboard')" class="${activeView === 'website-dashboard' ? 'active' : ''}">My Website</li>
-          <li onclick="window.navigateTo('website-structure')" class="${activeView === 'website-structure' ? 'active' : ''}">Structure</li>
-          <li onclick="window.navigateTo('pages')" class="${activeView === 'pages' || activeView === 'page-sections' ? 'active' : ''}">Pages</li>
->>>>>>> TARGETED-FIX-PROMPTS-(W6-HARDENING)
           <li onclick="window.navigateTo('website-navigation')" class="${activeView === 'website-navigation' ? 'active' : ''}">Navigation</li>
           <li onclick="window.navigateTo('seo-pages')" class="${activeView === 'seo-pages' ? 'active' : ''}">SEO Pages</li>
           <li onclick="window.navigateTo('website-settings')" class="${activeView === 'website-settings' ? 'active' : ''}">Settings</li>
@@ -2910,7 +2904,6 @@ function renderReports() {
   `;
 }
 
-<<<<<<< HEAD
 (window as any).showAttachToWebsiteModal = (funnelId: string) => {
     const userId = (window as any).currentUser || 'system';
     const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
@@ -2990,20 +2983,7 @@ function renderReports() {
     renderFunnelDetail(funnelId);
 };
 
-(window as any).openNewPageModal = (type: string) => {
-  if (type === 'template') {
-    (window as any).navigateTo('templates');
-    return;
-  }
-  const titles: Record<string, string> = {
-    'blank': 'Create Blank Page',
-    'ai': 'Generate Page with AI'
-  };
-
-=======
-(window as any).openNewPageModal = (sourceType: string = 'blank') => {
-  // Step 1: Select Template
->>>>>>> TARGETED-FIX-PROMPTS-(W6-HARDENING)
+(window as any).openNewPageModal = (_sourceType: string = 'blank') => {
   const modal = document.createElement('div');
   modal.id = 'page-creation-modal';
   modal.innerHTML = `
@@ -3581,10 +3561,6 @@ function renderWebsiteSettings() {
   `;
 }
 
-<<<<<<< HEAD
-=======
-
->>>>>>> TARGETED-FIX-PROMPTS-(W6-HARDENING)
 function renderWebsiteNavigation() {
   const userId = (window as any).currentUser || 'system';
   const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
@@ -3593,32 +3569,6 @@ function renderWebsiteNavigation() {
   if (!layout.header_config.nav_items) layout.header_config.nav_items = [];
   const navItems = layout.header_config.nav_items;
 
-<<<<<<< HEAD
-  const itemsHtml = navItems.map((item: any, index: number) => `
-    <div class="card" style="display: flex; align-items: center; gap: 15px; margin-bottom: 12px; padding: 15px; border: 1px solid #eef2f6;">
-      <div style="display: flex; flex-direction: column; gap: 4px;">
-        <button class="btn-outline" style="padding: 2px 10px; font-size: 0.7rem; background: white;" onclick="window.reorderNavItem(${index}, -1)" ${index === 0 ? 'disabled' : ''}>▲</button>
-        <button class="btn-outline" style="padding: 2px 10px; font-size: 0.7rem; background: white;" onclick="window.reorderNavItem(${index}, 1)" ${index === navItems.length - 1 ? 'disabled' : ''}>▼</button>
-      </div>
-      
-      <div style="flex: 2;">
-        <label style="font-size: 0.75rem; color: #64748b; font-weight: 600; text-transform: uppercase; display: block; margin-bottom: 4px;">Label</label>
-        <input type="text" value="${item.label}" onchange="window.updateNavItem(${index}, 'label', this.value)" style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px;">
-      </div>
-
-      <div style="flex: 2;">
-        <label style="font-size: 0.75rem; color: #64748b; font-weight: 600; text-transform: uppercase; display: block; margin-bottom: 4px;">URL Path</label>
-        <input type="text" value="${item.path}" onchange="window.updateNavItem(${index}, 'path', this.value)" style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px;">
-      </div>
-
-      <div style="flex: 0.5; text-align: center;">
-        <label style="font-size: 0.75rem; color: #64748b; font-weight: 600; text-transform: uppercase; display: block; margin-bottom: 4px;">Show</label>
-        <input type="checkbox" ${item.visible !== false ? 'checked' : ''} onchange="window.updateNavItem(${index}, 'visible', this.checked)" style="width: 20px; height: 20px; cursor: pointer;">
-      </div>
-
-      <button class="btn-outline" style="background: #fff; color: #ef4444; border-color: #fee2e2; padding: 8px 12px;" onclick="window.deleteNavItem(${index})">
-        <svg style="width: 18px; height: 18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-=======
   // 🌿 Fix.2: Get available pages for the dropdown
   const siteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
 
@@ -3653,7 +3603,6 @@ function renderWebsiteNavigation() {
 
       <button class="btn-outline" style="background: #fff5f5; color: #ef4444; border-color: #fee2e2; padding: 10px; border-radius: 10px;" onclick="window.deleteNavItem(${index})">
         <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
->>>>>>> TARGETED-FIX-PROMPTS-(W6-HARDENING)
       </button>
     </div>
   `).join('');
@@ -3663,19 +3612,6 @@ function renderWebsiteNavigation() {
     <main class="main-content">
       <header class="view-header">
         <div>
-<<<<<<< HEAD
-          <h2>Website Navigation</h2>
-          <p style="color: #64748b; margin-top: 4px;">Control the links in your site's top navigation bar.</p>
-        </div>
-        <div style="display: flex; gap: 10px;">
-           <button class="btn-primary" style="background: #8a2be2;" onclick="window.addNavItem()">+ Add Item</button>
-           <button class="btn-primary" onclick="window.saveWebsiteLayout()">Save Changes</button>
-        </div>
-      </header>
-
-      <div style="max-width: 900px; padding: 10px;">
-        ${itemsHtml || '<div class="empty-state" style="padding: 60px; text-align: center; background: white; border-radius: 12px; border: 2px dashed #e2e8f0; color: #64748b;"><div style="font-size: 2rem; margin-bottom: 10px;">🗺️</div><h3>No menu items found</h3><p>Click "Add Item" to build your site menu.</p></div>'}
-=======
           <h2 style="margin: 0; font-size: 1.75rem;">Website Navigation</h2>
           <p style="color: #64748b; margin-top: 6px;">Manage your site's header menu. Links are restricted to your published pages to prevent dead ends.</p>
         </div>
@@ -3687,7 +3623,6 @@ function renderWebsiteNavigation() {
 
       <div style="max-width: 1000px; padding: 10px;">
         ${itemsHtml || '<div class="empty-state" style="padding: 80px; text-align: center; background: white; border-radius: 20px; border: 2px dashed #e2e8f0; color: #64748b;"><div style="font-size: 3rem; margin-bottom: 16px;">📂</div><h3>No menu items here</h3><p>Start building your navigation menu by adding your first link.</p><button class="btn-primary" style="margin-top: 20px;" onclick="window.addNavItem()">Add Item</button></div>'}
->>>>>>> TARGETED-FIX-PROMPTS-(W6-HARDENING)
       </div>
     </main>
   `;
@@ -3698,10 +3633,7 @@ function renderWebsiteNavigation() {
     const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
     const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
     
-<<<<<<< HEAD
-=======
     if (!layout.header_config.nav_items) layout.header_config.nav_items = [];
->>>>>>> TARGETED-FIX-PROMPTS-(W6-HARDENING)
     layout.header_config.nav_items.push({ label: 'New Link', path: '/', visible: true });
     renderWebsiteNavigation();
 };
@@ -3712,12 +3644,7 @@ function renderWebsiteNavigation() {
     const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
     
     (layout.header_config.nav_items[index] as any)[field] = value;
-<<<<<<< HEAD
-    // Don't re-render for input changes to keep focus, but re-render for visibility toggle
-    if (field === 'visible') renderWebsiteNavigation();
-=======
     renderWebsiteNavigation();
->>>>>>> TARGETED-FIX-PROMPTS-(W6-HARDENING)
 };
 
 (window as any).reorderNavItem = (index: number, direction: number) => {
@@ -3746,120 +3673,11 @@ function renderWebsiteNavigation() {
 };
 
 (window as any).saveWebsiteLayout = async () => {
-<<<<<<< HEAD
-    (window as any).showToast('Saving navigation...', 2000);
-    // In a real app, this would be a POST to /api/websites/layout
-    setTimeout(() => {
-        (window as any).showToast('Navigation saved successfully!', 2000);
-    }, 500);
-};
-
-=======
     (window as any).showToast('Saving navigation layout...', 2000);
     setTimeout(() => {
         (window as any).showToast('Navigation updated successfully!', 2000);
     }, 600);
 };
-
-
-function renderWebsiteDashboard() {
-  const userId = (window as any).currentUser || 'system';
-  const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
-  const domain = website.domain || `${website.subdomain}.hanssays.com`;
-  const previewUrl = `${window.location.protocol}//${window.location.host}/?subdomain=${website.subdomain}`;
-
-  const homeRoute = mockWebsiteRoutes.find(r => r.website_id === website.id && r.path === '/');
-  const homePage = mockPages.find(p => p.funnel_id === homeRoute?.funnel_id);
-
-  app.innerHTML = `
-    ${renderSidebar('website-dashboard')}
-    <main class="main-content">
-      <header class="view-header">
-        <div>
-          <h2 style="margin: 0; font-size: 1.75rem;">My Website</h2>
-          <p style="color: #64748b; margin-top: 6px;">Manage your online presence and tracks its performance.</p>
-        </div>
-        <div style="display: flex; gap: 12px;">
-           <button class="btn-primary" style="background: white; color: var(--primary-color); border: 2px solid var(--primary-color);" onclick="window.open('${previewUrl}', '_blank')">View Live Site</button>
-           <button class="btn-primary" onclick="window.openNewPageModal()">+ Add Page</button>
-        </div>
-      </header>
-
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; margin-bottom: 40px;">
-        <div class="card" style="padding: 24px; display: flex; align-items: center; gap: 24px;">
-           <div style="font-size: 2.5rem; background: #f0f7ff; width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; border-radius: 20px;">🌐</div>
-           <div>
-              <label style="font-size: 0.75rem; color: #94a3b8; font-weight: 800; text-transform: uppercase;">Domain Mode</label>
-              <h3 style="margin: 4px 0; font-size: 1.25rem;">${domain}</h3>
-              <p style="margin: 0; font-size: 0.85rem; color: #10b981; font-weight: 600;">● Live & Secured</p>
-           </div>
-        </div>
-
-        <div class="card" style="padding: 24px; display: flex; align-items: center; gap: 24px;">
-           <div style="font-size: 2.5rem; background: #fff7ed; width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; border-radius: 20px;">⚡</div>
-           <div>
-              <label style="font-size: 0.75rem; color: #94a3b8; font-weight: 800; text-transform: uppercase;">Site Health</label>
-              <h3 style="margin: 4px 0; font-size: 1.25rem;">98 / 100</h3>
-              <p style="margin: 0; font-size: 0.85rem; color: #64748b;">Optimized for Speed</p>
-           </div>
-        </div>
-      </div>
-
-      <div class="card" style="padding: 30px; margin-bottom: 40px;">
-         <h3 style="margin-top: 0; margin-bottom: 24px;">Quick Actions</h3>
-         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px;">
-            <div class="card" style="border: 1px solid #eef2f6; text-align: center; padding: 30px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#eef2f6'" onclick="${homePage ? `window.switchBuilderPage('${homePage.id}'); window.navigateTo('builder')` : 'alert(\'No Home Page found\')'}">
-               <div style="font-size: 2rem; margin-bottom: 15px;">🏠</div>
-               <h4 style="margin: 0; color: #1e293b;">Edit Home Page</h4>
-               <p style="color: #64748b; font-size: 0.85rem; margin-top: 8px;">Modify your hero, services, and branding visually.</p>
-            </div>
-            
-            <div class="card" style="border: 1px solid #eef2f6; text-align: center; padding: 30px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#eef2f6'" onclick="window.navigateTo('website-navigation')">
-               <div style="font-size: 2rem; margin-bottom: 15px;">🗺️</div>
-               <h4 style="margin: 0; color: #1e293b;">Site Navigation</h4>
-               <p style="color: #64748b; font-size: 0.85rem; margin-top: 8px;">Control the menu links in your site header.</p>
-            </div>
-
-            <div class="card" style="border: 1px solid #eef2f6; text-align: center; padding: 30px; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='#eef2f6'" onclick="window.navigateTo('seo-pages')">
-               <div style="font-size: 2rem; margin-bottom: 15px;">🚀</div>
-               <h4 style="margin: 0; color: #1e293b;">SEO Boost</h4>
-               <p style="color: #64748b; font-size: 0.85rem; margin-top: 8px;">Generate local landing pages to rank higher.</p>
-            </div>
-         </div>
-      </div>
-
-      <div class="card" style="padding: 0; overflow: hidden; border-radius: 16px;">
-        <div style="padding: 20px 30px; border-bottom: 1px solid #f1f5f9; background: #f8fafc; display: flex; justify-content: space-between; align-items: center;">
-            <h3 style="margin: 0; font-size: 1.1rem; color: #1e293b;">Active Site Structure</h3>
-            <button class="btn-primary" style="padding: 6px 16px; font-size: 0.85rem;" onclick="window.navigateTo('website-structure')">Manage Routes</button>
-        </div>
-        <table class="clients-table" style="box-shadow: none; border: none; margin: 0;">
-           <thead>
-              <tr>
-                 <th>Path</th>
-                 <th>Resource</th>
-                 <th style="text-align: right;">Activity</th>
-              </tr>
-           </thead>
-           <tbody>
-              ${mockWebsiteRoutes.filter(r => r.website_id === website.id).slice(0, 5).map(route => {
-                  const funnel = mockFunnels.find(f => f.id === route.funnel_id);
-                  return `
-                    <tr>
-                       <td style="font-weight: 700;">${route.path}</td>
-                       <td><span class="badge" style="background: #eef2f6; color: #64748b;">${funnel?.name || 'Unknown'}</span></td>
-                       <td style="text-align: right;"><span style="color: #10b981; font-weight: 600;">Active</span></td>
-                    </tr>
-                  `;
-              }).join('')}
-           </tbody>
-        </table>
-      </div>
-    </main>
-  `;
-}
-
->>>>>>> TARGETED-FIX-PROMPTS-(W6-HARDENING)
 function renderWebsiteStructure() {
   const userId = (window as any).currentUser || 'system';
   const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
@@ -3922,12 +3740,8 @@ function renderWebsiteStructure() {
                   </td>
                   <td><span class="badge badge-published">Live</span></td>
                   <td style="text-align: right; padding-right: 20px;">
-<<<<<<< HEAD
-                    <button class="btn-outline" style="color: #64748b; border-color: #e2e8f0; padding: 4px 10px; font-size: 0.8rem;" onclick="window.navigateTo('funnel-detail', '${route.funnel_id}')">Edit Page</button>
-=======
                     <button class="btn-primary" style="padding: 4px 12px; font-size: 0.8rem;" onclick="event.stopPropagation(); const p = mockPages.find(pg => pg.funnel_id === '${route.funnel_id}'); if(p) { window.switchBuilderPage(p.id); window.navigateTo('builder'); } else { window.navigateTo('funnel-detail', '${route.funnel_id}'); }">Edit Page</button>
                     <button class="btn-outline" style="color: #64748b; border-color: #e2e8f0; padding: 4px 10px; font-size: 0.8rem; margin-left: 5px;" onclick="event.stopPropagation(); window.open('/site${route.path}', '_blank')">View Live</button>
->>>>>>> TARGETED-FIX-PROMPTS-(W6-HARDENING)
                     ${!isHome ? `<button class="btn-outline" style="color: #ef4444; border-color: #fee2e2; padding: 4px 10px; font-size: 0.8rem; margin-left: 5px;" onclick="window.deleteRoute('${route.id}')">Delete</button>` : ''}
                   </td>
                 </tr>
@@ -4859,76 +4673,6 @@ function renderFunnels(mode: 'website' | 'marketing' = 'website') {
       </div>
     </main>
   `;
-<<<<<<< HEAD
-=======
-
-  try {
-    const res = await fetch('/api/funnels').then(r => r.json());
-    const container = document.getElementById('funnels-container');
-    if (!container) return;
-
-    if (!res.success || !res.data || res.data.length === 0) {
-      container.innerHTML = `
-        <div class="empty-state" style="text-align: center; padding: 60px 20px; background: white; border-radius: 12px; border: 2px dashed #e2e8f0;">
-          <div style="font-size: 3rem; margin-bottom: 16px;">🚀</div>
-          <h3 style="color: #1e293b; margin-bottom: 8px;">No funnels yet</h3>
-          <p style="color: #64748b; max-width: 400px; margin: 0 auto 24px;">Your first funnel will help you capture leads fast. Create one to start growing your business.</p>
-          <button class="btn-primary" onclick="window.createFunnelPrompt()">Build My First Funnel</button>
-        </div>
-      `;
-      return;
-    }
-
-    // 🌿 WB.5.5: Fetch metrics for funnels
-    const oppsRes = await fetch('/api/opportunities').then(r => r.json());
-    const allOpps = oppsRes.success ? oppsRes.data : [];
-    const today = new Date().toISOString().split('T')[0];
-
-    const funnelsHtml = res.data.map((f: any) => {
-      const funnelOpps = allOpps.filter((o: any) => o.funnel_id === f.id);
-      const totalLeads = funnelOpps.length;
-      const leadsToday = funnelOpps.filter((o: any) => o.created_at.startsWith(today)).length;
-
-      return `
-      <div class="card funnel-card" 
-           style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; transition: transform 0.2s; border: 1px solid #eef2f6;" 
-           onmouseover="this.style.boxShadow='0 10px 25px rgba(0,0,0,0.05)'; this.style.borderColor='var(--primary-color)';"
-           onmouseout="this.style.boxShadow='none'; this.style.borderColor='#eef2f6';">
-        <div style="display: flex; align-items: center; gap: 20px;" onclick="window.navigateTo('funnel-detail', '${f.id}')" style="cursor: pointer;">
-          <div style="background: #f0f7ff; width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">🎯</div>
-          <div>
-            <h4 style="margin: 0; color: #1e293b; font-size: 1.1rem;">${f.name}</h4>
-            <div style="font-size: 0.85rem; color: #64748b; margin-top: 4px;">Created ${new Date(f.created_at).toLocaleDateString()}</div>
-          </div>
-        </div>
-        <div style="text-align: right; display: flex; align-items: center; gap: 25px;">
-          <div style="text-align: center; min-width: 60px;">
-            <div style="font-weight: 700; color: #1e293b; font-size: 1.1rem;">${totalLeads}</div>
-            <div style="font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Total Leads</div>
-          </div>
-          <div style="text-align: center; min-width: 80px; padding: 0 15px; border-left: 1px solid #eef2f6; border-right: 1px solid #eef2f6;">
-            <div style="font-weight: 700; color: var(--primary-color); font-size: 1.1rem;">${leadsToday}</div>
-            <div style="font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Leads Today</div>
-          </div>
-          <div style="display: flex; gap: 8px;">
-             <button class="btn-primary" style="padding: 8px 16px; font-size: 0.85rem;" onclick="event.stopPropagation(); const p = mockPages.find(pg => pg.funnel_id === '${f.id}'); if(p) { window.switchBuilderPage(p.id); window.navigateTo('builder'); } else { window.navigateTo('funnel-detail', '${f.id}'); }">Edit Page</button>
-             <button class="btn-outline" style="padding: 8px 16px; font-size: 0.85rem; border-color: #e2e8f0; color: #475569;" onclick="event.stopPropagation(); const r = mockWebsiteRoutes.find(rt => rt.funnel_id === '${f.id}'); window.open(r ? '/site' + r.path : '/preview/${f.id}', '_blank')">View Live</button>
-          </div>
-        </div>
-      </div>
-    `;}).join('');
-
-    container.innerHTML = `
-      <div class="funnels-grid">
-        ${funnelsHtml}
-      </div>
-    `;
-  } catch (err) {
-    console.error('Failed to load funnels:', err);
-    const container = document.getElementById('funnels-container');
-    if (container) container.innerHTML = '<div class="error">Failed to load funnels. Please try again.</div>';
-  }
->>>>>>> TARGETED-FIX-PROMPTS-(W6-HARDENING)
 }
 
 
@@ -5362,10 +5106,7 @@ async function executeNavigation(view: string, id?: string, context?: any) {
       renderWebsiteSettings();
       break;
     case 'website-navigation': renderWebsiteNavigation(); break;
-<<<<<<< HEAD
-=======
     case 'website-dashboard': renderWebsiteDashboard(); break;
->>>>>>> TARGETED-FIX-PROMPTS-(W6-HARDENING)
     case 'seo-pages': (window as any).renderSeoPages(); break;
     case 'website-structure': renderWebsiteStructure(); break;
     case 'reports': renderReports(); break;
