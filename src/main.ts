@@ -1,4 +1,4 @@
-import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
+import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
 import { templates } from './templates';
 import { Activity, WebsiteSettings } from './types';
 import { resolveWebsiteRequest } from './website_resolver';
@@ -67,7 +67,7 @@ const emitEvent = (name: string, payload: any, user_id?: string) => {
     console.log(`[FRONTEND EVENT] ${name}:`, payload);
 };
 const getContactTimeline = (id: string, user?: any) => [] as any[];
-const getLatestActivity = (id: string, user?: any) => null;
+const getLatestActivity = (id: string, user?: any): any => null;
 const createLead = async (data: any, request?: any) => {
     return fetch('/api/leads', {
         method: 'POST',
@@ -5891,6 +5891,7 @@ async function renderContactDetail(contactId: string) {
 
     mockActivities.push({
       id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
+      user_id: (window as any).currentUser || 'system',
       contact_id: invoice.contact_id,
       type: 'note',
       description: `Invoice ${invoice.id} marked as Paid.`,
@@ -5928,6 +5929,7 @@ async function renderContactDetail(contactId: string) {
 
     mockActivities.push({
       id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
+      user_id: (window as any).currentUser || 'system',
       contact_id: quote.contact_id,
       type: 'note',
       description: `Invoice ${invoiceId} created from Quote Q-${quote.id}`,
@@ -5953,6 +5955,7 @@ async function renderContactDetail(contactId: string) {
 
     mockActivities.push({
       id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
+      user_id: (window as any).currentUser || 'system',
       contact_id: quote.contact_id,
       type: 'note',
       description: `Quote Q-${quote.id} approved! Opportunity marked as Won.`,
@@ -5978,6 +5981,7 @@ async function renderContactDetail(contactId: string) {
 
       mockActivities.push({
         id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
+      user_id: (window as any).currentUser || 'system',
         contact_id: quote.contact_id,
         type: 'note',
         description: `Invoice ${invoiceId} automatically created from Quote Q-${quote.id}`,
@@ -6002,6 +6006,7 @@ async function renderContactDetail(contactId: string) {
 
     mockActivities.push({
       id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
+      user_id: (window as any).currentUser || 'system',
       contact_id: quote.contact_id,
       type: 'note',
       description: `Quote Q-${quote.id} was rejected. Opportunity marked as Lost.`,
@@ -6023,6 +6028,7 @@ async function renderContactDetail(contactId: string) {
     // Log Activity
     mockActivities.push({
       id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
+      user_id: (window as any).currentUser || 'system',
       contact_id: quote.contact_id,
       type: 'note',
       description: `Quote Q-${quote.id} sent to customer`,

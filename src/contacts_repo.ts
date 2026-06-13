@@ -140,7 +140,8 @@ export const ContactsRepo = {
   getContacts,
   getAllContacts,
   deleteContact,
-  resolveContactOwner
+  resolveContactOwner,
+  resolveContactOwnerByPhone
 };
 
 /**
@@ -153,3 +154,10 @@ export async function resolveContactOwner(contact_id: string): Promise<string | 
 
 
 
+/**
+ * Resolves the owner of a contact by phone number. (Internal use)
+ */
+export async function resolveContactOwnerByPhone(phone: string): Promise<string | null> {
+    const { data } = await supabase.from('contacts').select('user_id').eq('phone', phone).maybeSingle();
+    return data?.user_id || null;
+}

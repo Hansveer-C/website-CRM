@@ -4,6 +4,7 @@ import { mockWebsites, mockWebsiteRoutes } from './db';
 export interface ResolutionResult {
   funnel_id: string | null;
   website: Website | null;
+  route?: WebsiteRoute | null;
   error?: 'WEBSITE_NOT_FOUND' | 'NO_FUNNEL_MAPPED';
 }
 
@@ -57,5 +58,5 @@ export async function resolveWebsiteRequest(
   }
 
   console.log(`[RESOLVER] RESOLVED to funnel_id: ${funnel_id}`);
-  return { funnel_id, website };
+  return { funnel_id, website, route };
 }

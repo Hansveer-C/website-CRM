@@ -108,9 +108,10 @@ function saveLocal(userId: string, websiteId: string, settings: WebsiteSettings)
 }
 
 async function getSqliteDb(): Promise<any | null> {
-  if (typeof process === 'undefined') return null;
+  if (typeof window !== 'undefined' || typeof process === 'undefined') return null;
   try {
-    const mod = await import('./database');
+    const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
+    const mod = await dynamicImport('./database');
     return mod.getDB();
   } catch {
     return null;
