@@ -49,6 +49,11 @@ function completeSettings(input: Partial<WebsiteSettings>, userId: string, websi
     cities_served: input.cities_served ?? [],
     services_offered: input.services_offered ?? [],
     publish_status: input.publish_status ?? 'draft',
+    website_preset: input.website_preset ?? undefined,
+    build_brief: input.build_brief ?? undefined,
+    google_business_link: input.google_business_link ?? undefined,
+    google_rating: input.google_rating ?? undefined,
+    google_reviews_count: input.google_reviews_count ?? undefined,
   };
 }
 
@@ -207,6 +212,7 @@ function saveSqlite(db: any, settings: WebsiteSettings): void {
     missed_call_sms_enabled: settings.missed_call_sms_enabled ? 1 : 0,
     services_offered: JSON.stringify(settings.services_offered || []),
     cities_served: JSON.stringify(settings.cities_served || []),
+    website_preset: settings.website_preset ?? null,
     build_brief: settings.build_brief ? JSON.stringify(settings.build_brief) : null,
     google_business_link: settings.google_business_link || null,
     google_rating: settings.google_rating ?? null,

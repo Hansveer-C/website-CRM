@@ -1,6 +1,6 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockMedia, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
 import { templates } from './templates';
-import { Activity, WebsiteLayout } from './types';
+import { Activity, WebsiteSettings } from './types';
 import { resolveWebsiteRequest } from './website_resolver';
 import { normalizePhone, normalizeEmail, normalizeName } from './utils/validators';
 
@@ -340,7 +340,11 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         if (url.match(/^\/api\/pages\/[^/]+\/sections$/) && method === 'PUT') {
             const pageId = url.split('/')[3];
             let body: any = {};
-            try { body = JSON.parse(typeof reqContext.body === 'string' ? reqContext.body : await reqContext.body?.text?.() ?? '{}'); } catch {}
+            try {
+                body = typeof reqContext.body === 'string'
+                    ? JSON.parse(reqContext.body)
+                    : (reqContext.body || {});
+            } catch {}
             const sections: any[] = body.sections || [];
 
             const isBrowser = typeof window !== 'undefined';
@@ -539,12 +543,29 @@ let mockGlobalSettings = {
 
 (window as any).saveGlobalSettings = async () => {
   const s = getWebsiteSettings();
+  const readInput = (selector: string): string | undefined => {
+    const el = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | null;
+    return el ? el.value : undefined;
+  };
 
+  const formValues: Partial<WebsiteSettings> = {
+    business_name: readInput('[data-settings-field="business_name"]') ?? s.business_name,
+    phone: readInput('#settings-phone-input') ?? s.phone,
+    sms_number: readInput('#settings-sms-number-input') ?? s.sms_number,
+    email: readInput('#settings-email-input') ?? s.email,
+    logo_url: readInput('#settings-logo-url-input') ?? s.logo_url,
+    primary_color: readInput('#settings-primary-color-input') ?? s.primary_color,
+    facebook_pixel_id: readInput('[data-settings-field="facebook_pixel_id"]') ?? s.facebook_pixel_id,
+    gtm_id: readInput('[data-settings-field="gtm_id"]') ?? s.gtm_id
+  };
+  Object.assign(s, formValues);
+
+  // Basic validation before save
   if (!s.business_name || s.business_name.trim() === '') {
     (window as any).showToast?.('Business name cannot be empty.', 'error');
     return;
   }
-  if (s.email && !/^[^@s]+@[^@s]+.[^@s]+$/.test(s.email)) {
+  if (s.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.email)) {
     (window as any).showToast?.('Please enter a valid email address.', 'error');
     return;
   }
@@ -560,7 +581,10 @@ let mockGlobalSettings = {
     }).then(r => r.json());
 
     if (res.success) {
+      if (res.data) Object.assign(s, res.data);
+      applyPrimaryColor(s.primary_color);
       (window as any).showToast?.('Settings saved successfully!', 'success');
+      renderWebsiteSettings();
     } else {
       (window as any).showToast?.(`Settings could not be saved: ${res.error || 'Unknown error'}`, 'error');
     }
@@ -569,7 +593,6 @@ let mockGlobalSettings = {
   } finally {
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Settings'; }
   }
-  renderWebsiteSettings();
 };
 
 (window as any).setCompCategory = (cat: string) => {
@@ -1176,9 +1199,38 @@ function renderBuilder() {
   });
 }
 
+function hydrateBuilderSectionsFromLocalStorage(pageId: string): void {
+  const isBrowser = typeof window !== 'undefined';
+  const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : false;
+  if (!isBrowser || hasSupabase) return;
+
+  const userId = (window as any).currentUser || 'system';
+  const storageKey = `mock_sections_${userId}:${pageId}`;
+  const cached = window.localStorage.getItem(storageKey);
+  if (!cached) return;
+
+  try {
+    const sections = JSON.parse(cached);
+    if (!Array.isArray(sections)) throw new Error('Cached sections is not an array');
+    for (const section of sections) {
+      const idx = mockPageSections.findIndex((s: any) => s.id === section.id);
+      if (idx >= 0) {
+        mockPageSections[idx] = section;
+      } else {
+        mockPageSections.push(section);
+      }
+    }
+  } catch (err) {
+    console.error('[Builder] Failed to hydrate cached sections; clearing corrupted cache:', err);
+    window.localStorage.removeItem(storageKey);
+  }
+}
+
 function _renderBuilder() {
   const page = mockPages.find(p => p.id === builderPageId);
   if (!page) return;
+
+  hydrateBuilderSectionsFromLocalStorage(builderPageId);
 
   const sections = mockPageSections
     .filter(s => s.page_id === builderPageId)
@@ -1406,10 +1458,8 @@ function setNestedValue(obj: any, path: string, value: any) {
   // Dismiss onboarding hints on first interaction
   if (!localStorage.getItem('pb_onboarding_hints_seen')) {
     localStorage.setItem('pb_onboarding_hints_seen', 'true');
-    renderBuilder();
-  } else {
-    (window as any).triggerAutoSave();
   }
+  (window as any).triggerAutoSave();
 };
 
 /**
@@ -1425,6 +1475,8 @@ function inlineText(sectionId: string, field: string, value: string, extraStyle:
     data-field="${field}"
     style="${extraStyle} ${canEdit ? '' : 'pointer-events: none;'}"
     onclick="event.stopPropagation()"
+    oninput="window.saveInlineEdit('${sectionId}', '${field}', this)"
+    onblur="window.saveInlineEdit('${sectionId}', '${field}', this)"
     onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.blur();}"
   >${safe}</span>`;
 }
@@ -3293,7 +3345,7 @@ function renderWebsiteSettings() {
           <div style="display: flex; flex-direction: column; gap: 15px;">
             <div class="form-group">
               <label>Business Name</label>
-              <input type="text" value="${settings.business_name}" onchange="window.updateSettingsField('business_name', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+              <input type="text" data-settings-field="business_name" value="${settings.business_name}" onchange="window.updateSettingsField('business_name', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
                <div class="form-group">
@@ -3325,8 +3377,8 @@ function renderWebsiteSettings() {
             <div class="form-group">
               <label>Logo URL</label>
               <div style="display: flex; gap: 10px;">
-                 <input type="text" value="${settings.logo_url}" onchange="window.updateSettingsField('logo_url', this.value)" style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-                 ${settings.logo_url ? `<img src="${settings.logo_url}" style="height: 42px; width: 42px; border-radius: 4px; object-fit: cover; border: 1px solid #ddd;">` : ''}
+                 <input type="text" id="settings-logo-url-input" value="${settings.logo_url || ''}" onchange="window.updateSettingsField('logo_url', this.value)" style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                 ${settings.logo_url ? `<img id="settings-logo-img" src="${settings.logo_url}" style="height: 42px; width: 42px; border-radius: 4px; object-fit: cover; border: 1px solid #ddd;">` : ''}
               </div>
             </div>
           </div>
@@ -3338,11 +3390,11 @@ function renderWebsiteSettings() {
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
             <div class="form-group">
               <label>Facebook Pixel ID</label>
-              <input type="text" placeholder="e.g. 1234567890" value="${settings.facebook_pixel_id || ''}" onchange="window.updateSettingsField('facebook_pixel_id', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+              <input type="text" data-settings-field="facebook_pixel_id" placeholder="e.g. 1234567890" value="${settings.facebook_pixel_id || ''}" onchange="window.updateSettingsField('facebook_pixel_id', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
             </div>
             <div class="form-group">
               <label>GTM Container ID</label>
-              <input type="text" placeholder="e.g. GTM-XXXXXX" value="${settings.gtm_id || ''}" onchange="window.updateSettingsField('gtm_id', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+              <input type="text" data-settings-field="gtm_id" placeholder="e.g. GTM-XXXXXX" value="${settings.gtm_id || ''}" onchange="window.updateSettingsField('gtm_id', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
             </div>
           </div>
         </div>
@@ -3800,6 +3852,10 @@ function renderWebsiteStructure() {
         const colorDisplay = document.getElementById('settings-primary-color-display');
         if (colorDisplay) colorDisplay.textContent = value;
     }
+    if (field === 'logo_url') {
+        const logoImg = document.getElementById('settings-logo-img') as HTMLImageElement | null;
+        if (logoImg) logoImg.src = value;
+    }
 
     const promise = fetch('/api/settings', {
         method: 'POST',
@@ -3820,7 +3876,6 @@ function renderWebsiteStructure() {
         throw err;
     });
 
-    renderWebsiteSettings();
     console.log('Settings updated:', field, value);
     return promise;
 };

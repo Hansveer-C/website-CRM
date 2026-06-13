@@ -189,6 +189,26 @@ function migrate(database: any) {
         console.log('✅ [DB MIGRATION] Added user_id to event_logs table');
     } catch (e) {}
 
+    const ensureWebsiteSettingsColumn = (name: string, ddl: string) => {
+        try {
+            database.prepare(`ALTER TABLE website_settings ADD COLUMN ${name} ${ddl}`).run();
+            console.log(`Added ${name} to website_settings table`);
+        } catch (e) {}
+    };
+
+    ensureWebsiteSettingsColumn('sms_number', 'TEXT DEFAULT ""');
+    ensureWebsiteSettingsColumn('ga4_measurement_id', 'TEXT DEFAULT ""');
+    ensureWebsiteSettingsColumn('publish_status', 'TEXT DEFAULT "draft"');
+    ensureWebsiteSettingsColumn('website_preset', 'TEXT');
+    ensureWebsiteSettingsColumn('services_offered', 'TEXT');
+    ensureWebsiteSettingsColumn('cities_served', 'TEXT');
+    ensureWebsiteSettingsColumn('build_brief', 'TEXT');
+    ensureWebsiteSettingsColumn('google_business_link', 'TEXT');
+    ensureWebsiteSettingsColumn('google_rating', 'REAL');
+    ensureWebsiteSettingsColumn('google_reviews_count', 'INTEGER');
+    ensureWebsiteSettingsColumn('user_id', 'TEXT DEFAULT "system"');
+    ensureWebsiteSettingsColumn('website_id', 'TEXT DEFAULT "ws-1"');
+
     console.log('✅ [DB] Migrations completed: contacts, opportunities, messages, calls, event_logs, activities, website_settings, and users initialized.');
 }
 
