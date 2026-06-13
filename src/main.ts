@@ -2561,6 +2561,19 @@ function hydratePreviewSectionsForPage(pageId: string): void {
   hydrateBuilderSectionsFromLocalStorage(pageId);
 }
 
+function resolveWebsitePathFromBrowserPath(rawPath: string): string | null {
+  if (rawPath === '/site' || rawPath === '/preview') return '/';
+  if (rawPath.startsWith('/site/')) return rawPath.replace('/site/', '/');
+  if (rawPath.startsWith('/preview/')) return rawPath.replace('/preview/', '/');
+
+  const normalizedPath = normalizePreviewPath(rawPath);
+  if (normalizedPath === '/') return null;
+  const isKnownWebsiteRoute = mockWebsiteRoutes.some((route: any) =>
+    normalizePreviewPath(route.path || '/') === normalizedPath
+  );
+  return isKnownWebsiteRoute ? normalizedPath : null;
+}
+
 async function renderSitePage(funnel_id: string, websiteOrContext: any, isPreview: boolean = false) {
   // Store context for lead submission (Phase W3.8)
   activeWebsiteContext = websiteOrContext;
@@ -6257,17 +6270,25 @@ async function bootRouter() {
   }
 
   // 1. Phase W6.9: Resolve Public Website Route first (Real URLs)
-  if (rawPath.startsWith('/site/') || rawPath.startsWith('/preview/')) {
-    let targetPath = rawPath;
-    if (targetPath.startsWith('/site/')) targetPath = targetPath.replace('/site/', '/');
-    if (targetPath.startsWith('/preview/')) targetPath = targetPath.replace('/preview/', '/');
-    
-    // Ensure root path consistency for the resolver
-    if (!targetPath || targetPath === '') targetPath = '/';
-    
+  const targetPath = resolveWebsitePathFromBrowserPath(rawPath);
+  if (targetPath) {
     const result = await resolveWebsiteRequest(host, targetPath);
     if (result && result.funnel_id) {
-       await renderSitePage(result.funnel_id, result.website);
+       const isPreview = rawPath === '/preview' || rawPath.startsWith('/preview/');
+       const mergedContext = result.website ? {
+         ...result.website,
+         route: result.route,
+         route_id: result.route?.id,
+         path: result.route?.path || targetPath,
+         slug: result.route?.slug || targetPath.replace(/^\//, ''),
+         is_seo_page: result.route?.is_seo_page || targetPath !== '/',
+         city: result.route?.city || '',
+         service: result.route?.service || '',
+         route_type: (result.route as any)?.route_type || (targetPath === '/' ? 'homepage' : 'service'),
+         funnel_id: result.funnel_id || result.route?.funnel_id || '',
+         page_id: result.route?.id || ''
+       } : null;
+       await renderSitePage(result.funnel_id, mergedContext, isPreview);
        return;
     }
   }
