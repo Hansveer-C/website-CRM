@@ -19,32 +19,7 @@ export const mockFunnels: Funnel[] = [
   }
 ];
 
-export const mockContacts: Contact[] = [
-  {
-    id: 'c1',
-    user_id: 'system',
-    name: 'John Doe',
-    phone: '555-0101',
-    email: 'john@example.com',
-    address: '123 Pine St, Seattle, WA',
-    tags: ['residential', 'referral'],
-    source: 'Google Search',
-    status: 'customer',
-    created_at: '2026-02-15T10:00:00Z',
-  },
-  {
-    id: 'c2',
-    user_id: 'system',
-    name: 'Jane Smith',
-    phone: '555-0202',
-    email: 'jane@smithresidence.com',
-    address: '456 Oak Ave, Portland, OR',
-    tags: ['lead', 'driveway'],
-    source: 'Facebook Ad',
-    status: 'lead',
-    created_at: '2026-03-01T14:30:00Z',
-  },
-];
+export const mockContacts: Contact[] = [];
 
 export const mockPipelines: Pipeline[] = [
   {
@@ -54,28 +29,7 @@ export const mockPipelines: Pipeline[] = [
   },
 ];
 
-export const mockOpportunities: Opportunity[] = [
-  {
-    id: 'o1',
-    user_id: 'system',
-    contact_id: 'c2',
-    pipeline_stage: 'New Lead',
-    value: 250,
-    assigned_to: 'Hansveer',
-    status: 'open',
-    created_at: '2026-03-01T14:35:00Z',
-  },
-  {
-    id: 'o2',
-    user_id: 'system',
-    contact_id: 'c1',
-    pipeline_stage: 'Completed',
-    value: 450,
-    assigned_to: 'Hansveer',
-    status: 'won',
-    created_at: '2026-02-15T10:05:00Z',
-  },
-];
+export const mockOpportunities: Opportunity[] = [];
 
 export const mockActivities: Activity[] = [
   {
