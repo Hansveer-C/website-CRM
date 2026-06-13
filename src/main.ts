@@ -2538,6 +2538,29 @@ function render404(message?: string) {
 
 let activeWebsiteContext: any = null;
 
+function normalizePreviewPath(path: string = '/'): string {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return cleanPath === '/home' ? '/' : cleanPath;
+}
+
+function resolvePageForPreviewPath(path: string = '/', funnelId?: string): any | null {
+  const normalizedPath = normalizePreviewPath(path);
+  if (normalizedPath === '/') {
+    return mockPages.find((p: any) => p.slug === 'home' || p.name?.toLowerCase() === 'home') || null;
+  }
+
+  const slug = normalizedPath.replace(/^\//, '');
+  const route = mockWebsiteRoutes.find((r: any) => normalizePreviewPath(r.path || '/') === normalizedPath);
+  return mockPages.find((p: any) => p.slug === slug)
+    || mockPages.find((p: any) => route?.funnel_id && p.funnel_id === route.funnel_id && p.slug === slug)
+    || mockPages.find((p: any) => funnelId && p.funnel_id === funnelId && p.slug === slug)
+    || null;
+}
+
+function hydratePreviewSectionsForPage(pageId: string): void {
+  hydrateBuilderSectionsFromLocalStorage(pageId);
+}
+
 async function renderSitePage(funnel_id: string, websiteOrContext: any, isPreview: boolean = false) {
   // Store context for lead submission (Phase W3.8)
   activeWebsiteContext = websiteOrContext;
@@ -2547,7 +2570,9 @@ async function renderSitePage(funnel_id: string, websiteOrContext: any, isPrevie
   // In the resolver, it correctly identifies the funnel_id.
   
   // 2. Identify primary page/step in that funnel
-  const page = mockPages.find(p => p.funnel_id === funnel_id);
+  const resolvedPath = websiteOrContext?.route?.path || websiteOrContext?.path || '/';
+  const page = resolvePageForPreviewPath(resolvedPath, funnel_id)
+    || mockPages.find(p => p.funnel_id === funnel_id);
   
   if (!page || (!isPreview && page.status !== 'published')) {
     render404(!page ? 'No content mapped to this page.' : 'This page is currently a draft.');
@@ -2569,6 +2594,10 @@ async function renderSitePage(funnel_id: string, websiteOrContext: any, isPrevie
       ...r, 
       funnel_name: mockFunnels.find(f => f.id === r.funnel_id)?.name || 'Service' 
     }));
+
+  if (page?.id) {
+    hydratePreviewSectionsForPage(page.id);
+  }
 
   const sections = mockPageSections
     .filter(s => s.page_id === page.id && s.styles?.visible !== false)
