@@ -79,6 +79,114 @@ const createLead = async (data: any, request?: any) => {
         return json;
     });
 };
+
+function upsertById(list: any[], item: any) {
+    const index = list.findIndex(existing => existing.id === item.id);
+    if (index >= 0) {
+        list[index] = item;
+    } else {
+        list.push(item);
+    }
+}
+
+function hydrateLocalMockCrm(userId: string = 'system') {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+
+    try {
+        const contacts = JSON.parse(window.localStorage.getItem(`mock_crm_contacts_${userId}`) || '[]');
+        if (Array.isArray(contacts)) contacts.forEach(contact => upsertById(mockContacts, contact));
+    } catch (err) {
+        console.warn('[CRM MOCK] Ignoring corrupted local contact cache:', err);
+    }
+
+    try {
+        const opportunities = JSON.parse(window.localStorage.getItem(`mock_crm_opportunities_${userId}`) || '[]');
+        if (Array.isArray(opportunities)) opportunities.forEach(opportunity => upsertById(mockOpportunities, opportunity));
+    } catch (err) {
+        console.warn('[CRM MOCK] Ignoring corrupted local opportunity cache:', err);
+    }
+}
+
+function persistLocalMockCrm(userId: string = 'system') {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.setItem(`mock_crm_contacts_${userId}`, JSON.stringify(mockContacts.filter(contact => contact.user_id === userId)));
+    window.localStorage.setItem(`mock_crm_opportunities_${userId}`, JSON.stringify(mockOpportunities.filter(opportunity => opportunity.user_id === userId)));
+}
+
+function createLocalMockWebsiteLead(body: any, userId: string, isRepeat: boolean) {
+    hydrateLocalMockCrm(userId);
+    const timestamp = new Date().toISOString();
+    const cleanAttributionBlock = `Lead Attribution:\n` +
+        `- Source Page: ${body.source_page || '/'}\n` +
+        `- Page Type: ${body.source_page_type || 'unknown'}\n` +
+        `- Landing Page: ${body.landing_page || body.source_page || '/'}\n` +
+        `- Service: ${body.source_service || body.service_type || 'N/A'}\n` +
+        `- City: ${body.source_city || body.city || 'N/A'}\n` +
+        `- Referrer: ${body.referrer || ''}`;
+
+    let contact = mockContacts.find(c =>
+        c.user_id === userId &&
+        ((body.email && c.email === body.email) || (body.phone && c.phone === body.phone))
+    );
+
+    if (contact) {
+        contact.notes = contact.notes ? `${contact.notes}\n\n${cleanAttributionBlock}` : cleanAttributionBlock;
+        contact.source = contact.source || body.source || 'public website';
+        contact.service = contact.service || body.source_service || body.service_type;
+    } else {
+        contact = {
+            id: `c-${Date.now()}`,
+            user_id: userId,
+            name: body.name,
+            phone: body.phone || '',
+            email: body.email || '',
+            address: body.address || 'Public website submission',
+            tags: ['web-lead'],
+            source: body.source || 'public website',
+            service: body.source_service || body.service_type,
+            status: 'lead',
+            created_at: timestamp,
+            notes: cleanAttributionBlock
+        };
+        mockContacts.push(contact);
+    }
+
+    let opportunity = mockOpportunities.find(o =>
+        o.user_id === userId &&
+        o.contact_id === contact.id &&
+        o.status === 'open'
+    );
+
+    if (opportunity) {
+        opportunity.notes = opportunity.notes ? `${opportunity.notes}\n\n${cleanAttributionBlock}` : cleanAttributionBlock;
+        opportunity.source = opportunity.source || body.source || 'public website';
+        opportunity.service = opportunity.service || body.source_service || body.service_type;
+        opportunity.page_slug = opportunity.page_slug || body.page_slug || body.source_page || '';
+    } else {
+        opportunity = {
+            id: `opp-${Date.now()}`,
+            user_id: userId,
+            contact_id: contact.id,
+            pipeline_stage: 'New Lead',
+            value: 0,
+            assigned_to: 'Unassigned',
+            status: 'open',
+            notes: `Service Type: ${body.service_type || 'N/A'}\nAddress: ${body.address || 'N/A'}\nMessage: ${body.message || 'N/A'}\n[Funnel: ${body.funnel_id || 'N/A'}] [Page: ${body.page_id || 'N/A'}]\n\n${cleanAttributionBlock}`,
+            funnel_id: body.funnel_id,
+            page_slug: body.page_slug || body.source_page || '',
+            source: body.source || 'public website',
+            service: body.source_service || body.service_type,
+            city: body.source_city || body.city,
+            created_at: timestamp
+        };
+        mockOpportunities.push(opportunity);
+    }
+
+    persistLocalMockCrm(userId);
+    return { contact, opportunity, isRepeat };
+}
+
+hydrateLocalMockCrm((window as any).currentUser || 'system');
 const handleInboundCall = async (payload: { phone: string }) => {
     return fetch('/api/calls/inbound', {
         method: 'POST',
@@ -178,48 +286,69 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
         if (url === '/api/leads' && method === 'POST') {
             const body = reqContext.body;
-            console.log('[MOCK] Lead Submission:', body);
-            
-            // 🌿 WB.5.2: Deduplication (Phase W4.7)
-            let contact = mockContacts.find(c => c.phone === body.phone);
-            let isNew = false;
+            const userId = (window as any).currentUser || 'system';
+            let isRepeat = false;
+            console.log('[API ROUTER] Inbound Lead Submission:', body);
 
-            if (contact) {
-                console.log('[MOCK] Existing contact found, updating record:', contact.id);
-                // Update profile info if more complete data provided
-                if (body.name && contact.name === 'Anonymous') contact.name = body.name;
-                if (body.email && !contact.email) contact.email = body.email;
-                if (body.address && !contact.address) contact.address = body.address;
-            } else {
-                isNew = true;
-                contact = { 
-                    id: `c-${Date.now()}`, 
-                    name: body.name || 'Anonymous',
-                    phone: body.phone,
-                    email: body.email || '',
-                    address: body.address || '',
-                    status: 'lead', 
-                    created_at: new Date().toISOString(),
-                    user_id: (window as any).currentUser || 'system',
-                    source: body.is_test ? 'test_submission' : 'website_form',
-                    tags: []
-                } as any;
-                mockContacts.push(contact as any);
+            try {
+                const { createLead } = await import('./leads_logic');
+                const { findContact, getContactById } = await import('./contacts_repo');
+
+                const phoneVal = body.phone ? body.phone.trim() : '';
+                const emailVal = body.email ? body.email.trim() : '';
+
+                // Determine if this is a repeat lead
+                const existingRes = await findContact(phoneVal, emailVal || null, userId);
+                isRepeat = !!(existingRes.success && existingRes.data);
+
+                // Run the real lead ingestion engine
+                const leadResult = await createLead(body, { user: { id: userId } } as any);
+
+                if (leadResult.contactId === 'spam-blocked') {
+                    return new Response(JSON.stringify({ success: true, data: { id: 'spam-blocked' }, is_repeat: false }), {
+                        status: 201,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
+
+                // Fetch the fully persisted/created contact to return to the frontend
+                const contactRes = await getContactById(leadResult.contactId, userId);
+                const contact = contactRes.success && contactRes.data ? contactRes.data : null;
+
+                // 🌿 WB.5.4 Trigger Automation (Phase W4.4)
+                if (contact) {
+                    runAutomations('LEAD_CAPTURED', contact);
+                }
+
+                if (body.is_test && contact) {
+                    const isNew = !isRepeat;
+                    (window as any).showToast(isNew ? 'Test lead received! Redirecting to CRM...' : 'Repeat test lead received!', 'success');
+                    setTimeout(() => window.navigateTo('contact-detail', contact.id), 2000);
+                }
+
+                return new Response(JSON.stringify({
+                    success: true,
+                    data: contact || { id: leadResult.contactId, name: body.name },
+                    is_repeat: isRepeat
+                }), {
+                    status: 201,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } catch (error: any) {
+                console.error('[API ROUTER] Lead Ingestion Error:', error);
+                const fallback = createLocalMockWebsiteLead(body, userId, isRepeat);
+                runAutomations('LEAD_CAPTURED', fallback.contact);
+                return new Response(JSON.stringify({
+                    success: true,
+                    data: fallback.contact,
+                    opportunity: fallback.opportunity,
+                    is_repeat: fallback.isRepeat,
+                    fallback: 'local-mock'
+                }), {
+                    status: 201,
+                    headers: { 'Content-Type': 'application/json' }
+                });
             }
-            
-            // 🌿 WB.5.4 Trigger Automation (Phase W4.4)
-            // Even if repeat, we may want to trigger automations (but runAutomations is idempotent for SMS)
-            runAutomations('LEAD_CAPTURED', contact);
-
-            if (body.is_test) {
-                (window as any).showToast(isNew ? 'Test lead received! Redirecting to CRM...' : 'Repeat test lead received!', 'success');
-                setTimeout(() => window.navigateTo('contact-detail', contact!.id), 2000);
-            }
-
-            return new Response(JSON.stringify({ success: true, data: contact, is_repeat: !isNew }), { 
-                status: 201,
-                headers: { 'Content-Type': 'application/json' }
-            });
         }
 
         if (url === '/api/contacts' && method === 'GET') {
@@ -2285,6 +2414,7 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
   const addressInput = document.getElementById(`${prefix}address-${sectionId}`) as HTMLInputElement;
   const serviceInput = (document.getElementById(`${prefix}service-${sectionId}`) || document.getElementById(`${prefix}service_type-${sectionId}`)) as HTMLSelectElement;
   const messageInput = document.getElementById(`${prefix}message-${sectionId}`) as HTMLTextAreaElement;
+  const honeypotInput = document.getElementById(`${prefix}website_url-${sectionId}`) as HTMLInputElement;
 
   if (!nameInput?.value || !phoneInput?.value) {
     alert('Please fill in your name and phone number.');
@@ -2293,7 +2423,7 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
 
   const sectionWrapper = document.getElementById(`form-wrapper-${sectionId}`);
   const submitBtn = document.querySelector(`#form-wrapper-${sectionId} .btn-primary`) as HTMLButtonElement;
-  
+
   if (!submitBtn || submitBtn.disabled) return; // Zero loss: prevent double submit
 
   const originalBtnText = submitBtn.innerHTML;
@@ -2306,24 +2436,72 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
 
     // 🌿 WB.5.1: Attach Funnel Attribution + SEO Metadata (W3.8)
     const page = mockPages.find(p => p.id === section.page_id);
+    // Derive landing_page by stripping /site and /preview prefixes from window.location.pathname and defaulting to /
+    let landingPath = window.location.pathname || '/';
+    if (landingPath.startsWith('/site/')) {
+      landingPath = landingPath.replace('/site', '');
+    } else if (landingPath === '/site') {
+      landingPath = '/';
+    }
+    if (landingPath.startsWith('/preview/')) {
+      landingPath = landingPath.replace('/preview', '');
+    } else if (landingPath === '/preview') {
+      landingPath = '/';
+    }
+    const landing_page = landingPath || '/';
+
+    // Safely parse attribution details using our helper from the landing page path
+    const inferredService = landing_page.includes('driveway-cleaning') ? 'Driveway Cleaning' : '';
+    const parsedAttr = {
+      source_service: inferredService,
+      source_city: '',
+      source_page_type: inferredService ? 'service' : 'unknown'
+    };
+
+    // Prefer activeWebsiteContext properties, then activeWebsiteContext.route properties, then parsed fallbacks
+    const source_service = activeWebsiteContext?.service || activeWebsiteContext?.route?.service || parsedAttr.source_service || '';
+    const source_city = activeWebsiteContext?.city || activeWebsiteContext?.route?.city || parsedAttr.source_city || '';
+
+    // Classify source_page and source_page_type
+    let source_page_type = activeWebsiteContext?.route_type || parsedAttr.source_page_type || 'unknown';
+    if (landing_page === '/' || landing_page === '') {
+      source_page_type = 'homepage';
+    } else if (source_service && source_city) {
+      source_page_type = 'service_city';
+    } else if (source_service) {
+      source_page_type = 'service';
+    } else if (source_city) {
+      source_page_type = 'city';
+    }
+
+    // Set source_page as the landing page path or fall back to '/'
+    const source_page = landing_page || '/';
+
     const leadData = {
       name: nameInput?.value || '',
       phone: phoneInput?.value,
       email: emailInput?.value || '',
       address: addressInput?.value || '',
-      service_type: serviceInput?.value || 'General Inquiry',
+      service_type: serviceInput?.value || source_service || 'General Inquiry',
       message: messageInput?.value || '',
-      source: 'funnel',
+      website_url: honeypotInput?.value || '',
+      source: 'public website',
       funnel_id: page?.funnel_id,
       page_id: section.page_id,
-      page_slug: activeWebsiteContext?.slug || page?.slug || '',
-      city: activeWebsiteContext?.city || '',
-      service: activeWebsiteContext?.service || ''
+      page_slug: activeWebsiteContext?.slug || activeWebsiteContext?.route?.slug || page?.slug || '',
+      city: source_city,
+      service: source_service,
+      source_page,
+      source_page_type,
+      source_service,
+      source_city,
+      landing_page,
+      referrer: document.referrer || ''
     };
 
     // Timeout & Retry Logic (W4.2)
     const MAX_TIMEOUT = 10000;
-    const withTimeout = (promise: Promise<any>, ms: number) => 
+    const withTimeout = (promise: Promise<any>, ms: number) =>
       Promise.race([
         promise,
         new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms))
@@ -2331,11 +2509,29 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
 
     const performSubmission = async (canRetry: boolean = true): Promise<any> => {
       try {
-        return await withTimeout(createLead(leadData), MAX_TIMEOUT);
+        const response = await withTimeout(fetch('/api/leads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(leadData)
+        }), MAX_TIMEOUT) as Response;
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || `Lead submission failed with status ${response.status}`);
+        }
+        return result.data || result;
       } catch (err: any) {
         if (canRetry) {
           console.warn('[CRM: FORM] Submission failed/timed out. Retrying once...', err);
-          return await withTimeout(createLead(leadData), MAX_TIMEOUT);
+          const response = await withTimeout(fetch('/api/leads', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(leadData)
+          }), MAX_TIMEOUT) as Response;
+          const result = await response.json();
+          if (!response.ok || !result.success) {
+            throw new Error(result.error || `Lead submission failed with status ${response.status}`);
+          }
+          return result.data || result;
         }
         throw err;
       }
@@ -2344,7 +2540,19 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
     const res = await performSubmission(true); // Initial try + 1 retry
 
     console.log("[CRM: FORM] Success:", res);
-    
+
+    // Track successful lead submission event
+    if (typeof (window as any).trackConversionEvent === 'function') {
+      (window as any).trackConversionEvent('generate_lead', {
+        service_type: leadData.service_type,
+        page_slug: leadData.page_slug,
+        city: leadData.city,
+        service: leadData.service,
+        funnel_id: leadData.funnel_id,
+        page_id: leadData.page_id
+      });
+    }
+
     // Success State (W4.3)
     if (sectionWrapper) {
       sectionWrapper.innerHTML = `
@@ -2370,7 +2578,7 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
 
   } catch (error: any) {
     console.error("[CRM: FORM] Persistent failure after retry:", error);
-    
+
     // Persistent Failure Fallback UI (W4.10 Zero Loss)
     if (sectionWrapper) {
       sectionWrapper.innerHTML = `
@@ -2380,21 +2588,21 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
           <p style="font-size: 1.1rem; color: #7b341e; margin-bottom: 30px; line-height: 1.6; max-width: 320px; margin-left: auto; margin-right: auto;">
             Our server is having trouble connecting. To ensure we save your spot, please <b>call or text</b> us directly:
           </p>
-          
+
           <div style="display: flex; flex-direction: column; gap: 12px;">
-            <a href="tel:${settings.phone}" 
+            <a href="tel:${settings.phone}"
                style="display: flex; align-items: center; justify-content: center; gap: 10px; padding: 18px; background: #c05621; color: white; text-decoration: none; border-radius: 16px; font-weight: 800; font-size: 1.15rem; box-shadow: 0 6px 15px rgba(192, 86, 33, 0.3); transition: transform 0.2s;">
                <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>
                Call ${settings.phone}
             </a>
-            
-            <a href="sms:${settings.phone}?body=Hi, I tried to submit your website form but it failed. Please contact me about a cleaning quote." 
+
+            <a href="sms:${settings.phone}?body=Hi, I tried to submit your website form but it failed. Please contact me about a cleaning quote."
                style="display: flex; align-items: center; justify-content: center; gap: 10px; padding: 18px; background: white; color: #c05621; text-decoration: none; border-radius: 16px; font-weight: 800; font-size: 1.15rem; border: 2px solid #ed8936; transition: transform 0.2s;">
                <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
                Text ${settings.phone}
             </a>
           </div>
-          
+
           <p style="margin-top: 25px; font-size: 0.85rem; color: #a0522d; font-weight: 600;">Hans personally monitors this line 24/7</p>
         </div>
       `;
@@ -2431,7 +2639,7 @@ function renderPublicHeader(config: any, settings: any) {
            </a>
          `).join('')}
          ${config.cta_text ? `
-           <a href="${config.cta_link || '#'}" class="btn-primary" style="padding: 10px 20px; font-size: 0.9rem; border-radius: 8px; text-decoration: none;">${config.cta_text}</a>
+           <a href="#quote-form" class="btn-primary" style="padding: 10px 20px; font-size: 0.9rem; border-radius: 8px; text-decoration: none;" onclick="event.preventDefault(); document.querySelector('#quote-form, .site-form-section')?.scrollIntoView({behavior: 'smooth', block: 'start'});">${config.cta_text}</a>
          ` : `
            <a href="tel:${settings.phone}" style="color: var(--primary-color); font-weight: 700; text-decoration: none;">Call ${settings.phone}</a>
          `}
@@ -2568,6 +2776,41 @@ function resolveWebsitePathFromBrowserPath(rawPath: string): string | null {
   return isKnownWebsiteRoute ? normalizedPath : null;
 }
 
+function renderPublicLeadFormFallback(page: any, sections: any[], settings: any): string {
+  if (!page || sections.some(section => section.type === 'form')) {
+    return '';
+  }
+
+  const anchorSection = sections.find(section => section.page_id === page.id) || sections[0];
+  if (!anchorSection?.id) {
+    return '';
+  }
+
+  const serviceName = activeWebsiteContext?.service || activeWebsiteContext?.route?.service || page.name || 'Pressure Washing';
+  const formContent = {
+    title: 'Request a Quote',
+    submit_label: 'Request Quote',
+    service: serviceName,
+    business_name: settings.business_name,
+    phone: settings.phone
+  };
+
+  return `
+    <section id="quote-form" class="public-lead-form-section" style="padding: 90px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0;">
+      <div style="max-width: 980px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 500px); gap: 48px; align-items: center;">
+        <div>
+          <p style="margin: 0 0 12px 0; color: var(--primary-color); font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.8rem;">Fast local estimate</p>
+          <h2 style="font-size: clamp(2rem, 5vw, 3.25rem); line-height: 1.05; margin: 0 0 20px 0; color: #0f172a; font-weight: 900;">Request a Quote</h2>
+          <p style="font-size: 1.1rem; line-height: 1.7; color: #475569; margin: 0;">Tell us where you need help and we will follow up with next steps for ${serviceName}.</p>
+        </div>
+        ${renderStandardForm(anchorSection.id, formContent, true)}
+      </div>
+    </section>
+  `;
+}
+
+
+
 async function renderSitePage(funnel_id: string, websiteOrContext: any, isPreview: boolean = false) {
   // Store context for lead submission (Phase W3.8)
   activeWebsiteContext = websiteOrContext;
@@ -2684,6 +2927,8 @@ async function renderSitePage(funnel_id: string, websiteOrContext: any, isPrevie
         const content = { ...JSON.parse(contentJson), business_name: settings.business_name, phone: settings.phone, sms_number: smsCta, email: settings.email };
         return renderSection(section.type, content, section.styles, section.id);
       }).join('')}
+
+      ${renderPublicLeadFormFallback(page, sections, settings)}
 
       ${renderPublicFooter(layout.footer_config, settings)}
     </div>
