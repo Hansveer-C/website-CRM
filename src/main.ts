@@ -506,6 +506,15 @@ let builderInsertOrder: number | null = null;
 let builderViewport: 'mobile' | 'desktop' = 'mobile'; // WB.3.4 — mobile-first default
 let builderReturnTo: string = 'pages'; // WB.3.6 — context-aware Back button
 let builderReturnFunnelId: string | null = null; // set when opened from funnel detail
+type BuilderContext = {
+  pageId: string;
+  sectionId?: string | null;
+  path?: string;
+  label?: string;
+  returnTo?: string;
+  funnelId?: string | null;
+  updatedAt?: string;
+};
 let compSearchQuery: string = '';
 let compCategoryFilter: string = 'all';
 let contactTimelineState: any[] = [];
@@ -1226,9 +1235,112 @@ function hydrateBuilderSectionsFromLocalStorage(pageId: string): void {
   }
 }
 
+function getBuilderContextStorageKey(): string {
+  const userId = (window as any).currentUser || 'system';
+  return `mock_builder_context_${userId}`;
+}
+
+function getPrimarySectionForPage(pageId: string): any | null {
+  return mockPageSections
+    .filter((section: any) => section.page_id === pageId)
+    .sort((a: any, b: any) => a.order - b.order)[0] || null;
+}
+
+function getBuilderContextFromHash(): BuilderContext | null {
+  if (typeof window === 'undefined') return null;
+  const hash = window.location.hash || '';
+  const hashContent = hash.startsWith('#/')
+    ? hash.slice(2)
+    : hash.replace(/^#/, '');
+  const [view, query = ''] = hashContent.split('?');
+  if (view !== 'builder' || !query) return null;
+
+  const params = new URLSearchParams(query);
+  const pageId = params.get('pageId');
+  if (!pageId) return null;
+
+  return {
+    pageId,
+    sectionId: params.get('sectionId'),
+    path: params.get('path') || undefined,
+    label: params.get('label') || undefined,
+    returnTo: params.get('returnTo') || undefined,
+    funnelId: params.get('funnelId')
+  };
+}
+
+function getStoredBuilderContext(): BuilderContext | null {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(getBuilderContextStorageKey());
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.pageId ? parsed : null;
+  } catch (err) {
+    console.warn('[Builder] Failed to parse stored builder context; clearing it:', err);
+    window.localStorage.removeItem(getBuilderContextStorageKey());
+    return null;
+  }
+}
+
+function persistBuilderContext(context: BuilderContext): void {
+  if (typeof window === 'undefined' || !window.localStorage || !context.pageId) return;
+
+  const page = mockPages.find((p: any) => p.id === context.pageId);
+  const section = context.sectionId
+    ? mockPageSections.find((s: any) => s.id === context.sectionId)
+    : getPrimarySectionForPage(context.pageId);
+
+  const storedContext: BuilderContext = {
+    pageId: context.pageId,
+    sectionId: context.sectionId ?? section?.id ?? null,
+    path: context.path ?? (page?.slug ? `/${page.slug === 'home' ? '' : page.slug}` : undefined),
+    label: context.label ?? page?.name ?? section?.content?.heading,
+    returnTo: context.returnTo ?? builderReturnTo,
+    funnelId: context.funnelId ?? builderReturnFunnelId,
+    updatedAt: new Date().toISOString()
+  };
+
+  window.localStorage.setItem(getBuilderContextStorageKey(), JSON.stringify(storedContext));
+}
+
+function applyBuilderContext(context: BuilderContext | null): boolean {
+  if (!context?.pageId) return false;
+
+  builderPageId = context.pageId;
+  builderReturnTo = context.returnTo || builderReturnTo;
+  builderReturnFunnelId = context.funnelId || builderReturnFunnelId;
+
+  const sectionExists = context.sectionId
+    ? mockPageSections.some((section: any) => section.id === context.sectionId && section.page_id === context.pageId)
+    : false;
+  builderSelectedSectionId = sectionExists ? context.sectionId! : null;
+  builderInsertOrder = null;
+
+  return mockPages.some((page: any) => page.id === context.pageId);
+}
+
+function hydrateBuilderContext(): void {
+  const context = getBuilderContextFromHash() || getStoredBuilderContext();
+  if (context) applyBuilderContext(context);
+}
+
 function _renderBuilder() {
+  hydrateBuilderContext();
+
   const page = mockPages.find(p => p.id === builderPageId);
-  if (!page) return;
+  if (!page) {
+    app.innerHTML = `
+      <main style="width: 100vw; padding: 0; overflow: hidden; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #0b0f19; color: white; font-family: 'Inter', system-ui, sans-serif;">
+        <div style="text-align: center; max-width: 360px; padding: 40px;">
+          <h2 style="font-size: 1.5rem; font-weight: 700; margin: 0 0 12px; color: #f8fafc;">Select a page or section to edit.</h2>
+          <p style="color: #94a3b8; font-size: 0.95rem; margin: 0 0 20px; line-height: 1.5;">The previous builder context is no longer available.</p>
+          <button onclick="window.builderGoBack()" style="background: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.9rem;">Go Back</button>
+        </div>
+      </main>
+    `;
+    return;
+  }
 
   hydrateBuilderSectionsFromLocalStorage(builderPageId);
 
@@ -1810,7 +1922,18 @@ function renderSectionPreviewContent(section: any) {
   builderPageId = pageId;
   builderReturnTo = 'funnels';
   builderReturnFunnelId = funnelId;
-  (window as any).navigateTo('builder');
+  const primarySection = getPrimarySectionForPage(pageId);
+  const page = mockPages.find((p: any) => p.id === pageId);
+  const context: BuilderContext = {
+    pageId,
+    sectionId: primarySection?.id || null,
+    path: page?.slug ? `/${page.slug === 'home' ? '' : page.slug}` : undefined,
+    label: page?.name || primarySection?.content?.heading,
+    returnTo: 'funnels',
+    funnelId
+  };
+  persistBuilderContext(context);
+  (window as any).navigateTo('builder', undefined, { builderContext: context });
 };
 
 (window as any).switchBuilderPage = (id: string, source: 'pages' | 'footer' = 'pages') => {
@@ -1821,12 +1944,25 @@ function renderSectionPreviewContent(section: any) {
     builderReturnTo = 'pages';
     builderReturnFunnelId = null;
   }
+  const context: BuilderContext = {
+    pageId: id,
+    sectionId: getPrimarySectionForPage(id)?.id || null,
+    returnTo: builderReturnTo,
+    funnelId: builderReturnFunnelId
+  };
+  persistBuilderContext(context);
   renderBuilder();
 };
 
 (window as any).selectSectionForBuilder = (id: string) => {
   builderSelectedSectionId = id;
   builderInsertOrder = null;
+  persistBuilderContext({
+    pageId: builderPageId,
+    sectionId: id,
+    returnTo: builderReturnTo,
+    funnelId: builderReturnFunnelId
+  });
   renderBuilder();
 };
 
@@ -5117,7 +5253,18 @@ async function renderFunnelDetail(funnelId: string) {
 
   // Update URL for standard CRM navigation (Hash based)
   if (!['site', 'preview'].includes(view)) {
-    const newHash = id ? `#/${view}/${id}` : `#/${view}`;
+    let newHash = id ? `#/${view}/${id}` : `#/${view}`;
+    if (view === 'builder' && context?.builderContext?.pageId) {
+      const builderContext = context.builderContext as BuilderContext;
+      const params = new URLSearchParams();
+      params.set('pageId', builderContext.pageId);
+      if (builderContext.sectionId) params.set('sectionId', builderContext.sectionId);
+      if (builderContext.path) params.set('path', builderContext.path);
+      if (builderContext.label) params.set('label', builderContext.label);
+      if (builderContext.returnTo) params.set('returnTo', builderContext.returnTo);
+      if (builderContext.funnelId) params.set('funnelId', builderContext.funnelId);
+      newHash = `#/builder?${params.toString()}`;
+    }
     if (window.location.hash !== newHash) {
        window.history.pushState({}, "", newHash);
     }
@@ -6100,8 +6247,12 @@ async function bootRouter() {
   if (window.location.hash) {
      const hashContent = window.location.hash.slice(2);
      if (hashContent) {
-       const parts = hashContent.split('/');
-       (window as any).navigateTo(parts[0], parts[1]);
+       const [routePart, query = ''] = hashContent.split('?');
+       const parts = routePart.split('/');
+       const routeContext = parts[0] === 'builder' && query
+         ? { builderContext: getBuilderContextFromHash() }
+         : undefined;
+       (window as any).navigateTo(parts[0], parts[1], routeContext);
        return;
      }
   }
