@@ -142,10 +142,16 @@ if (typeof global !== 'undefined' && typeof window === 'undefined') {
     name: string;
     type: string;
     size: number;
+    private parts: any[];
     constructor(parts: any[], name: string, options: any = {}) {
+      this.parts = parts;
       this.name = name;
       this.type = options.type || 'image/png';
       this.size = options.size || 100 * 1024;
+    }
+    async arrayBuffer() {
+      const text = this.parts.map(part => typeof part === 'string' ? part : String(part)).join('');
+      return new TextEncoder().encode(text).buffer;
     }
   };
 
@@ -250,10 +256,10 @@ async function runLogoVerification() {
   console.log('Preview HTML:', mockPreview.innerHTML);
   console.log('Input Value:', mockUrlInput.value);
 
-  if (!mockPreview.innerHTML.includes('settings-logo-img') || !mockPreview.innerHTML.includes('https://cdn.pressurepro.io/mock-media/system/logos/')) {
-    throw new Error('UI preview was not updated immediately with mock CDN url');
+  if (!mockPreview.innerHTML.includes('settings-logo-img') || !mockPreview.innerHTML.includes('data:image/png;base64,')) {
+    throw new Error('UI preview was not updated immediately with renderable mock logo data URL');
   }
-  if (!mockUrlInput.value.startsWith('https://cdn.pressurepro.io/mock-media/system/logos/')) {
+  if (!mockUrlInput.value.startsWith('data:image/png;base64,')) {
     throw new Error(`Logo input field value format invalid: ${mockUrlInput.value}`);
   }
   console.log('✅ US-006 PASSED: Logo uploaded successfully, UI preview and fields updated immediately.');
@@ -305,8 +311,8 @@ async function runLogoVerification() {
   // ${config.logo_url || settings.logo_url ? `<img src="${config.logo_url || settings.logo_url}" ...>` : ''}
   const renderedLogoUrl = layout.header_config.logo_url || settingsRes.data.logo_url;
   console.log('Rendered Logo URL in Site Preview Header:', renderedLogoUrl);
-  if (!renderedLogoUrl || !renderedLogoUrl.startsWith('https://cdn.pressurepro.io/mock-media/')) {
-     throw new Error('Header did not resolve to uploaded mock CDN logo URL');
+  if (!renderedLogoUrl || !renderedLogoUrl.startsWith('data:image/')) {
+     throw new Error('Header did not resolve to uploaded renderable mock logo URL');
   }
   console.log('✅ US-008 PASSED: Uploaded logo resolves and renders correctly on the generated header.');
 
