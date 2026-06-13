@@ -1,10 +1,19 @@
 import { emitEvent } from './events';
-import { runAutomations } from './automation';
 import { persistContact, findContact, deleteContact } from './contacts_repo';
 import { persistOpportunity, getOpenOpportunityByContact } from './opportunities_repo';
 import { Contact, Opportunity, ApiRequest } from './types';
 
 import { validateContactInput } from './utils/validators';
+
+async function runServerAutomations(trigger: any, context: any) {
+  if (typeof window !== 'undefined') {
+    console.log(`[AUTOMATION] Skipping ${trigger} in browser mock context.`);
+    return;
+  }
+
+  const { runAutomations } = await import('./automation');
+  await runAutomations(trigger, context);
+}
 
 /**
  * Reusable Lead Creation Engine (End-to-End Pipeline)
@@ -155,7 +164,7 @@ export async function createLead(data: {
   });
 
   // 4. Trigger Automations
-  runAutomations('OPPORTUNITY_CREATED', activeOpp);
+  await runServerAutomations('OPPORTUNITY_CREATED', activeOpp);
 
     return {
       contactId: contactIdToUse,

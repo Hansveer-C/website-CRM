@@ -41,8 +41,6 @@ const getCall = (id: string) => null;
 const mockAutomationLogs: string[] = [];
 
 function runAutomations(type: string, data: any) {
-  const settings = getWebsiteSettings();
-  
   if (type === 'LEAD_CAPTURED') {
     const lead = data;
     const triggerId = `auto_sms_lead_${lead.id}`;
@@ -51,10 +49,7 @@ function runAutomations(type: string, data: any) {
     if (mockAutomationLogs.includes(triggerId)) return;
     mockAutomationLogs.push(triggerId);
 
-    const msg = `Hi ${lead.name}, thanks for reaching out to ${settings.business_name}. We’ll get back to you shortly.`;
-    
-    console.log(`[AUTOMATION] Triggering LEAD_CAPTURED Response for ${lead.phone}`);
-    sendMessageToContact(lead.id, msg, 'automation');
+    console.log(`[AUTOMATION] Lead auto SMS skipped in browser mock context for ${lead.phone}.`);
   }
 
   if (type === 'OPPORTUNITY_CREATED') {
@@ -267,76 +262,75 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
         // Simulating the Backend Dispatcher/Router
         if (url === '/api/messages/send' && method === 'POST') {
-            const { sendMessageApi } = await import('./messages_api');
-            const response: any = await sendMessageApi(reqContext);
-            const responseData = response.data || response;
-            return new Response(JSON.stringify(responseData), { 
-                status: response.status || 200, 
+            console.warn('[SMS MOCK] SMS delivery is server-only and is disabled in the browser mock API.');
+            return new Response(JSON.stringify({
+                success: false,
+                error: 'SMS delivery is server-only in this environment.'
+            }), {
+                status: 501,
                 headers: { 'Content-Type': 'application/json' } 
             });
         }
         
         if (url.includes('/api/messages/') && url.endsWith('/retry') && init?.method === 'POST') {
-            const { retryMessageApi } = await import('./messages_api');
-            const message_id = url.split('/')[3];
-            const response: any = await retryMessageApi({} as any, message_id);
-            const responseData = response.data || response;
-            return new Response(JSON.stringify(responseData), { status: response.status || 200 });
+            console.warn('[SMS MOCK] SMS retry is server-only and is disabled in the browser mock API.');
+            return new Response(JSON.stringify({
+                success: false,
+                error: 'SMS retry is server-only in this environment.'
+            }), {
+                status: 501,
+                headers: { 'Content-Type': 'application/json' }
+            });
         }
 
         if (url === '/api/leads' && method === 'POST') {
             const body = reqContext.body;
             const userId = (window as any).currentUser || 'system';
-            let isRepeat = false;
             console.log('[API ROUTER] Inbound Lead Submission:', body);
 
             try {
-                const { createLead } = await import('./leads_logic');
-                const { findContact, getContactById } = await import('./contacts_repo');
-
                 const phoneVal = body.phone ? body.phone.trim() : '';
                 const emailVal = body.email ? body.email.trim() : '';
+                const nameVal = body.name ? body.name.trim().toLowerCase() : '';
+                const isRepeat = mockContacts.some((contact) => {
+                    const contactPhone = contact.phone ? contact.phone.trim() : '';
+                    const contactEmail = contact.email ? contact.email.trim().toLowerCase() : '';
+                    const contactName = contact.name ? contact.name.trim().toLowerCase() : '';
+                    return contact.user_id === userId && (
+                        (!!phoneVal && contactPhone === phoneVal) ||
+                        (!!emailVal && contactEmail === emailVal.toLowerCase()) ||
+                        (!!nameVal && contactName === nameVal)
+                    );
+                });
 
-                // Determine if this is a repeat lead
-                const existingRes = await findContact(phoneVal, emailVal || null, userId);
-                isRepeat = !!(existingRes.success && existingRes.data);
+                const fallback = createLocalMockWebsiteLead({
+                    ...body,
+                    phone: phoneVal || body.phone,
+                    email: emailVal || body.email,
+                    name: body.name || ''
+                }, userId, isRepeat);
 
-                // Run the real lead ingestion engine
-                const leadResult = await createLead(body, { user: { id: userId } } as any);
+                // Browser mock context must not import or execute server-only SMS/Twilio code.
+                runAutomations('LEAD_CAPTURED', fallback.contact);
 
-                if (leadResult.contactId === 'spam-blocked') {
-                    return new Response(JSON.stringify({ success: true, data: { id: 'spam-blocked' }, is_repeat: false }), {
-                        status: 201,
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-                }
-
-                // Fetch the fully persisted/created contact to return to the frontend
-                const contactRes = await getContactById(leadResult.contactId, userId);
-                const contact = contactRes.success && contactRes.data ? contactRes.data : null;
-
-                // 🌿 WB.5.4 Trigger Automation (Phase W4.4)
-                if (contact) {
-                    runAutomations('LEAD_CAPTURED', contact);
-                }
-
-                if (body.is_test && contact) {
+                if (body.is_test && fallback.contact) {
                     const isNew = !isRepeat;
                     (window as any).showToast(isNew ? 'Test lead received! Redirecting to CRM...' : 'Repeat test lead received!', 'success');
-                    setTimeout(() => window.navigateTo('contact-detail', contact.id), 2000);
+                    setTimeout(() => window.navigateTo('contact-detail', fallback.contact.id), 2000);
                 }
 
                 return new Response(JSON.stringify({
                     success: true,
-                    data: contact || { id: leadResult.contactId, name: body.name },
-                    is_repeat: isRepeat
+                    data: fallback.contact,
+                    opportunity: fallback.opportunity,
+                    is_repeat: fallback.isRepeat
                 }), {
                     status: 201,
                     headers: { 'Content-Type': 'application/json' }
                 });
             } catch (error: any) {
                 console.error('[API ROUTER] Lead Ingestion Error:', error);
-                const fallback = createLocalMockWebsiteLead(body, userId, isRepeat);
+                const fallback = createLocalMockWebsiteLead(body, userId, false);
                 runAutomations('LEAD_CAPTURED', fallback.contact);
                 return new Response(JSON.stringify({
                     success: true,
