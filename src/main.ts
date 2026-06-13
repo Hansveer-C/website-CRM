@@ -2681,12 +2681,12 @@ function renderPublicHeader(config: any, settings: any) {
     document.documentElement.style.setProperty('--primary-color', settings.primary_color);
   }
   return `
-    <header style="padding: 20px 40px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: rgba(255,255,255,0.9); backdrop-filter: blur(8px); z-index: 100; transition: top 0.3s ease;">
-      <div style="display: flex; align-items: center; gap: 15px;">
+    <header style="padding: 20px clamp(16px, 4vw, 40px); border-bottom: 1px solid #eee; display: flex; flex-wrap: wrap; gap: 16px 24px; justify-content: space-between; align-items: center; position: sticky; top: 0; background: rgba(255,255,255,0.9); backdrop-filter: blur(8px); z-index: 100; transition: top 0.3s ease; box-sizing: border-box; width: 100%; max-width: 100%; overflow-x: clip;">
+      <div style="display: flex; align-items: center; gap: 15px; min-width: 0;">
          ${config.logo_url || settings.logo_url ? `<img src="${config.logo_url || settings.logo_url}" style="height: 40px; width: 40px; border-radius: 8px; object-fit: cover;">` : ''}
-         <span style="font-weight: 800; font-size: 1.25rem; color: #1e293b;">${displayName}</span>
+         <span style="font-weight: 800; font-size: 1.25rem; color: #1e293b; overflow-wrap: anywhere;">${displayName}</span>
       </div>
-      <nav style="display: flex; gap: 24px; align-items: center;">
+      <nav style="display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: center; justify-content: flex-end; min-width: 0; max-width: 100%;">
          ${(config.nav_items || []).map((item: any) => `
            <a href="/site${item.path.startsWith('/') ? item.path : '/' + item.path}"
               onclick="event.preventDefault(); window.navigateTo('site', '${item.path}')"
