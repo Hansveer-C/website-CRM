@@ -6275,6 +6275,12 @@ async function bootRouter() {
     const result = await resolveWebsiteRequest(host, targetPath);
     if (result && result.funnel_id) {
        const isPreview = rawPath === '/preview' || rawPath.startsWith('/preview/');
+       const resolvedRoutePath = normalizePreviewPath(result.route?.path || '/');
+       const requestedRoutePath = normalizePreviewPath(targetPath);
+       if (isPreview && resolvedRoutePath !== requestedRoutePath) {
+         render404('Preview target not found.');
+         return;
+       }
        const mergedContext = result.website ? {
          ...result.website,
          route: result.route,
