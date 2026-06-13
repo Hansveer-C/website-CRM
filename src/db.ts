@@ -510,17 +510,43 @@ export const mockWebsiteSettings: WebsiteSettings = {
   id: 'settings-001',
   business_name: 'Handyman Hans Pressure Washing',
   phone: '555-0199',
+  sms_number: '',
   email: 'hans@example.com',
   logo_url: 'https://images.unsplash.com/photo-1628177142898-93e36e4e3a50?q=80&w=200&h=200&auto=format&fit=crop',
   primary_color: '#4f46e5',
   facebook_pixel_id: '',
   gtm_id: '',
+  ga4_measurement_id: '',
   auto_lead_sms_enabled: true,
   auto_lead_sms_template: "Hey {name}, thanks for reaching out! I'll get back to you ASAP.",
   missed_call_sms_enabled: true,
   missed_call_sms_template: '',
-  created_at: new Date().toISOString()
+  created_at: new Date().toISOString(),
+  publish_status: 'draft',
+  cities_served: [
+    'Port Moody',
+    'Coquitlam',
+    'Port Coquitlam',
+    'Burnaby',
+    'Vancouver',
+    'North Vancouver',
+    'West Vancouver'
+  ],
+  services_offered: [
+    'Pressure Washing',
+    'Driveway Cleaning',
+    'Sidewalk Cleaning',
+    'Patio Cleaning',
+    'Deck Cleaning',
+    'House Washing',
+    'Gutter Cleaning',
+    'Roof Moss Treatment',
+    'Commercial Pressure Washing'
+  ],
+  website_preset: 'residential'
 };
+
+export const mockWebsiteSettingsMap = new Map<string, WebsiteSettings>();
 
 export const mockWebsiteLayouts: WebsiteLayout[] = [
   {

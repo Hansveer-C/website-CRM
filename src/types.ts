@@ -193,20 +193,44 @@ export interface Template {
   created_at: string;
 }
 
+export interface WebsiteBuildBrief {
+  business_type: 'residential' | 'soft_washing' | 'commercial' | 'mixed';
+  services_offered: string[];
+  cities_served: string[];
+  tone: 'professional' | 'friendly' | 'bold' | 'modern';
+  main_offer: string;
+  focus_mode: 'residential' | 'soft_washing' | 'commercial' | 'mixed';
+  generate_service_pages: boolean;
+  generate_city_pages: boolean;
+  generate_service_city_pages: boolean;
+}
+
 export interface WebsiteSettings {
   id: string;
+  user_id?: string;
+  website_id?: string;
   business_name: string;
   phone: string;
+  sms_number?: string;
   email: string;
   logo_url: string;
   primary_color: string;
   facebook_pixel_id?: string;
   gtm_id?: string;
+  ga4_measurement_id?: string;
   auto_lead_sms_enabled: boolean;
   auto_lead_sms_template: string;
   missed_call_sms_enabled: boolean;
   missed_call_sms_template: string;
   created_at: string;
+  cities_served?: string[];
+  services_offered?: string[];
+  publish_status?: 'draft' | 'published' | 'unpublished';
+  website_preset?: string;
+  google_business_link?: string;
+  google_rating?: number;
+  google_reviews_count?: number;
+  build_brief?: WebsiteBuildBrief;
 }
 
 export interface Website {

@@ -21,12 +21,18 @@ declare global {
  * These stubs replace direct backend function calls to prevent credential leakage.
  * These utilize regional mock data (db.ts) to maintain UI functionality without direct DB access.
  */
-const getWebsiteSettings = () => mockWebsiteSettings;
-const getWebsiteLayout = (id?: string) => mockWebsiteLayouts[0]; // Simplified for now
-const persistWebsiteSettings = async (data: any) => { 
+export const getWebsiteSettings = () => mockWebsiteSettings;
+export const getWebsiteLayout = (id?: string) => mockWebsiteLayouts[0]; // Simplified for now
+export const persistWebsiteSettings = async (data: any) => {
     console.log('[API STUB] Saving settings:', data);
     return { success: true }; 
 };
+
+function applyPrimaryColor(color?: string): void {
+  if (!color || typeof document === 'undefined' || !document.documentElement?.style) return;
+  document.documentElement.style.setProperty('--primary', color);
+  document.documentElement.style.setProperty('--primary-color', color);
+}
 const getEvents = (user?: any) => [] as any[];
 const getAllMessagesOrdered = (user?: any) => [] as any[];
 const getConversation = (id: string, user?: any) => [] as any[];
@@ -337,6 +343,24 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
             try { body = JSON.parse(typeof reqContext.body === 'string' ? reqContext.body : await reqContext.body?.text?.() ?? '{}'); } catch {}
             const sections: any[] = body.sections || [];
 
+            const isBrowser = typeof window !== 'undefined';
+            const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+            const reqUser = (window as any).currentUser || reqContext.user?.id || 'system';
+
+            if (!hasSupabase) {
+                const { SectionsRepo } = await import('./sections_repo_supabase');
+                for (const s of sections) {
+                    await SectionsRepo.persistSection(s, reqUser);
+                }
+                return new Response(JSON.stringify({
+                    success: true,
+                    saved: sections.length
+                }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+
             // Upsert sections to Supabase
             const { supabase, safeDbCall } = await import('./utils/db/supabase');
             const result = await safeDbCall('UPSERT_SECTIONS', reqContext.user?.id || 'system',
@@ -357,6 +381,43 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         }
 
         // ── WB.3.4 Bulk SEO Generation ──────────────────────────────────
+        if (url === '/api/settings') {
+            const reqUser = (window as any).currentUser || 'system';
+            const { WebsitesRepo } = await import('./websites_repo_supabase');
+            let userSite = await WebsitesRepo.getWebsiteByUser(reqUser);
+            if (!userSite) {
+                userSite = { id: 'ws-1', user_id: reqUser } as any;
+            }
+            const websiteId = userSite ? userSite.id : 'ws-1';
+
+            if (method === 'GET') {
+                const { getWebsiteSettings } = await import('./website_settings_repo');
+                const response = await getWebsiteSettings(reqUser, websiteId);
+                if (response.success && response.data) {
+                    Object.assign(mockWebsiteSettings, response.data);
+                    applyPrimaryColor(mockWebsiteSettings.primary_color);
+                }
+                return new Response(JSON.stringify(response), {
+                    status: response.success ? 200 : 500,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } else if (method === 'POST') {
+                const { persistWebsiteSettings } = await import('./website_settings_repo');
+                const response = await persistWebsiteSettings(reqUser, websiteId, reqContext.body);
+                if (response.success && response.data) {
+                    Object.assign(mockWebsiteSettings, response.data);
+                    applyPrimaryColor(mockWebsiteSettings.primary_color);
+                } else if (!response.success) {
+                    Object.assign(mockWebsiteSettings, reqContext.body);
+                    applyPrimaryColor(mockWebsiteSettings.primary_color);
+                }
+                return new Response(JSON.stringify(response), {
+                    status: response.success ? 200 : 500,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+        }
+
         if (url === '/api/websites/bulk-seo' && method === 'POST') {
             const { services, cities } = reqContext.body || {};
             console.log(`[MOCK] Bulk SEO Generation for ${services.length} services in ${cities.length} cities`);
@@ -476,8 +537,38 @@ let mockGlobalSettings = {
   (mockGlobalSettings as any)[key] = value;
 };
 
-(window as any).saveGlobalSettings = () => {
-  alert('Global Website Settings saved successfully! All pages updated.');
+(window as any).saveGlobalSettings = async () => {
+  const s = getWebsiteSettings();
+
+  if (!s.business_name || s.business_name.trim() === '') {
+    (window as any).showToast?.('Business name cannot be empty.', 'error');
+    return;
+  }
+  if (s.email && !/^[^@s]+@[^@s]+.[^@s]+$/.test(s.email)) {
+    (window as any).showToast?.('Please enter a valid email address.', 'error');
+    return;
+  }
+
+  const saveBtn = document.querySelector('[onclick="window.saveGlobalSettings()"]') as HTMLButtonElement | null;
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
+
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(s)
+    }).then(r => r.json());
+
+    if (res.success) {
+      (window as any).showToast?.('Settings saved successfully!', 'success');
+    } else {
+      (window as any).showToast?.(`Settings could not be saved: ${res.error || 'Unknown error'}`, 'error');
+    }
+  } catch (err: any) {
+    (window as any).showToast?.(`Save failed: ${err.message}`, 'error');
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Settings'; }
+  }
   renderWebsiteSettings();
 };
 
@@ -3676,10 +3767,101 @@ function renderWebsiteStructure() {
 };
 
 (window as any).updateSettingsField = (field: string, value: string) => {
-    const s = getWebsiteSettings(); (s as any)[field] = value; require('./website_settings_repo').persistWebsiteSettings(s);
+    const s = getWebsiteSettings();
+    (s as any)[field] = value;
+
+    const promise = fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(s)
+    })
+    .then(res => res.json())
+    .then(res => {
+        if (res.success) {
+            console.log('[SETTINGS] Field persisted:', field, value);
+        } else {
+            console.warn('[SETTINGS] Persistence response was failure:', res.error);
+        }
+        return res;
+    })
+    .catch(err => {
+        console.error('[SETTINGS] Network error on field save:', err);
+        throw err;
+    });
+
     renderWebsiteSettings();
     console.log('Settings updated:', field, value);
-  };
+    return promise;
+};
+
+(window as any).handleLogoUpload = async (file: File) => {
+    if (!file) return;
+    const btn = document.getElementById('logo-upload-btn') as HTMLButtonElement | null;
+    const status = document.getElementById('logo-upload-status') as HTMLDivElement | null;
+    const preview = document.getElementById('logo-preview-container') as HTMLDivElement | null;
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span>Uploading...</span>';
+        btn.style.opacity = '0.7';
+    }
+    if (status) {
+        status.style.color = '#3b82f6';
+        status.textContent = 'Uploading to secure storage...';
+    }
+
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('purpose', 'logo');
+
+        const res = await fetch('/api/media/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        const json = await res.json();
+
+        if (json.success && json.public_url) {
+            if (status) {
+                status.style.color = '#10b981';
+                status.textContent = 'Upload completed! Saving settings...';
+            }
+            if (preview) {
+                preview.innerHTML = `<img id="settings-logo-img" src="${json.public_url}" style="width: 100%; height: 100%; object-fit: cover;">`;
+            }
+            const input = document.getElementById('settings-logo-url-input') as HTMLInputElement | null;
+            if (input) {
+                input.value = json.public_url;
+            }
+
+            await window.updateSettingsField('logo_url', json.public_url);
+
+            setTimeout(() => {
+                if (status) status.textContent = 'Upload completed!';
+            }, 1000);
+        } else {
+            throw new Error(json.error || 'UPLOAD_FAILED');
+        }
+    } catch (err: any) {
+        console.error('[LOGO UPLOAD ERROR]:', err);
+        if (status) {
+            status.style.color = '#ef4444';
+            const errorMsg = err.message === 'FILE_TOO_LARGE'
+                ? 'File too large (max 5MB)'
+                : err.message === 'INVALID_FILE_TYPE'
+                    ? 'Invalid image type (only PNG/JPG/WEBP allowed)'
+                    : 'Server error';
+            status.textContent = `Upload failed: ${errorMsg}`;
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span>Upload Logo File</span>';
+            btn.style.opacity = '1';
+        }
+    }
+};
 
 function renderQuickstart() {
   app.innerHTML = `
@@ -4889,10 +5071,20 @@ async function executeNavigation(view: string, id?: string, context?: any) {
     case 'funnel-detail': if (id) renderFunnelDetail(id); break;
     case 'pages': renderPages(); break;
     case 'page-sections': if (id) renderPageSections(id); break;
-    case 'builder': if (id) renderBuilder(); break;
+    case 'builder': renderBuilder(); break;
     case 'templates': renderTemplates(); break;
     case 'components': app.innerHTML = `${renderSidebar('components')}<main class="main-content"><h2>Components Shelf</h2><div class="empty-state">Library of pre-built UI components coming soon.</div></main>`; break;
-    case 'website-settings': renderWebsiteSettings(); break;
+    case 'website-settings':
+      try {
+        const settingsRes = await fetch('/api/settings').then(r => r.json());
+        if (settingsRes.success && settingsRes.data) {
+          Object.assign(mockWebsiteSettings, settingsRes.data);
+        }
+      } catch (err) {
+        console.warn('Failed to load settings on navigation:', err);
+      }
+      renderWebsiteSettings();
+      break;
     case 'website-navigation': renderWebsiteNavigation(); break;
 <<<<<<< HEAD
 =======
@@ -5790,6 +5982,16 @@ checkOverdueInvoices();
 async function bootRouter() {
   const host = window.location.hostname;
   const rawPath = window.location.pathname;
+
+  // Load website settings on boot to ensure persistence
+  try {
+    const settingsRes = await fetch('/api/settings').then(r => r.json());
+    if (settingsRes.success && settingsRes.data) {
+      Object.assign(mockWebsiteSettings, settingsRes.data);
+    }
+  } catch (err) {
+    console.warn('Failed to load settings at boot:', err);
+  }
 
   // 1. Phase W6.9: Resolve Public Website Route first (Real URLs)
   if (rawPath.startsWith('/site/') || rawPath.startsWith('/preview/')) {
