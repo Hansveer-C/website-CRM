@@ -2327,7 +2327,7 @@ function renderSectionPreviewContent(section: any) {
 function renderStandardForm(id: string, content: any, isPublic: boolean) {
   const prefix = isPublic ? 'site-f-' : 'pf-';
   const title = content.title || 'Get Your Free Quote';
-  
+
   // 🌿 Context-Aware CTA (Phase W4.8)
   let submitLabel = content.submit_label || 'Get My Free Quote ✨';
   if (isPublic) {
@@ -2337,67 +2337,90 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
       submitLabel = 'Get Free Quote';
     }
   }
-  
+
   // 🌿 WB.5.2: Input Memory (Repeat Visit Support - Phase W4.6)
   const savedName = window.localStorage.getItem('crm_lead_name') || '';
   const savedPhone = window.localStorage.getItem('crm_lead_phone') || '';
-  
+  const defaultService = content.service || activeWebsiteContext?.service || '';
+  const serviceSelected = (value: string) => defaultService.toLowerCase() === value.toLowerCase() ? 'selected' : '';
+
   return `
     <div id="form-wrapper-${id}" class="site-form-section" style="max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.1); color: #1e293b; text-align: left; border: 1px solid #f1f5f9;">
       <h3 style="margin-bottom: 30px; font-size: 1.85rem; text-align: center; font-weight: 800; letter-spacing: -0.5px; color: #0f172a;">${title}</h3>
-      <div style="display: flex; flex-direction: column; gap: 16px;">
+      <form id="${prefix}form-${id}" onsubmit="event.preventDefault(); window.submitBuilderForm('${id}', ${isPublic})" style="display: flex; flex-direction: column; gap: 16px;">
         <div class="form-group">
           <label style="display: block; font-weight: 700; margin-bottom: 6px; font-size: 0.85rem; color: #64748b;">Full Name <span style="color: #ef4444;">*</span></label>
-          <input type="text" id="${prefix}name-${id}" 
+          <input type="text" id="${prefix}name-${id}"
                  value="${savedName}"
-                 placeholder="e.g. John Doe" required 
+                 placeholder="e.g. John Doe" required
                  autocomplete="name"
                  oninput="window.localStorage.setItem('crm_lead_name', this.value)"
                  style="padding: 14px 18px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 14px; width: 100%; font-family: inherit; font-size: 1rem; transition: all 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'; this.style.background='white'; this.style.boxShadow='0 0 0 4px rgba(37, 99, 235, 0.1)';" onblur="this.style.borderColor='#f1f5f9'; this.style.background='#f8fafc'; this.style.boxShadow='none'">
         </div>
         <div class="form-group">
           <label style="display: block; font-weight: 700; margin-bottom: 6px; font-size: 0.85rem; color: #64748b;">Phone Number <span style="color: #ef4444;">*</span></label>
-          <input type="tel" id="${prefix}phone-${id}" 
+          <input type="tel" id="${prefix}phone-${id}"
                  value="${savedPhone}"
-                 placeholder="e.g. (555) 000-0000" required 
+                 placeholder="e.g. (555) 000-0000" required
+                 title="Enter a 10-digit phone number, or 11 digits starting with 1."
                  autocomplete="tel"
-                 oninput="window.localStorage.setItem('crm_lead_phone', this.value)"
+                 oninput="this.setCustomValidity(''); window.localStorage.setItem('crm_lead_phone', this.value)"
                  style="padding: 14px 18px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 14px; width: 100%; font-family: inherit; font-size: 1rem; transition: all 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'; this.style.background='white'; this.style.boxShadow='0 0 0 4px rgba(37, 99, 235, 0.1)';" onblur="this.style.borderColor='#f1f5f9'; this.style.background='#f8fafc'; this.style.boxShadow='none'">
         </div>
-        
         <div class="form-group">
-          <label style="display: block; font-weight: 700; margin-bottom: 6px; font-size: 0.85rem; color: #64748b;">Service Needed</label>
-          <select id="${prefix}service-${id}" 
+          <label style="display: block; font-weight: 700; margin-bottom: 6px; font-size: 0.85rem; color: #64748b;">Email <span style="color: #ef4444;">*</span></label>
+          <input type="email" id="${prefix}email-${id}"
+                  placeholder="e.g. john@example.com"
+                  required
+                  autocomplete="email"
+                 style="padding: 14px 18px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 14px; width: 100%; font-family: inherit; font-size: 1rem; transition: all 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'; this.style.background='white'; this.style.boxShadow='0 0 0 4px rgba(37, 99, 235, 0.1)';" onblur="this.style.borderColor='#f1f5f9'; this.style.background='#f8fafc'; this.style.boxShadow='none'">
+        </div>
+        <div class="form-group">
+          <label style="display: block; font-weight: 700; margin-bottom: 6px; font-size: 0.85rem; color: #64748b;">Address or Project Location <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="${prefix}address-${id}"
+                  placeholder="e.g. 123 Main Street"
+                  required
+                  autocomplete="street-address"
+                 style="padding: 14px 18px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 14px; width: 100%; font-family: inherit; font-size: 1rem; transition: all 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'; this.style.background='white'; this.style.boxShadow='0 0 0 4px rgba(37, 99, 235, 0.1)';" onblur="this.style.borderColor='#f1f5f9'; this.style.background='#f8fafc'; this.style.boxShadow='none'">
+        </div>
+
+        <div class="form-group">
+          <label style="display: block; font-weight: 700; margin-bottom: 6px; font-size: 0.85rem; color: #64748b;">Service Needed <span style="color: #ef4444;">*</span></label>
+          <select id="${prefix}service-${id}"
+                  required
                   autocomplete="off"
                   style="padding: 14px 18px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 14px; width: 100%; font-family: inherit; font-size: 1rem; appearance: none; background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%2364748b%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C/polyline%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 15px center; background-size: 18px;">
-            <option value="General Inquiry">Select a service...</option>
-            <option value="Driveway Cleaning">Driveway Cleaning</option>
-            <option value="House Washing">House Washing</option>
-            <option value="Roof Cleaning">Roof Cleaning</option>
-            <option value="Gutter Cleaning">Gutter Cleaning</option>
-            <option value="Commercial Cleaning">Commercial Cleaning</option>
-            <option value="Other">Other</option>
+            <option value="">Select a service...</option>
+            <option value="Driveway Cleaning" ${serviceSelected('Driveway Cleaning')}>Driveway Cleaning</option>
+            <option value="House Washing" ${serviceSelected('House Washing')}>House Washing</option>
+            <option value="Roof Cleaning" ${serviceSelected('Roof Cleaning')}>Roof Cleaning</option>
+            <option value="Gutter Cleaning" ${serviceSelected('Gutter Cleaning')}>Gutter Cleaning</option>
+            <option value="Commercial Cleaning" ${serviceSelected('Commercial Cleaning')}>Commercial Cleaning</option>
+            <option value="Other" ${serviceSelected('Other')}>Other</option>
           </select>
         </div>
 
         <div class="form-group">
           <label style="display: block; font-weight: 700; margin-bottom: 6px; font-size: 0.85rem; color: #64748b;">Message (Optional)</label>
-          <textarea id="${prefix}message-${id}" 
+          <textarea id="${prefix}message-${id}"
                     autocomplete="off"
-                    placeholder="Tell us more about your project..." 
+                    placeholder="Tell us more about your project..."
                     style="padding: 14px 18px; border: 2px solid #f1f5f9; background: #f8fafc; border-radius: 14px; width: 100%; font-family: inherit; font-size: 1rem; min-height: 100px; resize: vertical; transition: all 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'; this.style.background='white'; this.style.boxShadow='0 0 0 4px rgba(37, 99, 235, 0.1)';" onblur="this.style.borderColor='#f1f5f9'; this.style.background='#f8fafc'; this.style.boxShadow='none'"></textarea>
         </div>
 
-        <button class="btn-primary" 
+
+        <div id="${prefix}status-${id}" aria-live="polite" style="display: none; padding: 12px 14px; border-radius: 10px; background: #fef2f2; color: #b91c1c; font-weight: 700; font-size: 0.9rem;"></div>
+
+        <button type="submit" class="btn-primary"
           style="width: 100%; margin-top: 10px; font-size: 1.3rem; height: 64px;"
-          onclick="window.submitBuilderForm('${id}', ${isPublic})">
+          >
           ${submitLabel}
         </button>
         <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 15px; color: #94a3b8; font-size: 0.85rem; font-weight: 600;">
           <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
           Secure & Private Inquiry
         </div>
-      </div>
+      </form>
     </div>
   `;
 }
@@ -2415,12 +2438,47 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
   const serviceInput = (document.getElementById(`${prefix}service-${sectionId}`) || document.getElementById(`${prefix}service_type-${sectionId}`)) as HTMLSelectElement;
   const messageInput = document.getElementById(`${prefix}message-${sectionId}`) as HTMLTextAreaElement;
   const honeypotInput = document.getElementById(`${prefix}website_url-${sectionId}`) as HTMLInputElement;
+  const formEl = document.getElementById(`${prefix}form-${sectionId}`) as HTMLFormElement | null;
+  const statusEl = document.getElementById(`${prefix}status-${sectionId}`) as HTMLElement | null;
 
-  if (!nameInput?.value || !phoneInput?.value) {
-    alert('Please fill in your name and phone number.');
+  const showValidationError = (message: string) => {
+    if (statusEl) {
+      statusEl.textContent = message;
+      statusEl.style.display = 'block';
+    }
+  };
+
+  const clearValidationError = () => {
+    if (statusEl) {
+      statusEl.textContent = '';
+      statusEl.style.display = 'none';
+    }
+  };
+
+  const phoneDigits = (phoneInput?.value || '').replace(/\D/g, '');
+  const hasValidPhone = phoneDigits.length === 10 || (phoneDigits.length === 11 && phoneDigits.startsWith('1'));
+  if (phoneInput) {
+    phoneInput.setCustomValidity(hasValidPhone || !phoneInput.value ? '' : 'Please enter a valid phone number.');
+  }
+
+  if (formEl && !formEl.checkValidity()) {
+    const message = !phoneInput?.value || !nameInput?.value || !emailInput?.value || !addressInput?.value || !serviceInput?.value
+      ? 'Please complete the required fields.'
+      : !hasValidPhone
+        ? 'Please enter a valid phone number.'
+        : emailInput?.validity?.typeMismatch
+          ? 'Please enter a valid email address.'
+          : 'Please check the highlighted fields.';
+    showValidationError(message);
+    formEl.reportValidity();
     return;
   }
 
+  if (!nameInput?.value || !phoneInput?.value) {
+    showValidationError('Please complete the required fields.');
+    return;
+  }
+  clearValidationError();
   const sectionWrapper = document.getElementById(`form-wrapper-${sectionId}`);
   const submitBtn = document.querySelector(`#form-wrapper-${sectionId} .btn-primary`) as HTMLButtonElement;
 
