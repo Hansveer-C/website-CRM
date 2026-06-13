@@ -2227,18 +2227,23 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
 };
 
 function renderPublicHeader(config: any, settings: any) {
+  const displayName = settings.business_name || config.logo_text || 'Our Business';
+  if (settings.primary_color && typeof document !== 'undefined' && document.documentElement?.style) {
+    document.documentElement.style.setProperty('--primary', settings.primary_color);
+    document.documentElement.style.setProperty('--primary-color', settings.primary_color);
+  }
   return `
     <header style="padding: 20px 40px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: rgba(255,255,255,0.9); backdrop-filter: blur(8px); z-index: 100; transition: top 0.3s ease;">
       <div style="display: flex; align-items: center; gap: 15px;">
          ${config.logo_url || settings.logo_url ? `<img src="${config.logo_url || settings.logo_url}" style="height: 40px; width: 40px; border-radius: 8px; object-fit: cover;">` : ''}
-         <span style="font-weight: 800; font-size: 1.25rem; color: #1e293b;">${config.logo_text || settings.business_name}</span>
+         <span style="font-weight: 800; font-size: 1.25rem; color: #1e293b;">${displayName}</span>
       </div>
       <nav style="display: flex; gap: 24px; align-items: center;">
          ${(config.nav_items || []).map((item: any) => `
-           <a href="/site${item.path.startsWith('/') ? item.path : '/' + item.path}" 
+           <a href="/site${item.path.startsWith('/') ? item.path : '/' + item.path}"
               onclick="event.preventDefault(); window.navigateTo('site', '${item.path}')"
-              style="text-decoration: none; color: #475569; font-weight: 600; font-size: 0.95rem; transition: color 0.2s;" 
-              onmouseover="this.style.color='var(--primary-color)'" 
+              style="text-decoration: none; color: #475569; font-weight: 600; font-size: 0.95rem; transition: color 0.2s;"
+              onmouseover="this.style.color='var(--primary-color)'"
               onmouseout="this.style.color='#475569'">
               ${item.label}
            </a>
@@ -2246,7 +2251,7 @@ function renderPublicHeader(config: any, settings: any) {
          ${config.cta_text ? `
            <a href="${config.cta_link || '#'}" class="btn-primary" style="padding: 10px 20px; font-size: 0.9rem; border-radius: 8px; text-decoration: none;">${config.cta_text}</a>
          ` : `
-           <a href="tel:${settings.phone}" style="color: var(--primary-color); font-weight: 700; text-decoration: none;">📞 ${settings.phone}</a>
+           <a href="tel:${settings.phone}" style="color: var(--primary-color); font-weight: 700; text-decoration: none;">Call ${settings.phone}</a>
          `}
       </nav>
     </header>
@@ -2254,37 +2259,33 @@ function renderPublicHeader(config: any, settings: any) {
 }
 
 function renderPublicFooter(config: any, settings: any) {
-  const businessName = config.business_name || settings.business_name;
-  const phone = config.phone_number || settings.phone;
+  const businessName = settings.business_name || config.business_name || 'Our Business';
+  const phone = settings.phone || config.phone_number || '';
+  const smsPhone = settings.sms_number || phone;
   const email = settings.email || config.email || '';
   const serviceArea = config.service_area || 'Your Local Area';
   const cta = config.cta_text || 'Get My Free Quote';
   const links = config.links || [];
-  const copyright = `© ${new Date().getFullYear()} ${businessName}. All rights reserved.`;
+  const copyright = `(c) ${new Date().getFullYear()} ${businessName}. All rights reserved.`;
 
   return `
     <footer style="padding: 60px 20px; background: #0f172a; color: #f8fafc; margin-top: 80px; border-top: 4px solid var(--primary-color);">
       <div style="max-width: 1200px; margin: 0 auto;">
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 40px; margin-bottom: 40px;">
-          
-          <!-- Trust & Branding -->
           <div>
             <h3 style="color: white; font-size: 1.5rem; font-weight: 800; margin-bottom: 16px; letter-spacing: -0.5px;">${businessName}</h3>
             <p style="color: #94a3b8; line-height: 1.6; font-size: 0.95rem; margin-bottom: 24px;">
               Providing professional exterior cleaning and restoration services with a focus on quality, reliability, and customer satisfaction.
             </p>
             <div style="display: flex; align-items: center; gap: 10px; color: #3b82f6; font-weight: 600;">
-              <span style="font-size: 1.2rem;">📍</span>
               <span>Serving ${serviceArea}</span>
             </div>
           </div>
-
-          <!-- Quick Navigation -->
           <div>
             <h4 style="color: white; font-size: 1.1rem; font-weight: 700; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px;">Navigation</h4>
             <div style="display: flex; flex-direction: column; gap: 12px;">
               ${links.map((l: any) => `
-                <a href="${l.path}" 
+                <a href="${l.path}"
                    onclick="event.preventDefault(); window.navigateTo('site', '${l.path}')"
                    style="color: #94a3b8; text-decoration: none; font-size: 0.9rem; transition: all 0.2s;" onmouseover="this.style.color='white'; this.style.paddingLeft='4px'" onmouseout="this.style.color='#94a3b8'; this.style.paddingLeft='0'">
                   ${l.label}
@@ -2292,18 +2293,22 @@ function renderPublicFooter(config: any, settings: any) {
               `).join('')}
             </div>
           </div>
-
-          <!-- Immediate Contact -->
           <div>
             <h4 style="color: white; font-size: 1.1rem; font-weight: 700; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px;">Contact Us</h4>
-            <p style="color: #94a3b8; font-size: 0.9rem; margin-bottom: 20px;">Questions? Call us directly for immediate assistance.</p>
+            <p style="color: #94a3b8; font-size: 0.9rem; margin-bottom: 20px;">Questions? Call or text us directly for immediate assistance.</p>
             <a href="tel:${phone}" style="display: flex; align-items: center; gap: 12px; color: white; text-decoration: none; font-size: 1.4rem; font-weight: 800; margin-bottom: 20px; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-               <span style="background: var(--primary-color); width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 1.1rem;">📞</span>
+               <span style="background: var(--primary-color); width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 1.1rem;">Call</span>
                <span>${phone}</span>
             </a>
+            ${smsPhone ? `
+              <a href="sms:${smsPhone}?body=Hi, I'd like a quote for pressure washing." style="display: flex; align-items: center; gap: 12px; color: #94a3b8; text-decoration: none; font-size: 0.95rem; margin-bottom: 20px; font-weight: 500;">
+                 <span style="background: #1e293b; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 0.8rem;">SMS</span>
+                 <span>Text us</span>
+              </a>
+            ` : ''}
             ${email ? `
               <a href="mailto:${email}" style="display: flex; align-items: center; gap: 12px; color: #94a3b8; text-decoration: none; font-size: 0.95rem; margin-bottom: 20px; font-weight: 500;">
-                 <span style="background: #1e293b; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 0.8rem;">✉️</span>
+                 <span style="background: #1e293b; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 0.8rem;">Email</span>
                  <span>${email}</span>
               </a>
             ` : ''}
@@ -2311,15 +2316,12 @@ function renderPublicFooter(config: any, settings: any) {
               ${cta}
             </button>
           </div>
-
         </div>
-
-        <!-- Footer Bottom -->
         <div style="padding-top: 30px; border-top: 1px solid #1e293b; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 20px; color: #64748b; font-size: 0.85rem;">
           <div>${copyright}</div>
           <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-             <span style="display: flex; align-items: center; gap: 6px;"><span style="color: #22c55e;">●</span> Fully Insured</span>
-             <span style="display: flex; align-items: center; gap: 6px;"><span style="color: #22c55e;">●</span> Licensed Professionals</span>
+             <span style="display: flex; align-items: center; gap: 6px;"><span style="color: #22c55e;">-</span> Fully Insured</span>
+             <span style="display: flex; align-items: center; gap: 6px;"><span style="color: #22c55e;">-</span> Licensed Professionals</span>
           </div>
           <button onclick="window.navigateTo('dashboard')" style="background: none; border: 1px solid #334155; padding: 6px 16px; border-radius: 6px; cursor: pointer; color: inherit; font-weight: 600; transition: all 0.2s;" onmouseover="this.style.borderColor='#475569'; this.style.color='white'" onmouseout="this.style.borderColor='#334155'; this.style.color='inherit'">
             Admin Access
@@ -2433,6 +2435,9 @@ async function renderSitePage(funnel_id: string, websiteOrContext: any, isPrevie
             <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>
             <span>Call Now</span>
           </a>
+          <a href="sms:${settings.sms_number || settings.phone}?body=Hi, I'd like a quote for pressure washing." class="cta-bar-btn" style="background: #0ea5e9; color: white; display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 0.9rem;">
+            <span>Text Photos</span>
+          </a>
           <button class="cta-bar-btn cta-bar-btn--quote" onclick="document.querySelector('.site-form-section')?.scrollIntoView({behavior: 'smooth'})">
             <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
             <span>Get Free Quote</span>
@@ -2445,12 +2450,14 @@ async function renderSitePage(funnel_id: string, websiteOrContext: any, isPrevie
       ${sections.map(section => {
         // 🌿 Fix.7: Inject global variables into section content with auto-replacement (Phase Fix.7)
         let contentJson = JSON.stringify(section.content);
+        const smsCta = settings.sms_number || settings.phone;
         contentJson = contentJson
           .replace(/{{business_name}}/g, settings.business_name)
           .replace(/{{phone}}/g, settings.phone)
+          .replace(/{{sms_number}}/g, smsCta)
           .replace(/{{email}}/g, settings.email || '');
           
-        const content = { ...JSON.parse(contentJson), business_name: settings.business_name, phone: settings.phone, email: settings.email };
+        const content = { ...JSON.parse(contentJson), business_name: settings.business_name, phone: settings.phone, sms_number: smsCta, email: settings.email };
         return renderSection(section.type, content, section.styles, section.id);
       }).join('')}
 
@@ -3270,6 +3277,7 @@ function renderTemplates() {
 
 function renderWebsiteSettings() {
   const settings = getWebsiteSettings();
+  applyPrimaryColor(settings.primary_color);
   app.innerHTML = `
     ${renderSidebar('website-settings')}
     <main class="main-content">
@@ -3287,14 +3295,31 @@ function renderWebsiteSettings() {
               <label>Business Name</label>
               <input type="text" value="${settings.business_name}" onchange="window.updateSettingsField('business_name', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
                <div class="form-group">
                  <label>Public Phone</label>
-                 <input type="text" value="${settings.phone}" onchange="window.updateSettingsField('phone', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                 <input type="text" id="settings-phone-input" value="${settings.phone}" onchange="window.updateSettingsField('phone', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+               </div>
+               <div class="form-group">
+                 <label>Text/SMS Number</label>
+                 <input type="text" id="settings-sms-number-input" value="${settings.sms_number || ''}" onchange="window.updateSettingsField('sms_number', this.value)" placeholder="${settings.phone}" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                 <small style="color: #94a3b8; font-size: 0.75rem;">Used for text-message CTAs. Leave blank to use your public phone number.</small>
                </div>
                <div class="form-group">
                  <label>Public Email</label>
-                 <input type="email" value="${settings.email}" onchange="window.updateSettingsField('email', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                 <input type="email" id="settings-email-input" value="${settings.email}" onchange="window.updateSettingsField('email', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+               </div>
+            </div>
+            <div style="display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center;">
+               <div class="form-group" style="margin: 0;">
+                 <label>Brand Color</label>
+                 <div style="display: flex; align-items: center; gap: 12px; margin-top: 6px;">
+                   <input type="color" id="settings-primary-color-input" value="${settings.primary_color || '#4f46e5'}" onchange="window.updateSettingsField('primary_color', this.value)" oninput="window.updateSettingsField('primary_color', this.value)" style="width: 48px; height: 40px; border: 1px solid #ddd; border-radius: 6px; padding: 2px; cursor: pointer;">
+                   <code style="font-size: 0.85rem; color: #475569; font-weight: 600;" id="settings-primary-color-display">${settings.primary_color || '#4f46e5'}</code>
+                 </div>
+               </div>
+               <div style="padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 0.85rem; color: #64748b; margin-top: 20px;">
+                 Changes button and accent colors across your public website and CRM dashboard.
                </div>
             </div>
             <div class="form-group">
@@ -3769,6 +3794,12 @@ function renderWebsiteStructure() {
 (window as any).updateSettingsField = (field: string, value: string) => {
     const s = getWebsiteSettings();
     (s as any)[field] = value;
+
+    if (field === 'primary_color') {
+        applyPrimaryColor(value);
+        const colorDisplay = document.getElementById('settings-primary-color-display');
+        if (colorDisplay) colorDisplay.textContent = value;
+    }
 
     const promise = fetch('/api/settings', {
         method: 'POST',
@@ -5073,6 +5104,7 @@ async function executeNavigation(view: string, id?: string, context?: any) {
     case 'page-sections': if (id) renderPageSections(id); break;
     case 'builder': renderBuilder(); break;
     case 'templates': renderTemplates(); break;
+    case 'pages-seo': renderPagesSeoLanding(); break;
     case 'components': app.innerHTML = `${renderSidebar('components')}<main class="main-content"><h2>Components Shelf</h2><div class="empty-state">Library of pre-built UI components coming soon.</div></main>`; break;
     case 'website-settings':
       try {
@@ -6586,6 +6618,94 @@ function renderSeoWizard() {
         alert('Exception: ' + err.message);
     }
 };
+
+function renderPagesSeoLanding() {
+  app.innerHTML = `
+    ${renderSidebar('pages-seo')}
+    <main class="main-content">
+      <header class="view-header">
+        <div>
+          <h2>Pages & SEO</h2>
+          <p style="color: #64748b; margin-top: 4px;">Organize your site architecture, menus, and search engine optimization.</p>
+        </div>
+      </header>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; margin-top: 10px;">
+        <!-- Card 1: Site Pages -->
+        <div class="card"
+             style="padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 12px;"
+             onclick="window.navigateTo('funnels')"
+             onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 15px -3px rgb(0 0 0 / 0.1)'; this.style.borderColor='var(--primary-color)'"
+             onmouseout="this.style.transform='none'; this.style.boxShadow='none'; this.style.borderColor='#e2e8f0'">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: #eff6ff; color: #3b82f6; width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.25rem;">📄</div>
+            <h3 style="margin: 0; font-size: 1.15rem; color: #1e293b;">Site Pages</h3>
+          </div>
+          <p style="margin: 0; color: #64748b; font-size: 0.9rem; line-height: 1.5;">
+            Manage your main website pages and landing pages.
+          </p>
+          <div style="margin-top: auto; color: var(--primary-color); font-weight: 600; font-size: 0.85rem; display: flex; align-items: center; gap: 4px;">
+            Manage Pages ➔
+          </div>
+        </div>
+
+        <!-- Card 2: Local Service Pages -->
+        <div class="card"
+             style="padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 12px;"
+             onclick="window.navigateTo('seo-pages')"
+             onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 15px -3px rgb(0 0 0 / 0.1)'; this.style.borderColor='var(--primary-color)'"
+             onmouseout="this.style.transform='none'; this.style.boxShadow='none'; this.style.borderColor='#e2e8f0'">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: #f0fdf4; color: #22c55e; width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.25rem;">🔍</div>
+            <h3 style="margin: 0; font-size: 1.15rem; color: #1e293b;">Local Service Pages</h3>
+          </div>
+          <p style="margin: 0; color: #64748b; font-size: 0.9rem; line-height: 1.5;">
+            Create specialized pages to help your business rank higher on Google in the cities and services you cover.
+          </p>
+          <div style="margin-top: auto; color: var(--primary-color); font-weight: 600; font-size: 0.85rem; display: flex; align-items: center; gap: 4px;">
+            Manage Local Service Pages ➔
+          </div>
+        </div>
+
+        <!-- Card 3: Site Structure -->
+        <div class="card"
+             style="padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 12px;"
+             onclick="window.navigateTo('website-structure')"
+             onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 15px -3px rgb(0 0 0 / 0.1)'; this.style.borderColor='var(--primary-color)'"
+             onmouseout="this.style.transform='none'; this.style.boxShadow='none'; this.style.borderColor='#e2e8f0'">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: #faf5ff; color: #a855f7; width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.25rem;">🌐</div>
+            <h3 style="margin: 0; font-size: 1.15rem; color: #1e293b;">Site Structure</h3>
+          </div>
+          <p style="margin: 0; color: #64748b; font-size: 0.9rem; line-height: 1.5;">
+            Review how your website pages and routes are organized.
+          </p>
+          <div style="margin-top: auto; color: var(--primary-color); font-weight: 600; font-size: 0.85rem; display: flex; align-items: center; gap: 4px;">
+            Manage Structure ➔
+          </div>
+        </div>
+
+        <!-- Card 4: Navigation -->
+        <div class="card"
+             style="padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 12px;"
+             onclick="window.navigateTo('website-navigation')"
+             onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 15px -3px rgb(0 0 0 / 0.1)'; this.style.borderColor='var(--primary-color)'"
+             onmouseout="this.style.transform='none'; this.style.boxShadow='none'; this.style.borderColor='#e2e8f0'">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: #fff7ed; color: #f97316; width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.25rem;">🗺️</div>
+            <h3 style="margin: 0; font-size: 1.15rem; color: #1e293b;">Navigation</h3>
+          </div>
+          <p style="margin: 0; color: #64748b; font-size: 0.9rem; line-height: 1.5;">
+            Manage website menus and visitor navigation.
+          </p>
+          <div style="margin-top: auto; color: var(--primary-color); font-weight: 600; font-size: 0.85rem; display: flex; align-items: center; gap: 4px;">
+            Manage Navigation ➔
+          </div>
+        </div>
+      </div>
+    </main>
+  `;
+}
 
 (window as any).deleteSeoPage = async (routeId: string) => {
     if (!confirm('Are you sure you want to delete this SEO page? It will be removed from your public website instantly.')) return;
