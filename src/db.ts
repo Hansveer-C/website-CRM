@@ -473,9 +473,9 @@ export const mockWebsites: Website[] = [
   {
     id: 'ws-1',
     user_id: 'system',
-    name: 'PressurePro Seattle',
-    domain: 'hanssays.com',
-    subdomain: 'hans-seattle',
+    name: 'PressurePro Demo',
+    domain: 'website-crm-one.vercel.app',
+    subdomain: 'pressurepro-demo',
     homepage_funnel_id: 'fnl-1',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
@@ -508,7 +508,7 @@ export const mockWebsiteRoutes: WebsiteRoute[] = [
 
 export const mockWebsiteSettings: WebsiteSettings = {
   id: 'settings-001',
-  business_name: 'Handyman Hans Pressure Washing',
+  business_name: 'PressurePro Demo',
   phone: '555-0199',
   sms_number: '',
   email: 'hans@example.com',

@@ -2885,8 +2885,7 @@ async function renderSitePage(funnel_id: string, websiteOrContext: any, isPrevie
   const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || getWebsiteLayout(); 
   
   // W6.5: Robust Internal Linking System
-  const contactRoute = mockWebsiteRoutes.find(r => r.website_id === website.id && (r.path === '/contact' || r.path === '/quote'));
-  const contactLink = contactRoute ? `/site${contactRoute.path}` : '/site/contact';
+  const contactLink = '#quote-form';
   const homeLink = '/site/';
   
   // Identify all service routes for cross-linking
@@ -2977,6 +2976,9 @@ async function renderSitePage(funnel_id: string, websiteOrContext: any, isPrevie
           .replace(/{{email}}/g, settings.email || '');
           
         const content = { ...JSON.parse(contentJson), business_name: settings.business_name, phone: settings.phone, sms_number: smsCta, email: settings.email };
+        if (['/quote', '/site/quote', '/contact', '/site/contact'].includes(content.button_link)) {
+          content.button_link = '#quote-form';
+        }
         return renderSection(section.type, content, section.styles, section.id);
       }).join('')}
 
@@ -4793,7 +4795,9 @@ async function renderWebsiteDashboard() {
   const routes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
   const homePage = mockFunnels.find(f => f.name.toLowerCase().includes('home')) || mockFunnels[0];
   
-  const siteUrl = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
+  const siteUrlBase = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
+  const primaryPublicRoute = routes.find(route => route.path === '/driveway-cleaning') || routes.find(route => route.path !== '/') || routes[0];
+  const liveSiteUrl = `${siteUrlBase}${primaryPublicRoute && primaryPublicRoute.path !== '/' ? primaryPublicRoute.path : ''}`;
 
   app.innerHTML = `
     ${renderSidebar('website-dashboard')}
@@ -4813,9 +4817,9 @@ async function renderWebsiteDashboard() {
               <div>
                 <span class="badge" style="background: #0ea5e9; color: white; margin-bottom: 12px;">Live & Published</span>
                 <h3 style="margin: 0; font-size: 1.5rem; color: #1e3a8a;">${website.name || 'Your Website'}</h3>
-                <div style="font-size: 1.1rem; color: #0369a1; margin-top: 8px; font-weight: 600;">${siteUrl}</div>
+                <div style="font-size: 1.1rem; color: #0369a1; margin-top: 8px; font-weight: 600;">${siteUrlBase}</div>
               </div>
-              <a href="${siteUrl}" target="_blank" class="btn-primary" style="background: #0ea5e9; border: none; padding: 14px 28px; font-weight: 800; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(14, 165, 233, 0.4);">View Live Site ↗</a>
+              <a href="${liveSiteUrl}" target="_blank" class="btn-primary" style="background: #0ea5e9; border: none; padding: 14px 28px; font-weight: 800; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(14, 165, 233, 0.4);">View Live Site ↗</a>
             </div>
           </div>
 
@@ -5446,7 +5450,7 @@ async function executeNavigation(view: string, id?: string, context?: any) {
 
 (window as any).downloadSitemap = () => {
   const publishedPages = mockPages.filter(p => p.status === 'published');
-  const baseUrl = 'https://hanssays.com/site'; // Hypothetical production base URL
+  const baseUrl = `${window.location.origin}/site`;
 
   const sitemapContent = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
