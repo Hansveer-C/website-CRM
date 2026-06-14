@@ -2682,8 +2682,7 @@ function renderPublicHeader(config: any, settings: any) {
       </div>
       <nav style="display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: center; justify-content: flex-end; min-width: 0; max-width: 100%;">
          ${(config.nav_items || []).map((item: any) => `
-           <a href="/site${item.path.startsWith('/') ? item.path : '/' + item.path}"
-              onclick="event.preventDefault(); window.navigateTo('site', '${item.path}')"
+           <a href="${item.path.startsWith('/') ? item.path : '/' + item.path}"
               style="text-decoration: none; color: #475569; font-weight: 600; font-size: 0.95rem; transition: color 0.2s;"
               onmouseover="this.style.color='var(--primary-color)'"
               onmouseout="this.style.color='#475569'">
@@ -2821,7 +2820,7 @@ function resolveWebsitePathFromBrowserPath(rawPath: string): string | null {
   if (rawPath.startsWith('/preview/')) return rawPath.replace('/preview/', '/');
 
   const normalizedPath = normalizePreviewPath(rawPath);
-  if (normalizedPath === '/') return null;
+  if (normalizedPath === '/') return '/';
   const isKnownWebsiteRoute = mockWebsiteRoutes.some((route: any) =>
     normalizePreviewPath(route.path || '/') === normalizedPath
   );
@@ -2838,7 +2837,10 @@ function renderPublicLeadFormFallback(page: any, sections: any[], settings: any)
     return '';
   }
 
-  const serviceName = activeWebsiteContext?.service || activeWebsiteContext?.route?.service || page.name || 'Pressure Washing';
+  const normalizedPath = activeWebsiteContext?.route?.path || (page.slug ? `/${page.slug}` : '/');
+  const isDrivewayPage = normalizedPath === '/driveway-cleaning' || normalizedPath === '/driveway';
+  const serviceName = isDrivewayPage ? 'Driveway Cleaning' : '';
+  const contextLabel = serviceName || 'your exterior cleaning request';
   const formContent = {
     title: 'Request a Quote',
     submit_label: 'Request Quote',
@@ -2853,7 +2855,7 @@ function renderPublicLeadFormFallback(page: any, sections: any[], settings: any)
         <div>
           <p style="margin: 0 0 12px 0; color: var(--primary-color); font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.8rem;">Fast local estimate</p>
           <h2 style="font-size: clamp(2rem, 5vw, 3.25rem); line-height: 1.05; margin: 0 0 20px 0; color: #0f172a; font-weight: 900;">Request a Quote</h2>
-          <p style="font-size: 1.1rem; line-height: 1.7; color: #475569; margin: 0;">Tell us where you need help and we will follow up with next steps for ${serviceName}.</p>
+          <p style="font-size: 1.1rem; line-height: 1.7; color: #475569; margin: 0;">Tell us where you need help and we will follow up with next steps for ${contextLabel}.</p>
         </div>
         ${renderStandardForm(anchorSection.id, formContent, true)}
       </div>
@@ -3175,7 +3177,7 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
         </div>`;
     }
     default:
-      return `<div style="padding: 40px; text-align: center; color: #999; border: 2px dashed #eee; border-radius: 12px; margin: 40px;">Legacy Section Type: ${type}</div>`;
+      return '';
   }
 }
 
@@ -6329,7 +6331,7 @@ async function bootRouter() {
 
   // 1. Phase W6.9: Resolve Public Website Route first (Real URLs)
   const targetPath = resolveWebsitePathFromBrowserPath(rawPath);
-  if (targetPath) {
+  if (!window.location.hash && targetPath) {
     const result = await resolveWebsiteRequest(host, targetPath);
     if (result && result.funnel_id) {
        const isPreview = rawPath === '/preview' || rawPath.startsWith('/preview/');

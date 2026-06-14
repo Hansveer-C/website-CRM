@@ -142,9 +142,14 @@ export const mockPageSections: PageSection[] = [
     id: 'ps1',
     page_id: 'p1',
     type: 'hero',
-    content: { heading: 'Welcome to HansSays', subheading: 'Leading pressure washing experts in the region.' },
+    content: {
+      heading: 'Handyman Hans Pressure Washing Demo',
+      subheading: 'Exterior cleaning and driveway cleaning demo site for soft-launch testing.',
+      button_text: 'Get Free Estimate',
+      button_link: '#quote-form'
+    },
     order: 1,
-    styles: { background: '#007bff' }
+    styles: { text_alignment: 'center' }
   },
   {
     id: 'ps-d1',
@@ -185,7 +190,7 @@ export const mockPageSections: PageSection[] = [
     type: 'text',
     content: { text: 'We offer professional cleaning for your driveway, roof, and more.' },
     order: 2,
-    styles: { padding: '40px' }
+    styles: { padding: '40px', visible: false }
   },
   {
     id: 'ps3',
@@ -506,8 +511,7 @@ export const mockWebsiteLayouts: WebsiteLayout[] = [
       logo_text: 'Handyman Hans Demo',
       nav_items: [
         { label: 'Home', path: '/' },
-        { label: 'Driveway Cleaning', path: '/driveway' },
-        { label: 'About', path: '/about' }
+        { label: 'Driveway Cleaning', path: '/driveway-cleaning' }
       ],
       cta_text: 'Get Quote',
       cta_link: '/quote'
