@@ -4,11 +4,11 @@ import { WebsiteSettings, RepoResponse } from './types';
 
 export const DEFAULT_SETTINGS: WebsiteSettings = {
   id: 'global-settings',
-  business_name: 'Acme Home Services',
-  phone: '+15550000000',
+  business_name: 'Handyman Hans Pressure Washing Demo',
+  phone: '604-555-0199',
   sms_number: '',
-  email: 'hello@acmehome.com',
-  logo_url: 'https://placehold.co/150x50/000000/FFFFFF?text=ACME',
+  email: 'demo@handymanhans.com',
+  logo_url: '',
   primary_color: '#2563eb',
   facebook_pixel_id: '',
   gtm_id: '',
@@ -18,8 +18,8 @@ export const DEFAULT_SETTINGS: WebsiteSettings = {
   missed_call_sms_enabled: true,
   missed_call_sms_template: "Hi {name}, sorry we missed your call to {business_name}. We'll call back shortly. Can we help you over text?",
   created_at: new Date().toISOString(),
-  cities_served: [],
-  services_offered: [],
+  cities_served: ['Port Moody', 'Coquitlam', 'Port Coquitlam', 'Burnaby'],
+  services_offered: ['Driveway Cleaning'],
   publish_status: 'draft',
 };
 

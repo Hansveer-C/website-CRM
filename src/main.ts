@@ -3024,11 +3024,15 @@ function updateMetaTag(name: string, content: string) {
 }
 
 function renderSection(type: string, content: any, styles: any, id: string) {
+  const heroFallbackImage = 'linear-gradient(135deg, #0f172a 0%, #155e75 52%, #16a34a 100%)';
+  const backgroundImage = content.background_image
+    ? `url('${content.background_image}')`
+    : (type === 'hero' ? heroFallbackImage : 'none');
   return `
     <section id="section-${id}" style="
       padding: ${styles.padding || '60px 20px'};
       text-align: ${styles.text_alignment || styles.alignment || styles.textAlign || 'left'};
-      background-image: ${content.background_image ? `url('${content.background_image}')` : 'none'};
+      background-image: ${backgroundImage};
       background-size: cover;
       background-position: center;
       background-color: ${styles.background || styles.backgroundColor || 'transparent'};
@@ -4833,10 +4837,16 @@ async function renderWebsiteDashboard() {
               <tbody>
                 ${routes.map(r => {
                   const funnel = mockFunnels.find(f => f.id === r.funnel_id);
+                  const routePage = r.path === '/'
+                    ? mockPages.find(p => p.slug === 'home')
+                    : mockPages.find(p => p.slug && `/${p.slug}` === r.path);
+                  const routeLabel = r.path === '/driveway'
+                    ? 'Driveway Page'
+                    : (r.path === '/' ? 'Home Page' : (routePage?.name || funnel?.name || r.path));
                   return `
                     <tr>
                       <td style="padding-left: 20px;">
-                        <div style="font-weight: 700;">${funnel?.name}</div>
+                        <div style="font-weight: 700;">${routeLabel}</div>
                         <code style="color: var(--primary-color); font-size: 0.8rem;">${r.path}</code>
                       </td>
                       <td style="text-align: right; padding-right: 20px;">

@@ -154,7 +154,6 @@ export const mockPageSections: PageSection[] = [
         heading: 'Pristine Driveways, Every Time.',
         subheading: 'We remove years of stains, oil, and moss with ease.',
         button_text: 'Get an Instant Quote',
-        background_image: 'https://images.unsplash.com/photo-1541604193435-22077a288934?auto=format&fit=crop&w=1200'
     },
     order: 1,
     styles: { text_alignment: 'center' }
@@ -427,7 +426,7 @@ export const mockWebsites: Website[] = [
   {
     id: 'ws-1',
     user_id: 'system',
-    name: 'PressurePro Demo',
+    name: 'Handyman Hans Demo',
     domain: 'website-crm-one.vercel.app',
     subdomain: 'pressurepro-demo',
     homepage_funnel_id: 'fnl-1',
@@ -462,10 +461,10 @@ export const mockWebsiteRoutes: WebsiteRoute[] = [
 
 export const mockWebsiteSettings: WebsiteSettings = {
   id: 'settings-001',
-  business_name: 'PressurePro Demo',
-  phone: '555-0199',
+  business_name: 'Handyman Hans Pressure Washing Demo',
+  phone: '604-555-0199',
   sms_number: '',
-  email: 'hans@example.com',
+  email: 'demo@handymanhans.com',
   logo_url: 'https://images.unsplash.com/photo-1628177142898-93e36e4e3a50?q=80&w=200&h=200&auto=format&fit=crop',
   primary_color: '#4f46e5',
   facebook_pixel_id: '',
@@ -481,10 +480,7 @@ export const mockWebsiteSettings: WebsiteSettings = {
     'Port Moody',
     'Coquitlam',
     'Port Coquitlam',
-    'Burnaby',
-    'Vancouver',
-    'North Vancouver',
-    'West Vancouver'
+    'Burnaby'
   ],
   services_offered: [
     'Pressure Washing',
@@ -507,7 +503,7 @@ export const mockWebsiteLayouts: WebsiteLayout[] = [
     id: 'layout-1',
     website_id: 'ws-1',
     header_config: {
-      logo_text: 'PressurePro',
+      logo_text: 'Handyman Hans Demo',
       nav_items: [
         { label: 'Home', path: '/' },
         { label: 'Driveway Cleaning', path: '/driveway' },
@@ -517,9 +513,9 @@ export const mockWebsiteLayouts: WebsiteLayout[] = [
       cta_link: '/quote'
     },
     footer_config: {
-      business_name: 'PressurePro cleaning solutions',
-      phone_number: '555-0199',
-      service_area: 'Seattle & surrounding areas',
+      business_name: 'Handyman Hans Demo',
+      phone_number: '604-555-0199',
+      service_area: 'Port Moody, Coquitlam, Port Coquitlam & Burnaby',
       cta_text: 'Get an Instant Estimate',
       links: [
         { label: 'Privacy Policy', path: '/privacy' },
