@@ -445,6 +445,7 @@ export const mockWebsiteRoutes: WebsiteRoute[] = [
     id: 'r1',
     website_id: 'ws-1',
     path: '/',
+    slug: 'home',
     funnel_id: 'fnl-1',
     created_at: new Date().toISOString()
   },
@@ -452,6 +453,7 @@ export const mockWebsiteRoutes: WebsiteRoute[] = [
     id: 'r2',
     website_id: 'ws-1',
     path: '/driveway',
+    slug: 'driveway-cleaning',
     funnel_id: 'fnl-1',
     created_at: new Date().toISOString()
   },
@@ -459,6 +461,7 @@ export const mockWebsiteRoutes: WebsiteRoute[] = [
     id: 'r3',
     website_id: 'ws-1',
     path: '/driveway-cleaning',
+    slug: 'driveway-cleaning',
     funnel_id: 'fnl-1',
     created_at: new Date().toISOString()
   }

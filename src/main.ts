@@ -2605,6 +2605,12 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
       });
     }
 
+    if (isPublic) {
+      window.localStorage.removeItem('crm_lead_name');
+      window.localStorage.removeItem('crm_lead_phone');
+      formEl?.reset();
+    }
+
     // Success State (W4.3)
     if (sectionWrapper) {
       sectionWrapper.innerHTML = `
@@ -2804,9 +2810,10 @@ function resolvePageForPreviewPath(path: string = '/', funnelId?: string): any |
 
   const slug = normalizedPath.replace(/^\//, '');
   const route = mockWebsiteRoutes.find((r: any) => normalizePreviewPath(r.path || '/') === normalizedPath);
-  return mockPages.find((p: any) => p.slug === slug)
-    || mockPages.find((p: any) => route?.funnel_id && p.funnel_id === route.funnel_id && p.slug === slug)
-    || mockPages.find((p: any) => funnelId && p.funnel_id === funnelId && p.slug === slug)
+  const routePageSlug = route?.slug || slug;
+  return mockPages.find((p: any) => p.slug === routePageSlug)
+    || mockPages.find((p: any) => route?.funnel_id && p.funnel_id === route.funnel_id && p.slug === routePageSlug)
+    || mockPages.find((p: any) => funnelId && p.funnel_id === funnelId && p.slug === routePageSlug)
     || null;
 }
 
@@ -5433,7 +5440,11 @@ async function executeNavigation(view: string, id?: string, context?: any) {
          // This is a direct slug navigation, we need to resolve it
          const result = await resolveWebsiteRequest(window.location.hostname, id);
          if (result && result.funnel_id) {
-            renderSitePage(result.funnel_id, result.website);
+            renderSitePage(result.funnel_id, {
+              ...result.website,
+              route: result.route,
+              path: result.route?.path || normalizePreviewPath(id)
+            });
          } else {
             render404();
          }
@@ -5444,7 +5455,11 @@ async function executeNavigation(view: string, id?: string, context?: any) {
       else if (id) {
          const result = await resolveWebsiteRequest(window.location.hostname, id);
          if (result && result.funnel_id) {
-           renderSitePage(result.funnel_id, result.website, true);
+           renderSitePage(result.funnel_id, {
+             ...result.website,
+             route: result.route,
+             path: result.route?.path || normalizePreviewPath(id)
+           }, true);
          } else {
            render404('Preview target not found.');
          }
