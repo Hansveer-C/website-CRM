@@ -1,8 +1,29 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
 import { templates } from './templates';
-import { Activity, WebsiteSettings } from './types';
+import { Activity, Page, PageSection, User, Website, WebsiteRoute, WebsiteSettings } from './types';
+import { createBuilderSection, getBuilderSectionDefinition, isRegisteredBuilderSectionType } from './builder_section_registry';
+import type { BuilderInspectorFieldDefinition, BuilderInspectorTab } from './builder_inspector_schema';
+import { createBuilderInspectorPatch, getBuilderInspectorField, getBuilderInspectorFieldValue, getBuilderInspectorSchema } from './builder_inspector_schema';
 import { resolveWebsiteRequest } from './website_resolver';
 import { normalizePhone, normalizeEmail, normalizeName } from './utils/validators';
+import { LocalStorageBuilderPublicationRepository } from './builder_publication_repository_local';
+import { handleBuilderPublicationBrowserRequest, isBuilderPublicationBrowserRequest } from './builder_publication_browser';
+import { builderDocumentToPageSections, createBuilderDocument, validateBuilderDocument } from './builder_document';
+import {
+  createBuilderPublishedRevision,
+  getBuilderPublicationState,
+  hasBuilderUnpublishedChanges
+} from './builder_publication';
+import type { BuilderPublishedRevision } from './builder_publication';
+import type { BuilderPublicationHistoryPage, BuilderPublicationTarget } from './builder_publication_repository';
+import {
+  createBuilderPageRevision,
+  getBuilderPagePublication,
+  listBuilderPageRevisions,
+  publishBuilderPageRevision,
+  rollbackBuilderPageRevision
+} from './builder_publication_client';
+import { loadBuilderPublicRevision } from './builder_publication_public';
 
 declare global {
   interface Window {
@@ -41,6 +62,8 @@ const getCall = (id: string) => null;
 const mockAutomationLogs: string[] = [];
 
 function runAutomations(type: string, data: any) {
+  const settings = getWebsiteSettings();
+  
   if (type === 'LEAD_CAPTURED') {
     const lead = data;
     const triggerId = `auto_sms_lead_${lead.id}`;
@@ -49,6 +72,8 @@ function runAutomations(type: string, data: any) {
     if (mockAutomationLogs.includes(triggerId)) return;
     mockAutomationLogs.push(triggerId);
 
+    const msg = `Hi ${lead.name}, thanks for reaching out to ${settings.business_name}. We’ll get back to you shortly.`;
+    
     console.log(`[AUTOMATION] Lead auto SMS skipped in browser mock context for ${lead.phone}.`);
   }
 
@@ -244,9 +269,268 @@ const getOpportunity = (id: string, user?: any) => mockOpportunities.find(o => o
  * This allows the frontend to call fetch('/api/...') and have it handled
  * by the actual backend controller logic in a unified way.
  */
+let builderPublicationRepository: LocalStorageBuilderPublicationRepository | undefined;
+
+function actingBuilderPublicationUserId(user: User | string): string | undefined {
+    const userId = typeof user === 'string' ? user : user?.id;
+    return typeof userId === 'string' && userId.trim() ? userId : undefined;
+}
+
+function normalizeBuilderPublicationPath(path: string): string {
+    const withLeadingSlash = path.startsWith('/') ? path : `/${path}`;
+    if (withLeadingSlash === '/home') return '/';
+    return withLeadingSlash.length > 1 && withLeadingSlash.endsWith('/')
+        ? withLeadingSlash.slice(0, -1)
+        : withLeadingSlash;
+}
+
+function canAccessBuilderPublicationPage(
+    user: User | string,
+    websiteId: string,
+    pageId: string
+): boolean {
+    const userId = actingBuilderPublicationUserId(user);
+    if (!userId) return false;
+
+    const website = mockWebsites.find(item => item.id === websiteId);
+    if (!website || website.user_id !== userId) return false;
+
+    const page = mockPages.find(item => item.id === pageId);
+    if (!page || page.user_id !== userId) return false;
+
+    const websiteRoutes = mockWebsiteRoutes.filter(route => route.website_id === website.id);
+    const pagePath = normalizeBuilderPublicationPath(
+        page.slug === 'home' ? '/' : `/${page.slug}`
+    );
+    const directlyRouted = websiteRoutes.some(route => {
+        const routeWithPage = route as WebsiteRoute & { page_id?: string };
+        return routeWithPage.page_id === page.id
+            || route.slug === page.slug
+            || normalizeBuilderPublicationPath(route.path || '/') === pagePath;
+    });
+    if (directlyRouted) return true;
+
+    const homepageRoute = websiteRoutes.find(
+        route => normalizeBuilderPublicationPath(route.path || '/') === '/'
+    );
+    const homepagePage = homepageRoute
+        ? resolvePageForPreviewPath('/', homepageRoute.funnel_id)
+        : website.homepage_funnel_id
+            ? mockPages.find(item => item.funnel_id === website.homepage_funnel_id)
+            : undefined;
+    if (homepagePage?.id === page.id) return true;
+
+    const ownedFunnel = page.funnel_id
+        ? mockFunnels.find(funnel => funnel.id === page.funnel_id && funnel.user_id === userId)
+        : undefined;
+    if (ownedFunnel && website.homepage_funnel_id === ownedFunnel.id) return true;
+    if (ownedFunnel && websiteRoutes.some(route => route.funnel_id === ownedFunnel.id)) return true;
+
+    const ownerWebsites = mockWebsites.filter(item => item.user_id === userId);
+    return ownerWebsites.length === 1;
+}
+
+function getBuilderPublicationRepository(): LocalStorageBuilderPublicationRepository {
+    if (!builderPublicationRepository) {
+        builderPublicationRepository = new LocalStorageBuilderPublicationRepository({
+            storage: window.localStorage,
+            canAccessPage: canAccessBuilderPublicationPage
+        });
+    }
+    return builderPublicationRepository;
+}
+
+function builderPublicationInternalErrorResponse(): Response {
+    return new Response(JSON.stringify({
+        success: false,
+        code: 'INTERNAL_ERROR',
+        error: 'Builder publication request failed'
+    }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+    });
+}
+
+function builderSectionsJsonResponse(
+    body: Record<string, unknown>,
+    status: number
+): Response {
+    return new Response(JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' }
+    });
+}
+
+function getBuilderSectionsRequestUrl(input: RequestInfo | URL): string | undefined {
+    if (typeof input === 'string') return input;
+    if (input instanceof URL) return input.toString();
+    return input.url;
+}
+
+function getBuilderSectionsRequestMethod(
+    input: RequestInfo | URL,
+    init?: RequestInit
+): string {
+    if (typeof init?.method === 'string') return init.method;
+    if (typeof Request !== 'undefined' && input instanceof Request) return input.method;
+    return 'GET';
+}
+
+function orderedBuilderPageSections(sections: readonly PageSection[]): PageSection[] {
+    return sections
+        .map((section, inputIndex) => ({ section, inputIndex }))
+        .sort((left, right) => {
+            const leftFinite = typeof left.section.order === 'number'
+                && Number.isFinite(left.section.order);
+            const rightFinite = typeof right.section.order === 'number'
+                && Number.isFinite(right.section.order);
+            if (leftFinite && rightFinite && left.section.order !== right.section.order) {
+                return left.section.order - right.section.order;
+            }
+            if (leftFinite !== rightFinite) return leftFinite ? -1 : 1;
+            return left.inputIndex - right.inputIndex;
+        })
+        .map(({ section }) => section);
+}
+
+async function handleBuilderSectionsBrowserGet(
+    input: RequestInfo | URL,
+    init?: RequestInit
+): Promise<Response | null> {
+    let requestUrl: string | undefined;
+    try {
+        requestUrl = getBuilderSectionsRequestUrl(input);
+        if (!requestUrl) return null;
+
+        const parsedUrl = new URL(requestUrl, window.location.origin);
+        const routeMatch = /^\/api\/pages\/([^/]+)\/sections\/?$/.exec(parsedUrl.pathname);
+        if (!routeMatch) return null;
+        if (getBuilderSectionsRequestMethod(input, init).toUpperCase() !== 'GET') return null;
+
+        let pageId: string;
+        try {
+            pageId = decodeURIComponent(routeMatch[1]);
+        } catch {
+            return builderSectionsJsonResponse({
+                success: false,
+                code: 'INVALID_INPUT',
+                error: 'Invalid page ID'
+            }, 400);
+        }
+        if (!pageId.trim()) {
+            return builderSectionsJsonResponse({
+                success: false,
+                code: 'INVALID_INPUT',
+                error: 'Invalid page ID'
+            }, 400);
+        }
+
+        const currentUser = (window as any).currentUser;
+        const userId = typeof currentUser === 'string' && currentUser.trim()
+            ? currentUser
+            : undefined;
+        if (!userId) {
+            return builderSectionsJsonResponse({
+                success: false,
+                code: 'UNAUTHORIZED',
+                error: 'Unauthorized'
+            }, 401);
+        }
+
+        const page = mockPages.find(item => item.id === pageId);
+        if (!page) {
+            return builderSectionsJsonResponse({
+                success: false,
+                code: 'NOT_FOUND',
+                error: 'Page not found'
+            }, 404);
+        }
+        if (page.user_id !== userId) {
+            return builderSectionsJsonResponse({
+                success: false,
+                code: 'FORBIDDEN',
+                error: 'Forbidden'
+            }, 403);
+        }
+
+        const storageKey = `mock_sections_${userId}:${pageId}`;
+        let storedValue: string | null;
+        try {
+            storedValue = window.localStorage.getItem(storageKey);
+        } catch {
+            return builderSectionsJsonResponse({
+                success: false,
+                code: 'PERSISTENCE_ERROR',
+                error: 'LOCAL_SECTION_STORAGE_READ_FAILED'
+            }, 500);
+        }
+
+        let pageSections: PageSection[];
+        if (storedValue !== null) {
+            let parsedSections: unknown;
+            try {
+                parsedSections = JSON.parse(storedValue);
+            } catch {
+                return builderSectionsJsonResponse({
+                    success: false,
+                    code: 'PERSISTENCE_ERROR',
+                    error: 'LOCAL_SECTION_STORAGE_CORRUPT'
+                }, 500);
+            }
+            if (!Array.isArray(parsedSections) || parsedSections.some(section => (
+                typeof section !== 'object'
+                || section === null
+                || Array.isArray(section)
+                || typeof (section as Record<string, unknown>).page_id !== 'string'
+            ))) {
+                return builderSectionsJsonResponse({
+                    success: false,
+                    code: 'PERSISTENCE_ERROR',
+                    error: 'LOCAL_SECTION_STORAGE_CORRUPT'
+                }, 500);
+            }
+            pageSections = parsedSections.filter(section => (
+                (section as Record<string, unknown>).page_id === pageId
+            )) as PageSection[];
+        } else {
+            pageSections = mockPageSections.filter(section => section.page_id === pageId);
+        }
+
+        return builderSectionsJsonResponse({
+            success: true,
+            data: orderedBuilderPageSections(pageSections)
+        }, 200);
+    } catch {
+        return requestUrl && requestUrl.includes('/api/pages/')
+            ? builderSectionsJsonResponse({
+                success: false,
+                code: 'INTERNAL_ERROR',
+                error: 'Failed to load page sections'
+            }, 500)
+            : null;
+    }
+}
+
 const originalFetch = window.fetch;
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : (input as any).url;
+
+    if (isBuilderPublicationBrowserRequest(input)) {
+        try {
+            const publicationResponse = await handleBuilderPublicationBrowserRequest(
+                getBuilderPublicationRepository(),
+                (window as any).currentUser as User | string,
+                input,
+                init
+            );
+            if (publicationResponse) return publicationResponse;
+        } catch {
+            return builderPublicationInternalErrorResponse();
+        }
+    }
+
+    const builderSectionsResponse = await handleBuilderSectionsBrowserGet(input, init);
+    if (builderSectionsResponse) return builderSectionsResponse;
     
     if (url.startsWith('/api/')) {
         const method = init?.method || 'GET';
@@ -289,33 +573,31 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
             console.log('[API ROUTER] Inbound Lead Submission:', body);
 
             try {
-                const phoneVal = body.phone ? body.phone.trim() : '';
-                const emailVal = body.email ? body.email.trim() : '';
-                const nameVal = body.name ? body.name.trim().toLowerCase() : '';
-                const isRepeat = mockContacts.some((contact) => {
-                    const contactPhone = contact.phone ? contact.phone.trim() : '';
-                    const contactEmail = contact.email ? contact.email.trim().toLowerCase() : '';
-                    const contactName = contact.name ? contact.name.trim().toLowerCase() : '';
-                    return contact.user_id === userId && (
-                        (!!phoneVal && contactPhone === phoneVal) ||
-                        (!!emailVal && contactEmail === emailVal.toLowerCase()) ||
-                        (!!nameVal && contactName === nameVal)
-                    );
-                });
+                const phoneVal = body.phone ? normalizePhone(body.phone).normalized : '';
+                const emailVal = body.email ? normalizeEmail(body.email) : '';
+                const isRepeat = mockContacts.some(contact =>
+                    contact.user_id === userId &&
+                    ((emailVal && contact.email === emailVal) || (phoneVal && contact.phone === phoneVal))
+                );
+
+                if (body.website_url) {
+                    return new Response(JSON.stringify({ success: true, data: { id: 'spam-blocked' }, is_repeat: false }), {
+                        status: 201,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
 
                 const fallback = createLocalMockWebsiteLead({
                     ...body,
                     phone: phoneVal || body.phone,
                     email: emailVal || body.email,
-                    name: body.name || ''
+                    name: normalizeName(body.name || '')
                 }, userId, isRepeat);
 
-                // Browser mock context must not import or execute server-only SMS/Twilio code.
                 runAutomations('LEAD_CAPTURED', fallback.contact);
 
                 if (body.is_test && fallback.contact) {
-                    const isNew = !isRepeat;
-                    (window as any).showToast(isNew ? 'Test lead received! Redirecting to CRM...' : 'Repeat test lead received!', 'success');
+                    (window as any).showToast(!fallback.isRepeat ? 'Test lead received! Redirecting to CRM...' : 'Repeat test lead received!', 'success');
                     setTimeout(() => window.navigateTo('contact-detail', fallback.contact.id), 2000);
                 }
 
@@ -626,9 +908,36 @@ let invoiceStatusFilter: string = 'all';
 let builderPageId: string = mockPages[0]?.id || '';
 let builderSelectedSectionId: string | null = null;
 let builderInsertOrder: number | null = null;
-let builderViewport: 'mobile' | 'desktop' = 'mobile'; // WB.3.4 — mobile-first default
+let builderInspectorTab: BuilderInspectorTab = 'content';
+type BuilderLeftPanelTab = 'add' | 'pages' | 'layers';
+let builderLeftPanelTab: BuilderLeftPanelTab = 'add';
+type BuilderViewport = 'desktop' | 'tablet' | 'mobile';
+let builderViewport: BuilderViewport = 'mobile'; // WB.3.4 — mobile-first default
 let builderReturnTo: string = 'pages'; // WB.3.6 — context-aware Back button
 let builderReturnFunnelId: string | null = null; // set when opened from funnel detail
+let builderPublishModalOpen = false;
+let builderPublicationLoading = false;
+let builderPublishing = false;
+let builderPublicationTarget: BuilderPublicationTarget | null = null;
+let builderPublishedRevision: BuilderPublishedRevision | null = null;
+let builderPublicationError: string | null = null;
+let builderPublicationSuccess: string | null = null;
+let builderPublicationLoadedPageId: string | null = null;
+let builderPublicationStatusLoadFailed = false;
+let builderPublicationRequestSequence = 0;
+let builderPublicationHistoryOpen = false;
+let builderPublicationHistoryLoading = false;
+let builderPublicationHistoryItems: BuilderPublishedRevision[] = [];
+let builderPublicationHistoryNextCursor: string | undefined;
+let builderPublicationHistoryError: string | null = null;
+let builderPublicationHistoryLoadingMore = false;
+let builderPublicationRollbackRevisionId: string | null = null;
+let builderPublicationRollbackConfirmationId: string | null = null;
+let builderPublicationRollbackSuccess: string | null = null;
+let builderPublicationHistoryPageId: string | null = null;
+let builderPublicationHistoryRequestSequence = 0;
+let builderPublicationHistoryLoadingCursor: string | null = null;
+let publicSiteRenderSequence = 0;
 type BuilderContext = {
   pageId: string;
   sectionId?: string | null;
@@ -1271,6 +1580,692 @@ async function renderClients() {
 let isAutoSaving = false;
 let autoSaveTimeout: any;
 
+type BuilderPublicationDisplayStatus = {
+  label: 'Never published' | 'Published' | 'Unpublished changes' | 'Checking…' | 'Status unavailable';
+  className: 'never' | 'published' | 'changes' | 'checking' | 'unavailable';
+  state: 'never-published' | 'published' | 'changes-pending' | 'checking' | 'unavailable';
+};
+
+function getBuilderPublicationWebsite(page: Page): Website | undefined {
+  const currentUser = (window as any).currentUser as User | string;
+  const activeWebsite = getActiveBuilderWebsite();
+  if (
+    activeWebsite
+    && canAccessBuilderPublicationPage(currentUser, activeWebsite.id, page.id)
+  ) {
+    return activeWebsite;
+  }
+  return mockWebsites.find(website => (
+    canAccessBuilderPublicationPage(currentUser, website.id, page.id)
+  ));
+}
+
+function getCurrentBuilderDocument(pageId = builderPageId) {
+  const page = mockPages.find(item => item.id === pageId);
+  if (!page) return null;
+  const sections = mockPageSections.filter(section => section.page_id === pageId);
+  return createBuilderDocument(page, sections);
+}
+
+function getBuilderPublicationDisplayStatus(): BuilderPublicationDisplayStatus {
+  if (
+    builderPublicationLoadedPageId !== builderPageId
+    || builderPublicationLoading
+  ) {
+    return { label: 'Checking…', className: 'checking', state: 'checking' };
+  }
+  if (builderPublicationStatusLoadFailed) {
+    return { label: 'Status unavailable', className: 'unavailable', state: 'unavailable' };
+  }
+  if (!builderPublicationTarget || !builderPublishedRevision) {
+    return { label: 'Never published', className: 'never', state: 'never-published' };
+  }
+
+  const document = getCurrentBuilderDocument();
+  if (!document) {
+    return { label: 'Status unavailable', className: 'unavailable', state: 'unavailable' };
+  }
+  try {
+    const publicationState = getBuilderPublicationState(document, builderPublishedRevision);
+    const hasChanges = hasBuilderUnpublishedChanges(document, builderPublishedRevision);
+    return publicationState === 'published' && !hasChanges
+      ? { label: 'Published', className: 'published', state: 'published' }
+      : { label: 'Unpublished changes', className: 'changes', state: 'changes-pending' };
+  } catch {
+    return { label: 'Status unavailable', className: 'unavailable', state: 'unavailable' };
+  }
+}
+
+function updateBuilderPublicationStatusBadge(): void {
+  const badge = document.getElementById('pb-publication-status');
+  if (!badge) return;
+  const status = getBuilderPublicationDisplayStatus();
+  badge.className = `pb-publication-status ${status.className}`;
+  badge.textContent = status.label;
+}
+
+async function loadBuilderPublicationState(
+  pageId: string,
+  preserveMessages = false
+): Promise<void> {
+  const page = mockPages.find(item => item.id === pageId);
+  if (!page) return;
+  const website = getBuilderPublicationWebsite(page);
+  const requestSequence = ++builderPublicationRequestSequence;
+  builderPublicationLoadedPageId = pageId;
+  builderPublicationLoading = true;
+  builderPublicationStatusLoadFailed = false;
+  builderPublicationTarget = null;
+  builderPublishedRevision = null;
+  if (!preserveMessages) {
+    builderPublicationError = null;
+    builderPublicationSuccess = null;
+  }
+
+  if (!website) {
+    builderPublicationLoading = false;
+    builderPublicationStatusLoadFailed = true;
+    if (!preserveMessages) {
+      builderPublicationError = 'We couldn’t load the publication status.';
+    }
+    if (builderPageId === pageId && currentView === 'builder') renderBuilder();
+    return;
+  }
+
+  const result = await getBuilderPagePublication(
+    (input, init) => window.fetch(input, init),
+    website.id,
+    pageId
+  );
+  if (
+    requestSequence !== builderPublicationRequestSequence
+    || builderPageId !== pageId
+    || builderPublicationLoadedPageId !== pageId
+  ) {
+    return;
+  }
+
+  builderPublicationLoading = false;
+  if (!result.success || !result.data || typeof result.data !== 'object') {
+    builderPublicationStatusLoadFailed = true;
+    if (!preserveMessages) {
+      builderPublicationError = 'We couldn’t load the publication status.';
+    }
+  } else {
+    builderPublicationStatusLoadFailed = false;
+    builderPublicationTarget = result.data.target ?? null;
+    builderPublishedRevision = result.data.publishedRevision ?? null;
+  }
+  if (currentView === 'builder') renderBuilder();
+}
+
+function ensureBuilderPublicationState(pageId: string): void {
+  if (builderPublicationLoadedPageId === pageId) return;
+  void loadBuilderPublicationState(pageId);
+}
+
+function resetBuilderPublicationHistory(): void {
+  builderPublicationHistoryRequestSequence += 1;
+  builderPublicationHistoryOpen = false;
+  builderPublicationHistoryLoading = false;
+  builderPublicationHistoryItems = [];
+  builderPublicationHistoryNextCursor = undefined;
+  builderPublicationHistoryError = null;
+  builderPublicationHistoryLoadingMore = false;
+  builderPublicationRollbackRevisionId = null;
+  builderPublicationRollbackConfirmationId = null;
+  builderPublicationRollbackSuccess = null;
+  builderPublicationHistoryPageId = null;
+  builderPublicationHistoryLoadingCursor = null;
+}
+
+function appendBuilderPublicationHistoryPage(
+  page: BuilderPublicationHistoryPage,
+  append: boolean
+): void {
+  if (!append) {
+    builderPublicationHistoryItems = [...page.items];
+  } else {
+    const knownIds = new Set(builderPublicationHistoryItems.map(revision => revision.id));
+    builderPublicationHistoryItems = [
+      ...builderPublicationHistoryItems,
+      ...page.items.filter(revision => !knownIds.has(revision.id))
+    ];
+  }
+  builderPublicationHistoryNextCursor = page.nextCursor;
+}
+
+async function loadBuilderPublicationHistory(
+  pageId: string,
+  options: { cursor?: string; preserveMessages?: boolean; force?: boolean } = {}
+): Promise<void> {
+  const append = options.cursor !== undefined;
+  if (append) {
+    if (
+      builderPublicationHistoryLoadingMore
+      || builderPublicationHistoryLoadingCursor === options.cursor
+    ) return;
+  } else if (builderPublicationHistoryLoading && !options.force) {
+    return;
+  }
+
+  const page = mockPages.find(item => item.id === pageId);
+  const website = page ? getBuilderPublicationWebsite(page) : undefined;
+  const requestSequence = ++builderPublicationHistoryRequestSequence;
+  builderPublicationHistoryPageId = pageId;
+  builderPublicationHistoryLoadingCursor = options.cursor ?? null;
+  if (append) {
+    builderPublicationHistoryLoadingMore = true;
+  } else {
+    builderPublicationHistoryLoading = true;
+    builderPublicationHistoryLoadingMore = false;
+    builderPublicationHistoryItems = [];
+    builderPublicationHistoryNextCursor = undefined;
+  }
+  if (!options.preserveMessages) {
+    builderPublicationHistoryError = null;
+    builderPublicationRollbackSuccess = null;
+  }
+
+  if (!page || !website) {
+    builderPublicationHistoryLoading = false;
+    builderPublicationHistoryLoadingMore = false;
+    builderPublicationHistoryLoadingCursor = null;
+    builderPublicationHistoryError = 'We couldn’t load version history.';
+    if (currentView === 'builder') renderBuilder();
+    return;
+  }
+
+  const result = await listBuilderPageRevisions(
+    (input, init) => window.fetch(input, init),
+    {
+      websiteId: website.id,
+      pageId,
+      limit: 25,
+      ...(options.cursor === undefined ? {} : { cursor: options.cursor })
+    }
+  );
+  if (
+    requestSequence !== builderPublicationHistoryRequestSequence
+    || builderPageId !== pageId
+    || builderPublicationHistoryPageId !== pageId
+  ) return;
+
+  builderPublicationHistoryLoading = false;
+  builderPublicationHistoryLoadingMore = false;
+  builderPublicationHistoryLoadingCursor = null;
+  if (!result.success) {
+    builderPublicationHistoryError = 'We couldn’t load version history.';
+  } else {
+    appendBuilderPublicationHistoryPage(result.data, append);
+    if (!options.preserveMessages) builderPublicationHistoryError = null;
+  }
+  if (currentView === 'builder') renderBuilder();
+}
+
+(window as any).openBuilderVersionHistory = () => {
+  if (!builderPublishModalOpen || builderMode !== 'edit') return;
+  const shouldLoad = builderPublicationHistoryPageId !== builderPageId
+    || builderPublicationHistoryError !== null;
+  builderPublicationHistoryOpen = true;
+  builderPublicationRollbackConfirmationId = null;
+  builderPublicationHistoryError = null;
+  builderPublicationRollbackSuccess = null;
+  renderBuilder();
+  if (shouldLoad && !builderPublicationHistoryLoading) {
+    void loadBuilderPublicationHistory(builderPageId);
+  }
+};
+
+(window as any).closeBuilderVersionHistory = () => {
+  if (builderPublicationRollbackRevisionId) return;
+  builderPublicationHistoryOpen = false;
+  builderPublicationRollbackConfirmationId = null;
+  builderPublicationHistoryError = null;
+  builderPublicationRollbackSuccess = null;
+  renderBuilder();
+};
+
+(window as any).loadMoreBuilderPublicationHistory = () => {
+  if (!builderPublicationHistoryNextCursor) return;
+  void loadBuilderPublicationHistory(builderPageId, {
+    cursor: builderPublicationHistoryNextCursor,
+    preserveMessages: true
+  });
+  renderBuilder();
+};
+
+(window as any).confirmBuilderPublicationRollback = (revisionId: string) => {
+  const revision = builderPublicationHistoryItems.find(item => item.id === revisionId);
+  if (!revision || revision.id === builderPublicationTarget?.publishedRevisionId) return;
+  builderPublicationRollbackConfirmationId = revisionId;
+  builderPublicationHistoryError = null;
+  builderPublicationRollbackSuccess = null;
+  renderBuilder();
+};
+
+(window as any).cancelBuilderPublicationRollback = () => {
+  if (builderPublicationRollbackRevisionId) return;
+  builderPublicationRollbackConfirmationId = null;
+  renderBuilder();
+};
+
+(window as any).restoreBuilderPublishedRevision = async () => {
+  if (builderPublicationRollbackRevisionId) return;
+  const pageId = builderPageId;
+  const revisionId = builderPublicationRollbackConfirmationId;
+  const page = mockPages.find(item => item.id === pageId);
+  const website = page ? getBuilderPublicationWebsite(page) : undefined;
+  const revision = revisionId
+    ? builderPublicationHistoryItems.find(item => item.id === revisionId)
+    : undefined;
+  if (
+    !page
+    || !website
+    || !revision
+    || builderPublicationHistoryPageId !== pageId
+    || revision.pageId !== pageId
+    || revision.websiteId !== website.id
+  ) {
+    builderPublicationHistoryError = revisionId
+      ? 'This version is no longer available.'
+      : 'We couldn’t restore this version.';
+    builderPublicationRollbackConfirmationId = null;
+    renderBuilder();
+    return;
+  }
+  if (
+    builderPublicationLoadedPageId !== pageId
+    || builderPublicationLoading
+    || builderPublicationStatusLoadFailed
+  ) {
+    builderPublicationHistoryError = 'We couldn’t restore this version.';
+    renderBuilder();
+    return;
+  }
+  if (revision.id === builderPublicationTarget?.publishedRevisionId) {
+    builderPublicationRollbackConfirmationId = null;
+    renderBuilder();
+    return;
+  }
+
+  builderPublicationRollbackRevisionId = revision.id;
+  builderPublicationHistoryError = null;
+  builderPublicationRollbackSuccess = null;
+  renderBuilder();
+
+  const result = await rollbackBuilderPageRevision(
+    (input, init) => window.fetch(input, init),
+    {
+      websiteId: website.id,
+      pageId,
+      revisionId: revision.id,
+      expectedPublishedRevisionId: builderPublicationTarget?.publishedRevisionId ?? null,
+      publishedAt: new Date().toISOString()
+    }
+  );
+  if (
+    builderPageId !== pageId
+    || builderPublicationHistoryPageId !== pageId
+    || builderPublicationRollbackRevisionId !== revision.id
+  ) return;
+
+  builderPublicationRollbackRevisionId = null;
+  builderPublicationRollbackConfirmationId = null;
+  if (!result.success) {
+    if (result.status === 409 || result.code === 'CONFLICT') {
+      await Promise.all([
+        loadBuilderPublicationState(pageId, true),
+        loadBuilderPublicationHistory(pageId, { force: true, preserveMessages: true })
+      ]);
+      if (builderPageId === pageId) {
+        builderPublicationHistoryError = 'The published version changed elsewhere. Refresh and try again.';
+        renderBuilder();
+      }
+    } else {
+      builderPublicationHistoryError = result.status === 404
+        ? 'This version is no longer available.'
+        : 'We couldn’t restore this version.';
+      renderBuilder();
+    }
+    return;
+  }
+
+  builderPublicationTarget = result.data.target;
+  builderPublishedRevision = result.data.revision;
+  builderPublicationLoadedPageId = pageId;
+  builderPublicationStatusLoadFailed = false;
+  builderPublicationHistoryError = null;
+  builderPublicationRollbackSuccess = 'Selected published revision updated. Your current draft was not changed.';
+  renderBuilder();
+  (window as any).showToast('Published version restored', 'success');
+  await loadBuilderPublicationHistory(pageId, { force: true, preserveMessages: true });
+};
+
+function getBuilderPublicationPagePath(page: Page): string {
+  return getBuilderWebsitePageEntries().find(entry => entry.page.id === page.id)?.path
+    || (page.slug === 'home' ? '/' : `/${page.slug}`);
+}
+
+function createBuilderRevisionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  throw new Error('Secure revision ID generation is unavailable.');
+}
+
+async function flushBuilderAutosaveForPublication(): Promise<boolean> {
+  if (autoSaveTimeout) {
+    clearTimeout(autoSaveTimeout);
+    autoSaveTimeout = undefined;
+  }
+  isAutoSaving = true;
+  const indicator = document.getElementById('pb-autosave-indicator');
+  if (indicator) indicator.textContent = 'Saving…';
+  const saved = await (window as any).savePageSections();
+  isAutoSaving = false;
+  if (indicator) indicator.textContent = saved ? 'Saved' : 'Save failed';
+  updateBuilderPublicationStatusBadge();
+  return saved === true;
+}
+
+function closeBuilderPublishModal(): void {
+  if (builderPublishing || builderPublicationRollbackRevisionId) return;
+  builderPublishModalOpen = false;
+  builderPublicationHistoryOpen = false;
+  builderPublicationRollbackConfirmationId = null;
+  builderPublicationError = null;
+  builderPublicationSuccess = null;
+  builderPublicationHistoryError = null;
+  builderPublicationRollbackSuccess = null;
+  document.body.classList.remove('pb-publish-modal-open');
+  renderBuilder();
+}
+
+(window as any).openBuilderPublishModal = () => {
+  if (builderMode !== 'edit') return;
+  builderPublishModalOpen = true;
+  builderPublicationHistoryOpen = false;
+  builderPublicationRollbackConfirmationId = null;
+  builderPublicationError = builderPublicationStatusLoadFailed
+    ? 'We couldn’t load the publication status.'
+    : null;
+  builderPublicationSuccess = null;
+  document.body.classList.add('pb-publish-modal-open');
+  renderBuilder();
+  setTimeout(() => document.getElementById('pb-publish-close')?.focus(), 0);
+};
+
+(window as any).closeBuilderPublishModal = closeBuilderPublishModal;
+
+window.addEventListener('keydown', event => {
+  if (
+    event.key === 'Escape'
+    && builderPublishModalOpen
+    && !builderPublishing
+    && !builderPublicationRollbackRevisionId
+  ) {
+    event.preventDefault();
+    closeBuilderPublishModal();
+  }
+});
+
+(window as any).publishCurrentBuilderPage = async () => {
+  if (builderPublishing) return;
+  const initialStatus = getBuilderPublicationDisplayStatus();
+  if (initialStatus.state === 'published') return;
+
+  const pageId = builderPageId;
+  const page = mockPages.find(item => item.id === pageId);
+  if (!page) {
+    builderPublicationError = 'We couldn’t publish this page.';
+    renderBuilder();
+    return;
+  }
+  const website = getBuilderPublicationWebsite(page);
+  const actingUserId = actingBuilderPublicationUserId(
+    (window as any).currentUser as User | string
+  );
+  if (!website || !actingUserId) {
+    builderPublicationError = 'We couldn’t publish this page.';
+    renderBuilder();
+    return;
+  }
+
+  builderPublishing = true;
+  builderPublicationError = null;
+  builderPublicationSuccess = null;
+  renderBuilder();
+
+  try {
+    const saved = await flushBuilderAutosaveForPublication();
+    if (!saved) {
+      builderPublishing = false;
+      builderPublicationError = 'Save the page before publishing.';
+      renderBuilder();
+      return;
+    }
+
+    const builderDocument = getCurrentBuilderDocument(pageId);
+    if (!builderDocument) {
+      builderPublishing = false;
+      builderPublicationError = 'We couldn’t publish this page.';
+      renderBuilder();
+      return;
+    }
+    const validationIssues = validateBuilderDocument(builderDocument);
+    if (validationIssues.length > 0) {
+      builderPublishing = false;
+      builderPublicationError = 'This page contains invalid section data.';
+      renderBuilder();
+      return;
+    }
+
+    const createdAt = new Date().toISOString();
+    const revision = createBuilderPublishedRevision(builderDocument, {
+      id: createBuilderRevisionId(),
+      websiteId: website.id,
+      createdAt,
+      createdBy: actingUserId
+    });
+    const createResult = await createBuilderPageRevision(
+      (input, init) => window.fetch(input, init),
+      website.id,
+      pageId,
+      revision
+    );
+    if (!createResult.success) {
+      builderPublishing = false;
+      builderPublicationError = 'We couldn’t publish this page.';
+      renderBuilder();
+      return;
+    }
+
+    const publishResult = await publishBuilderPageRevision(
+      (input, init) => window.fetch(input, init),
+      website.id,
+      pageId,
+      {
+        revisionId: createResult.data.id,
+        publishedAt: new Date().toISOString(),
+        expectedPublishedRevisionId: builderPublicationTarget?.publishedRevisionId ?? null
+      }
+    );
+    if (!publishResult.success) {
+      builderPublishing = false;
+      if (publishResult.status === 409 || publishResult.code === 'CONFLICT') {
+        builderPublicationError = 'This page was published elsewhere. Refresh the status and try again.';
+        await loadBuilderPublicationState(pageId, true);
+      } else {
+        builderPublicationError = 'We couldn’t publish this page.';
+        renderBuilder();
+      }
+      return;
+    }
+
+    if (builderPageId !== pageId) {
+      builderPublishing = false;
+      return;
+    }
+    builderPublicationTarget = publishResult.data.target;
+    builderPublishedRevision = publishResult.data.revision;
+    builderPublicationLoadedPageId = pageId;
+    builderPublicationStatusLoadFailed = false;
+    builderPublishing = false;
+    builderPublicationError = null;
+    builderPublicationSuccess = 'Page published successfully.';
+    resetBuilderPublicationHistory();
+    renderBuilder();
+    (window as any).showToast('Page published', 'success');
+    void loadBuilderPublicationState(pageId, true);
+  } catch {
+    builderPublishing = false;
+    builderPublicationError = 'We couldn’t publish this page.';
+    renderBuilder();
+  }
+};
+
+function formatBuilderRevisionDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Date unavailable' : date.toLocaleString();
+}
+
+function renderBuilderVersionHistoryContent(page: Page): string {
+  const confirmation = builderPublicationRollbackConfirmationId
+    ? builderPublicationHistoryItems.find(
+      revision => revision.id === builderPublicationRollbackConfirmationId
+    )
+    : undefined;
+
+  if (confirmation) {
+    const confirmationPageName = confirmation.document.page.name || page.name || 'Untitled page';
+    const isRestoring = builderPublicationRollbackRevisionId === confirmation.id;
+    return `
+      <div class="pb-history-confirmation" aria-labelledby="pb-history-confirmation-title">
+        <span>Confirm restore</span>
+        <h3 id="pb-history-confirmation-title">Restore this published version?</h3>
+        <dl>
+          <div><dt>Version date</dt><dd>${escapeBuilderInspectorHtml(formatBuilderRevisionDate(confirmation.createdAt))}</dd></div>
+          <div><dt>Page</dt><dd>${escapeBuilderInspectorHtml(confirmationPageName)}</dd></div>
+          <div><dt>Sections</dt><dd>${confirmation.document.sections.length}</dd></div>
+        </dl>
+        <p>The selected published revision will change. Your current draft page and sections will not be changed.</p>
+        ${builderPublicationHistoryError ? `<div class="pb-history-error" role="alert" aria-live="assertive">${escapeBuilderInspectorHtml(builderPublicationHistoryError)}</div>` : ''}
+        <div class="pb-history-confirmation-actions">
+          <button type="button" class="pb-history-secondary" onclick="window.cancelBuilderPublicationRollback()" ${isRestoring ? 'disabled' : ''}>Cancel</button>
+          <button type="button" class="pb-history-restore-confirm" onclick="window.restoreBuilderPublishedRevision()" ${isRestoring ? 'disabled' : ''}>${isRestoring ? 'Restoring…' : 'Restore published version'}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  const revisionCards = builderPublicationHistoryItems.map(revision => {
+    const isCurrent = revision.id === builderPublicationTarget?.publishedRevisionId;
+    const displayedDate = isCurrent && builderPublicationTarget
+      ? builderPublicationTarget.publishedAt
+      : revision.createdAt;
+    const pageName = revision.document.page.name || 'Untitled page';
+    return `
+      <article class="pb-history-revision ${isCurrent ? 'current' : ''}">
+        <div class="pb-history-revision-heading">
+          <div>
+            <span>${isCurrent ? 'Published' : 'Version created'}</span>
+            <strong>${escapeBuilderInspectorHtml(formatBuilderRevisionDate(displayedDate))}</strong>
+          </div>
+          <span class="pb-history-version-label ${isCurrent ? 'current' : 'unpublished'}">${isCurrent ? 'Current version' : 'Unpublished revision'}</span>
+        </div>
+        <div class="pb-history-revision-meta">
+          <span>${escapeBuilderInspectorHtml(pageName)}</span>
+          <span>${revision.document.sections.length} ${revision.document.sections.length === 1 ? 'section' : 'sections'}</span>
+          ${revision.createdBy ? `<span>Creator ${escapeBuilderInspectorHtml(revision.createdBy)}</span>` : ''}
+        </div>
+        <code>${escapeBuilderInspectorHtml(revision.id)}</code>
+        ${isCurrent ? '' : `<button type="button" class="pb-history-restore" aria-label="Restore revision ${escapeBuilderInspectorHtml(revision.id)}" onclick='window.confirmBuilderPublicationRollback(${builderInspectorJsArgument(revision.id)})'>Restore this version</button>`}
+      </article>
+    `;
+  }).join('');
+
+  return `
+    <div class="pb-history-intro">
+      <strong>${escapeBuilderInspectorHtml(page.name || 'Untitled page')}</strong>
+      <p>Selecting a version changes the publication target. It does not change the current draft or the legacy public-site renderer.</p>
+    </div>
+    ${builderPublicationHistoryError ? `<div class="pb-history-error" role="alert" aria-live="assertive">${escapeBuilderInspectorHtml(builderPublicationHistoryError)}</div>` : ''}
+    ${builderPublicationRollbackSuccess ? `<div class="pb-history-success" role="status" aria-live="polite">${escapeBuilderInspectorHtml(builderPublicationRollbackSuccess)}</div>` : ''}
+    ${builderPublicationHistoryLoading ? '<div class="pb-history-loading" role="status" aria-live="polite">Loading version history…</div>' : ''}
+    ${!builderPublicationHistoryLoading && builderPublicationHistoryItems.length === 0 ? '<div class="pb-history-empty">No published versions yet.</div>' : ''}
+    ${revisionCards ? `<div class="pb-history-list">${revisionCards}</div>` : ''}
+    ${builderPublicationHistoryNextCursor ? `<button type="button" class="pb-history-load-more" onclick="window.loadMoreBuilderPublicationHistory()" ${builderPublicationHistoryLoadingMore ? 'disabled' : ''}>${builderPublicationHistoryLoadingMore ? 'Loading…' : 'Load more'}</button>` : ''}
+  `;
+}
+
+function renderBuilderPublishModal(
+  page: Page,
+  sections: readonly PageSection[],
+  status: BuilderPublicationDisplayStatus
+): string {
+  if (!builderPublishModalOpen || builderMode !== 'edit') return '';
+  const pageName = escapeBuilderInspectorHtml(page.name || 'Untitled page');
+  const pagePath = escapeBuilderInspectorHtml(getBuilderPublicationPagePath(page));
+  const lastPublished = builderPublicationTarget?.publishedAt
+    ? new Date(builderPublicationTarget.publishedAt).toLocaleString()
+    : null;
+  const alreadyPublished = status.state === 'published';
+  const primaryDisabled = builderPublishing
+    || alreadyPublished
+    || status.state === 'checking'
+    || status.state === 'unavailable';
+  const busy = builderPublishing || builderPublicationRollbackRevisionId !== null;
+
+  return `
+    <div class="pb-publish-overlay" role="presentation">
+      <section class="pb-publish-modal ${builderPublicationHistoryOpen ? 'history' : ''}" role="dialog" aria-modal="true" aria-labelledby="pb-publish-title">
+        <header class="pb-publish-modal-header">
+          ${builderPublicationHistoryOpen ? `
+          <div class="pb-history-header-title">
+            <button type="button" class="pb-history-back" aria-label="Back to Publish page" onclick="window.closeBuilderVersionHistory()" ${busy ? 'disabled' : ''}>←</button>
+            <div><span>Website publication</span><h2 id="pb-publish-title">Version history</h2></div>
+          </div>
+          ` : `
+          <div><span>Website publication</span><h2 id="pb-publish-title">Publish page</h2></div>
+          `}
+          <button id="pb-publish-close" type="button" class="pb-publish-close" aria-label="Close publish dialog" onclick="window.closeBuilderPublishModal()" ${busy ? 'disabled' : ''}>×</button>
+        </header>
+        ${builderPublicationHistoryOpen ? `
+        <div class="pb-publish-modal-body pb-history-body">${renderBuilderVersionHistoryContent(page)}</div>
+        <footer class="pb-publish-modal-actions">
+          <button type="button" class="pb-publish-cancel" onclick="window.closeBuilderPublishModal()" ${busy ? 'disabled' : ''}>Close</button>
+        </footer>
+        ` : `
+        <div class="pb-publish-modal-body">
+          <div class="pb-publish-page-summary">
+            <div><strong>${pageName}</strong><code>${pagePath}</code></div>
+            <span class="pb-publication-status ${status.className}">${status.label}</span>
+          </div>
+          <div class="pb-publish-summary-grid">
+            <div><span>Sections</span><strong>${sections.length}</strong></div>
+            <div><span>Current version</span><strong>${status.label}</strong></div>
+          </div>
+          <p class="pb-publish-explanation">Publishing saves the current page and its sections as an immutable website version.</p>
+          ${lastPublished ? `<div class="pb-publish-metadata"><span>Last published</span><strong>${escapeBuilderInspectorHtml(lastPublished)}</strong>${builderPublicationTarget ? `<code>${escapeBuilderInspectorHtml(builderPublicationTarget.publishedRevisionId)}</code>` : ''}</div>` : ''}
+          ${alreadyPublished && !builderPublicationSuccess ? '<div class="pb-publish-success">This page is already published.</div>' : ''}
+          ${builderPublicationError ? `<div class="pb-publish-error" role="alert">${escapeBuilderInspectorHtml(builderPublicationError)}</div>` : ''}
+          ${builderPublicationSuccess ? `<div class="pb-publish-success" role="status">${escapeBuilderInspectorHtml(builderPublicationSuccess)}</div>` : ''}
+          ${builderPublishing ? '<div class="pb-publish-loading" role="status">Saving and publishing this page…</div>' : ''}
+        </div>
+        <footer class="pb-publish-modal-actions pb-publish-modal-actions-split">
+          <button type="button" class="pb-history-entry" onclick="window.openBuilderVersionHistory()" ${builderPublishing ? 'disabled' : ''}>Version history</button>
+          <div>
+            <button type="button" class="pb-publish-cancel" onclick="window.closeBuilderPublishModal()" ${builderPublishing ? 'disabled' : ''}>${alreadyPublished || builderPublicationSuccess ? 'Close' : 'Cancel'}</button>
+            ${alreadyPublished || builderPublicationSuccess ? '' : `<button type="button" class="pb-publish-confirm" onclick="window.publishCurrentBuilderPage()" ${primaryDisabled ? 'disabled' : ''}>${builderPublishing ? 'Publishing…' : 'Publish page'}</button>`}
+          </div>
+        </footer>
+        `}
+      </section>
+    </div>
+  `;
+}
+
 // WB.3.5 — Auto-save: debounced 600ms, then persists via API
 (window as any).triggerAutoSave = () => {
   isAutoSaving = true;
@@ -1283,6 +2278,7 @@ let autoSaveTimeout: any;
 
   clearTimeout(autoSaveTimeout);
   autoSaveTimeout = setTimeout(async () => {
+    autoSaveTimeout = undefined;
     // Persist to Supabase via internal API
     try {
       await (window as any).savePageSections();
@@ -1296,6 +2292,7 @@ let autoSaveTimeout: any;
     if (ind) {
       ind.innerHTML = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#22c55e;"></span> Saved`;
     }
+    updateBuilderPublicationStatusBadge();
   }, 600); // 600ms debounce — within the 300–800ms WB.3.5 spec
 };
 
@@ -1305,9 +2302,23 @@ let autoSaveTimeout: any;
 let builderMode: 'edit' | 'preview' = 'edit';
 
 // WB.3.4 — Viewport toggle handler
-(window as any).setBuilderViewport = (vp: 'mobile' | 'desktop') => {
-  builderViewport = vp;
+(window as any).setBuilderViewport = (viewport: unknown) => {
+  if (viewport !== 'desktop' && viewport !== 'tablet' && viewport !== 'mobile') return;
+  if (builderViewport === viewport) return;
+
+  const currentCanvas = document.querySelector<HTMLElement>('.pb-canvas-area');
+  const scrollLeft = currentCanvas?.scrollLeft ?? 0;
+  const scrollTop = currentCanvas?.scrollTop ?? 0;
+
+  builderViewport = viewport;
   renderBuilder();
+
+  setTimeout(() => {
+    const nextCanvas = document.querySelector<HTMLElement>('.pb-canvas-area');
+    if (!nextCanvas) return;
+    nextCanvas.scrollLeft = scrollLeft;
+    nextCanvas.scrollTop = scrollTop;
+  }, 80);
 };
 
 (window as any).setBuilderMode = (mode: 'edit' | 'preview') => {
@@ -1325,10 +2336,13 @@ function renderBuilder() {
   });
 }
 
+const hydratedBuilderSectionPageIds = new Set<string>();
+
 function hydrateBuilderSectionsFromLocalStorage(pageId: string): void {
   const isBrowser = typeof window !== 'undefined';
   const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : false;
-  if (!isBrowser || hasSupabase) return;
+  if (!isBrowser || hasSupabase || hydratedBuilderSectionPageIds.has(pageId)) return;
+  hydratedBuilderSectionPageIds.add(pageId);
 
   const userId = (window as any).currentUser || 'system';
   const storageKey = `mock_sections_${userId}:${pageId}`;
@@ -1442,6 +2456,499 @@ function hydrateBuilderContext(): void {
   if (context) applyBuilderContext(context);
 }
 
+function escapeBuilderInspectorHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function builderInspectorJsArgument(value: string): string {
+  return JSON.stringify(value)
+    .replace(/'/g, '\\u0027')
+    .replace(/</g, '\\u003c');
+}
+
+function renderBuilderInspectorControl(
+  section: PageSection,
+  field: BuilderInspectorFieldDefinition
+): string {
+  const value = getBuilderInspectorFieldValue(section, field);
+  const stringValue = value === undefined || value === null ? '' : String(value);
+  const safeValue = escapeBuilderInspectorHtml(stringValue);
+  const sectionArg = builderInspectorJsArgument(section.id);
+  const fieldArg = builderInspectorJsArgument(field.id);
+  const commit = `window.updateBuilderInspectorField(${sectionArg}, ${fieldArg}, this.value)`;
+
+  switch (field.control) {
+    case 'text':
+      return `<input class="pb-inspector-input" type="text" value="${safeValue}" placeholder="${escapeBuilderInspectorHtml(field.placeholder ?? '')}" onblur='${commit}'>`;
+    case 'textarea':
+      return `<textarea class="pb-inspector-textarea" placeholder="${escapeBuilderInspectorHtml(field.placeholder ?? '')}" onblur='${commit}'>${safeValue}</textarea>`;
+    case 'select':
+      return `
+        <select class="pb-inspector-select" onchange='${commit}'>
+          ${(field.options ?? []).map(option => `
+            <option value="${escapeBuilderInspectorHtml(option.value)}" ${String(value ?? '') === option.value ? 'selected' : ''}>${escapeBuilderInspectorHtml(option.label)}</option>
+          `).join('')}
+        </select>
+      `;
+    case 'toggle':
+      const isChecked = field.id === 'visibility' ? value !== false : value === true;
+      return `
+        <label class="pb-inspector-toggle">
+          <input type="checkbox" ${isChecked ? 'checked' : ''} aria-label="${escapeBuilderInspectorHtml(field.label)}" onchange='window.updateBuilderInspectorField(${sectionArg}, ${fieldArg}, this.checked)'>
+          <span class="pb-inspector-toggle-track"><span class="pb-inspector-toggle-thumb"></span></span>
+          <span class="pb-inspector-toggle-value">${isChecked ? 'On' : 'Off'}</span>
+        </label>
+      `;
+    case 'number':
+      return `<input class="pb-inspector-input" type="number" value="${safeValue}" ${field.min === undefined ? '' : `min="${field.min}"`} ${field.max === undefined ? '' : `max="${field.max}"`} ${field.step === undefined ? '' : `step="${field.step}"`} onblur='${commit}'>`;
+    case 'color': {
+      const canUseColorInput = /^#[0-9a-fA-F]{6}$/.test(stringValue);
+      return `
+        <div class="pb-inspector-color-control">
+          ${canUseColorInput ? `<input class="pb-inspector-color-swatch" type="color" value="${safeValue}" aria-label="${escapeBuilderInspectorHtml(field.label)} colour" onchange='${commit}'>` : ''}
+          <input class="pb-inspector-input" type="text" value="${safeValue}" placeholder="#000000 or CSS value" onblur='${commit}'>
+        </div>
+      `;
+    }
+    case 'image':
+      return `
+        <div class="pb-inspector-image-control">
+          <input class="pb-inspector-input" type="text" value="${safeValue}" placeholder="Image URL" onblur='${commit}'>
+          <button class="pb-inspector-secondary-btn" type="button" onclick='window.openImagePicker(${sectionArg}, ${builderInspectorJsArgument(field.path.join('.'))})'>Choose image</button>
+          ${stringValue ? `<img class="pb-inspector-image-preview" src="${safeValue}" alt="">` : ''}
+        </div>
+      `;
+    case 'collection': {
+      const itemCount = Array.isArray(value) ? value.length : 0;
+      return `
+        <div class="pb-inspector-collection">
+          <strong>${itemCount} ${itemCount === 1 ? 'item' : 'items'}</strong>
+          <span>Edit these items using the existing controls on the page.</span>
+        </div>
+      `;
+    }
+    default:
+      return '';
+  }
+}
+
+function renderBuilderInspectorPanel(sections: PageSection[]): string {
+  const section = builderSelectedSectionId
+    ? sections.find(item => item.id === builderSelectedSectionId)
+    : undefined;
+
+  if (!section) {
+    return `
+      <aside class="pb-inspector-panel">
+        <div class="pb-inspector-empty">
+          <h3>Select a section</h3>
+          <p>Choose a section on the page to edit its content and design.</p>
+        </div>
+      </aside>
+    `;
+  }
+
+  const schema = getBuilderInspectorSchema(section.type);
+  const registryDefinition = getBuilderSectionDefinition(section.type);
+  if (!schema || !registryDefinition) {
+    return `
+      <aside class="pb-inspector-panel">
+        <div class="pb-inspector-empty">
+          <h3>Custom section</h3>
+          <p>This section can still be edited using its existing on-page controls.</p>
+        </div>
+      </aside>
+    `;
+  }
+
+  const availableTabs = Array.from(
+    new Set(schema.groups.map(group => group.tab))
+  );
+  const activeTab = availableTabs.includes(builderInspectorTab)
+    ? builderInspectorTab
+    : availableTabs[0];
+  const groups = schema.groups.filter(group => group.tab === activeTab);
+
+  return `
+    <aside class="pb-inspector-panel">
+      <div class="pb-inspector-header">
+        <span class="pb-inspector-eyebrow">Properties</span>
+        <h3>${escapeBuilderInspectorHtml(registryDefinition.label)}</h3>
+        <div class="pb-inspector-meta">
+          <span>${escapeBuilderInspectorHtml(section.type)}</span>
+          <span>${escapeBuilderInspectorHtml(section.variant ?? registryDefinition.defaultVariant ?? 'default')}</span>
+        </div>
+      </div>
+      <div class="pb-inspector-tabs" role="tablist" aria-label="Section properties">
+        ${availableTabs.map(tab => `
+          <button type="button" role="tab" aria-selected="${tab === activeTab}" class="pb-inspector-tab ${tab === activeTab ? 'active' : ''}" onclick="window.setBuilderInspectorTab('${tab}')">${escapeBuilderInspectorHtml(tab === 'content' ? 'Content' : 'Design')}</button>
+        `).join('')}
+      </div>
+      <div class="pb-inspector-scroll">
+        ${groups.map(group => `
+          <section class="pb-inspector-group">
+            <div class="pb-inspector-group-header">
+              <h4>${escapeBuilderInspectorHtml(group.label)}</h4>
+              ${group.description ? `<p>${escapeBuilderInspectorHtml(group.description)}</p>` : ''}
+            </div>
+            ${group.fields.map(field => `
+              <div class="pb-inspector-field">
+                <label>${escapeBuilderInspectorHtml(field.label)}</label>
+                ${field.description ? `<p>${escapeBuilderInspectorHtml(field.description)}</p>` : ''}
+                ${renderBuilderInspectorControl(section, field)}
+              </div>
+            `).join('')}
+          </section>
+        `).join('')}
+      </div>
+    </aside>
+  `;
+}
+
+(window as any).setBuilderLeftPanelTab = (tab: BuilderLeftPanelTab) => {
+  if (builderLeftPanelTab === tab) return;
+  builderLeftPanelTab = tab;
+  renderBuilder();
+};
+
+function renderBuilderLayersPanel(sections: PageSection[]): string {
+  const orderedSections = sections
+    .map((section, originalIndex) => ({ section, originalIndex }))
+    .sort((left, right) => {
+      const leftOrder = Number.isFinite(left.section.order) ? left.section.order : Number.POSITIVE_INFINITY;
+      const rightOrder = Number.isFinite(right.section.order) ? right.section.order : Number.POSITIVE_INFINITY;
+      return leftOrder - rightOrder || left.originalIndex - right.originalIndex;
+    })
+    .map(item => item.section);
+
+  if (orderedSections.length === 0) {
+    return `
+      <div class="pb-layers-empty">
+        <h4>No sections yet</h4>
+        <p>Use the Add tab to add the first section.</p>
+        <button type="button" onclick="window.setBuilderLeftPanelTab('add')">Go to Add</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="pb-layers-panel">
+      <div class="pb-layers-heading">
+        <div>
+          <span>Page sections</span>
+          <strong>${orderedSections.length}</strong>
+        </div>
+      </div>
+      <div class="pb-layer-list">
+        ${orderedSections.map((section, index) => {
+          const definition = getBuilderSectionDefinition(section.type);
+          const component = definition
+            ? undefined
+            : mockComponents.find(item => item.type === section.type);
+          const label = definition?.label || component?.name || 'Custom section';
+          const safeLabel = escapeBuilderInspectorHtml(label);
+          const accessibleSectionLabel = /section$/i.test(label) ? label : `${label} section`;
+          const safeAccessibleSectionLabel = escapeBuilderInspectorHtml(accessibleSectionLabel);
+          const safeType = escapeBuilderInspectorHtml(section.type);
+          const safeVariant = escapeBuilderInspectorHtml(section.variant ?? '');
+          const sectionArg = builderInspectorJsArgument(section.id);
+          const isSelected = builderSelectedSectionId === section.id;
+          const isHidden = section.styles?.visible === false;
+
+          return `
+            <article class="pb-layer-row ${isSelected ? 'active' : ''} ${isHidden ? 'hidden' : ''}">
+              <button
+                type="button"
+                class="pb-layer-main"
+                onclick='window.selectSectionForBuilder(${sectionArg}, true)'
+                ${isSelected ? 'aria-current="true"' : ''}
+                aria-label="Select ${safeAccessibleSectionLabel}"
+              >
+                <span class="pb-layer-title">${safeLabel}</span>
+                <span class="pb-layer-meta">
+                  <span>${safeType}</span>
+                  ${section.variant ? `<span class="pb-layer-variant">${safeVariant}</span>` : ''}
+                  <span class="pb-layer-visibility">${isHidden ? 'Hidden' : 'Visible'}</span>
+                </span>
+              </button>
+              <div class="pb-layer-actions" aria-label="${safeAccessibleSectionLabel} actions">
+                <button type="button" aria-label="Move ${safeLabel} up" title="Move up" onclick='event.stopPropagation(); window.moveSection(${sectionArg}, -1)' ${index === 0 ? 'disabled' : ''}>↑</button>
+                <button type="button" aria-label="Move ${safeLabel} down" title="Move down" onclick='event.stopPropagation(); window.moveSection(${sectionArg}, 1)' ${index === orderedSections.length - 1 ? 'disabled' : ''}>↓</button>
+                <button type="button" aria-label="${isHidden ? 'Show' : 'Hide'} ${safeLabel}" title="${isHidden ? 'Show section' : 'Hide section'}" onclick='event.stopPropagation(); window.toggleSectionVisibility(${sectionArg})'>${isHidden ? 'Show' : 'Hide'}</button>
+                <button type="button" class="pb-layer-delete" aria-label="Delete ${safeLabel}" title="Delete section" onclick='event.stopPropagation(); window.removeSection(${sectionArg})'>Delete</button>
+              </div>
+            </article>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+type BuilderWebsitePageEntry = {
+  page: Page;
+  path: string;
+  isHomepage: boolean;
+  routeOrder?: number;
+  stepOrder?: number;
+  originalIndex: number;
+};
+
+function getActiveBuilderWebsite(): Website | undefined {
+  const userId = (window as any).currentUser || 'system';
+  return mockWebsites.find(website => website.user_id === userId) || mockWebsites[0];
+}
+
+function getBuilderWebsitePageEntries(): BuilderWebsitePageEntry[] {
+  const website = getActiveBuilderWebsite();
+  if (!website) return [];
+
+  const websiteRoutes = mockWebsiteRoutes.filter(route => route.website_id === website.id);
+  const routedFunnelIds = new Set(websiteRoutes.map(route => route.funnel_id));
+  const homepageRoute = websiteRoutes.find(route => normalizePreviewPath(route.path) === '/');
+  const homepagePage = homepageRoute
+    ? resolvePageForPreviewPath('/', homepageRoute.funnel_id)
+    : website.homepage_funnel_id
+      ? mockPages.find(page => page.funnel_id === website.homepage_funnel_id)
+      : undefined;
+  const websitesForOwner = mockWebsites.filter(item => item.user_id === website.user_id);
+
+  const entries = mockPages
+    .map((page, originalIndex) => ({ page, originalIndex }))
+    .filter(({ page }) => {
+      if (page.user_id !== website.user_id) return false;
+      if (websitesForOwner.length === 1) return true;
+      return page.id === builderPageId
+        || page.id === homepagePage?.id
+        || (!!page.funnel_id && routedFunnelIds.has(page.funnel_id));
+    })
+    .map(({ page, originalIndex }): BuilderWebsitePageEntry => {
+      const isHomepage = page.id === homepagePage?.id;
+      const slugPath = page.slug ? normalizePreviewPath(`/${page.slug}`) : '/';
+      const exactRoute = websiteRoutes.find(route =>
+        route.slug === page.slug
+        || normalizePreviewPath(route.path) === slugPath
+      );
+      const route = isHomepage ? homepageRoute : exactRoute;
+      const rawRouteOrder = route
+        ? (route as WebsiteRoute & { order?: number; sort_order?: number }).order
+          ?? (route as WebsiteRoute & { sort_order?: number }).sort_order
+        : undefined;
+
+      return {
+        page,
+        path: isHomepage ? '/' : route?.path || slugPath,
+        isHomepage,
+        routeOrder: typeof rawRouteOrder === 'number' && Number.isFinite(rawRouteOrder)
+          ? rawRouteOrder
+          : undefined,
+        stepOrder: typeof page.step_order === 'number' && Number.isFinite(page.step_order)
+          ? page.step_order
+          : undefined,
+        originalIndex
+      };
+    });
+
+  const hasRouteOrder = entries.some(entry => entry.routeOrder !== undefined);
+  const hasStepOrder = entries.some(entry => entry.stepOrder !== undefined);
+
+  return entries.slice().sort((left, right) => {
+    if (hasRouteOrder) {
+      const routeDifference = (left.routeOrder ?? Number.POSITIVE_INFINITY)
+        - (right.routeOrder ?? Number.POSITIVE_INFINITY);
+      if (routeDifference !== 0) return routeDifference;
+    } else if (hasStepOrder) {
+      const stepDifference = (left.stepOrder ?? Number.POSITIVE_INFINITY)
+        - (right.stepOrder ?? Number.POSITIVE_INFINITY);
+      if (stepDifference !== 0) return stepDifference;
+    }
+    return left.originalIndex - right.originalIndex;
+  });
+}
+
+function renderBuilderPagesPanel(): string {
+  const entries = getBuilderWebsitePageEntries();
+
+  if (entries.length === 0) {
+    return `
+      <div class="pb-pages-empty">
+        <h4>No pages found</h4>
+        <p>Pages connected to this website will appear here.</p>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="pb-pages-panel">
+      <div class="pb-pages-heading">
+        <span>Website pages</span>
+        <strong>${entries.length}</strong>
+      </div>
+      <div class="pb-page-list">
+        ${entries.map(({ page, path, isHomepage }) => {
+          const name = page.name.trim() || 'Untitled page';
+          const status = page.status || 'draft';
+          const isCurrent = page.id === builderPageId;
+          const safeName = escapeBuilderInspectorHtml(name);
+          const safePath = escapeBuilderInspectorHtml(path);
+          const safeStatus = escapeBuilderInspectorHtml(status);
+          const pageArg = builderInspectorJsArgument(page.id);
+
+          return `
+            <button
+              type="button"
+              class="pb-page-row ${isCurrent ? 'active' : ''}"
+              onclick='window.switchBuilderPage(${pageArg})'
+              ${isCurrent ? 'aria-current="page"' : ''}
+              aria-label="Open ${safeName} page"
+            >
+              <span class="pb-page-row-topline">
+                <span class="pb-page-name">${safeName}</span>
+                ${isCurrent ? '<span class="pb-page-open">Open</span>' : ''}
+              </span>
+              <span class="pb-page-path">${safePath}</span>
+              <span class="pb-page-badges">
+                <span class="pb-page-status ${status === 'published' ? 'published' : 'draft'}">${safeStatus}</span>
+                ${isHomepage ? '<span class="pb-page-homepage">Homepage</span>' : ''}
+              </span>
+            </button>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function isBuilderInspectorPlainObject(
+  value: unknown
+): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object') return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function mergeBuilderInspectorPatch(
+  existing: unknown,
+  patch: Record<string, unknown>
+): Record<string, unknown> {
+  const result: Record<string, unknown> = isBuilderInspectorPlainObject(existing)
+    ? { ...existing }
+    : {};
+
+  for (const [key, patchValue] of Object.entries(patch)) {
+    const existingValue = result[key];
+    result[key] = isBuilderInspectorPlainObject(existingValue)
+      && isBuilderInspectorPlainObject(patchValue)
+      ? mergeBuilderInspectorPatch(existingValue, patchValue)
+      : structuredClone(patchValue);
+  }
+
+  return result;
+}
+
+function areBuilderInspectorValuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) =>
+        areBuilderInspectorValuesEqual(value, right[index])
+      );
+  }
+  if (isBuilderInspectorPlainObject(left) && isBuilderInspectorPlainObject(right)) {
+    const leftKeys = Object.keys(left);
+    const rightKeys = Object.keys(right);
+    return leftKeys.length === rightKeys.length
+      && leftKeys.every(key =>
+        Object.prototype.hasOwnProperty.call(right, key)
+        && areBuilderInspectorValuesEqual(left[key], right[key])
+      );
+  }
+  return false;
+}
+
+(window as any).setBuilderInspectorTab = (tab: BuilderInspectorTab) => {
+  if (builderInspectorTab === tab) return;
+  builderInspectorTab = tab;
+  renderBuilder();
+};
+
+(window as any).updateBuilderInspectorField = (
+  sectionId: string,
+  fieldId: string,
+  submittedValue: unknown
+) => {
+  const sectionIndex = mockPageSections.findIndex(section => section.id === sectionId);
+  if (sectionIndex === -1) return;
+
+  const section = mockPageSections[sectionIndex];
+  const field = getBuilderInspectorField(section.type, fieldId);
+  if (!field || field.control === 'collection') return;
+
+  let value: unknown;
+  if (field.control === 'toggle') {
+    value = submittedValue === true || submittedValue === 'true';
+  } else if (field.control === 'number') {
+    if (submittedValue === '' || submittedValue === null) return;
+    const numericValue = Number(submittedValue);
+    if (!Number.isFinite(numericValue)) return;
+    value = numericValue;
+  } else {
+    value = String(submittedValue ?? '');
+  }
+
+  try {
+    const patch = createBuilderInspectorPatch(field, value);
+    let nextContent = section.content;
+    let nextStyles = section.styles;
+    let nextVariant = section.variant;
+
+    if (patch.content) {
+      nextContent = mergeBuilderInspectorPatch(section.content, patch.content);
+    }
+    if (patch.styles) {
+      nextStyles = mergeBuilderInspectorPatch(section.styles, patch.styles);
+    }
+    if (patch.variant !== undefined) {
+      nextVariant = patch.variant === null ? undefined : patch.variant;
+    }
+
+    if (
+      areBuilderInspectorValuesEqual(nextContent, section.content)
+      && areBuilderInspectorValuesEqual(nextStyles, section.styles)
+      && nextVariant === section.variant
+    ) {
+      return;
+    }
+
+    const nextSection: PageSection = {
+      ...section,
+      content: nextContent,
+      styles: nextStyles
+    };
+    if (nextVariant === undefined) {
+      delete nextSection.variant;
+    } else {
+      nextSection.variant = nextVariant;
+    }
+
+    mockPageSections[sectionIndex] = nextSection;
+    (window as any).triggerAutoSave();
+    renderBuilder();
+  } catch (error) {
+    console.error(
+      `[Builder Inspector] Failed to update field "${fieldId}" on section "${sectionId}".`,
+      error
+    );
+  }
+};
+
 function _renderBuilder() {
   hydrateBuilderContext();
 
@@ -1459,11 +2966,21 @@ function _renderBuilder() {
     return;
   }
 
+  if (
+    builderPublicationHistoryPageId !== null
+    && builderPublicationHistoryPageId !== page.id
+  ) {
+    resetBuilderPublicationHistory();
+  }
+
+  ensureBuilderPublicationState(page.id);
+
   hydrateBuilderSectionsFromLocalStorage(builderPageId);
 
   const sections = mockPageSections
     .filter(s => s.page_id === builderPageId)
     .sort((a, b) => a.order - b.order);
+  const publicationStatus = getBuilderPublicationDisplayStatus();
 
   app.innerHTML = `
     <main style="width: 100vw; padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column; background: #000; color: white; font-family: 'Inter', system-ui, sans-serif;">
@@ -1481,14 +2998,18 @@ function _renderBuilder() {
           </div>
         </div>
 
-        <div style="display: flex; background: #000; padding: 4px; border-radius: 10px; border: 1px solid #222; gap: 4px;">
-          <button onclick="window.setBuilderViewport('mobile')" style="padding: 6px 16px; border-radius: 7px; border: none; cursor: pointer; font-size: 0.8rem; font-weight: 700; display: flex; align-items: center; gap: 8px; ${builderViewport === 'mobile' ? 'background: #2563EB; color: white; box-shadow: 0 4px 12px rgba(37,99,235,0.4);' : 'background: transparent; color: #555;'}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
-            Mobile
+        <div class="pb-viewport-toggle" role="group" aria-label="Canvas viewport">
+          <button type="button" class="pb-vt-btn ${builderViewport === 'desktop' ? 'active' : ''}" aria-label="Desktop viewport" aria-pressed="${builderViewport === 'desktop'}" title="Desktop viewport" onclick="window.setBuilderViewport('desktop')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="14" rx="2"/><polyline points="8 22 12 18 16 22"/></svg>
+            <span>Desktop</span>
           </button>
-          <button onclick="window.setBuilderViewport('desktop')" style="padding: 6px 16px; border-radius: 7px; border: none; cursor: pointer; font-size: 0.8rem; font-weight: 700; display: flex; align-items: center; gap: 8px; ${builderViewport === 'desktop' ? 'background: #2563EB; color: white; box-shadow: 0 4px 12px rgba(37,99,235,0.4);' : 'background: transparent; color: #555;'}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><polyline points="8 22 12 18 16 22"/></svg>
-            Desktop
+          <button type="button" class="pb-vt-btn ${builderViewport === 'tablet' ? 'active' : ''}" aria-label="Tablet viewport, 768 pixels" aria-pressed="${builderViewport === 'tablet'}" title="Tablet · 768px" onclick="window.setBuilderViewport('tablet')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
+            <span>Tablet</span>
+          </button>
+          <button type="button" class="pb-vt-btn ${builderViewport === 'mobile' ? 'active' : ''}" aria-label="Mobile viewport, 375 pixels" aria-pressed="${builderViewport === 'mobile'}" title="Mobile · 375px" onclick="window.setBuilderViewport('mobile')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
+            <span>Mobile</span>
           </button>
         </div>
 
@@ -1497,6 +3018,12 @@ function _renderBuilder() {
             <span style="width: 7px; height: 7px; border-radius: 50%; background: ${isAutoSaving ? '#fbbf24' : '#10b981'}; box-shadow: 0 0 8px ${isAutoSaving ? '#fbbf24' : '#10b981'};"></span>
             ${isAutoSaving ? 'Auto-saving...' : 'Cloud Saved'}
           </span>
+          ${builderMode === 'edit' ? `
+          <div class="pb-publication-control">
+            <span id="pb-publication-status" class="pb-publication-status ${publicationStatus.className}">${publicationStatus.label}</span>
+            <button type="button" class="pb-publish-button" aria-label="Publish current page" onclick="window.openBuilderPublishModal()" ${builderPublishing ? 'disabled' : ''}>${builderPublishing ? 'Publishing…' : 'Publish'}</button>
+          </div>
+          ` : ''}
           <button onclick="window.navigateTo('preview', '${page.slug}')" style="background: #1e1e1e; border: 1px solid #333; color: white; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 0.85rem;">Live Preview</button>
         </div>
       </header>
@@ -1505,6 +3032,13 @@ function _renderBuilder() {
         <!-- Left Panel: Structured Sections -->
         ${builderMode === 'edit' ? `
         <aside class="pb-left-panel" style="width: 260px; border-right: 1px solid #222; background: #111; display: flex; flex-direction: column;">
+          <div class="pb-left-tabs" role="tablist" aria-label="Builder sidebar">
+            <button type="button" role="tab" aria-selected="${builderLeftPanelTab === 'add'}" class="${builderLeftPanelTab === 'add' ? 'active' : ''}" onclick="window.setBuilderLeftPanelTab('add')">Add</button>
+            <button type="button" role="tab" aria-selected="${builderLeftPanelTab === 'pages'}" class="${builderLeftPanelTab === 'pages' ? 'active' : ''}" onclick="window.setBuilderLeftPanelTab('pages')">Pages</button>
+            <button type="button" role="tab" aria-selected="${builderLeftPanelTab === 'layers'}" class="${builderLeftPanelTab === 'layers' ? 'active' : ''}" onclick="window.setBuilderLeftPanelTab('layers')">Layers</button>
+          </div>
+
+          ${builderLeftPanelTab === 'add' ? `
           <div class="pb-panel-header" style="padding: 24px 20px; border-bottom: 1px solid #222;">
             <h3 style="font-size: 0.7rem; color: #555; text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin: 0;">Add Components</h3>
           </div>
@@ -1524,18 +3058,19 @@ function _renderBuilder() {
               </div>
             `).join('')}
           </div>
+          ` : builderLeftPanelTab === 'pages' ? renderBuilderPagesPanel() : renderBuilderLayersPanel(sections)}
 
           <div style="padding: 20px; border-top: 1px solid #222; background: #0a0a0a;">
              <div style="font-size: 0.6rem; color: #444; text-transform: uppercase; font-weight: 800; margin-bottom: 10px; letter-spacing: 0.05em;">Switch Page</div>
              <select onchange="window.switchBuilderPage(this.value)" style="width: 100%; padding: 12px; border-radius: 8px; background: #111; border: 1px solid #333; color: #eee; font-size: 0.85rem; font-weight: 700; cursor: pointer;">
-                ${mockPages.map(p => `<option value="${p.id}" ${p.id === builderPageId ? 'selected' : ''}>${p.name}</option>`).join('')}
+                ${getBuilderWebsitePageEntries().map(({ page: builderPage }) => `<option value="${escapeBuilderInspectorHtml(builderPage.id)}" ${builderPage.id === builderPageId ? 'selected' : ''}>${escapeBuilderInspectorHtml(builderPage.name.trim() || 'Untitled page')}</option>`).join('')}
              </select>
           </div>
         </aside>
         ` : ''}
 
         <!-- Center Panel: Live Canvas -->
-        <section class="pb-canvas-area" style="flex: 1; overflow-y: auto; height: 100%; padding: 40px 20px; background: #000; display: flex; flex-direction: column; align-items: center; position: relative;">
+        <section class="pb-canvas-area" style="flex: 1; min-width: 0; overflow: auto; height: 100%; padding: 40px 20px; background: #000; display: flex; flex-direction: column; align-items: safe center; position: relative;">
           
           ${(() => {
             if (builderMode === 'preview') return '';
@@ -1588,7 +3123,7 @@ function _renderBuilder() {
                 </div>
                 ` : ''}
                 ${!isInitial ? `
-                  <div class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''} ${section.styles?.visible === false ? 'pb-section--hidden' : ''}" 
+                  <div id="sec-preview-${escapeBuilderInspectorHtml(section.id)}" class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''} ${section.styles?.visible === false ? 'pb-section--hidden' : ''}"
                        onclick="${builderMode === 'edit' ? `window.selectSectionForBuilder('${section.id}')` : ''}"
                        style="position: relative; border: 2px solid transparent; transition: border-color 0.2s; background: white; cursor: ${builderMode === 'edit' ? 'pointer' : 'default'};">
                       
@@ -1659,7 +3194,9 @@ function _renderBuilder() {
             `}
           </div>
         </section>
+        ${builderMode === 'edit' ? renderBuilderInspectorPanel(sections) : ''}
       </div>
+      ${renderBuilderPublishModal(page, sections, publicationStatus)}
     </main>
   `;
 }
@@ -1683,6 +3220,7 @@ function setNestedValue(obj: any, path: string, value: any) {
   if (!section) return;
   const newValue = el.innerText;
   setNestedValue(section.content, field, newValue);
+  updateBuilderPublicationStatusBadge();
   
   // Dismiss onboarding hints on first interaction
   if (!localStorage.getItem('pb_onboarding_hints_seen')) {
@@ -2053,10 +3591,32 @@ function renderSectionPreviewContent(section: any) {
   (window as any).navigateTo('builder', undefined, { builderContext: context });
 };
 
-(window as any).switchBuilderPage = (id: string, source: 'pages' | 'footer' = 'pages') => {
+(window as any).switchBuilderPage = async (id: string, source: 'pages' | 'footer' = 'pages') => {
+  if (id === builderPageId) return;
+
+  if (autoSaveTimeout) {
+    clearTimeout(autoSaveTimeout);
+    autoSaveTimeout = undefined;
+    const previousPage = mockPages.find(page => page.id === builderPageId);
+    await (window as any).savePageSections();
+    isAutoSaving = false;
+    if (previousPage) (previousPage as any).updated_at = new Date().toISOString();
+  }
+
   builderPageId = id;
   builderSelectedSectionId = null;
   builderInsertOrder = null;
+  builderPublicationRequestSequence += 1;
+  builderPublicationLoadedPageId = null;
+  builderPublicationLoading = false;
+  builderPublicationTarget = null;
+  builderPublishedRevision = null;
+  builderPublicationStatusLoadFailed = false;
+  builderPublicationError = null;
+  builderPublicationSuccess = null;
+  builderPublishModalOpen = false;
+  resetBuilderPublicationHistory();
+  document.body.classList.remove('pb-publish-modal-open');
   if (source === 'pages') {
     builderReturnTo = 'pages';
     builderReturnFunnelId = null;
@@ -2071,7 +3631,7 @@ function renderSectionPreviewContent(section: any) {
   renderBuilder();
 };
 
-(window as any).selectSectionForBuilder = (id: string) => {
+(window as any).selectSectionForBuilder = (id: string, shouldScroll = false) => {
   builderSelectedSectionId = id;
   builderInsertOrder = null;
   persistBuilderContext({
@@ -2081,6 +3641,11 @@ function renderSectionPreviewContent(section: any) {
     funnelId: builderReturnFunnelId
   });
   renderBuilder();
+  if (shouldScroll) {
+    setTimeout(() => {
+      document.getElementById(`sec-preview-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+  }
 };
 
 (window as any).showComponentPickerAt = (order: string) => {
@@ -2121,14 +3686,36 @@ function renderSectionPreviewContent(section: any) {
 
   builderInsertOrder = null;
 
-  const newSection = {
-    id: `sec-${Date.now()}`,
-    page_id: builderPageId,
-    type: component.type,
-    content: JSON.parse(JSON.stringify(component.default_content)),
-    styles: JSON.parse(JSON.stringify(component.default_styles)),
-    order: orderToInsertAt
-  };
+  const sectionId = `sec-${Date.now()}`;
+  let newSection: PageSection;
+
+  if (isRegisteredBuilderSectionType(component.type)) {
+    const currentPage = mockPages.find(page => page.id === builderPageId);
+
+    try {
+      newSection = createBuilderSection(component.type, {
+        id: sectionId,
+        pageId: builderPageId,
+        order: orderToInsertAt,
+        funnelId: currentPage?.funnel_id
+      });
+    } catch (error) {
+      console.error(
+        `[Builder] Failed to create registered section type "${component.type}".`,
+        error
+      );
+      return;
+    }
+  } else {
+    newSection = {
+      id: sectionId,
+      page_id: builderPageId,
+      type: component.type,
+      content: JSON.parse(JSON.stringify(component.default_content)),
+      styles: JSON.parse(JSON.stringify(component.default_styles)),
+      order: orderToInsertAt
+    };
+  }
 
   mockPageSections.push(newSection);
   builderSelectedSectionId = newSection.id;
@@ -2191,6 +3778,13 @@ function renderSectionPreviewContent(section: any) {
     section1.order = section2.order;
     section2.order = tempOrder;
 
+    builderSelectedSectionId = id;
+    persistBuilderContext({
+      pageId: builderPageId,
+      sectionId: id,
+      returnTo: builderReturnTo,
+      funnelId: builderReturnFunnelId
+    });
     renderBuilder();
     (window as any).triggerAutoSave();
   }
@@ -2305,13 +3899,16 @@ function renderSectionPreviewContent(section: any) {
     const data = await res.json();
     if (data.success) {
       (window as any).showToast('Saved ✓', 'success');
+      return true;
     } else {
       // Fail silently in indicator but log for debugging
       console.warn('[AutoSave] Section persist failed:', data.error);
+      return false;
     }
   } catch (err) {
     // Network errors don't disrupt editing
     console.warn('[AutoSave] Fetch error:', err);
+    return false;
   }
 };
 
@@ -2605,12 +4202,6 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
       });
     }
 
-    if (isPublic) {
-      window.localStorage.removeItem('crm_lead_name');
-      window.localStorage.removeItem('crm_lead_phone');
-      formEl?.reset();
-    }
-
     // Success State (W4.3)
     if (sectionWrapper) {
       sectionWrapper.innerHTML = `
@@ -2688,7 +4279,8 @@ function renderPublicHeader(config: any, settings: any) {
       </div>
       <nav style="display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: center; justify-content: flex-end; min-width: 0; max-width: 100%;">
          ${(config.nav_items || []).map((item: any) => `
-           <a href="${item.path.startsWith('/') ? item.path : '/' + item.path}"
+           <a href="/site${item.path.startsWith('/') ? item.path : '/' + item.path}"
+              onclick="event.preventDefault(); window.navigateTo('site', '${item.path}')"
               style="text-decoration: none; color: #475569; font-weight: 600; font-size: 0.95rem; transition: color 0.2s;"
               onmouseover="this.style.color='var(--primary-color)'"
               onmouseout="this.style.color='#475569'">
@@ -2810,10 +4402,9 @@ function resolvePageForPreviewPath(path: string = '/', funnelId?: string): any |
 
   const slug = normalizedPath.replace(/^\//, '');
   const route = mockWebsiteRoutes.find((r: any) => normalizePreviewPath(r.path || '/') === normalizedPath);
-  const routePageSlug = route?.slug || slug;
-  return mockPages.find((p: any) => p.slug === routePageSlug)
-    || mockPages.find((p: any) => route?.funnel_id && p.funnel_id === route.funnel_id && p.slug === routePageSlug)
-    || mockPages.find((p: any) => funnelId && p.funnel_id === funnelId && p.slug === routePageSlug)
+  return mockPages.find((p: any) => p.slug === slug)
+    || mockPages.find((p: any) => route?.funnel_id && p.funnel_id === route.funnel_id && p.slug === slug)
+    || mockPages.find((p: any) => funnelId && p.funnel_id === funnelId && p.slug === slug)
     || null;
 }
 
@@ -2827,11 +4418,76 @@ function resolveWebsitePathFromBrowserPath(rawPath: string): string | null {
   if (rawPath.startsWith('/preview/')) return rawPath.replace('/preview/', '/');
 
   const normalizedPath = normalizePreviewPath(rawPath);
-  if (normalizedPath === '/') return '/';
+  if (normalizedPath === '/') return null;
   const isKnownWebsiteRoute = mockWebsiteRoutes.some((route: any) =>
     normalizePreviewPath(route.path || '/') === normalizedPath
   );
   return isKnownWebsiteRoute ? normalizedPath : null;
+}
+
+function createResolvedWebsiteRenderContext(result: any, targetPath: string): any {
+  if (!result?.website) return null;
+  return {
+    ...result.website,
+    route: result.route,
+    route_id: result.route?.id,
+    path: result.route?.path || targetPath,
+    slug: result.route?.slug || targetPath.replace(/^\//, ''),
+    is_seo_page: result.route?.is_seo_page || targetPath !== '/',
+    city: result.route?.city || '',
+    service: result.route?.service || '',
+    route_type: result.route?.route_type || (targetPath === '/' ? 'homepage' : 'service'),
+    funnel_id: result.funnel_id || result.route?.funnel_id || '',
+    page_id: result.route?.id || ''
+  };
+}
+
+function resolveExactPublicPage(
+  website: Website,
+  route: WebsiteRoute | undefined,
+  path: string,
+  funnelId: string
+): Page | null {
+  const normalizedPath = normalizePreviewPath(path);
+  const exactRoute = route?.website_id === website.id
+    ? route
+    : mockWebsiteRoutes.find(candidate => (
+      candidate.website_id === website.id
+      && normalizePreviewPath(candidate.path || '/') === normalizedPath
+    ));
+  const routeWithPage = exactRoute as (WebsiteRoute & { page_id?: string }) | undefined;
+  if (routeWithPage?.page_id) {
+    const routedPage = mockPages.find(candidate => candidate.id === routeWithPage.page_id);
+    if (routedPage) return routedPage;
+  }
+
+  if (normalizedPath === '/') {
+    return mockPages.find(candidate => (
+      candidate.slug === 'home' || candidate.name?.toLowerCase() === 'home'
+    )) || mockPages.find(candidate => candidate.funnel_id === funnelId) || null;
+  }
+
+  const requestedSlug = exactRoute?.slug || normalizedPath.replace(/^\//, '');
+  return mockPages.find(candidate => (
+    candidate.funnel_id === (exactRoute?.funnel_id || funnelId)
+    && candidate.slug === requestedSlug
+  )) || mockPages.find(candidate => candidate.slug === requestedSlug)
+    || mockPages.find(candidate => candidate.funnel_id === (exactRoute?.funnel_id || funnelId))
+    || null;
+}
+
+function renderPublicPublicationUnavailable(): void {
+  document.title = 'Page temporarily unavailable';
+  updateMetaTag('description', 'This page is temporarily unavailable. Please try again later.');
+  updateMetaTag('keywords', '');
+  app.innerHTML = `
+    <main class="public-site" style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 32px; background: #f8fafc; font-family: 'Inter', sans-serif;">
+      <div style="max-width: 520px; text-align: center; padding: 48px 32px; border: 1px solid #e2e8f0; border-radius: 18px; background: white; box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);">
+        <h1 style="margin: 0 0 14px; color: #0f172a; font-size: 2rem;">This page is temporarily unavailable.</h1>
+        <p style="margin: 0; color: #64748b; font-size: 1rem; line-height: 1.6;">Please try again later.</p>
+      </div>
+    </main>
+  `;
 }
 
 function renderPublicLeadFormFallback(page: any, sections: any[], settings: any): string {
@@ -2844,10 +4500,7 @@ function renderPublicLeadFormFallback(page: any, sections: any[], settings: any)
     return '';
   }
 
-  const normalizedPath = activeWebsiteContext?.route?.path || (page.slug ? `/${page.slug}` : '/');
-  const isDrivewayPage = normalizedPath === '/driveway-cleaning' || normalizedPath === '/driveway';
-  const serviceName = isDrivewayPage ? 'Driveway Cleaning' : '';
-  const contextLabel = serviceName || 'your exterior cleaning request';
+  const serviceName = activeWebsiteContext?.service || activeWebsiteContext?.route?.service || page.name || 'Pressure Washing';
   const formContent = {
     title: 'Request a Quote',
     submit_label: 'Request Quote',
@@ -2862,7 +4515,7 @@ function renderPublicLeadFormFallback(page: any, sections: any[], settings: any)
         <div>
           <p style="margin: 0 0 12px 0; color: var(--primary-color); font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.8rem;">Fast local estimate</p>
           <h2 style="font-size: clamp(2rem, 5vw, 3.25rem); line-height: 1.05; margin: 0 0 20px 0; color: #0f172a; font-weight: 900;">Request a Quote</h2>
-          <p style="font-size: 1.1rem; line-height: 1.7; color: #475569; margin: 0;">Tell us where you need help and we will follow up with next steps for ${contextLabel}.</p>
+          <p style="font-size: 1.1rem; line-height: 1.7; color: #475569; margin: 0;">Tell us where you need help and we will follow up with next steps for ${serviceName}.</p>
         </div>
         ${renderStandardForm(anchorSection.id, formContent, true)}
       </div>
@@ -2873,28 +4526,83 @@ function renderPublicLeadFormFallback(page: any, sections: any[], settings: any)
 
 
 async function renderSitePage(funnel_id: string, websiteOrContext: any, isPreview: boolean = false) {
+  const renderSequence = ++publicSiteRenderSequence;
   // Store context for lead submission (Phase W3.8)
   activeWebsiteContext = websiteOrContext;
-  const website = websiteOrContext.website_id ? websiteOrContext : websiteOrContext; // Handle both Website and WebsiteRoute
+  const website = websiteOrContext as Website;
   
   // 1. Resolve Data
   // In the resolver, it correctly identifies the funnel_id.
   
   // 2. Identify primary page/step in that funnel
   const resolvedPath = websiteOrContext?.route?.path || websiteOrContext?.path || '/';
-  const page = resolvePageForPreviewPath(resolvedPath, funnel_id)
-    || mockPages.find(p => p.funnel_id === funnel_id);
-  
-  if (!page || (!isPreview && page.status !== 'published')) {
-    render404(!page ? 'No content mapped to this page.' : 'This page is currently a draft.');
+  const resolvedPage = isPreview
+    ? resolvePageForPreviewPath(resolvedPath, funnel_id)
+      || mockPages.find(candidate => candidate.funnel_id === funnel_id)
+    : resolveExactPublicPage(
+      website,
+      websiteOrContext?.route,
+      resolvedPath,
+      funnel_id
+    );
+
+  if (!resolvedPage) {
+    render404('No content mapped to this page.');
     return;
+  }
+
+  let page: Page = resolvedPage;
+  let sourceSections: PageSection[];
+  if (isPreview) {
+    hydratePreviewSectionsForPage(resolvedPage.id);
+    sourceSections = mockPageSections.filter(section => section.page_id === resolvedPage.id);
+  } else {
+    app.innerHTML = `
+      <main class="public-site" style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f8fafc; font-family: 'Inter', sans-serif; color: #64748b;">
+        <p role="status">Loading page…</p>
+      </main>
+    `;
+    let publicationResult;
+    try {
+      publicationResult = await loadBuilderPublicRevision(
+        window.localStorage,
+        website.id,
+        resolvedPage.id
+      );
+    } catch {
+      publicationResult = {
+        state: 'publication-error' as const,
+        error: 'Published page data is unavailable.'
+      };
+    }
+    if (renderSequence !== publicSiteRenderSequence) return;
+
+    if (publicationResult.state === 'publication-error') {
+      console.error('[Public site] Selected published revision is unavailable.');
+      renderPublicPublicationUnavailable();
+      return;
+    }
+    if (publicationResult.state === 'published') {
+      page = publicationResult.revision.document.page;
+      sourceSections = builderDocumentToPageSections(
+        publicationResult.revision.document
+      );
+    } else {
+      if (resolvedPage.status !== 'published') {
+        render404('This page is currently a draft.');
+        return;
+      }
+      hydratePreviewSectionsForPage(resolvedPage.id);
+      sourceSections = mockPageSections.filter(section => section.page_id === resolvedPage.id);
+    }
   }
 
   const settings = getWebsiteSettings();
   const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || getWebsiteLayout(); 
   
   // W6.5: Robust Internal Linking System
-  const contactLink = '#quote-form';
+  const contactRoute = mockWebsiteRoutes.find(r => r.website_id === website.id && (r.path === '/contact' || r.path === '/quote'));
+  const contactLink = contactRoute ? `/site${contactRoute.path}` : '/site/contact';
   const homeLink = '/site/';
   
   // Identify all service routes for cross-linking
@@ -2905,12 +4613,8 @@ async function renderSitePage(funnel_id: string, websiteOrContext: any, isPrevie
       funnel_name: mockFunnels.find(f => f.id === r.funnel_id)?.name || 'Service' 
     }));
 
-  if (page?.id) {
-    hydratePreviewSectionsForPage(page.id);
-  }
-
-  const sections = mockPageSections
-    .filter(s => s.page_id === page.id && s.styles?.visible !== false)
+  const sections = sourceSections
+    .filter(section => section.styles?.visible !== false)
     .sort((a, b) => a.order - b.order)
     .map(section => {
       // Create a copy of content to avoid mutating the mock database directly every render
@@ -2985,9 +4689,6 @@ async function renderSitePage(funnel_id: string, websiteOrContext: any, isPrevie
           .replace(/{{email}}/g, settings.email || '');
           
         const content = { ...JSON.parse(contentJson), business_name: settings.business_name, phone: settings.phone, sms_number: smsCta, email: settings.email };
-        if (['/quote', '/site/quote', '/contact', '/site/contact'].includes(content.button_link)) {
-          content.button_link = '#quote-form';
-        }
         return renderSection(section.type, content, section.styles, section.id);
       }).join('')}
 
@@ -3033,15 +4734,11 @@ function updateMetaTag(name: string, content: string) {
 }
 
 function renderSection(type: string, content: any, styles: any, id: string) {
-  const heroFallbackImage = 'linear-gradient(135deg, #0f172a 0%, #155e75 52%, #16a34a 100%)';
-  const backgroundImage = content.background_image
-    ? `url('${content.background_image}')`
-    : (type === 'hero' ? heroFallbackImage : 'none');
   return `
     <section id="section-${id}" style="
       padding: ${styles.padding || '60px 20px'};
       text-align: ${styles.text_alignment || styles.alignment || styles.textAlign || 'left'};
-      background-image: ${backgroundImage};
+      background-image: ${content.background_image ? `url('${content.background_image}')` : 'none'};
       background-size: cover;
       background-position: center;
       background-color: ${styles.background || styles.backgroundColor || 'transparent'};
@@ -3184,7 +4881,7 @@ function renderSectionBody(type: string, content: any, styles: any, id: string) 
         </div>`;
     }
     default:
-      return '';
+      return `<div style="padding: 40px; text-align: center; color: #999; border: 2px dashed #eee; border-radius: 12px; margin: 40px;">Legacy Section Type: ${type}</div>`;
   }
 }
 
@@ -4808,9 +6505,7 @@ async function renderWebsiteDashboard() {
   const routes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
   const homePage = mockFunnels.find(f => f.name.toLowerCase().includes('home')) || mockFunnels[0];
   
-  const siteUrlBase = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
-  const primaryPublicRoute = routes.find(route => route.path === '/driveway-cleaning') || routes.find(route => route.path !== '/') || routes[0];
-  const liveSiteUrl = `${siteUrlBase}${primaryPublicRoute && primaryPublicRoute.path !== '/' ? primaryPublicRoute.path : ''}`;
+  const siteUrl = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
 
   app.innerHTML = `
     ${renderSidebar('website-dashboard')}
@@ -4830,9 +6525,9 @@ async function renderWebsiteDashboard() {
               <div>
                 <span class="badge" style="background: #0ea5e9; color: white; margin-bottom: 12px;">Live & Published</span>
                 <h3 style="margin: 0; font-size: 1.5rem; color: #1e3a8a;">${website.name || 'Your Website'}</h3>
-                <div style="font-size: 1.1rem; color: #0369a1; margin-top: 8px; font-weight: 600;">${siteUrlBase}</div>
+                <div style="font-size: 1.1rem; color: #0369a1; margin-top: 8px; font-weight: 600;">${siteUrl}</div>
               </div>
-              <a href="${liveSiteUrl}" target="_blank" class="btn-primary" style="background: #0ea5e9; border: none; padding: 14px 28px; font-weight: 800; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(14, 165, 233, 0.4);">View Live Site ↗</a>
+              <a href="${siteUrl}" target="_blank" class="btn-primary" style="background: #0ea5e9; border: none; padding: 14px 28px; font-weight: 800; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(14, 165, 233, 0.4);">View Live Site ↗</a>
             </div>
           </div>
 
@@ -4846,16 +6541,10 @@ async function renderWebsiteDashboard() {
               <tbody>
                 ${routes.map(r => {
                   const funnel = mockFunnels.find(f => f.id === r.funnel_id);
-                  const routePage = r.path === '/'
-                    ? mockPages.find(p => p.slug === 'home')
-                    : mockPages.find(p => p.slug && `/${p.slug}` === r.path);
-                  const routeLabel = r.path === '/driveway'
-                    ? 'Driveway Page'
-                    : (r.path === '/' ? 'Home Page' : (routePage?.name || funnel?.name || r.path));
                   return `
                     <tr>
                       <td style="padding-left: 20px;">
-                        <div style="font-weight: 700;">${routeLabel}</div>
+                        <div style="font-weight: 700;">${funnel?.name}</div>
                         <code style="color: var(--primary-color); font-size: 0.8rem;">${r.path}</code>
                       </td>
                       <td style="text-align: right; padding-right: 20px;">
@@ -5334,6 +7023,7 @@ async function renderFunnelDetail(funnelId: string) {
 };
 
 (window as any).navigateTo = async (view: string, id?: string, context?: any) => {
+  publicSiteRenderSequence += 1;
   const previousView = currentView;
   currentView = view;
   if (id) selectedContactId = id;
@@ -5440,11 +7130,10 @@ async function executeNavigation(view: string, id?: string, context?: any) {
          // This is a direct slug navigation, we need to resolve it
          const result = await resolveWebsiteRequest(window.location.hostname, id);
          if (result && result.funnel_id) {
-            renderSitePage(result.funnel_id, {
-              ...result.website,
-              route: result.route,
-              path: result.route?.path || normalizePreviewPath(id)
-            });
+            renderSitePage(
+              result.funnel_id,
+              createResolvedWebsiteRenderContext(result, normalizePreviewPath(id))
+            );
          } else {
             render404();
          }
@@ -5455,11 +7144,11 @@ async function executeNavigation(view: string, id?: string, context?: any) {
       else if (id) {
          const result = await resolveWebsiteRequest(window.location.hostname, id);
          if (result && result.funnel_id) {
-           renderSitePage(result.funnel_id, {
-             ...result.website,
-             route: result.route,
-             path: result.route?.path || normalizePreviewPath(id)
-           }, true);
+           renderSitePage(
+             result.funnel_id,
+             createResolvedWebsiteRenderContext(result, normalizePreviewPath(id)),
+             true
+           );
          } else {
            render404('Preview target not found.');
          }
@@ -5477,7 +7166,7 @@ async function executeNavigation(view: string, id?: string, context?: any) {
 
 (window as any).downloadSitemap = () => {
   const publishedPages = mockPages.filter(p => p.status === 'published');
-  const baseUrl = `${window.location.origin}/site`;
+  const baseUrl = 'https://hanssays.com/site'; // Hypothetical production base URL
 
   const sitemapContent = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -6331,6 +8020,7 @@ checkOverdueInvoices();
 
 // 🌿 WB.6.4 INTEGRATED ROUTING RESOLVER (Step 2 & 3)
 async function bootRouter() {
+  publicSiteRenderSequence += 1;
   const host = window.location.hostname;
   const rawPath = window.location.pathname;
 
@@ -6346,7 +8036,7 @@ async function bootRouter() {
 
   // 1. Phase W6.9: Resolve Public Website Route first (Real URLs)
   const targetPath = resolveWebsitePathFromBrowserPath(rawPath);
-  if (!window.location.hash && targetPath) {
+  if (targetPath) {
     const result = await resolveWebsiteRequest(host, targetPath);
     if (result && result.funnel_id) {
        const isPreview = rawPath === '/preview' || rawPath.startsWith('/preview/');
@@ -6356,19 +8046,7 @@ async function bootRouter() {
          render404('Preview target not found.');
          return;
        }
-       const mergedContext = result.website ? {
-         ...result.website,
-         route: result.route,
-         route_id: result.route?.id,
-         path: result.route?.path || targetPath,
-         slug: result.route?.slug || targetPath.replace(/^\//, ''),
-         is_seo_page: result.route?.is_seo_page || targetPath !== '/',
-         city: result.route?.city || '',
-         service: result.route?.service || '',
-         route_type: (result.route as any)?.route_type || (targetPath === '/' ? 'homepage' : 'service'),
-         funnel_id: result.funnel_id || result.route?.funnel_id || '',
-         page_id: result.route?.id || ''
-       } : null;
+       const mergedContext = createResolvedWebsiteRenderContext(result, targetPath);
        await renderSitePage(result.funnel_id, mergedContext, isPreview);
        return;
     }
@@ -6397,7 +8075,10 @@ async function bootRouter() {
        // On real domains, ROOT defaults to the website homepage
        const homeResult = await resolveWebsiteRequest(host, '/');
        if (homeResult && homeResult.funnel_id) {
-          await renderSitePage(homeResult.funnel_id, homeResult.website);
+          await renderSitePage(
+            homeResult.funnel_id,
+            createResolvedWebsiteRenderContext(homeResult, '/')
+          );
        } else {
           (window as any).navigateTo('dashboard');
        }

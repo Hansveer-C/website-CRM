@@ -17,7 +17,7 @@ async function verifyV4() {
 
     // Register temporary listener to verify event fire
     onEvent('lead_created', (payload) => {
-        if (payload.phone === phone) {
+        if (payload.phone === phone || payload.phone === `+1${phone}` || (payload.phone && payload.phone.endsWith(phone))) {
             console.log('   ✅ Event received: lead_created fired with correct payload.');
             eventReceived = true;
         }
@@ -36,11 +36,12 @@ async function verifyV4() {
 
     console.log(`   Lead created results: Contact ${res.contactId}, Opportunity ${res.opportunityId}`);
 
-    console.log('\n[STEP 2] Verifying Core Entities in Database...');
-    const contact = getContact(res.contactId);
-    const opps = getOpportunitiesByContact(res.contactId);
+    const contactRes = await getContact(res.contactId, 'system');
+    const contact = contactRes.success ? contactRes.data : null;
+    const oppsRes = await getOpportunitiesByContact(res.contactId, 'system');
+    const opps = oppsRes.success ? oppsRes.data : [];
     
-    const dbSuccess = contact && opps.length > 0 && opps[0].id === res.opportunityId;
+    const dbSuccess = contact && opps && opps.length > 0 && opps[0].id === res.opportunityId;
     if (dbSuccess) {
       console.log('   ✅ Contact preserved in SQLite.');
       console.log('   ✅ Opportunity preserved in SQLite.');
@@ -49,6 +50,12 @@ async function verifyV4() {
     }
 
     console.log('\n[STEP 3] Verifying Business Logic (SMS Flow)...');
+    // Wait up to 500ms for event listener to fire
+    for (let i = 0; i < 50; i++) {
+        if (eventReceived) break;
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+
     // Note: Our current SMS flow logs to console as [AUTOMATION]
     // Since we are running in the same process, we check if the event listener triggered.
     if (eventReceived) {

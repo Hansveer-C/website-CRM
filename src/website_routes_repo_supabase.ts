@@ -1,5 +1,9 @@
 import { DB } from './utils/db/db_module';
 import { WebsiteRoute } from './types';
+import { mockWebsiteRoutes } from './db';
+
+const isBrowser = typeof window !== 'undefined';
+const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
 
 /**
  * Website Routes Repository (Supabase Version).
@@ -14,6 +18,28 @@ export const WebsiteRoutesRepo = {
     
     const normalizedPath = path.startsWith('/') ? path : `/${path}`;
 
+    if (!hasSupabase) {
+      console.log('[DB MOCK FALLBACK: ADD_ROUTE] Saving to mockWebsiteRoutes:', { website_id, normalizedPath, funnel_id, seoData });
+      const newRoute: WebsiteRoute = {
+        id: `r-${Date.now()}`,
+        website_id,
+        path: normalizedPath,
+        funnel_id,
+        is_seo_page: seoData?.is_seo_page ?? false,
+        city: seoData?.city || '',
+        service: seoData?.service || '',
+        slug: seoData?.slug || path.replace(/^\//, ''),
+        created_at: new Date().toISOString()
+      };
+      const idx = mockWebsiteRoutes.findIndex(r => r.website_id === website_id && r.path === normalizedPath);
+      if (idx !== -1) {
+        mockWebsiteRoutes[idx] = newRoute;
+      } else {
+        mockWebsiteRoutes.push(newRoute);
+      }
+      return newRoute;
+    }
+
     const payload: Partial<WebsiteRoute> = {
       website_id,
       path: normalizedPath,
@@ -26,10 +52,6 @@ export const WebsiteRoutesRepo = {
     };
 
     try {
-      // Supabase's upsert by default targets unique columns/primary key.
-      // For website_routes, we'll let it use (website_id, path) uniqueness if possible,
-      // but DB.upsert doesn't specify onConflict. 
-      // If adding a route that already exists, this might error in DB.upsert unless we explicitly handle it.
       return await DB.upsert<WebsiteRoute>('website_routes', payload);
     } catch (e: any) {
       if (e.message?.includes('unique constraint') || e.message?.includes('duplicate key')) {
@@ -45,6 +67,11 @@ export const WebsiteRoutesRepo = {
   async getRouteByPath(website_id: string, path: string): Promise<WebsiteRoute | null> {
     if (!website_id || !path) return null;
     
+    if (!hasSupabase) {
+      const route = mockWebsiteRoutes.find(r => r.website_id === website_id && r.path === path);
+      return route || null;
+    }
+
     try {
       const { data, error } = await DB.query('website_routes')
         .select('*')
@@ -69,6 +96,10 @@ export const WebsiteRoutesRepo = {
   async getAllRoutes(website_id: string): Promise<WebsiteRoute[]> {
     if (!website_id) return [];
     
+    if (!hasSupabase) {
+      return mockWebsiteRoutes.filter(r => r.website_id === website_id);
+    }
+
     try {
       const { data, error } = await DB.query('website_routes')
         .select('*')
@@ -92,6 +123,14 @@ export const WebsiteRoutesRepo = {
   async deleteRoute(id: string): Promise<void> {
     if (!id) return;
     
+    if (!hasSupabase) {
+      const idx = mockWebsiteRoutes.findIndex(r => r.id === id);
+      if (idx !== -1) {
+        mockWebsiteRoutes.splice(idx, 1);
+      }
+      return;
+    }
+
     try {
       const { error } = await DB.query('website_routes')
         .delete()

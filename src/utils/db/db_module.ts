@@ -4,7 +4,7 @@
  * ⚠️ DO NOT IMPORT INTO FRONTEND CODE (main.ts, etc.)
  */
 import { supabase } from './supabase';
-import { PostgrestResponse, PostgrestSingleResponse } from '@supabase/supabase-js';
+
 
 /**
  * Standard DB Module for Phase S3 (Supabase Transition).

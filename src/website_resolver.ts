@@ -24,9 +24,13 @@ export async function resolveWebsiteRequest(
   console.log(`[RESOLVER] Attempting to resolve ${siteHost}${normalizedPath}`);
 
   // 1. Identify Website (via domain or subdomain)
-  // Check custom domain first, then fallback to subdomain
+  // Check custom domain first, then fallback to subdomain (strip platform domain suffix if present)
+  const subdomainCandidate = siteHost.endsWith('.pressurepro.io') 
+    ? siteHost.replace('.pressurepro.io', '') 
+    : siteHost;
+
   let website = mockWebsites.find(w => w.domain === siteHost) || 
-                mockWebsites.find(w => w.subdomain === siteHost);
+                mockWebsites.find(w => w.subdomain === subdomainCandidate);
   
   // Debug Fallback: if localhost or unknown, use the first mock website for testing
   if (!website && (siteHost === 'localhost' || siteHost === '127.0.0.1')) {

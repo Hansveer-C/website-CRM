@@ -1,6 +1,6 @@
 import { createUser, getUserByEmail } from './users_repo';
 import { validateEmail, validatePassword } from './validation_utils';
-import { User, Funnel } from './types';
+import { User } from './types';
 import { emitEvent } from './events';
 import { WebsitesRepo } from './websites_repo_supabase';
 import { FunnelsRepo } from './funnels_repo_supabase';

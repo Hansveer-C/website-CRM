@@ -1,4 +1,4 @@
-import { Message, Contact } from './types';
+import { Contact } from './types';
 
 /**
  * Universal SMS Bridge.

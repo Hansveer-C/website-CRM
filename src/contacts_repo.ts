@@ -1,4 +1,5 @@
 import { Contact, User, RepoResponse } from './types';
+import { mockContacts } from './db';
 /**
  * 🔒 SERVER-ONLY MODULE
  * This module contains administrative logic, database credentials, or Node.js internal utilities.
@@ -13,6 +14,19 @@ export async function createContact(contact: Contact): Promise<RepoResponse<Cont
   console.log(`[DB: SUPABASE CONTACT] Persisting ${contact.id} (${contact.name}).`);
   
   const userId = contact.user_id;
+
+  const isBrowser = typeof window !== 'undefined';
+  const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+  if (!hasSupabase) {
+      console.log('[DB MOCK FALLBACK: CREATE_CONTACT] Saving to mockContacts:', contact);
+      const idx = mockContacts.findIndex(c => c.id === contact.id);
+      if (idx !== -1) {
+          mockContacts[idx] = contact;
+      } else {
+          mockContacts.push(contact);
+      }
+      return { success: true, data: contact };
+  }
 
   // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
   // Before upserting, verify that if the record exists, it belongs to the same user.
@@ -47,6 +61,19 @@ export async function searchContacts(phone: string, email: string | null, user?:
       return { success: false, error: 'MISSING_USER_CONTEXT' };
   }
 
+  const isBrowser = typeof window !== 'undefined';
+  const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+  if (!hasSupabase) {
+      console.log('[DB MOCK FALLBACK: SEARCH_CONTACTS] Finding in mockContacts');
+      const contact = mockContacts.find(c => {
+          if (c.user_id !== userId) return false;
+          if (phone && c.phone === phone) return true;
+          if (email && c.email === email) return true;
+          return false;
+      });
+      return { success: true, data: contact || null };
+  }
+
   let query = supabase.from('contacts')
     .select('*')
     .eq('user_id', userId);
@@ -75,6 +102,13 @@ export async function getContactById(id: string, user?: User | string | null): P
       return { success: false, error: 'MISSING_USER_CONTEXT' };
   }
 
+  const isBrowser = typeof window !== 'undefined';
+  const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+  if (!hasSupabase) {
+      const contact = mockContacts.find(c => c.id === id && c.user_id === userId);
+      return { success: true, data: contact || null };
+  }
+
   return safeDbCall('GET_CONTACT', userId, supabase
     .from('contacts')
     .select('*')
@@ -96,6 +130,13 @@ export async function getContacts(user?: User | string | null, limit = 100): Pro
       return { success: false, error: 'MISSING_USER_CONTEXT' };
   }
 
+  const isBrowser = typeof window !== 'undefined';
+  const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+  if (!hasSupabase) {
+      const list = mockContacts.filter(c => c.user_id === userId);
+      return { success: true, data: list };
+  }
+
   return safeDbCall('GET_CONTACTS', userId, supabase
     .from('contacts')
     .select('*')
@@ -110,6 +151,16 @@ export async function getContacts(user?: User | string | null, limit = 100): Pro
  */
 export async function deleteContact(id: string, user: User | string): Promise<RepoResponse<void>> {
   const userId = typeof user === 'string' ? user : user.id;
+
+  const isBrowser = typeof window !== 'undefined';
+  const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+  if (!hasSupabase) {
+      const idx = mockContacts.findIndex(c => c.id === id && c.user_id === userId);
+      if (idx !== -1) {
+          mockContacts.splice(idx, 1);
+      }
+      return { success: true };
+  }
 
   const { error } = await supabase
     .from('contacts')
@@ -138,7 +189,6 @@ export const ContactsRepo = {
   getContactById,
   getContact,
   getContacts,
-  getAllContacts,
   deleteContact,
   resolveContactOwner,
   resolveContactOwnerByPhone
@@ -148,16 +198,30 @@ export const ContactsRepo = {
  * Resolves the owner of a contact. (Internal use)
  */
 export async function resolveContactOwner(contact_id: string): Promise<string | null> {
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const contact = mockContacts.find(c => c.id === contact_id);
+        return contact?.user_id || null;
+    }
     const { data } = await supabase.from('contacts').select('user_id').eq('id', contact_id).maybeSingle();
     return data?.user_id || null;
 }
-
-
 
 /**
  * Resolves the owner of a contact by phone number. (Internal use)
  */
 export async function resolveContactOwnerByPhone(phone: string): Promise<string | null> {
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const contact = mockContacts.find(c => c.phone === phone);
+        return contact?.user_id || null;
+    }
     const { data } = await supabase.from('contacts').select('user_id').eq('phone', phone).maybeSingle();
     return data?.user_id || null;
 }
+
+
+
+

@@ -1,4 +1,4 @@
-import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component, Asset, Template, WebsiteSettings, EventLog, Message, Call, Funnel, WebsiteLayout, Website, WebsiteRoute } from './types';
+import { Contact, Opportunity, Activity, Pipeline, Quote, QuoteItem, Invoice, Page, PageSection, Component, Asset, Template, WebsiteSettings, Funnel, WebsiteLayout, Website, WebsiteRoute, GalleryItem } from './types';
 
 export const mockFunnels: Funnel[] = [
   {
@@ -19,7 +19,32 @@ export const mockFunnels: Funnel[] = [
   }
 ];
 
-export const mockContacts: Contact[] = [];
+export const mockContacts: Contact[] = [
+  {
+    id: 'c1',
+    user_id: 'system',
+    name: 'John Doe',
+    phone: '555-0101',
+    email: 'john@example.com',
+    address: '123 Pine St, Seattle, WA',
+    tags: ['residential', 'referral'],
+    source: 'Google Search',
+    status: 'customer',
+    created_at: '2026-02-15T10:00:00Z',
+  },
+  {
+    id: 'c2',
+    user_id: 'system',
+    name: 'Jane Smith',
+    phone: '555-0202',
+    email: 'jane@smithresidence.com',
+    address: '456 Oak Ave, Portland, OR',
+    tags: ['lead', 'driveway'],
+    source: 'Facebook Ad',
+    status: 'lead',
+    created_at: '2026-03-01T14:30:00Z',
+  },
+];
 
 export const mockPipelines: Pipeline[] = [
   {
@@ -29,7 +54,28 @@ export const mockPipelines: Pipeline[] = [
   },
 ];
 
-export const mockOpportunities: Opportunity[] = [];
+export const mockOpportunities: Opportunity[] = [
+  {
+    id: 'o1',
+    user_id: 'system',
+    contact_id: 'c2',
+    pipeline_stage: 'New Lead',
+    value: 250,
+    assigned_to: 'Hansveer',
+    status: 'open',
+    created_at: '2026-03-01T14:35:00Z',
+  },
+  {
+    id: 'o2',
+    user_id: 'system',
+    contact_id: 'c1',
+    pipeline_stage: 'Completed',
+    value: 450,
+    assigned_to: 'Hansveer',
+    status: 'won',
+    created_at: '2026-02-15T10:05:00Z',
+  },
+];
 
 export const mockActivities: Activity[] = [
   {
@@ -142,14 +188,9 @@ export const mockPageSections: PageSection[] = [
     id: 'ps1',
     page_id: 'p1',
     type: 'hero',
-    content: {
-      heading: 'Handyman Hans Pressure Washing Demo',
-      subheading: 'Exterior cleaning and driveway cleaning demo site for soft-launch testing.',
-      button_text: 'Get Free Estimate',
-      button_link: '#quote-form'
-    },
+    content: { heading: 'Welcome to HansSays', subheading: 'Leading pressure washing experts in the region.' },
     order: 1,
-    styles: { text_alignment: 'center' }
+    styles: { background: '#007bff' }
   },
   {
     id: 'ps-d1',
@@ -159,6 +200,7 @@ export const mockPageSections: PageSection[] = [
         heading: 'Pristine Driveways, Every Time.',
         subheading: 'We remove years of stains, oil, and moss with ease.',
         button_text: 'Get an Instant Quote',
+        background_image: 'https://images.unsplash.com/photo-1541604193435-22077a288934?auto=format&fit=crop&w=1200'
     },
     order: 1,
     styles: { text_alignment: 'center' }
@@ -190,7 +232,7 @@ export const mockPageSections: PageSection[] = [
     type: 'text',
     content: { text: 'We offer professional cleaning for your driveway, roof, and more.' },
     order: 2,
-    styles: { padding: '40px', visible: false }
+    styles: { padding: '40px' }
   },
   {
     id: 'ps3',
@@ -263,6 +305,7 @@ export const mockComponents: Component[] = [
     },
     default_styles: { padding: '60px 20px', background: '#f8fafc', visible: true }
   },
+
   {
     id: 'comp-faq',
     name: 'FAQ Section',
@@ -275,6 +318,22 @@ export const mockComponents: Component[] = [
       ]
     },
     default_styles: { padding: '80px 20px', background: '#ffffff', visible: true }
+  },
+  {
+    id: 'comp-testimonials',
+    name: 'Testimonials (Social Proof)',
+    type: 'testimonials',
+    default_content: {
+      heading: 'What Our Clients are Saying',
+      subheading: 'Real reviews from real homeowners in your area.',
+      // In a real app, this might fetch from the reviews table, 
+      // but we provide some default static ones for the builder preview.
+      reviews: [
+        { name: 'David Wilson', rating: 5, text: 'Absolutely the best pressure washing service I have ever used. My roof looks brand new!', location: 'Seattle, WA' },
+        { name: 'Sarah Miller', rating: 5, text: 'Fantastic attention to detail. They even cleaned the sidewalk for free!', location: 'Bellevue, WA' }
+      ]
+    },
+    default_styles: { padding: '80px 20px', background: '#f8fafc', visible: true }
   }
 ];
 
@@ -431,9 +490,9 @@ export const mockWebsites: Website[] = [
   {
     id: 'ws-1',
     user_id: 'system',
-    name: 'Handyman Hans Demo',
-    domain: 'website-crm-one.vercel.app',
-    subdomain: 'pressurepro-demo',
+    name: 'PressurePro Seattle',
+    domain: 'hanssays.com',
+    subdomain: 'hans-seattle',
     homepage_funnel_id: 'fnl-1',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
@@ -445,7 +504,6 @@ export const mockWebsiteRoutes: WebsiteRoute[] = [
     id: 'r1',
     website_id: 'ws-1',
     path: '/',
-    slug: 'home',
     funnel_id: 'fnl-1',
     created_at: new Date().toISOString()
   },
@@ -453,7 +511,6 @@ export const mockWebsiteRoutes: WebsiteRoute[] = [
     id: 'r2',
     website_id: 'ws-1',
     path: '/driveway',
-    slug: 'driveway-cleaning',
     funnel_id: 'fnl-1',
     created_at: new Date().toISOString()
   },
@@ -461,7 +518,6 @@ export const mockWebsiteRoutes: WebsiteRoute[] = [
     id: 'r3',
     website_id: 'ws-1',
     path: '/driveway-cleaning',
-    slug: 'driveway-cleaning',
     funnel_id: 'fnl-1',
     created_at: new Date().toISOString()
   }
@@ -469,10 +525,10 @@ export const mockWebsiteRoutes: WebsiteRoute[] = [
 
 export const mockWebsiteSettings: WebsiteSettings = {
   id: 'settings-001',
-  business_name: 'Handyman Hans Pressure Washing Demo',
-  phone: '604-555-0199',
+  business_name: 'Handyman Hans Pressure Washing',
+  phone: '555-0199',
   sms_number: '',
-  email: 'demo@handymanhans.com',
+  email: 'hans@example.com',
   logo_url: 'https://images.unsplash.com/photo-1628177142898-93e36e4e3a50?q=80&w=200&h=200&auto=format&fit=crop',
   primary_color: '#4f46e5',
   facebook_pixel_id: '',
@@ -488,7 +544,10 @@ export const mockWebsiteSettings: WebsiteSettings = {
     'Port Moody',
     'Coquitlam',
     'Port Coquitlam',
-    'Burnaby'
+    'Burnaby',
+    'Vancouver',
+    'North Vancouver',
+    'West Vancouver'
   ],
   services_offered: [
     'Pressure Washing',
@@ -506,23 +565,25 @@ export const mockWebsiteSettings: WebsiteSettings = {
 
 export const mockWebsiteSettingsMap = new Map<string, WebsiteSettings>();
 
+
 export const mockWebsiteLayouts: WebsiteLayout[] = [
   {
     id: 'layout-1',
     website_id: 'ws-1',
     header_config: {
-      logo_text: 'Handyman Hans Demo',
+      logo_text: 'PressurePro',
       nav_items: [
         { label: 'Home', path: '/' },
-        { label: 'Driveway Cleaning', path: '/driveway-cleaning' }
+        { label: 'Driveway Cleaning', path: '/driveway' },
+        { label: 'About', path: '/about' }
       ],
       cta_text: 'Get Quote',
       cta_link: '/quote'
     },
     footer_config: {
-      business_name: 'Handyman Hans Demo',
-      phone_number: '604-555-0199',
-      service_area: 'Port Moody, Coquitlam, Port Coquitlam & Burnaby',
+      business_name: 'PressurePro cleaning solutions',
+      phone_number: '555-0199',
+      service_area: 'Seattle & surrounding areas',
       cta_text: 'Get an Instant Estimate',
       links: [
         { label: 'Privacy Policy', path: '/privacy' },
@@ -533,5 +594,7 @@ export const mockWebsiteLayouts: WebsiteLayout[] = [
     updated_at: new Date().toISOString()
   }
 ];
+
+export const mockGalleryItems: GalleryItem[] = [];
 
 // End of db.ts

@@ -1,6 +1,6 @@
 import { FunnelsRepo } from './funnels_repo_supabase';
 import { PagesRepo } from './pages_repo_supabase';
-import { ApiRequest, RepoResponse, Page } from './types';
+import { ApiRequest, Page } from './types';
 import { apiMiddleware, requireAuth } from './middleware';
 
 /**

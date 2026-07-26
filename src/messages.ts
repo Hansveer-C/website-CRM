@@ -15,8 +15,15 @@ export async function saveMessage(message: Partial<Message> & { contact_id: stri
   // 🛡️ Resolve Actor Context (MF.2)
   let ownerId = message.user_id;
   if (!ownerId || ownerId === 'INTERNAL_SYSTEM_BYPASS') {
-      const { data: contact } = await supabase.from('contacts').select('user_id').eq('id', message.contact_id).maybeSingle();
-      ownerId = contact?.user_id || 'system';
+      const isBrowser = typeof window !== 'undefined';
+      const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+      if (hasSupabase) {
+          const { data: contact } = await supabase.from('contacts').select('user_id').eq('id', message.contact_id).maybeSingle();
+          ownerId = contact?.user_id || 'system';
+      } else {
+          const contactRes = await getContact(message.contact_id);
+          ownerId = contactRes.success && contactRes.data?.user_id ? contactRes.data.user_id : 'system';
+      }
   }
 
   // Validate contact_id exists

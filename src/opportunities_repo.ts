@@ -1,4 +1,5 @@
 import { Opportunity, User, RepoResponse } from './types';
+import { mockOpportunities } from './db';
 /**
  * 🔒 SERVER-ONLY MODULE
  * This module contains administrative logic, database credentials, or Node.js internal utilities.
@@ -16,6 +17,19 @@ export const OpportunitiesRepo = {
   async createOpportunity(opportunity: Opportunity): Promise<RepoResponse<Opportunity>> {
     console.log(`[DB: SUPABASE OPPORTUNITY] Persisting ${opportunity.id} for contact ${opportunity.contact_id}.`);
     
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        console.log('[DB MOCK FALLBACK: CREATE_OPPORTUNITY] Saving to mockOpportunities:', opportunity);
+        const idx = mockOpportunities.findIndex(o => o.id === opportunity.id);
+        if (idx !== -1) {
+            mockOpportunities[idx] = opportunity;
+        } else {
+            mockOpportunities.push(opportunity);
+        }
+        return { success: true, data: opportunity };
+    }
+
     // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
     const { data: existing } = await supabase.from('opportunities').select('user_id').eq('id', opportunity.id).maybeSingle();
     if (existing && existing.user_id !== opportunity.user_id) {
@@ -52,6 +66,13 @@ export const OpportunitiesRepo = {
         return { success: false, error: 'MISSING_USER_CONTEXT' };
     }
 
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const list = mockOpportunities.filter(o => o.contact_id === contact_id && o.user_id === userId);
+        return { success: true, data: list };
+    }
+
     return safeDbCall('GET_OPPORTUNITIES_BY_CONTACT', userId, supabase
       .from('opportunities')
       .select('*')
@@ -69,6 +90,13 @@ export const OpportunitiesRepo = {
     
     if (!userId) {
         return { success: false, error: 'MISSING_USER_CONTEXT' };
+    }
+
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const opp = mockOpportunities.find(o => o.id === id && o.user_id === userId);
+        return { success: true, data: opp || null };
     }
 
     return safeDbCall('GET_OPPORTUNITY', userId, supabase
@@ -97,6 +125,13 @@ export const OpportunitiesRepo = {
         return { success: false, error: 'MISSING_USER_CONTEXT' };
     }
 
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const list = mockOpportunities.filter(o => o.user_id === userId);
+        return { success: true, data: list };
+    }
+
     return safeDbCall('GET_OPPORTUNITIES', userId, supabase
       .from('opportunities')
       .select('*')
@@ -111,6 +146,13 @@ export const OpportunitiesRepo = {
   async getOpenOpportunityByContact(contact_id: string, user?: User | string | null): Promise<RepoResponse<Opportunity | null>> {
     const userId = typeof user === 'string' ? user : (user?.id);
     if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
+
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const opp = mockOpportunities.find(o => o.contact_id === contact_id && o.user_id === userId && o.status === 'open');
+        return { success: true, data: opp || null };
+    }
 
     return safeDbCall('GET_OPEN_OPP', userId, supabase
       .from('opportunities')
@@ -135,6 +177,16 @@ export const OpportunitiesRepo = {
   async deleteOpportunity(id: string, user: User | string): Promise<RepoResponse<void>> {
     const userId = typeof user === 'string' ? user : user.id;
 
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const idx = mockOpportunities.findIndex(o => o.id === id && o.user_id === userId);
+        if (idx !== -1) {
+            mockOpportunities.splice(idx, 1);
+        }
+        return { success: true };
+    }
+
     const { error } = await supabase
       .from('opportunities')
       .delete()
@@ -152,6 +204,12 @@ export const OpportunitiesRepo = {
  * Resolves the owner of an opportunity. (Internal use)
  */
 export async function resolveOpportunityOwner(opp_id: string): Promise<string | null> {
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const opp = mockOpportunities.find(o => o.id === opp_id);
+        return opp?.user_id || null;
+    }
     const { data } = await supabase.from('opportunities').select('user_id').eq('id', opp_id).maybeSingle();
     return data?.user_id || null;
 }

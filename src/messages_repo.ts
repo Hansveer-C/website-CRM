@@ -1,10 +1,12 @@
-import { Message, User, RepoResponse } from './types';
+import { Message, User, RepoResponse, MessageStatus } from './types';
 /**
  * 🔒 SERVER-ONLY MODULE
  * This module contains administrative logic, database credentials, or Node.js internal utilities.
  * ⚠️ DO NOT IMPORT INTO FRONTEND CODE (main.ts, etc.)
  */
 import { supabase, safeDbCall, safeDbCount } from './utils/db/supabase';
+
+export const mockMessages: Message[] = [];
 
 /**
  * Phase S3 - Batch 3: Messages Repository (Supabase).
@@ -16,6 +18,19 @@ export const MessagesRepo = {
   async createMessage(message: Message): Promise<RepoResponse<Message>> {
     console.log(`[DB: SUPABASE MESSAGE] Persisting ${message.id} for contact ${message.contact_id}.`);
     
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        console.log('[DB MOCK FALLBACK: CREATE_MESSAGE] Saving to mockMessages:', message);
+        const idx = mockMessages.findIndex(m => m.id === message.id);
+        if (idx !== -1) {
+            mockMessages[idx] = message;
+        } else {
+            mockMessages.push(message);
+        }
+        return { success: true, data: message };
+    }
+
     // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
     const { data: existing } = await supabase.from('messages').select('user_id').eq('id', message.id).maybeSingle();
     if (existing && existing.user_id !== message.user_id) {
@@ -52,6 +67,13 @@ export const MessagesRepo = {
         return { success: false, error: 'MISSING_USER_CONTEXT' };
     }
 
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const msg = mockMessages.find(m => m.id === id && m.user_id === userId);
+        return { success: true, data: msg || null };
+    }
+
     return safeDbCall('GET_MESSAGE', userId, supabase
       .from('messages')
       .select('*')
@@ -71,6 +93,13 @@ export const MessagesRepo = {
         return { success: false, error: 'MISSING_USER_CONTEXT' };
     }
 
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const list = mockMessages.filter(m => m.contact_id === contactId && m.user_id === userId);
+        return { success: true, data: list.slice(0, limit) };
+    }
+
     return safeDbCall('GET_MESSAGES_BY_CONTACT', userId, supabase
       .from('messages')
       .select('*')
@@ -84,10 +113,21 @@ export const MessagesRepo = {
   /**
    * Updates a message's status and provider info.
    */
-  async updateMessageStatus(id: string, status: string, providerMessageId?: string, retryable?: boolean, user?: User | string | null): Promise<RepoResponse<void>> {
+  async updateMessageStatus(id: string, status: MessageStatus, providerMessageId?: string, retryable?: boolean, user?: User | string | null): Promise<RepoResponse<void>> {
     const userId = typeof user === 'string' ? user : (user?.id);
     if (!userId) {
         return { success: false, error: 'MISSING_USER_CONTEXT' };
+    }
+
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const msg = mockMessages.find(m => m.id === id && m.user_id === userId);
+        if (!msg) return { success: false, error: 'MESSAGE_NOT_FOUND' };
+        msg.status = status;
+        msg.provider_message_id = providerMessageId || undefined;
+        msg.retryable = !!retryable;
+        return { success: true };
     }
 
     // Resolve owner
@@ -118,6 +158,16 @@ export const MessagesRepo = {
   async deleteMessage(id: string, user: User | string): Promise<RepoResponse<void>> {
     const userId = typeof user === 'string' ? user : user.id;
 
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const idx = mockMessages.findIndex(m => m.id === id && m.user_id === userId);
+        if (idx !== -1) {
+            mockMessages.splice(idx, 1);
+        }
+        return { success: true };
+    }
+
     const { error } = await supabase
       .from('messages')
       .delete()
@@ -136,6 +186,13 @@ export const MessagesRepo = {
     
     if (!userId) return { success: true, data: 0 };
 
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const count = mockMessages.filter(m => m.user_id === userId && m.contact_id === contactId && m.direction === 'outbound' && m.created_at > sinceIso).length;
+        return { success: true, data: count };
+    }
+
     return safeDbCount('COUNT_RECENT_SMS_CONTACT', userId, supabase
       .from('messages')
       .select('*', { count: 'exact', head: true })
@@ -150,6 +207,13 @@ export const MessagesRepo = {
    * Counts the total outbound messages sent by a user across all contacts for global rate limiting.
    */
   async countUserTotalRecentMessages(user_id: string, sinceIso: string): Promise<RepoResponse<number>> {
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const count = mockMessages.filter(m => m.user_id === user_id && m.direction === 'outbound' && m.created_at > sinceIso).length;
+        return { success: true, data: count };
+    }
+
     return safeDbCount('COUNT_USER_TOTAL_SMS', user_id, supabase
       .from('messages')
       .select('*', { count: 'exact', head: true })
@@ -166,6 +230,13 @@ export const MessagesRepo = {
     const userId = typeof user === 'string' ? user : (user?.id);
     
     if (!userId) return { success: true, data: false };
+
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const count = mockMessages.filter(m => m.user_id === userId && m.contact_id === contactId && m.direction === 'outbound' && m.content === content && m.created_at > sinceIso).length;
+        return { success: true, data: count > 0 };
+    }
 
     const { count, error } = await supabase
       .from('messages')
@@ -192,6 +263,13 @@ export const MessagesRepo = {
     
     if (!userId) return { success: false, error: 'MISSING_USER_CONTEXT' };
  
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const list = mockMessages.filter(m => m.user_id === userId).sort((a, b) => a.created_at.localeCompare(b.created_at));
+        return { success: true, data: list.slice(0, limit) };
+    }
+
     return safeDbCall('GET_ALL_MESSAGES', userId, supabase
       .from('messages')
       .select('*')

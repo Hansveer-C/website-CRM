@@ -1,4 +1,4 @@
-import { normalizePhone } from './utils/normalization';
+import { normalizePhone } from './utils/validators';
 import { emitEvent } from './events';
 import { persistCall, getCall } from './calls_repo';
 import { resolveContactOwnerByPhone } from './contacts_repo';

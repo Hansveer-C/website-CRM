@@ -157,6 +157,7 @@ export interface FunnelTemplate {
 export interface PageSection {
   id: string;
   page_id: string; // foreign key to Page.id
+  funnel_id?: string; // optional funnel scope
   type: string; // hero, text, image, form, gallery, etc.
   content: any; // JSON
   order: number;
@@ -205,12 +206,48 @@ export interface WebsiteBuildBrief {
   generate_service_city_pages: boolean;
 }
 
+export interface PromptPageBrief {
+  prompt: string;
+  page_type: 'service_page' | 'city_page' | 'service_city_page' | 'section';
+  target_service?: string;
+  target_city?: string;
+  tone?: 'professional' | 'friendly' | 'bold' | 'modern';
+  main_offer?: string;
+  suggested_sections?: string[];
+}
+
+export interface GalleryItem {
+  id: string;
+  user_id: string;
+  before_image_url: string;
+  after_image_url: string;
+  title?: string;
+  service_type?: string;
+  city?: string;
+  description?: string;
+  sort_order?: number;
+  is_featured?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Review {
+  id: string;
+  user_id: string;
+  name: string;
+  rating: number; // 1-5
+  text: string;
+  location?: string;
+  created_at: string;
+}
+
 export interface WebsiteSettings {
   id: string;
   user_id?: string;
   website_id?: string;
   business_name: string;
   phone: string;
+  /** Separate SMS/text number. If absent, SMS CTAs fall back to phone. */
   sms_number?: string;
   email: string;
   logo_url: string;
@@ -223,6 +260,7 @@ export interface WebsiteSettings {
   missed_call_sms_enabled: boolean;
   missed_call_sms_template: string;
   created_at: string;
+  // Extended fields used by website generator & mock data
   cities_served?: string[];
   services_offered?: string[];
   publish_status?: 'draft' | 'published' | 'unpublished';
@@ -230,6 +268,7 @@ export interface WebsiteSettings {
   google_business_link?: string;
   google_rating?: number;
   google_reviews_count?: number;
+  /** Guided builder brief — created during website generation */
   build_brief?: WebsiteBuildBrief;
 }
 
