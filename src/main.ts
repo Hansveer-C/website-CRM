@@ -96,6 +96,7 @@ import {
 import { WebsiteDashboardController, type WebsiteDashboardCoreData } from './website_dashboard_controller';
 import { getWebsiteScopedPages, resolveWebsiteHomepage, type WebsiteDashboardModel, type WebsiteDashboardSummaryInput } from './website_dashboard_model';
 import { createBrowserCallSimulator } from './browser_call_simulation';
+import { isCrmApplicationHost } from './application_host';
 
 declare global {
   interface Window {
@@ -10151,12 +10152,12 @@ async function bootRouter() {
   publicSiteAbortController = null;
   const host = window.location.hostname;
   const rawPath = window.location.pathname;
+  const crmApplicationHost = isCrmApplicationHost(host);
   const targetPath = resolveWebsitePathFromBrowserPath(rawPath);
   const isPreviewRoute = rawPath === '/preview' || rawPath.startsWith('/preview/');
   const isActualPublicRequest = targetPath !== null || (
       (rawPath === '/' || rawPath === '/index.html' || rawPath === '')
-      && host !== 'localhost'
-      && host !== '127.0.0.1'
+      && !crmApplicationHost
     );
   const edgePublicRequest = !isPreviewRoute
     && isActualPublicRequest
@@ -10214,8 +10215,9 @@ async function bootRouter() {
 
   // 3. Fallback Logic
   if (rawPath === '/' || rawPath === '/index.html' || rawPath === '') {
-    // On localhost, ROOT always defaults to Dashboard to allow admin access
-    if (host === 'localhost' || host === '127.0.0.1') {
+    // The CRM's local and Vercel deployment hosts must open the application shell.
+    // Customer custom domains continue through the public-site runtime below.
+    if (crmApplicationHost) {
        (window as any).navigateTo('dashboard');
     } else {
        // On real domains, ROOT defaults to the website homepage
