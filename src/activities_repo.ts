@@ -1,4 +1,5 @@
 import { Activity, User, RepoResponse } from './types';
+import { mockActivities } from './db';
 /**
  * 🔒 SERVER-ONLY MODULE
  * This module contains administrative logic, database credentials, or Node.js internal utilities.
@@ -16,6 +17,19 @@ export const ActivitiesRepo = {
   async createActivity(activity: Activity): Promise<RepoResponse<Activity>> {
     console.log(`[DB: SUPABASE ACTIVITY] Persisting activity ${activity.id} for contact ${activity.contact_id}.`);
     
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        console.log('[DB MOCK FALLBACK: CREATE_ACTIVITY] Saving to mockActivities:', activity);
+        const idx = mockActivities.findIndex(a => a.id === activity.id);
+        if (idx !== -1) {
+            mockActivities[idx] = activity;
+        } else {
+            mockActivities.push(activity);
+        }
+        return { success: true, data: activity };
+    }
+
     // 🛡️ MF.3: PREVENT CROSS-TENANT OVERWRITES
     const { data: existing } = await supabase.from('activities').select('user_id').eq('id', activity.id).maybeSingle();
     if (existing && existing.user_id !== activity.user_id) {
@@ -52,6 +66,13 @@ export const ActivitiesRepo = {
         return { success: false, error: 'MISSING_USER_CONTEXT' };
     }
 
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const list = mockActivities.filter(a => a.contact_id === contact_id && a.user_id === userId);
+        return { success: true, data: list.slice(0, limit) };
+    }
+
     return safeDbCall('GET_ACTIVITIES_BY_CONTACT', userId, supabase
       .from('activities')
       .select('*')
@@ -67,6 +88,16 @@ export const ActivitiesRepo = {
    */
   async deleteActivity(id: string, user: User | string): Promise<RepoResponse<void>> {
     const userId = typeof user === 'string' ? user : user.id;
+
+    const isBrowser = typeof window !== 'undefined';
+    const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+    if (!hasSupabase) {
+        const idx = mockActivities.findIndex(a => a.id === id && a.user_id === userId);
+        if (idx !== -1) {
+            mockActivities.splice(idx, 1);
+        }
+        return { success: true };
+    }
 
     const { error } = await supabase
       .from('activities')

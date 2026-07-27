@@ -6,16 +6,8 @@ import { EventLog, User, RepoResponse } from './types';
  */
 import { supabase, safeDbCall } from './utils/db/supabase';
 
-/**
- * Standardized "New" badge logic.
- * Returns true if the provided date string is within the last 24 hours.
- */
-function isNew(dateStr: string): boolean {
-  if (!dateStr) return false;
-  const now = new Date().getTime();
-  const createdAt = new Date(dateStr).getTime();
-  return (now - createdAt) < (24 * 60 * 60 * 1000);
-}
+export const mockEventLogs: EventLog[] = [];
+
 
 /**
  * Persists an event log entry to Supabase.
@@ -23,6 +15,19 @@ function isNew(dateStr: string): boolean {
 export async function createEventLog(log: EventLog): Promise<RepoResponse<EventLog>> {
   console.log(`[DB: SUPABASE EVENT] Logging ${log.event_name} (${log.id}).`);
   
+  const isBrowser = typeof window !== 'undefined';
+  const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+  if (!hasSupabase) {
+      console.log('[DB MOCK FALLBACK: CREATE_EVENT_LOG] Saving to mockEventLogs:', log);
+      const idx = mockEventLogs.findIndex(e => e.id === log.id);
+      if (idx !== -1) {
+          mockEventLogs[idx] = log;
+      } else {
+          mockEventLogs.push(log);
+      }
+      return { success: true, data: log };
+  }
+
   // Auto-extract contact_id if present in payload but not in log root
   const contact_id = log.contact_id || (log.payload as any)?.contact_id;
 
@@ -51,6 +56,13 @@ export async function getAllEventLogs(user?: User | string | null): Promise<Repo
       return { success: false, error: 'MISSING_USER_CONTEXT' };
   }
 
+  const isBrowser = typeof window !== 'undefined';
+  const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+  if (!hasSupabase) {
+      const list = mockEventLogs.filter(e => e.user_id === userId);
+      return { success: true, data: list };
+  }
+
   return safeDbCall('GET_ALL_EVENT_LOGS', userId, supabase
     .from('event_logs')
     .select('*')
@@ -69,6 +81,13 @@ export async function getEventLogsByContact(contact_id: string, user?: User | st
       return { success: false, error: 'MISSING_USER_CONTEXT' };
   }
 
+  const isBrowser = typeof window !== 'undefined';
+  const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+  if (!hasSupabase) {
+      const list = mockEventLogs.filter(e => (e.contact_id === contact_id || (e.payload as any)?.contact_id === contact_id) && e.user_id === userId);
+      return { success: true, data: list.slice(0, limit) };
+  }
+
   return safeDbCall('GET_EVENT_LOGS_BY_CONTACT', userId, supabase
     .from('event_logs')
     .select('*')
@@ -83,6 +102,13 @@ export async function getEventLogsByContact(contact_id: string, user?: User | st
  * Retrieves recent event logs for a specific event name and user.
  */
 export async function getRecentEventLogs(eventName: string, userId: string, sinceIso: string): Promise<RepoResponse<EventLog[]>> {
+  const isBrowser = typeof window !== 'undefined';
+  const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
+  if (!hasSupabase) {
+      const list = mockEventLogs.filter(e => e.user_id === userId && e.event_name === eventName && e.created_at > sinceIso);
+      return { success: true, data: list };
+  }
+
   return safeDbCall('GET_RECENT_EVENT_LOGS', userId, supabase
     .from('event_logs')
     .select('*')

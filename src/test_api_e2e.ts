@@ -1,5 +1,6 @@
 import { createLead } from './leads_logic';
-import { mockContacts, mockOpportunities, mockEventLogs } from './db';
+import { mockContacts, mockOpportunities } from './db';
+import { mockEventLogs } from './event_logs_repo';
 
 async function testLeadCreationE2E() {
   console.log('=== End-to-End Lead Creation Test ===');

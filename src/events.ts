@@ -57,10 +57,10 @@ export async function emitEvent(name: string, payload: Record<string, any> = {},
   if (!finalUserId) {
     if (payload.contact_id) {
        finalUserId = await resolveContactOwner(payload.contact_id) || undefined;
-    }
+     }
     else if (payload.opportunity_id) {
        finalUserId = await resolveOpportunityOwner(payload.opportunity_id) || undefined;
-    }
+     }
   }
 
   const event = createEvent(name, payload);
@@ -111,7 +111,9 @@ export async function getEvents(user?: User | string | null): Promise<AppEvent[]
 // --- Register Business Logic Listeners ---
 onEvent('lead_created', async (payload, userId) => {
   // Global Toggle Check
-  const settingsRes = await getWebsiteSettings();
+  const { WebsitesRepo } = await import('./websites_repo_supabase');
+  const userSite = await WebsitesRepo.getWebsiteByUser(userId || 'system');
+  const settingsRes = await getWebsiteSettings(userId || 'system', userSite?.id || 'ws-1');
   if (!settingsRes.success || !settingsRes.data) return;
   const settings = settingsRes.data;
 
@@ -175,7 +177,9 @@ onEvent('call_missed', async (payload, userId) => {
   console.log('call_missed event received');
   
   // 1. Global Toggle
-  const settingsRes = await getWebsiteSettings();
+  const { WebsitesRepo } = await import('./websites_repo_supabase');
+  const userSite = await WebsitesRepo.getWebsiteByUser(userId || 'system');
+  const settingsRes = await getWebsiteSettings(userId || 'system', userSite?.id || 'ws-1');
   if (!settingsRes.success || !settingsRes.data || !settingsRes.data.missed_call_sms_enabled) {
     console.log('Missed call SMS disabled');
     return;

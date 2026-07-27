@@ -6,7 +6,7 @@ import { WebsiteLayoutsRepo } from './website_layouts_repo_supabase';
 import { FunnelTemplatesRepo } from './funnel_templates_repo';
 import { SectionsRepo } from './sections_repo_supabase';
 import { getWebsiteSettings } from './website_settings_repo';
-import { Funnel, Page, HeaderConfig, NavItem } from './types';
+import { Funnel, Page, HeaderConfig, NavItem, PromptPageBrief } from './types';
 import { generateServiceCitySlug } from './utils/url_utils';
 
 /**
@@ -22,8 +22,48 @@ export const WebsiteGeneratorService = {
     phone_number: string; 
     city: string; 
     services: string[];
+    cities?: string[];
+    generate_services?: boolean;
+    generate_cities?: boolean;
+    generate_service_cities?: boolean;
+    website_preset?: string;
+    primary_color?: string;
+    build_brief?: any;
   }) {
-    console.log(`[GENERATOR] Starting website generation for ${userId} (${input.business_name})`);
+    console.log(`[GENERATOR] Starting website generation for ${userId} (${input.business_name}) with preset ${input.website_preset || 'none'}`);
+
+    const selectedServices = input.services && input.services.length > 0 ? input.services : [
+        'Pressure Washing',
+        'Driveway Cleaning',
+        'Sidewalk Cleaning',
+        'Patio Cleaning',
+        'Deck Cleaning',
+        'House Washing',
+        'Gutter Cleaning',
+        'Roof Moss Treatment',
+        'Commercial Pressure Washing'
+    ];
+
+    const selectedCities = input.cities && input.cities.length > 0 ? input.cities : [
+        'Port Moody',
+        'Coquitlam',
+        'Port Coquitlam',
+        'Burnaby',
+        'Vancouver',
+        'North Vancouver',
+        'West Vancouver'
+    ];
+
+    const genServices = input.generate_services !== false;
+    const genCities = input.generate_cities !== false;
+    const genServiceCities = input.generate_service_cities !== false;
+
+
+    const sanitizeSlug = (text: string) => 
+        text.toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, '')
+            .trim()
+            .replace(/\s+/g, '-');
 
     const createdIds = {
         website_id: '',
@@ -56,9 +96,6 @@ export const WebsiteGeneratorService = {
         for (const fid of createdIds.funnel_ids) {
             await FunnelsRepo.updateFunnel(userId, fid, { status: 'draft' }).catch(() => {});
         }
-
-        // We don't delete the website container if it already existed, 
-        // but if we just created it, we might want to (optional).
         
         throw error;
     };
@@ -71,6 +108,22 @@ export const WebsiteGeneratorService = {
             createdIds.website_id = website.id;
         }
 
+        // Fetch and persist website settings with selected services & cities (fully scoped by website.id)
+        const { getWebsiteSettings, persistWebsiteSettings } = await import('./website_settings_repo');
+        const settingsRes = await getWebsiteSettings(userId, website.id);
+        if (settingsRes.success && settingsRes.data) {
+            await persistWebsiteSettings(userId, website.id, {
+                ...settingsRes.data,
+                business_name: input.business_name,
+                phone: input.phone_number,
+                services_offered: selectedServices,
+                cities_served: selectedCities,
+                website_preset: input.website_preset || 'residential',
+                primary_color: input.primary_color || settingsRes.data.primary_color || '#2563eb',
+                build_brief: input.build_brief || settingsRes.data.build_brief
+            });
+        }
+
         // ── 2. Identify Templates ───────────────────────────────────────────
         const templateMap: Record<string, string> = {
             'Driveway Cleaning': 'dc54de07-5ea2-46f7-b513-85149306449c',
@@ -80,7 +133,7 @@ export const WebsiteGeneratorService = {
         };
         const defaultTplId = '0d3214fb-2777-41fa-9837-4a6fddc660ec';
 
-        const serviceLinks = input.services.map(s => ({ name: s, path: generateServiceCitySlug(s, input.city) }));
+        const serviceLinks = selectedServices.map(s => ({ name: s, path: generateServiceCitySlug(s, input.city) }));
 
         // ── 3. Create Homepage Funnel ───────────────────────────────────────
         // Only if no homepage is set yet
@@ -93,8 +146,8 @@ export const WebsiteGeneratorService = {
             // Create high-converting sections for the homepage (WB.2.3)
             const homepageLandingPageId = createdIds.page_ids.find(pid => pid.startsWith(`pg_${homeFunnelId}_1`));
             if (homepageLandingPageId) {
-                const primaryService = input.services[0] || 'Professional Service';
-                await this.createHomepageSections(homepageLandingPageId, primaryService, input.city, userId, createdIds, serviceLinks);
+                const primaryService = selectedServices[0] || 'Professional Service';
+                await this.createHomepageSections(homepageLandingPageId, primaryService, input.city, userId, createdIds, serviceLinks, input.website_preset);
             }
             
             // Update website with homepage reference
@@ -106,7 +159,7 @@ export const WebsiteGeneratorService = {
         const existingFunnelsRes = await FunnelsRepo.getFunnels(userId);
         const existingFunnels = existingFunnelsRes.data || [];
 
-        for (const service of input.services) {
+        for (const service of selectedServices) {
             const path = generateServiceCitySlug(service, input.city);
 
             // Check if funnel already exists by name (minimal idempotency)
@@ -132,6 +185,25 @@ export const WebsiteGeneratorService = {
             serviceFunnelEntries.push({ name: service, funnel_id: serviceFunnel.id, path });
         }
 
+        // ── 4.5. Create City Funnels (if enabled) ───────────────────────────
+        const cityFunnelEntries: { name: string; funnel_id: string; path: string }[] = [];
+        if (genCities) {
+            for (const city of selectedCities) {
+                const citySlug = `/${sanitizeSlug(city)}`;
+                let cityFunnel = existingFunnels.find(f => f.name === `City - ${city}`);
+                if (!cityFunnel) {
+                    cityFunnel = await this.createFunnelFromTemplate(userId, defaultTplId, `City - ${city}`, city, createdIds, { businessName: input.business_name });
+                    createdIds.funnel_ids.push(cityFunnel.id);
+                    
+                    // Tag funnel
+                    await FunnelsRepo.updateFunnel(userId, cityFunnel.id, { 
+                        city: city 
+                    });
+                }
+                cityFunnelEntries.push({ name: city, funnel_id: cityFunnel.id, path: citySlug });
+            }
+        }
+
         // ── 5. Create Contact Funnel ─────────────────────────────────────
         let contactFunnel = existingFunnels.find(f => f.name === 'Contact Us');
         if (!contactFunnel) {
@@ -149,7 +221,7 @@ export const WebsiteGeneratorService = {
         // ── 6. Assign Routes ───────────────────────────────────────────────
         const existingRoutes = await WebsiteRoutesRepo.getAllRoutes(website.id);
 
-        const upsertRouteHelper = async (path: string, funnel_id: string, isSeo?: boolean, service?: string) => {
+        const upsertRouteHelper = async (path: string, funnel_id: string, isSeo?: boolean, service?: string, city?: string) => {
             const exists = existingRoutes.find(r => r.path === path);
             if (exists) {
                 if (exists.funnel_id !== funnel_id) {
@@ -158,7 +230,7 @@ export const WebsiteGeneratorService = {
                     const route = await WebsiteRoutesRepo.addRoute(website.id, path, funnel_id, {
                         is_seo_page: isSeo,
                         service: service,
-                        city: input.city,
+                        city: city || input.city,
                         slug: path.replace(/^\//, '') || 'home'
                     });
                     createdIds.route_ids.push(route.id);
@@ -167,7 +239,7 @@ export const WebsiteGeneratorService = {
                 const route = await WebsiteRoutesRepo.addRoute(website.id, path, funnel_id, {
                     is_seo_page: isSeo,
                     service: service,
-                    city: input.city,
+                    city: city || input.city,
                     slug: path.replace(/^\//, '') || 'home'
                 });
                 createdIds.route_ids.push(route.id);
@@ -177,14 +249,44 @@ export const WebsiteGeneratorService = {
         // Homepage
         await upsertRouteHelper('/', homeFunnelId, false);
 
-        // Services
+        // Services: main plain service pages (e.g. /driveway-cleaning)
         for (const s of serviceFunnelEntries) {
-            await upsertRouteHelper(s.path, s.funnel_id, true, s.name);
+            const serviceSlug = `/${sanitizeSlug(s.name)}`;
+            if (genServices) {
+                await upsertRouteHelper(serviceSlug, s.funnel_id, true, s.name, undefined);
+            }
+        }
+
+        // Cities: main plain city pages (e.g. /port-moody)
+        if (genCities) {
+            for (const c of cityFunnelEntries) {
+                await upsertRouteHelper(c.path, c.funnel_id, true, undefined, c.name);
+            }
+        }
+
+        // Service + City Combinations (e.g. /driveway-cleaning-port-moody)
+        if (genServiceCities) {
+            for (const service of selectedServices) {
+                for (const city of selectedCities) {
+                    const comboPath = generateServiceCitySlug(service, city);
+                    const exists = existingRoutes.some(r => r.path === comboPath);
+                    if (!exists) {
+                        try {
+                            const res = await this.generateSeoFunnel(userId, website.id, service, city, input.business_name);
+                            createdIds.funnel_ids.push(res.funnel_id);
+                            createdIds.route_ids.push(res.route_id);
+                        } catch (err: any) {
+                            console.error(`[GENERATOR] Failed to generate SEO page for ${service} in ${city}:`, err.message);
+                        }
+                    } else {
+                        console.log(`[GENERATOR] Skipping duplicate SEO page for ${service} in ${city} at path: ${comboPath}`);
+                    }
+                }
+            }
         }
 
         // Contact
         if (!contactFunnel) {
-            // Should not happen as we created it above, but to satisfy TS
             const found = await FunnelsRepo.getFunnels(userId);
             contactFunnel = found.data?.find(f => f.name === 'Contact Us');
         }
@@ -198,10 +300,15 @@ export const WebsiteGeneratorService = {
         ];
 
         if (serviceFunnelEntries.length > 0) {
+            const children = serviceFunnelEntries.map(s => {
+                const serviceSlug = `/${sanitizeSlug(s.name)}`;
+                const path = genServices ? serviceSlug : (genServiceCities ? generateServiceCitySlug(s.name, input.city) : '/');
+                return { label: s.name, path };
+            });
             navItems.push({
                 label: 'Services',
                 path: '#', // Placeholder for dropdown trigger
-                children: serviceFunnelEntries.map(s => ({ label: s.name, path: s.path }))
+                children
             });
         }
 
@@ -314,12 +421,46 @@ export const WebsiteGeneratorService = {
   /**
    * Internal helper to create high-converting sections for the homepage.
    */
-  async createHomepageSections(pageId: string, service: string, city: string, userId: string, createdIds: any, serviceLinks: {name: string, path: string}[] = []) {
+  async createHomepageSections(
+      pageId: string, 
+      service: string, 
+      city: string, 
+      userId: string, 
+      createdIds: any, 
+      serviceLinks: {name: string, path: string}[] = [],
+      websitePreset?: string
+  ) {
     // Prevent duplication: check if sections already exist (WB.2.10)
     const existing = await SectionsRepo.getSectionsForPage(pageId, userId);
     if (existing && (existing as any).data?.length > 0) {
         console.log(`[GENERATOR] Skipping sections for page ${pageId} - already exists.`);
         return;
+    }
+
+    const { getWebsiteSettings } = await import('./website_settings_repo');
+    const { WebsitesRepo } = await import('./websites_repo_supabase');
+    const userSite = await WebsitesRepo.getWebsiteByUser(userId);
+    const settingsRes = await getWebsiteSettings(userId, userSite?.id || 'ws-1');
+    const brief = settingsRes.success && settingsRes.data ? settingsRes.data.build_brief : null;
+    const mainOffer = brief?.main_offer || '';
+
+    const preset = websitePreset || 'residential';
+    let heroSubtext = 'Fast, affordable, same-day service';
+    let heroCta = 'Get Free Quote';
+
+    if (preset === 'residential') {
+        heroSubtext = 'Local owner-operated exterior cleaning for homes, driveways, patios, and decks.';
+        heroCta = 'Get My Free Quote';
+    } else if (preset === 'house_washing') {
+        heroSubtext = 'Gentle exterior cleaning for siding, gutters, moss, and organic buildup.';
+        heroCta = 'Request a House Wash Quote';
+    } else if (preset === 'commercial') {
+        heroSubtext = 'Reliable exterior cleaning for storefronts, sidewalks, commercial pads, and high-traffic areas.';
+        heroCta = 'Request a Commercial Quote';
+    }
+
+    if (mainOffer) {
+        heroSubtext = `Special Offer: ${mainOffer}. ${heroSubtext}`;
     }
 
     const hydrate = (text: string) => text.replace(/\{\{service\}\}/gi, service).replace(/\{\{city\}\}/gi, city);
@@ -330,8 +471,8 @@ export const WebsiteGeneratorService = {
             order: 1,
             content: {
                 headline: hydrate('{{service}} in {{city}}'),
-                subtext: 'Fast, affordable, same-day service',
-                cta: 'Get Free Quote'
+                subtext: hydrate(heroSubtext),
+                cta: heroCta
             }
         },
         {
@@ -351,8 +492,8 @@ export const WebsiteGeneratorService = {
             order: 3,
             content: {
                 highlight: 'Special Launch Offer',
-                title: '10% off your first service',
-                description: 'Limited time offer for new customers in {{city}}.'
+                title: mainOffer ? mainOffer : '10% off your first service',
+                description: mainOffer ? `Take advantage of our special offer: ${mainOffer}` : 'Limited time offer for new customers in {{city}}.'
             }
         },
         {
@@ -719,7 +860,7 @@ export const WebsiteGeneratorService = {
     console.log(`[GENERATOR] Starting bulk SEO generation for ${userId} (services: ${services.length}, cities: ${cities.length})`);
     
     // Fetch business name for SEO metadata (W3.6)
-    const settingsRes = await getWebsiteSettings();
+    const settingsRes = await getWebsiteSettings(userId, websiteId);
     const businessName = settingsRes.data?.business_name;
 
     // 1. Build and limit combinations
@@ -767,5 +908,252 @@ export const WebsiteGeneratorService = {
 
     console.log(`[GENERATOR] Bulk generation complete: Created ${results.created}, Skipped ${results.skipped}, Errors ${results.errors}`);
     return results;
+  },
+
+  /**
+   * Generates a single draft page from a PromptPageBrief input.
+   */
+  async generateSinglePageFromPromptBrief(userId: string, brief: PromptPageBrief) {
+    console.log(`[GENERATOR] Generating single page from prompt brief for user ${userId}:`, brief);
+
+    // Resolve website first
+    let website = await WebsitesRepo.getWebsiteByUser(userId);
+    if (!website) {
+        website = await WebsitesRepo.createWebsite(userId, 'Pressure Washing Pro');
+    }
+
+    const { getWebsiteSettings } = await import('./website_settings_repo');
+    const settingsRes = await getWebsiteSettings(userId, website.id);
+    const settings = settingsRes.data;
+
+    const defaultCity = settings?.cities_served?.[0] || 'Vancouver';
+    const defaultService = settings?.services_offered?.[0] || 'Pressure Washing';
+
+    const targetService = brief.target_service || defaultService;
+    const targetCity = brief.target_city || defaultCity;
+    const tone = brief.tone || 'professional';
+    const mainOffer = brief.main_offer || '';
+
+    // Sanitize slug helper
+    const sanitizeSlug = (text: string) => 
+        text.toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, '')
+            .trim()
+            .replace(/\s+/g, '-');
+
+    // Determine slug path
+    let baseSlug = '';
+    if (brief.page_type === 'service_page') {
+        baseSlug = `/${sanitizeSlug(targetService)}`;
+    } else if (brief.page_type === 'city_page') {
+        baseSlug = `/${sanitizeSlug(targetCity)}`;
+    } else if (brief.page_type === 'service_city_page') {
+        baseSlug = `/${sanitizeSlug(targetService)}-${sanitizeSlug(targetCity)}`;
+    } else {
+        // Section preview
+        baseSlug = `/draft-section-${sanitizeSlug(targetService || 'general')}`;
+    }
+
+    // Resolve duplicate route with suffix
+    let slug = baseSlug;
+    let counter = 2;
+    const existingRoutes = await WebsiteRoutesRepo.getAllRoutes(website.id);
+    while (existingRoutes.some(r => r.path === slug)) {
+        slug = `${baseSlug}-${counter}`;
+        counter++;
+    }
+
+    // W3.1 Funnel container for this single draft page
+    const funnelRes = await FunnelsRepo.createFunnel(userId, `${targetService} in ${targetCity} (Draft)`);
+    if (!funnelRes.success || !funnelRes.data) {
+        throw new Error('Failed to create funnel container for draft page');
+    }
+    const funnel = funnelRes.data;
+
+    // Keep it draft by default
+    await FunnelsRepo.updateFunnel(userId, funnel.id, {
+        status: 'draft',
+        service_type: targetService,
+        city: targetCity
+    });
+
+    // Create the landing step page as draft
+    const pageId = `pg_${funnel.id}_1_${Date.now()}`;
+    const pageTitle = brief.page_type === 'section' ? 'Draft Section' : `${targetService} in ${targetCity}`;
+    const page: Page = {
+        id:         pageId,
+        user_id:    userId,
+        name:       pageTitle,
+        slug:       slug.replace(/^\//, ''),
+        status:     'draft', // draft by default
+        created_at: new Date().toISOString(),
+        funnel_id:  funnel.id,
+        step_type:  'landing',
+        step_order: 1,
+        seo_title:  `${targetService} in ${targetCity} | ${settings?.business_name || 'Pressure Pro'}`,
+        seo_description: `Professional ${targetService} services in ${targetCity}.`,
+        seo_keywords: []
+    };
+
+    const pageRes = await PagesRepo.persistPage(page, userId);
+    if (!pageRes.success) {
+        throw new Error('Failed to persist page step');
+    }
+
+    // Add website route
+    await WebsiteRoutesRepo.addRoute(website.id, slug, funnel.id, {
+        is_seo_page: true,
+        service: targetService,
+        city: targetCity,
+        slug: slug.replace(/^\//, '')
+    });
+
+    // W3.2 Build beautiful pressure-washing-specific sections based on tone & main offer
+    let heroSubtext = 'Fast, professional, same-day exterior cleaning.';
+    let heroCta = 'Get Free Estimate';
+
+    if (tone === 'friendly') {
+        heroSubtext = `Hey there! We're your friendly local pressure washing team in ${targetCity}. We love making homes sparkle!`;
+        heroCta = 'Let\'s Get Started!';
+    } else if (tone === 'bold') {
+        heroSubtext = `WE ARE THE HIGHEST-RATED ${targetService.toUpperCase()} TEAM IN ${targetCity.toUpperCase()}! ZERO DIRT GUARANTEED!`;
+        heroCta = 'GET MY FREE ESTIMATE NOW!';
+    } else if (tone === 'modern') {
+        heroSubtext = `Premium, eco-friendly exterior restoration custom-tailored to your property in ${targetCity}.`;
+        heroCta = 'Book Your Restoration';
+    } else {
+        heroSubtext = `High-quality residential and commercial ${targetService} services in ${targetCity}. Fully insured.`;
+        heroCta = 'Request a Quote';
+    }
+
+    if (mainOffer) {
+        heroSubtext = `Special Offer: ${mainOffer}. ${heroSubtext}`;
+    }
+
+    const sections: any[] = [
+        {
+            type: 'hero',
+            order: 1,
+            content: {
+                headline: `${targetService} in ${targetCity}`,
+                subtext: heroSubtext,
+                cta: heroCta
+            }
+        },
+        {
+            type: 'benefits',
+            order: 2,
+            content: {
+                title: `Why Choose Us for ${targetService}`,
+                benefits: [
+                    'Professional-grade hot & cold water washers',
+                    '100% Satisfaction Guarantee',
+                    'Eco-friendly, biodegradable detergents'
+                ]
+            }
+        },
+        {
+            type: 'before_after',
+            order: 3,
+            content: {
+                title: `${targetService} Before & After`,
+                description: `Real performance results from recent projects in ${targetCity}.`,
+                before_image: 'https://placehold.co/600x400/333333/FFFFFF?text=BEFORE',
+                after_image: 'https://placehold.co/600x400/2563eb/FFFFFF?text=AFTER'
+            }
+        },
+        {
+            type: 'proof',
+            order: 4,
+            content: {
+                title: `What Your ${targetCity} Neighbors Say`,
+                testimonials: [
+                    { author: 'Jane S.', text: `Awesome ${targetService}! Highly recommend their team.` },
+                    { author: 'Mike R.', text: `Prompt, professional and great results in ${targetCity}.` }
+                ]
+            }
+        },
+        {
+            type: 'faq',
+            order: 5,
+            content: {
+                title: 'Frequently Asked Questions',
+                items: [
+                    { question: `How much does ${targetService} cost?`, answer: `Our rates depend on the size of the surface, but we provide completely free, transparent quotes.` },
+                    { question: `Are you insured for working in ${targetCity}?`, answer: `Yes, we carry full liability insurance and WorkSafe coverage for all our jobs.` }
+                ]
+            }
+        },
+        {
+            type: 'cta',
+            order: 6,
+            content: {
+                headline: `Ready to restore your property?`,
+                subtext: `Get an instant free estimate on your ${targetService} today.`,
+                cta: 'Get Quote',
+                form_enabled: true
+            }
+        }
+    ];
+
+    if (mainOffer) {
+        sections.push({
+            type: 'offer',
+            order: 7,
+            content: {
+                title: `Claim ${mainOffer} Today!`,
+                description: `Special, limited-time promotional pricing for ${targetService} in ${targetCity}.`
+            }
+        });
+    }
+
+    // Persist all sections
+    const createdSectionIds: string[] = [];
+    for (const s of sections) {
+        const sectionId = `sec_${pageId}_${s.order}_${Date.now()}`;
+        const res = await SectionsRepo.persistSection({
+            id: sectionId,
+            page_id: pageId,
+            type: s.type,
+            content: s.content,
+            order: s.order,
+            styles: {}
+        }, userId);
+        if (res.success) {
+            createdSectionIds.push(sectionId);
+        }
+    }
+
+    // Generate FAQ schema markup if FAQ section is present
+    const faqData = sections.find(s => s.type === 'faq')?.content;
+    if (faqData && faqData.items) {
+        const schema = {
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            "mainEntity": faqData.items.map((item: any) => ({
+                "@type": "Question",
+                "name": item.question,
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": item.answer
+                }
+            }))
+        };
+        const updatedPage = {
+            ...page,
+            schema_markup: JSON.stringify(schema, null, 2)
+        };
+        await PagesRepo.persistPage(updatedPage, userId);
+    }
+
+    return {
+        success: true,
+        page_id: pageId,
+        funnel_id: funnel.id,
+        route_path: slug,
+        page_type: brief.page_type,
+        preview_url: `/preview?page_id=${pageId}`,
+        message: `Draft page "${pageTitle}" generated successfully at path ${slug}.`
+    };
   }
 };

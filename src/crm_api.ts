@@ -1,7 +1,7 @@
 import { ApiRequest } from './types';
 import { apiMiddleware, requireAuth, validatePayloadSize } from './middleware';
 import { getContact, deleteContact } from './contacts_repo';
-import { getOpportunity, deleteOpportunity } from './opportunities_repo';
+import { getOpportunity } from './opportunities_repo';
 import { getMessage } from './messages_repo';
 import { getCall } from './calls_repo';
 import { createLead } from './leads_logic';

@@ -73,6 +73,8 @@ export async function getCurrentUser(request?: { cookies?: Record<string, string
         const sessionCookie = cookies.find(c => c.startsWith('session='));
         if (sessionCookie) {
             token = sessionCookie.split('=')[1];
+        } else if ((window as any).currentUser) {
+            return await getUserById((window as any).currentUser);
         }
     }
 

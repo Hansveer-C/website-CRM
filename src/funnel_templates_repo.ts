@@ -1,5 +1,9 @@
 import { supabase, safeDbCall } from './utils/db/supabase';
 import { FunnelTemplate, TemplateStep, RepoResponse } from './types';
+import { mockTemplates } from './db';
+
+const isBrowser = typeof window !== 'undefined';
+const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
 
 /**
  * 🔒 SERVER-ONLY REPOSITORY
@@ -14,6 +18,10 @@ export const FunnelTemplatesRepo = {
    * Ordered by category then name for consistent UI presentation.
    */
   async getTemplates(): Promise<RepoResponse<FunnelTemplate[]>> {
+    if (!hasSupabase) {
+      return { success: true, data: mockTemplates as unknown as FunnelTemplate[] };
+    }
+
     return safeDbCall<FunnelTemplate[]>(
       'GET_FUNNEL_TEMPLATES',
       'system',
@@ -25,11 +33,35 @@ export const FunnelTemplatesRepo = {
     );
   },
 
-  /**
-   * Returns a single template by ID, including its ordered steps.
-   * Used when a user selects a template to preview or apply to a funnel.
-   */
   async getTemplateById(templateId: string): Promise<RepoResponse<FunnelTemplate>> {
+    if (!hasSupabase) {
+      const template = mockTemplates.find(t => t.id === templateId) || mockTemplates[0];
+      if (template) {
+        const funnelTemplate: FunnelTemplate = {
+          id: template.id,
+          name: template.name,
+          category: 'pressure_washing',
+          service_type: 'generic',
+          city_placeholder_enabled: true,
+          created_at: template.created_at,
+          steps: [
+            {
+              id: `step-${template.id}-1`,
+              template_id: template.id,
+              type: 'landing',
+              order: 1,
+              template_content: {
+                headline: '{{service}} in {{city}}',
+                title: '{{service}} in {{city}}'
+              }
+            }
+          ]
+        };
+        return { success: true, data: funnelTemplate };
+      }
+      return { success: false, error: 'TEMPLATE_NOT_FOUND' };
+    }
+
     // Fetch the template header
     const templateRes = await safeDbCall<FunnelTemplate>(
       'GET_FUNNEL_TEMPLATE_BY_ID',

@@ -18,7 +18,7 @@ const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 if (!isBrowser && (!supabaseUrl || !supabaseServiceRoleKey)) {
-  throw new Error('Missing Supabase environment variables. Please check your .env file.');
+  console.warn('[DB: SUPABASE] Missing Supabase environment variables. Falling back to local/mock repositories.');
 }
 
 // 🛡️ MF.2: Use placeholder in browser to prevent crash during bundling/mock-testing
