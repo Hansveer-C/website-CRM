@@ -1,6 +1,11 @@
 import { dispatchBuilderPublicationRequest } from './builder_publication_dispatcher';
 import type { BuilderPublicationRepository } from './builder_publication_repository';
+import type { BuilderPublicationRuntimeResult } from './builder_publication_runtime';
 import type { User } from './types';
+
+export type BuilderPublicationBrowserRuntimeResolver = (
+  user: User | string
+) => Promise<BuilderPublicationRuntimeResult>;
 
 function getInputUrl(input: RequestInfo | URL): string {
   if (typeof input === 'string') return input;
@@ -66,6 +71,16 @@ function internalErrorResponse(): Response {
     code: 'INTERNAL_ERROR',
     error: 'Builder publication request failed'
   }, 500);
+}
+
+function publicationUnavailableResponse(
+  result: Extract<BuilderPublicationRuntimeResult, { success: false }>
+): Response {
+  return jsonResponse({
+    success: false,
+    code: 'PERSISTENCE_ERROR',
+    error: result.failure.message
+  }, 503);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -179,5 +194,27 @@ export async function handleBuilderPublicationBrowserRequest(
     return jsonResponse(result.response.body, result.response.status);
   } catch {
     return identifiable ? internalErrorResponse() : null;
+  }
+}
+
+export async function handleBuilderPublicationRuntimeBrowserRequest(
+  resolveRuntime: BuilderPublicationBrowserRuntimeResolver,
+  user: User | string,
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response | null> {
+  if (!isBuilderPublicationBrowserRequest(input)) return null;
+
+  try {
+    const runtime = await resolveRuntime(user);
+    if (!runtime.success) return publicationUnavailableResponse(runtime);
+    return handleBuilderPublicationBrowserRequest(
+      runtime.persistence.repository,
+      user,
+      input,
+      init
+    );
+  } catch {
+    return internalErrorResponse();
   }
 }

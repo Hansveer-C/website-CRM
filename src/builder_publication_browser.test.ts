@@ -6,6 +6,7 @@ import {
 } from './builder_publication';
 import {
   handleBuilderPublicationBrowserRequest,
+  handleBuilderPublicationRuntimeBrowserRequest,
   isBuilderPublicationBrowserRequest
 } from './builder_publication_browser';
 import type {
@@ -95,6 +96,71 @@ async function readJson(response: Response | null): Promise<Record<string, unkno
   expect(response).not.toBeNull();
   return response!.json() as Promise<Record<string, unknown>>;
 }
+
+describe('runtime-selected browser publication bridge', () => {
+  it('does not resolve persistence for unrelated requests', async () => {
+    const resolveRuntime = vi.fn();
+    const response = await handleBuilderPublicationRuntimeBrowserRequest(
+      resolveRuntime,
+      user,
+      '/api/contacts'
+    );
+    expect(response).toBeNull();
+    expect(resolveRuntime).not.toHaveBeenCalled();
+  });
+
+  it('supplies the selected repository to the existing dispatcher path', async () => {
+    const selectedRepository = makeRepository();
+    const resolveRuntime = vi.fn(async () => ({
+      success: true as const,
+      status: 'supabase' as const,
+      persistence: {
+        mode: 'supabase' as const,
+        repository: selectedRepository
+      }
+    }));
+    const response = await handleBuilderPublicationRuntimeBrowserRequest(
+      resolveRuntime,
+      user,
+      publicationPath
+    );
+    expect(response?.status).toBe(200);
+    expect(resolveRuntime).toHaveBeenCalledWith(user);
+    expect(selectedRepository.getPublicationTarget).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a safe unavailable response without dispatching', async () => {
+    const resolveRuntime = vi.fn(async () => ({
+      success: false as const,
+      status: 'unavailable' as const,
+      failure: {
+        code: 'SUPABASE_NOT_AUTHENTICATED' as const,
+        message: 'Publishing is unavailable because your Supabase session could not be verified.'
+      }
+    }));
+    const response = await handleBuilderPublicationRuntimeBrowserRequest(
+      resolveRuntime,
+      user,
+      publicationPath
+    );
+    expect(response?.status).toBe(503);
+    expect(await readJson(response)).toEqual({
+      success: false,
+      code: 'PERSISTENCE_ERROR',
+      error: 'Publishing is unavailable because your Supabase session could not be verified.'
+    });
+  });
+
+  it('does not expose unexpected resolver errors', async () => {
+    const response = await handleBuilderPublicationRuntimeBrowserRequest(
+      vi.fn(async () => { throw new Error('private auth detail'); }),
+      user,
+      publicationPath
+    );
+    expect(response?.status).toBe(500);
+    expect(JSON.stringify(await readJson(response))).not.toContain('private auth detail');
+  });
+});
 
 describe('browser publication route precheck', () => {
   it.each(['/api/contacts', '/api/pages/page-1/sections', 'https://example.test/dashboard'])(
