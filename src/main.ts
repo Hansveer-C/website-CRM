@@ -97,6 +97,14 @@ import { WebsiteDashboardController, type WebsiteDashboardCoreData } from './web
 import { getWebsiteScopedPages, resolveWebsiteHomepage, type WebsiteDashboardModel, type WebsiteDashboardSummaryInput } from './website_dashboard_model';
 import { createBrowserCallSimulator } from './browser_call_simulation';
 import { isCrmApplicationHost } from './application_host';
+import { ApplicationAuthController, type ApplicationAuthClient, type ApplicationAuthState } from './application_auth';
+import {
+  buildApplicationLoginHash,
+  getLoginReturnRoute,
+  resolveApplicationBootstrap,
+  sanitizeApplicationReturnRoute
+} from './application_bootstrap';
+import { resolveEditorRuntime } from './editor_runtime';
 
 declare global {
   interface Window {
@@ -269,7 +277,6 @@ function createLocalMockWebsiteLead(body: any, userId: string, isRepeat: boolean
     return { contact, opportunity, isRepeat };
 }
 
-hydrateLocalMockCrm((window as any).currentUser || 'system');
 const handleInboundCall = async (payload: { phone: string }) => {
     return fetch('/api/calls/inbound', {
         method: 'POST',
@@ -394,6 +401,7 @@ type BuilderPublicationViteEnvironment = {
     VITE_BUILDER_MEDIA_PERSISTENCE?: string;
     VITE_SUPABASE_URL?: string;
     VITE_SUPABASE_ANON_KEY?: string;
+    VITE_SUPABASE_PUBLISHABLE_KEY?: string;
     PROD?: boolean;
 };
 
@@ -404,7 +412,9 @@ const builderPublicationConfiguredMode = builderPublicationEnvironment
     .VITE_BUILDER_PUBLICATION_PERSISTENCE;
 const builderPublicationSupabaseUrl = builderPublicationEnvironment.VITE_SUPABASE_URL?.trim() || '';
 const builderPublicationSupabaseKey = builderPublicationEnvironment
-    .VITE_SUPABASE_ANON_KEY?.trim() || '';
+    .VITE_SUPABASE_PUBLISHABLE_KEY?.trim()
+    || builderPublicationEnvironment.VITE_SUPABASE_ANON_KEY?.trim()
+    || '';
 const builderPublicationProduction = builderPublicationEnvironment.PROD === true;
 
 function isBrowserSafeBuilderSupabaseKey(value: string): boolean {
@@ -427,6 +437,12 @@ function isBrowserSafeBuilderSupabaseKey(value: string): boolean {
 
 const builderPublicationSupabaseConfigured = /^https:\/\//i.test(builderPublicationSupabaseUrl)
     && isBrowserSafeBuilderSupabaseKey(builderPublicationSupabaseKey);
+const editorRuntime = resolveEditorRuntime({
+    production: builderPublicationProduction,
+    supabaseConfigured: builderPublicationSupabaseConfigured,
+    publicationMode: builderPublicationConfiguredMode,
+    mediaMode: builderPublicationEnvironment.VITE_BUILDER_MEDIA_PERSISTENCE
+});
 let builderPublicationSupabaseClientPromise: Promise<SupabaseClient | null> | undefined;
 
 function getBuilderPublicationSupabaseClient(): Promise<SupabaseClient | null> {
@@ -448,6 +464,38 @@ function getBuilderPublicationSupabaseClient(): Promise<SupabaseClient | null> {
     }
     return builderPublicationSupabaseClientPromise;
 }
+
+function editorUsesSupabase(): boolean {
+    return editorRuntime.success && editorRuntime.mode === 'supabase';
+}
+
+function editorUsesLocalData(): boolean {
+    return editorRuntime.success && editorRuntime.mode === 'local';
+}
+
+function removeLocalFixtureRows(): void {
+    mockContacts.splice(0);
+    mockOpportunities.splice(0);
+    mockActivities.splice(0);
+    mockQuotes.splice(0);
+    mockQuoteItems.splice(0);
+    mockInvoices.splice(0);
+    mockPages.splice(0);
+    mockPageSections.splice(0);
+    mockFunnels.splice(0);
+    mockWebsiteLayouts.splice(0);
+    mockWebsites.splice(0);
+    mockWebsiteRoutes.splice(0);
+}
+
+if (!editorUsesLocalData()) removeLocalFixtureRows();
+
+const applicationAuthController = new ApplicationAuthController({
+    mode: editorRuntime.success ? editorRuntime.mode : 'unavailable',
+    getSupabaseClient: async () => await getBuilderPublicationSupabaseClient() as unknown as ApplicationAuthClient | null,
+    ...(editorRuntime.success && editorRuntime.mode === 'local' ? { localUserId: 'system' } : {})
+});
+let applicationAuthInitialization: Promise<ApplicationAuthState> | null = null;
 
 const builderPublicationRuntimeResolver = createBuilderPublicationRuntimeResolver({
     configuredMode: builderPublicationConfiguredMode,
@@ -607,6 +655,43 @@ async function handleBuilderSectionsBrowserGet(
             }, 403);
         }
 
+        if (editorUsesSupabase()) {
+            const client = await getBuilderPublicationSupabaseClient();
+            if (!client) {
+                return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Sections are unavailable' }, 503);
+            }
+            const authResult = await client.auth.getUser();
+            if (authResult.error || authResult.data.user?.id !== userId) {
+                return builderSectionsJsonResponse({ success: false, code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+            }
+            const result = await client.from('page_sections')
+                .select('id,page_id,type,content,order_index,styles')
+                .eq('page_id', pageId)
+                .eq('user_id', userId)
+                .order('order_index', { ascending: true });
+            if (result.error) {
+                return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Sections are unavailable' }, 503);
+            }
+            const sections = (result.data ?? []).map((row: any): PageSection => {
+                const content = row.content && typeof row.content === 'object' ? structuredClone(row.content) : {};
+                const variant = typeof content.__builder_variant === 'string' ? content.__builder_variant : undefined;
+                if ('__builder_variant' in content) delete content.__builder_variant;
+                return {
+                    id: String(row.id),
+                    page_id: String(row.page_id),
+                    type: String(row.type),
+                    content,
+                    order: Number(row.order_index),
+                    styles: row.styles && typeof row.styles === 'object' ? structuredClone(row.styles) : {},
+                    ...(variant ? { variant } : {})
+                };
+            });
+            return builderSectionsJsonResponse({ success: true, data: orderedBuilderPageSections(sections) }, 200);
+        }
+        if (!editorUsesLocalData()) {
+            return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Sections are unavailable' }, 503);
+        }
+
         const storageKey = `mock_sections_${userId}:${pageId}`;
         let storedValue: string | null;
         try {
@@ -675,7 +760,7 @@ function builderPageSettingsStorageKey(userId: string): string {
 }
 
 function hydrateBuilderPageSettingsPagesFromLocalStorage(userId: string): void {
-    if (builderPublicationSupabaseConfigured || hydratedBuilderPageSettingsUsers.has(userId)) return;
+    if (!editorUsesLocalData() || hydratedBuilderPageSettingsUsers.has(userId)) return;
     hydratedBuilderPageSettingsUsers.add(userId);
     try {
         const raw = window.localStorage.getItem(builderPageSettingsStorageKey(userId));
@@ -761,7 +846,7 @@ async function handleBuilderPageSettingsBrowserPatch(
         entries.map(([key]) => [key, normalizedSettings[key as BuilderPageSettingsField]])
     ) as BuilderPageSettingsPatch;
 
-    if (builderPublicationSupabaseConfigured) {
+    if (editorUsesSupabase()) {
         const client = await getBuilderPublicationSupabaseClient();
         if (!client) return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Page settings are unavailable' }, 503);
         const authResult = await client.auth.getUser();
@@ -782,6 +867,9 @@ async function handleBuilderPageSettingsBrowserPatch(
         return builderSectionsJsonResponse({ success: true, data: result.data }, 200);
     }
 
+    if (!editorUsesLocalData()) {
+        return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Page settings are unavailable' }, 503);
+    }
     const result = await PagesRepo.updatePageSettings(pageId, patch, userId);
     if (!result.success || !result.data) {
         const conflict = result.code === '23505';
@@ -870,13 +958,15 @@ async function handleBuilderNewPageBrowserPost(
     if (!userId) return builderSectionsJsonResponse({ success: false, code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
 
     let client: SupabaseClient | undefined;
-    if (builderPublicationSupabaseConfigured) {
+    if (editorUsesSupabase()) {
         client = await getBuilderPublicationSupabaseClient() ?? undefined;
         if (!client) return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Page creation is unavailable' }, 503);
         const authResult = await client.auth.getUser();
         if (authResult.error || authResult.data.user?.id !== userId) {
             return builderSectionsJsonResponse({ success: false, code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
         }
+    } else if (!editorUsesLocalData()) {
+        return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Page creation is unavailable' }, 503);
     }
     const context = await loadBuilderNewPageServerContext(userId, client);
     if (!context || !context.website) {
@@ -1017,7 +1107,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
         if (url === '/api/leads' && method === 'POST') {
             const body = reqContext.body;
-            const userId = (window as any).currentUser || 'system';
+            const userId = getActingUserId();
             console.log('[API ROUTER] Inbound Lead Submission:', body);
 
             try {
@@ -1076,7 +1166,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         }
 
         if (url === '/api/contacts' && method === 'GET') {
-            const userId = (window as any).currentUser || 'system';
+            const userId = getActingUserId();
             const userContacts = mockContacts.filter(c => c.user_id === userId);
             return new Response(JSON.stringify({ success: true, data: userContacts }), { 
                 status: 200,
@@ -1202,10 +1292,13 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
             } catch {}
             const sections: any[] = body.sections || [];
 
-            const hasSupabase = builderPublicationSupabaseConfigured;
-            const reqUser = (window as any).currentUser || reqContext.user?.id || 'system';
+            const hasSupabase = editorUsesSupabase();
+            const reqUser = getActingUserId() || reqContext.user?.id || '';
 
             if (!hasSupabase) {
+                if (!editorUsesLocalData()) {
+                    return builderSectionsJsonResponse({ success: false, error: 'Section persistence unavailable' }, 503);
+                }
                 const page = mockPages.find(item => item.id === pageId && item.user_id === reqUser);
                 if (!page || sections.some(section => section.page_id !== pageId)) {
                     return builderSectionsJsonResponse({ success: false, error: 'Page not found' }, 404);
@@ -1304,7 +1397,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
         // ── WB.3.4 Bulk SEO Generation ──────────────────────────────────
         if (url === '/api/settings') {
-            const reqUser = (window as any).currentUser || 'system';
+            const reqUser = getActingUserId();
             const userSite = getActiveBuilderWebsite()
                 || mockWebsites.find(website => website.user_id === reqUser);
             if (!userSite || userSite.user_id !== reqUser) {
@@ -1320,7 +1413,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
             ]);
             const client = await getBuilderPublicationSupabaseClient();
 
-            if (builderPublicationSupabaseConfigured) {
+            if (editorUsesSupabase()) {
                 if (!client) return builderSectionsJsonResponse({ success: false, error: 'Settings unavailable' }, 503);
                 const auth = await client.auth.getUser();
                 if (auth.error || auth.data.user?.id !== reqUser) {
@@ -1354,6 +1447,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                 }
             }
 
+            if (!editorUsesLocalData()) {
+                return builderSectionsJsonResponse({ success: false, error: 'Settings unavailable' }, 503);
+            }
             if (method === 'GET') {
                 return builderSectionsJsonResponse({ success: true, data: structuredClone(mockWebsiteSettings) }, 200);
             } else if (method === 'POST') {
@@ -1442,7 +1538,7 @@ mockContacts.forEach(c => {
 
 // State Management
 let currentView: string = 'dashboard';
-(window as any).currentUser = 'system'; // 'user_a' or 'user_b'
+(window as any).currentUser = undefined;
 
 // Filter & Selection State
 let clientSearchQuery: string = '';
@@ -1581,8 +1677,75 @@ let compCategoryFilter: string = 'all';
 let contactTimelineState: any[] = [];
 let lastContactCount = mockContacts.length;
 
-(window as any).currentUser = 'system';
+function getActingUserId(): string {
+  const value = (window as any).currentUser;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function clearProtectedRuntimeData(): void {
+  removeLocalFixtureRows();
+  mockAutomationLogs.splice(0);
+  contactTimelineState = [];
+  selectedContactId = null;
+  activeBuilderWebsiteId = null;
+  activeDashboardWebsiteId = null;
+  builderPageId = '';
+  builderHistoryController = null;
+  builderPageSettingsController = null;
+  builderNewPageController = null;
+  builderNewPageControllerIdentity = '';
+  builderMediaController?.dispose();
+  builderMediaController = null;
+  builderMediaControllerIdentity = '';
+  websiteDashboardController?.invalidate();
+  websiteDashboardController = null;
+  lastContactCount = 0;
+}
+
+function applyApplicationAuthState(state: ApplicationAuthState): void {
+  const previousUserId = getActingUserId();
+  if (state.status !== 'authenticated') {
+    (window as any).currentUser = undefined;
+    if (previousUserId || editorUsesSupabase()) clearProtectedRuntimeData();
+    return;
+  }
+  if (previousUserId && previousUserId !== state.user.id) clearProtectedRuntimeData();
+  (window as any).currentUser = state.user.id;
+  if (state.source === 'supabase' && previousUserId !== state.user.id) {
+    clearProtectedRuntimeData();
+    (window as any).currentUser = state.user.id;
+  }
+  if (state.source === 'local' && previousUserId !== state.user.id) {
+    hydrateLocalMockCrm(state.user.id);
+    PagesRepo.hydrateLocalPages(state.user.id);
+    hydrateBuilderPageSettingsPagesFromLocalStorage(state.user.id);
+    lastContactCount = mockContacts.length;
+  }
+}
+
+async function ensureApplicationAuth(): Promise<ApplicationAuthState> {
+  if (!applicationAuthInitialization) {
+    applicationAuthController.onChange(state => {
+      applicationAuthInitialization = Promise.resolve(state);
+      const previousUserId = getActingUserId();
+      applyApplicationAuthState(state);
+      if (
+        previousUserId
+        && state.status !== 'authenticated'
+        && isCrmApplicationHost(window.location.hostname)
+      ) {
+        void bootRouter();
+      }
+    });
+    applicationAuthInitialization = applicationAuthController.initialize();
+  }
+  const state = await applicationAuthInitialization;
+  applyApplicationAuthState(state);
+  return state;
+}
+
 (window as any).switchUser = async (userId: string) => {
+  if (!editorUsesLocalData()) return;
   if (builderSetupController?.status === 'applying') return;
   builderSetupWizardOpen = false;
   builderSetupDraft = null;
@@ -1746,7 +1909,7 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}" style="display: flex; justify-content: space-between; align-items: center;">
             <span>Clients & Leads</span>
             ${(() => {
-              const userId = (window as any).currentUser || 'system';
+              const userId = getActingUserId();
               const newCount = mockContacts.filter(c => c.user_id === userId && isNew(c.created_at)).length;
               return newCount > 0 ? `<span class="badge" style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 800;">${newCount}</span>` : '';
             })()}
@@ -1773,6 +1936,7 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('qa-tools')" class="${activeView === 'qa-tools' ? 'active' : ''}">QA Tools</li>
           <li>Payments</li>
           <li>Settings</li>
+          <li><button type="button" class="sidebar-sign-out" onclick="window.signOutApplication()">Sign out</button></li>
         </ul>
       </nav>
     </div>
@@ -1782,7 +1946,7 @@ function renderSidebar(activeView: string) {
 function renderDashboard() {
   const now = new Date();
 
-  const userId = (window as any).currentUser || 'system';
+  const userId = getActingUserId();
 
   // 🏁 WB.6.1: Check for Onboarding
   if (!window.localStorage.getItem('onboarding_seen')) {
@@ -3159,7 +3323,7 @@ function hydrateBuilderSectionsFromLocalStorage(pageId: string): void {
   if (!isBrowser || hasSupabase || hydratedBuilderSectionPageIds.has(pageId)) return;
   hydratedBuilderSectionPageIds.add(pageId);
 
-  const userId = (window as any).currentUser || 'system';
+  const userId = getActingUserId();
   const storageKey = `mock_sections_${userId}:${pageId}`;
   const cached = window.localStorage.getItem(storageKey);
   if (!cached) return;
@@ -3182,7 +3346,7 @@ function hydrateBuilderSectionsFromLocalStorage(pageId: string): void {
 }
 
 function getBuilderContextStorageKey(): string {
-  const userId = (window as any).currentUser || 'system';
+  const userId = getActingUserId();
   return `mock_builder_context_${userId}`;
 }
 
@@ -3728,7 +3892,7 @@ type BuilderWebsitePageEntry = {
 };
 
 function getActiveBuilderWebsite(): Website | undefined {
-  const userId = (window as any).currentUser || 'system';
+  const userId = getActingUserId();
   if (activeBuilderWebsiteId) {
     return mockWebsites.find(website => website.id === activeBuilderWebsiteId && website.user_id === userId);
   }
@@ -4595,12 +4759,12 @@ window.addEventListener('keydown', event => {
 
 function _renderBuilder() {
   hydrateBuilderContext();
-  if (!builderPublicationSupabaseConfigured) {
-    PagesRepo.hydrateLocalPages((window as any).currentUser || 'system');
+  if (editorUsesLocalData()) {
+    PagesRepo.hydrateLocalPages(getActingUserId());
   }
-  hydrateBuilderPageSettingsPagesFromLocalStorage((window as any).currentUser || 'system');
+  hydrateBuilderPageSettingsPagesFromLocalStorage(getActingUserId());
 
-  const userId = (window as any).currentUser || 'system';
+  const userId = getActingUserId();
   const activeWebsite = getActiveBuilderWebsite();
   const page = mockPages.find(p => p.id === builderPageId && p.user_id === userId);
   const routeResolution = activeWebsite && page
@@ -6916,7 +7080,7 @@ function renderReports() {
 }
 
 (window as any).showAttachToWebsiteModal = (funnelId: string) => {
-    const userId = (window as any).currentUser || 'system';
+    const userId = getActingUserId();
     const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
     const existingRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
     
@@ -7076,7 +7240,7 @@ function renderReports() {
     // 1. Create Funnel
     mockFunnels.push({
         id: funnelId,
-        user_id: (window as any).currentUser || 'system',
+        user_id: getActingUserId(),
         name: name,
         status: 'published',
         created_at: new Date().toISOString(),
@@ -7086,7 +7250,7 @@ function renderReports() {
     // 2. Create Page
     const newPage = {
         id: pageId,
-        user_id: (window as any).currentUser || 'system',
+        user_id: getActingUserId(),
         funnel_id: funnelId,
         name: name,
         slug: slug,
@@ -7573,7 +7737,7 @@ function renderWebsiteSettings() {
 }
 
 function renderWebsiteNavigation() {
-  const userId = (window as any).currentUser || 'system';
+  const userId = getActingUserId();
   const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
   const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
   
@@ -7640,7 +7804,7 @@ function renderWebsiteNavigation() {
 }
 
 (window as any).addNavItem = () => {
-    const userId = (window as any).currentUser || 'system';
+    const userId = getActingUserId();
     const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
     const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
     
@@ -7650,7 +7814,7 @@ function renderWebsiteNavigation() {
 };
 
 (window as any).updateNavItem = (index: number, field: string, value: any) => {
-    const userId = (window as any).currentUser || 'system';
+    const userId = getActingUserId();
     const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
     const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
     
@@ -7659,7 +7823,7 @@ function renderWebsiteNavigation() {
 };
 
 (window as any).reorderNavItem = (index: number, direction: number) => {
-    const userId = (window as any).currentUser || 'system';
+    const userId = getActingUserId();
     const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
     const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
     
@@ -7675,7 +7839,7 @@ function renderWebsiteNavigation() {
 };
 
 (window as any).deleteNavItem = (index: number) => {
-    const userId = (window as any).currentUser || 'system';
+    const userId = getActingUserId();
     const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
     const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
     
@@ -7690,7 +7854,7 @@ function renderWebsiteNavigation() {
     }, 600);
 };
 function renderWebsiteStructure() {
-  const userId = (window as any).currentUser || 'system';
+  const userId = getActingUserId();
   const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
   const routes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
   
@@ -8059,7 +8223,7 @@ async function handleLeadCaptureSubmission(e: Event) {
 }
 
 function renderOpportunities() {
-  const userId = (window as any).currentUser || 'system';
+  const userId = getActingUserId();
   const defaultPipeline = mockPipelines[0];
   const stages = defaultPipeline.stages;
 
@@ -8503,9 +8667,92 @@ function renderSkeleton(type: 'pages' | 'templates' | 'builder' | 'generic') {
 
 
 function dashboardUsesSupabase(): boolean {
-  const mode = builderPublicationConfiguredMode?.trim().toLowerCase() || 'auto';
-  return mode === 'supabase' || (mode === 'auto' && builderPublicationProduction);
+  return editorUsesSupabase();
 }
+
+function renderApplicationUnavailable(): void {
+  currentView = 'login';
+  app.innerHTML = `
+    <main class="application-auth-shell">
+      <section class="application-auth-card" role="alert">
+        <div class="application-auth-brand">PressurePro</div>
+        <h1>The application is temporarily unavailable.</h1>
+        <p>We could not start the secure sign-in service. Please try again later.</p>
+        <button type="button" class="btn-primary" onclick="window.retryApplicationBootstrap()">Try again</button>
+      </section>
+    </main>
+  `;
+}
+
+function renderApplicationLogin(returnTo?: string, message?: string): void {
+  currentView = 'login';
+  const safeReturnTo = sanitizeApplicationReturnRoute(returnTo);
+  app.innerHTML = `
+    <main class="application-auth-shell">
+      <section class="application-auth-card" aria-labelledby="application-login-heading">
+        <div class="application-auth-brand">PressurePro</div>
+        <h1 id="application-login-heading">Sign in to your CRM</h1>
+        <p>Use your authorized account to manage customers and websites.</p>
+        ${message ? `<div class="application-auth-error" role="alert">${escapeBuilderInspectorHtml(message)}</div>` : ''}
+        <form id="application-login-form" novalidate>
+          <label for="application-login-email">Email</label>
+          <input id="application-login-email" name="email" type="email" autocomplete="username" required>
+          <label for="application-login-password">Password</label>
+          <input id="application-login-password" name="password" type="password" autocomplete="current-password" required>
+          <button id="application-login-submit" type="submit" class="btn-primary">Sign in</button>
+        </form>
+      </section>
+    </main>
+  `;
+  const form = document.querySelector<HTMLFormElement>('#application-login-form');
+  form?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const emailInput = document.querySelector<HTMLInputElement>('#application-login-email');
+    const passwordInput = document.querySelector<HTMLInputElement>('#application-login-password');
+    const submit = document.querySelector<HTMLButtonElement>('#application-login-submit');
+    const email = emailInput?.value.trim() ?? '';
+    const password = passwordInput?.value ?? '';
+    if (!email || !password) {
+      renderApplicationLogin(safeReturnTo, 'Enter your email and password.');
+      return;
+    }
+    if (submit) {
+      submit.disabled = true;
+      submit.textContent = 'Signing in…';
+    }
+    const result = await applicationAuthController.signIn(email, password);
+    passwordInput!.value = '';
+    if (!result.success) {
+      renderApplicationLogin(
+        safeReturnTo,
+        result.reason === 'invalid-credentials'
+          ? 'The email or password is incorrect.'
+          : 'Sign-in is temporarily unavailable. Please try again.'
+      );
+      return;
+    }
+    applyApplicationAuthState(result.state);
+    window.history.replaceState({}, '', safeReturnTo ?? '#/dashboard');
+    await bootRouter();
+  });
+}
+
+(window as any).retryApplicationBootstrap = async () => {
+  applicationAuthInitialization = null;
+  await bootRouter();
+};
+
+(window as any).signOutApplication = async () => {
+  const success = await applicationAuthController.signOut();
+  if (!success) {
+    (window as any).showToast?.('Sign out is temporarily unavailable.', 'error');
+    return;
+  }
+  clearProtectedRuntimeData();
+  (window as any).currentUser = undefined;
+  window.history.replaceState({}, '', '#/login');
+  renderApplicationLogin();
+};
 
 function replaceOwnedDashboardRows<T extends { user_id: string }>(target: T[], rows: readonly T[], userId: string): void {
   for (let index = target.length - 1; index >= 0; index -= 1) if (target[index].user_id === userId) target.splice(index, 1);
@@ -8525,7 +8772,8 @@ async function loadWebsiteDashboardCore(request: { actingUserId: string }): Prom
   if (auth.error || auth.data.user?.id !== userId) throw new Error('UNAVAILABLE');
   const websitesResult = await client.from('websites').select('*').eq('user_id', userId).order('created_at', { ascending: true });
   if (websitesResult.error) throw new Error('UNAVAILABLE');
-  const websites = (websitesResult.data ?? []) as Website[];
+  const websites = ((websitesResult.data ?? []) as Website[])
+    .filter(item => typeof item.id === 'string' && item.id.length > 0 && item.user_id === userId);
   const websiteIds = websites.map(item => item.id);
   const [routesResult, funnelsResult, pagesResult] = await Promise.all([
     websiteIds.length ? client.from('website_routes').select('*').in('website_id', websiteIds).order('path', { ascending: true }) : Promise.resolve({ data: [], error: null }),
@@ -8533,13 +8781,16 @@ async function loadWebsiteDashboardCore(request: { actingUserId: string }): Prom
     client.from('pages').select('*').eq('user_id', userId).order('created_at', { ascending: true })
   ]);
   if (routesResult.error || funnelsResult.error || pagesResult.error) throw new Error('UNAVAILABLE');
-  const routes = (routesResult.data ?? []) as WebsiteRoute[];
-  const funnels = (funnelsResult.data ?? []) as Funnel[];
-  const pages = (pagesResult.data ?? []) as Page[];
+  const ownedWebsiteIds = new Set(websites.map(item => item.id));
+  const routes = ((routesResult.data ?? []) as WebsiteRoute[])
+    .filter(item => typeof item.id === 'string' && ownedWebsiteIds.has(item.website_id));
+  const funnels = ((funnelsResult.data ?? []) as Funnel[])
+    .filter(item => typeof item.id === 'string' && item.user_id === userId);
+  const pages = ((pagesResult.data ?? []) as Page[])
+    .filter(item => typeof item.id === 'string' && item.user_id === userId);
   replaceOwnedDashboardRows(mockWebsites, websites, userId);
   replaceOwnedDashboardRows(mockFunnels, funnels, userId);
   replaceOwnedDashboardRows(mockPages, pages, userId);
-  const ownedWebsiteIds = new Set(websites.map(item => item.id));
   for (let index = mockWebsiteRoutes.length - 1; index >= 0; index -= 1) if (ownedWebsiteIds.has(mockWebsiteRoutes[index].website_id)) mockWebsiteRoutes.splice(index, 1);
   mockWebsiteRoutes.push(...routes.map(item => ({ ...item })));
   return { websites, routes, funnels, pages };
@@ -8648,9 +8899,13 @@ async function renderWebsiteDashboard(force = false) {
     app.innerHTML = `${renderSidebar('website-dashboard')}<main class="main-content website-dashboard"><header class="view-header"><h1>Website Dashboard</h1></header><section class="card website-dashboard-state"><h2>Choose a website</h2><label for="dashboard-website-select">Website</label><select id="dashboard-website-select" onchange="window.selectDashboardWebsite(this.value)"><option value="">Select a website</option>${state.resolution.ownedWebsites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}">${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></section></main>`;
     return;
   }
+  if (state.status === 'error') {
+    app.innerHTML = `${renderSidebar('website-dashboard')}<main class="main-content website-dashboard"><header class="view-header"><h1>Website Dashboard</h1></header><section class="card website-dashboard-state" role="alert"><h2>Website information could not be loaded.</h2><p>Please try again.</p><button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Retry</button></section></main>`;
+    return;
+  }
   if (state.status === 'empty' || state.status === 'unavailable') {
     const empty = state.status === 'empty';
-    app.innerHTML = `${renderSidebar('website-dashboard')}<main class="main-content website-dashboard"><header class="view-header"><h1>Website Dashboard</h1></header><section class="card website-dashboard-state" role="${empty ? 'status' : 'alert'}"><h2>${empty ? 'No website is connected' : 'This website is not available.'}</h2><p>${empty ? 'Create or connect a website through the existing website workflow.' : 'Check your access or choose another owned website.'}</p><button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Retry</button></section></main>`;
+    app.innerHTML = `${renderSidebar('website-dashboard')}<main class="main-content website-dashboard"><header class="view-header"><h1>Website Dashboard</h1></header><section class="card website-dashboard-state" role="${empty ? 'status' : 'alert'}"><h2>${empty ? 'No website has been set up for this account yet.' : 'This website is not available.'}</h2><p>${empty ? 'Use the existing website setup workflow when you are ready.' : 'Check your access or choose another owned website.'}</p><button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Retry</button></section></main>`;
     return;
   }
   if (state.status !== 'ready' && state.status !== 'partial') return;
@@ -8674,7 +8929,7 @@ async function renderWebsiteDashboard(force = false) {
 function renderFunnels(mode: 'website' | 'marketing' = 'website') {
   currentView = 'funnels';
   (window as any).funnelMode = mode;
-  const userId = (window as any).currentUser || 'system';
+  const userId = getActingUserId();
   const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
   
   const siteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
@@ -9148,11 +9403,64 @@ async function finishBuilderInitialAction(context: BuilderContext | null, prepar
   }
 }
 
+const WEBSITE_DATA_VIEWS = new Set([
+  'funnels', 'marketing-funnels', 'funnel-detail', 'pages', 'page-sections',
+  'pages-seo', 'website-settings', 'website-navigation', 'seo-pages', 'website-structure'
+]);
+
+function renderWebsiteRepositoryUnavailable(view: string): void {
+  currentView = view;
+  app.innerHTML = `${renderSidebar(view)}<main class="main-content"><header class="view-header"><h1>Website information could not be loaded.</h1></header><section class="card website-dashboard-state" role="alert"><p>Please try again.</p><button type="button" class="btn-outline" onclick="window.navigateTo('${escapeBuilderInspectorHtml(view)}')">Retry</button></section></main>`;
+}
+
 (window as any).navigateTo = async (view: string, id?: string, context?: any) => {
   publicSiteRenderSequence += 1;
   if (view !== 'site') {
     publicSiteAbortController?.abort();
     publicSiteAbortController = null;
+  }
+  if (view !== 'site') {
+    const authState = await ensureApplicationAuth();
+    if (authState.status === 'initializing' || authState.status === 'unavailable') {
+      renderApplicationUnavailable();
+      return;
+    }
+    if (view === 'login') {
+      const returnTo = getLoginReturnRoute(window.location.hash);
+      if (authState.status === 'authenticated') {
+        window.history.replaceState({}, '', returnTo ?? '#/dashboard');
+        await bootRouter();
+      } else {
+        const loginHash = buildApplicationLoginHash(returnTo);
+        if (window.location.hash !== loginHash) window.history.replaceState({}, '', loginHash);
+        renderApplicationLogin(returnTo);
+      }
+      return;
+    }
+    if (authState.status === 'unauthenticated') {
+      const currentHash = sanitizeApplicationReturnRoute(window.location.hash);
+      const requestedHash = currentHash && currentHash.slice(2).split(/[/?]/, 1)[0] === view
+        ? currentHash
+        : sanitizeApplicationReturnRoute(id ? `#/${view}/${encodeURIComponent(id)}` : `#/${view}`);
+      const loginHash = buildApplicationLoginHash(requestedHash);
+      window.history.replaceState({}, '', loginHash);
+      renderApplicationLogin(requestedHash);
+      return;
+    }
+    if (editorUsesSupabase() && WEBSITE_DATA_VIEWS.has(view)) {
+      try {
+        const core = await loadWebsiteDashboardCore({ actingUserId: authState.user.id });
+        if (core.websites.length === 0) {
+          window.history.replaceState({}, '', '#/website-dashboard');
+          currentView = 'website-dashboard';
+          await renderWebsiteDashboard(true);
+          return;
+        }
+      } catch {
+        renderWebsiteRepositoryUnavailable(view);
+        return;
+      }
+    }
   }
   const previousView = currentView;
   currentView = view;
@@ -9615,7 +9923,7 @@ async function renderContactDetail(contactId: string) {
   if (note) {
     mockActivities.push({
       id: 'act-' + Date.now(),
-      user_id: (window as any).currentUser || 'system',
+      user_id: getActingUserId(),
       contact_id: contactId,
       type: 'call',
       description: note,
@@ -9631,7 +9939,7 @@ async function renderContactDetail(contactId: string) {
   if (note) {
     mockActivities.push({
       id: 'act-' + Date.now(),
-      user_id: (window as any).currentUser || 'system',
+      user_id: getActingUserId(),
       contact_id: contactId,
       type: 'note',
       description: note,
@@ -9732,7 +10040,7 @@ async function renderContactDetail(contactId: string) {
 
     mockActivities.push({
       id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
-      user_id: (window as any).currentUser || 'system',
+      user_id: getActingUserId(),
       contact_id: invoice.contact_id,
       type: 'note',
       description: `Invoice ${invoice.id} marked as Paid.`,
@@ -9770,7 +10078,7 @@ async function renderContactDetail(contactId: string) {
 
     mockActivities.push({
       id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
-      user_id: (window as any).currentUser || 'system',
+      user_id: getActingUserId(),
       contact_id: quote.contact_id,
       type: 'note',
       description: `Invoice ${invoiceId} created from Quote Q-${quote.id}`,
@@ -9796,7 +10104,7 @@ async function renderContactDetail(contactId: string) {
 
     mockActivities.push({
       id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
-      user_id: (window as any).currentUser || 'system',
+      user_id: getActingUserId(),
       contact_id: quote.contact_id,
       type: 'note',
       description: `Quote Q-${quote.id} approved! Opportunity marked as Won.`,
@@ -9822,7 +10130,7 @@ async function renderContactDetail(contactId: string) {
 
       mockActivities.push({
         id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
-      user_id: (window as any).currentUser || 'system',
+      user_id: getActingUserId(),
         contact_id: quote.contact_id,
         type: 'note',
         description: `Invoice ${invoiceId} automatically created from Quote Q-${quote.id}`,
@@ -9847,7 +10155,7 @@ async function renderContactDetail(contactId: string) {
 
     mockActivities.push({
       id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
-      user_id: (window as any).currentUser || 'system',
+      user_id: getActingUserId(),
       contact_id: quote.contact_id,
       type: 'note',
       description: `Quote Q-${quote.id} was rejected. Opportunity marked as Lost.`,
@@ -9869,7 +10177,7 @@ async function renderContactDetail(contactId: string) {
     // Log Activity
     mockActivities.push({
       id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
-      user_id: (window as any).currentUser || 'system',
+      user_id: getActingUserId(),
       contact_id: quote.contact_id,
       type: 'note',
       description: `Quote Q-${quote.id} sent to customer`,
@@ -10155,53 +10463,62 @@ async function bootRouter() {
   const crmApplicationHost = isCrmApplicationHost(host);
   const targetPath = resolveWebsitePathFromBrowserPath(rawPath);
   const isPreviewRoute = rawPath === '/preview' || rawPath.startsWith('/preview/');
-  const isActualPublicRequest = targetPath !== null || (
-      (rawPath === '/' || rawPath === '/index.html' || rawPath === '')
-      && !crmApplicationHost
-    );
-  const edgePublicRequest = !isPreviewRoute
-    && isActualPublicRequest
-    && (
-      publicSiteEnvironment.PROD === true
-      || (publicSiteRuntime.success && publicSiteRuntime.value.source === 'edge')
-    );
-
-  // Load website settings on boot to ensure persistence
-  if (!edgePublicRequest) {
-    try {
-      const settingsRes = await fetch('/api/settings').then(r => r.json());
-      if (settingsRes.success && settingsRes.data) {
-        Object.assign(mockWebsiteSettings, settingsRes.data);
-      }
-    } catch (err) {
-      console.warn('Failed to load settings at boot:', err);
-    }
+  // Customer-facing /site routes and customer domains never initialize CRM auth.
+  if (targetPath && !isPreviewRoute) {
+    await renderConfiguredPublicSite(targetPath);
+    return;
+  }
+  if ((rawPath === '/' || rawPath === '/index.html' || rawPath === '') && !crmApplicationHost) {
+    await renderConfiguredPublicSite('/');
+    return;
+  }
+  if (!crmApplicationHost) {
+    render404();
+    return;
   }
 
-  // 1. Phase W6.9: Resolve Public Website Route first (Real URLs)
-  if (targetPath) {
-    if (!isPreviewRoute) {
-      await renderConfiguredPublicSite(targetPath);
-      return;
-    }
+  const authState = await ensureApplicationAuth();
+  const decision = resolveApplicationBootstrap({
+    pathname: rawPath,
+    hash: window.location.hash,
+    authState
+  });
+  if (decision.action === 'unavailable') {
+    renderApplicationUnavailable();
+    return;
+  }
+  if (decision.action === 'login') {
+    const loginHash = buildApplicationLoginHash(decision.returnTo);
+    if (window.location.hash !== loginHash) window.history.replaceState({}, '', loginHash);
+    renderApplicationLogin(decision.returnTo);
+    return;
+  }
+  if (decision.action !== 'authenticated') return;
+
+  if (isPreviewRoute && targetPath) {
     const result = await resolveWebsiteRequest(host, targetPath);
     if (result && result.funnel_id) {
-       const isPreview = isPreviewRoute;
        const resolvedRoutePath = normalizePreviewPath(result.route?.path || '/');
        const requestedRoutePath = normalizePreviewPath(targetPath);
-       if (isPreview && resolvedRoutePath !== requestedRoutePath) {
+       if (resolvedRoutePath !== requestedRoutePath) {
          render404('Preview target not found.');
          return;
        }
        const mergedContext = createResolvedWebsiteRenderContext(result, targetPath);
-       await renderSitePage(result.funnel_id, mergedContext, isPreview);
+       await renderSitePage(result.funnel_id, mergedContext, true);
        return;
     }
+    render404('Preview target not found.');
+    return;
   }
 
-  // 2. Check for Admin Hash Routes (Standard CRM)
-  if (window.location.hash) {
-     const hashContent = window.location.hash.slice(2);
+  if (window.location.hash !== decision.hash) {
+    window.history.replaceState({}, '', decision.hash);
+  }
+
+  // Authenticated CRM hash routes.
+  if (decision.hash) {
+     const hashContent = decision.hash.slice(2);
      if (hashContent) {
        const [routePart, query = ''] = hashContent.split('?');
        const parts = routePart.split('/');
@@ -10212,20 +10529,7 @@ async function bootRouter() {
        return;
      }
   }
-
-  // 3. Fallback Logic
-  if (rawPath === '/' || rawPath === '/index.html' || rawPath === '') {
-    // The CRM's local and Vercel deployment hosts must open the application shell.
-    // Customer custom domains continue through the public-site runtime below.
-    if (crmApplicationHost) {
-       (window as any).navigateTo('dashboard');
-    } else {
-       // On real domains, ROOT defaults to the website homepage
-       await renderConfiguredPublicSite('/');
-    }
-  } else {
-    render404();
-  }
+  (window as any).navigateTo('dashboard');
 }
 
 bootRouter();

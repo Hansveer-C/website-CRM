@@ -43,6 +43,8 @@ describe('WebsiteDashboardController', () => {
 
   it('fails closed when core loading fails', async () => {
     const controller = new WebsiteDashboardController({ loadCore: async () => { throw new Error('database detail'); } });
-    expect((await controller.load({ actingUserId: 'u1' })).status).toBe('unavailable');
+    const state = await controller.load({ actingUserId: 'u1' });
+    expect(state).toEqual({ status: 'error', reason: 'repository-failure' });
+    expect(JSON.stringify(state)).not.toContain('database detail');
   });
 });
