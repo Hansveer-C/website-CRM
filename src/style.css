@@ -4770,6 +4770,7 @@ body.pb-publish-modal-open {
   box-sizing: border-box;
   background: #f1f5f9;
 }
+.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 .application-auth-card {
   width: min(100%, 420px);
   padding: 36px;
@@ -4788,4 +4789,10 @@ body.pb-publish-modal-open {
 .application-auth-card input:focus-visible { outline: 3px solid #bfdbfe; border-color: #2563eb; }
 .application-auth-card button { min-height: 44px; margin-top: 10px; }
 .application-auth-error { margin-bottom: 14px; padding: 11px 12px; border-radius: 8px; background: #fef2f2; color: #b91c1c; font-size: .85rem; }
+.application-auth-guidance { margin: 2px 0 0 !important; color: #64748b; font-size: .78rem; }
+.application-auth-switch { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 18px; color: #64748b; font-size: .85rem; }
+.application-auth-link { min-height: auto !important; margin: 0 !important; padding: 4px; border: 0; background: transparent; color: #2563eb; font: inherit; font-weight: 750; cursor: pointer; }
+.application-auth-link:hover { text-decoration: underline; }
+.application-auth-card button:focus-visible { outline: 3px solid #bfdbfe; outline-offset: 2px; }
+.application-auth-card button:disabled { opacity: .6; cursor: wait; }
 .sidebar-sign-out { width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }

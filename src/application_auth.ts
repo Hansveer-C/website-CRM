@@ -17,6 +17,30 @@ export interface ApplicationAuthError {
   status?: number;
 }
 
+export interface ApplicationSignupInput {
+  email: string;
+  password: string;
+  confirmPassword: string;
+  emailRedirectTo: string;
+}
+
+export type ApplicationSignupValidationField = 'email' | 'password' | 'confirmPassword' | 'redirect';
+
+export interface ApplicationSignupValidationIssue {
+  field: ApplicationSignupValidationField;
+  message: string;
+}
+
+export type ApplicationSignupResult =
+  | { success: true; status: 'awaiting-confirmation' }
+  | {
+      success: true;
+      status: 'authenticated';
+      state: Extract<ApplicationAuthState, { status: 'authenticated' }>;
+    }
+  | { success: false; reason: 'invalid-input'; issues: ApplicationSignupValidationIssue[] }
+  | { success: false; reason: 'rejected' | 'unavailable' | 'in-progress' };
+
 export interface ApplicationAuthClient {
   auth: {
     getUser(): Promise<{
@@ -25,6 +49,17 @@ export interface ApplicationAuthClient {
     }>;
     signInWithPassword(credentials: { email: string; password: string }): Promise<{
       data: { user: { id: string; email?: string | null } | null };
+      error: ApplicationAuthError | null;
+    }>;
+    signUp(credentials: {
+      email: string;
+      password: string;
+      options: { emailRedirectTo: string };
+    }): Promise<{
+      data: {
+        user: { id: string; email?: string | null } | null;
+        session: { user: { id: string; email?: string | null } } | null;
+      };
       error: ApplicationAuthError | null;
     }>;
     signOut(): Promise<{ error: ApplicationAuthError | null }>;
@@ -44,6 +79,62 @@ export interface ApplicationAuthControllerOptions {
 export type ApplicationLoginResult =
   | { success: true; state: Extract<ApplicationAuthState, { status: 'authenticated' }> }
   | { success: false; reason: 'invalid-credentials' | 'unavailable' };
+
+const APPLICATION_EMAIL_MAX_LENGTH = 254;
+const APPLICATION_PASSWORD_MIN_LENGTH = 6;
+const APPLICATION_PASSWORD_MAX_LENGTH = 128;
+const PRACTICAL_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export function normalizeApplicationSignupEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+export function validateApplicationSignupInput(
+  input: ApplicationSignupInput
+): ApplicationSignupValidationIssue[] {
+  const issues: ApplicationSignupValidationIssue[] = [];
+  const email = normalizeApplicationSignupEmail(input.email);
+  if (!email) {
+    issues.push({ field: 'email', message: 'Enter your email address.' });
+  } else if (email.length > APPLICATION_EMAIL_MAX_LENGTH || !PRACTICAL_EMAIL_PATTERN.test(email)) {
+    issues.push({ field: 'email', message: 'Enter a valid email address.' });
+  }
+  if (!input.password) {
+    issues.push({ field: 'password', message: 'Enter a password.' });
+  } else if (input.password.length < APPLICATION_PASSWORD_MIN_LENGTH) {
+    issues.push({ field: 'password', message: 'Use at least 6 characters.' });
+  } else if (input.password.length > APPLICATION_PASSWORD_MAX_LENGTH) {
+    issues.push({ field: 'password', message: 'Use no more than 128 characters.' });
+  }
+  if (input.confirmPassword !== input.password) {
+    issues.push({ field: 'confirmPassword', message: 'Passwords do not match.' });
+  }
+  try {
+    const redirect = new URL(input.emailRedirectTo);
+    const safeProtocol = redirect.protocol === 'https:'
+      || (redirect.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(redirect.hostname));
+    const safeHost = redirect.hostname.endsWith('.vercel.app')
+      || ['localhost', '127.0.0.1', '[::1]'].includes(redirect.hostname);
+    if (!safeProtocol || !safeHost || redirect.pathname !== '/' || redirect.hash !== '#/login') {
+      issues.push({ field: 'redirect', message: 'Account creation is unavailable on this host.' });
+    }
+  } catch {
+    issues.push({ field: 'redirect', message: 'Account creation is unavailable on this host.' });
+  }
+  return issues;
+}
+
+export function createApplicationSignupRedirect(origin: string): string | undefined {
+  try {
+    const url = new URL(origin);
+    const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    const safeProtocol = url.protocol === 'https:' || (url.protocol === 'http:' && localHost);
+    if (!safeProtocol || (!localHost && !url.hostname.endsWith('.vercel.app'))) return undefined;
+    return new URL('/#/login', url.origin).toString();
+  } catch {
+    return undefined;
+  }
+}
 
 function toApplicationUser(user: { id: string; email?: string | null }): ApplicationAuthUser {
   return {
@@ -67,6 +158,7 @@ export class ApplicationAuthController {
   private client: ApplicationAuthClient | null = null;
   private unsubscribe: (() => void) | null = null;
   private listener: ((state: ApplicationAuthState) => void) | null = null;
+  private signupInFlight = false;
 
   constructor(private readonly options: ApplicationAuthControllerOptions) {}
 
@@ -119,6 +211,41 @@ export class ApplicationAuthController {
       return { success: true, state };
     } catch {
       return { success: false, reason: 'unavailable' };
+    }
+  }
+
+  async signUp(input: ApplicationSignupInput): Promise<ApplicationSignupResult> {
+    const issues = validateApplicationSignupInput(input);
+    if (issues.length > 0) return { success: false, reason: 'invalid-input', issues };
+    if (this.signupInFlight) return { success: false, reason: 'in-progress' };
+    if (this.options.mode !== 'supabase' || !this.client) {
+      return { success: false, reason: 'unavailable' };
+    }
+    this.signupInFlight = true;
+    try {
+      const result = await this.client.auth.signUp({
+        email: normalizeApplicationSignupEmail(input.email),
+        password: input.password,
+        options: { emailRedirectTo: input.emailRedirectTo }
+      });
+      if (result.error || !result.data.user?.id) {
+        this.setState({ status: 'unauthenticated' });
+        return { success: false, reason: result.error?.status && result.error.status >= 500 ? 'unavailable' : 'rejected' };
+      }
+      if (!result.data.session?.user?.id) {
+        this.setState({ status: 'unauthenticated' });
+        return { success: true, status: 'awaiting-confirmation' };
+      }
+      const state = this.setState({
+        status: 'authenticated',
+        user: toApplicationUser(result.data.session.user),
+        source: 'supabase'
+      }) as Extract<ApplicationAuthState, { status: 'authenticated' }>;
+      return { success: true, status: 'authenticated', state };
+    } catch {
+      return { success: false, reason: 'unavailable' };
+    } finally {
+      this.signupInFlight = false;
     }
   }
 

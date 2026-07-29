@@ -1,16 +1,32 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ApplicationAuthController, type ApplicationAuthClient } from './application_auth';
+import {
+  ApplicationAuthController,
+  createApplicationSignupRedirect,
+  normalizeApplicationSignupEmail,
+  validateApplicationSignupInput,
+  type ApplicationAuthClient
+} from './application_auth';
 
 function client(input: {
   user?: { id: string; email?: string } | null;
   getUserError?: { name?: string; code?: string } | null;
   loginUser?: { id: string; email?: string } | null;
   loginError?: { code?: string } | null;
+  signupUser?: { id: string; email?: string } | null;
+  signupSessionUser?: { id: string; email?: string } | null;
+  signupError?: { code?: string; status?: number } | null;
 } = {}): ApplicationAuthClient {
   return {
     auth: {
       getUser: vi.fn(async () => ({ data: { user: input.user ?? null }, error: input.getUserError ?? null })),
       signInWithPassword: vi.fn(async () => ({ data: { user: input.loginUser ?? null }, error: input.loginError ?? null })),
+      signUp: vi.fn(async () => ({
+        data: {
+          user: input.signupUser ?? null,
+          session: input.signupSessionUser ? { user: input.signupSessionUser } : null
+        },
+        error: input.signupError ?? null
+      })),
       signOut: vi.fn(async () => ({ error: null })),
       onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } }))
     }
@@ -89,5 +105,112 @@ describe('ApplicationAuthController', () => {
     expect(controller.state).toMatchObject({ status: 'authenticated', user: { id: 'user-2' } });
     notify('SIGNED_OUT', null);
     expect(controller.state).toEqual({ status: 'unauthenticated' });
+  });
+
+  it('normalizes signup email, preserves password bytes, and requests the verified redirect once', async () => {
+    const authClient = client({ signupUser: { id: 'user-new' } });
+    const controller = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => authClient });
+    await controller.initialize();
+    const password = ' six chars with spaces ';
+    expect(await controller.signUp({
+      email: ' New.Owner@Example.COM ',
+      password,
+      confirmPassword: password,
+      emailRedirectTo: 'https://website-crm-hans-says-projects.vercel.app/#/login'
+    })).toEqual({ success: true, status: 'awaiting-confirmation' });
+    expect(authClient.auth.signUp).toHaveBeenCalledTimes(1);
+    expect(authClient.auth.signUp).toHaveBeenCalledWith({
+      email: 'new.owner@example.com',
+      password,
+      options: { emailRedirectTo: 'https://website-crm-hans-says-projects.vercel.app/#/login' }
+    });
+  });
+
+  it('blocks invalid email, password mismatch, and unsafe redirects before making a request', async () => {
+    const authClient = client();
+    const controller = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => authClient });
+    await controller.initialize();
+    const result = await controller.signUp({
+      email: 'not-an-email',
+      password: 'secret-one',
+      confirmPassword: 'secret-two',
+      emailRedirectTo: 'https://customer.example/#/login'
+    });
+    expect(result).toMatchObject({ success: false, reason: 'invalid-input' });
+    if (!result.success && result.reason === 'invalid-input') {
+      expect(result.issues.map(issue => issue.field)).toEqual(['email', 'confirmPassword', 'redirect']);
+    }
+    expect(authClient.auth.signUp).not.toHaveBeenCalled();
+  });
+
+  it('does not expose remote signup outside initialized Supabase mode', async () => {
+    const authClient = client();
+    const local = new ApplicationAuthController({ mode: 'local', localUserId: 'local-user', getSupabaseClient: async () => authClient });
+    await local.initialize();
+    expect(await local.signUp({
+      email: 'owner@example.com', password: 'secret', confirmPassword: 'secret',
+      emailRedirectTo: 'http://localhost:5173/#/login'
+    })).toEqual({ success: false, reason: 'unavailable' });
+    expect(authClient.auth.signUp).not.toHaveBeenCalled();
+  });
+
+  it('prevents duplicate pending submissions', async () => {
+    let finish!: (value: Awaited<ReturnType<ApplicationAuthClient['auth']['signUp']>>) => void;
+    const authClient = client();
+    authClient.auth.signUp = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    const controller = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => authClient });
+    await controller.initialize();
+    const request = {
+      email: 'owner@example.com', password: 'secret', confirmPassword: 'secret',
+      emailRedirectTo: 'https://website-crm-hans-says-projects.vercel.app/#/login'
+    };
+    const pending = controller.signUp(request);
+    expect(await controller.signUp(request)).toEqual({ success: false, reason: 'in-progress' });
+    expect(authClient.auth.signUp).toHaveBeenCalledTimes(1);
+    finish({ data: { user: { id: 'user-new' }, session: null }, error: null });
+    expect(await pending).toEqual({ success: true, status: 'awaiting-confirmation' });
+  });
+
+  it('uses the normal authenticated state when signup returns an immediate session', async () => {
+    const authClient = client({
+      signupUser: { id: 'user-new', email: 'owner@example.com' },
+      signupSessionUser: { id: 'user-new', email: 'owner@example.com' }
+    });
+    const controller = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => authClient });
+    await controller.initialize();
+    const result = await controller.signUp({
+      email: 'owner@example.com', password: 'secret', confirmPassword: 'secret',
+      emailRedirectTo: 'https://website-crm-hans-says-projects.vercel.app/#/login'
+    });
+    expect(result).toEqual({
+      success: true,
+      status: 'authenticated',
+      state: { status: 'authenticated', user: { id: 'user-new', email: 'owner@example.com' }, source: 'supabase' }
+    });
+    expect(controller.state.status).toBe('authenticated');
+  });
+
+  it('sanitizes signup rejection and never returns credentials', async () => {
+    const authClient = client({ signupError: { code: 'user_already_exists', status: 422 } });
+    const controller = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => authClient });
+    await controller.initialize();
+    const result = await controller.signUp({
+      email: 'known@example.com', password: 'do-not-return', confirmPassword: 'do-not-return',
+      emailRedirectTo: 'https://website-crm-hans-says-projects.vercel.app/#/login'
+    });
+    expect(result).toEqual({ success: false, reason: 'rejected' });
+    expect(JSON.stringify(result)).not.toContain('known@example.com');
+    expect(JSON.stringify(result)).not.toContain('do-not-return');
+  });
+
+  it('derives only CRM-host signup redirects and validates project-compatible limits', () => {
+    expect(createApplicationSignupRedirect('https://website-crm-hans-says-projects.vercel.app')).toBe('https://website-crm-hans-says-projects.vercel.app/#/login');
+    expect(createApplicationSignupRedirect('http://localhost:5173')).toBe('http://localhost:5173/#/login');
+    expect(createApplicationSignupRedirect('https://customer.example')).toBeUndefined();
+    expect(normalizeApplicationSignupEmail(' Owner@Example.COM ')).toBe('owner@example.com');
+    expect(validateApplicationSignupInput({
+      email: 'owner@example.com', password: '12345', confirmPassword: '12345',
+      emailRedirectTo: 'http://localhost:5173/#/login'
+    })).toContainEqual({ field: 'password', message: 'Use at least 6 characters.' });
   });
 });

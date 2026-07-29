@@ -97,7 +97,12 @@ import { WebsiteDashboardController, type WebsiteDashboardCoreData } from './web
 import { getWebsiteScopedPages, resolveWebsiteHomepage, type WebsiteDashboardModel, type WebsiteDashboardSummaryInput } from './website_dashboard_model';
 import { createBrowserCallSimulator } from './browser_call_simulation';
 import { isCrmApplicationHost } from './application_host';
-import { ApplicationAuthController, type ApplicationAuthClient, type ApplicationAuthState } from './application_auth';
+import {
+  ApplicationAuthController,
+  createApplicationSignupRedirect,
+  type ApplicationAuthClient,
+  type ApplicationAuthState
+} from './application_auth';
 import {
   buildApplicationLoginHash,
   getLoginReturnRoute,
@@ -496,6 +501,8 @@ const applicationAuthController = new ApplicationAuthController({
     ...(editorRuntime.success && editorRuntime.mode === 'local' ? { localUserId: 'system' } : {})
 });
 let applicationAuthInitialization: Promise<ApplicationAuthState> | null = null;
+let applicationAuthHasInitialized = false;
+let applicationAuthFormSubmissionInProgress = false;
 
 const builderPublicationRuntimeResolver = createBuilderPublicationRuntimeResolver({
     configuredMode: builderPublicationConfiguredMode,
@@ -1730,14 +1737,21 @@ async function ensureApplicationAuth(): Promise<ApplicationAuthState> {
       const previousUserId = getActingUserId();
       applyApplicationAuthState(state);
       if (
-        previousUserId
-        && state.status !== 'authenticated'
+        applicationAuthHasInitialized
+        && !applicationAuthFormSubmissionInProgress
+        && (
+          (state.status === 'authenticated' && previousUserId !== state.user.id)
+          || (state.status !== 'authenticated' && Boolean(previousUserId))
+        )
         && isCrmApplicationHost(window.location.hostname)
       ) {
         void bootRouter();
       }
     });
-    applicationAuthInitialization = applicationAuthController.initialize();
+    applicationAuthInitialization = applicationAuthController.initialize().then(state => {
+      applicationAuthHasInitialized = true;
+      return state;
+    });
   }
   const state = await applicationAuthInitialization;
   applyApplicationAuthState(state);
@@ -8684,44 +8698,117 @@ function renderApplicationUnavailable(): void {
   `;
 }
 
-function renderApplicationLogin(returnTo?: string, message?: string): void {
+type ApplicationAuthViewMode = 'sign-in' | 'create-account';
+
+function renderApplicationLogin(
+  returnTo?: string,
+  message?: string,
+  mode: ApplicationAuthViewMode = 'sign-in',
+  awaitingConfirmation = false
+): void {
   currentView = 'login';
   const safeReturnTo = sanitizeApplicationReturnRoute(returnTo);
+  const creatingAccount = mode === 'create-account';
+  const heading = awaitingConfirmation
+    ? 'Check your email'
+    : creatingAccount
+      ? 'Create your CRM account'
+      : 'Sign in to your CRM';
+  const description = awaitingConfirmation
+    ? 'Check your email to confirm your account. After confirmation, return here and sign in.'
+    : creatingAccount
+      ? 'Create the secure owner account for your pressure-washing business.'
+      : 'Use your authorized account to manage customers and websites.';
   app.innerHTML = `
     <main class="application-auth-shell">
       <section class="application-auth-card" aria-labelledby="application-login-heading">
         <div class="application-auth-brand">PressurePro</div>
-        <h1 id="application-login-heading">Sign in to your CRM</h1>
-        <p>Use your authorized account to manage customers and websites.</p>
-        ${message ? `<div class="application-auth-error" role="alert">${escapeBuilderInspectorHtml(message)}</div>` : ''}
-        <form id="application-login-form" novalidate>
-          <label for="application-login-email">Email</label>
-          <input id="application-login-email" name="email" type="email" autocomplete="username" required>
-          <label for="application-login-password">Password</label>
-          <input id="application-login-password" name="password" type="password" autocomplete="current-password" required>
-          <button id="application-login-submit" type="submit" class="btn-primary">Sign in</button>
-        </form>
+        <h1 id="application-login-heading">${heading}</h1>
+        <p>${description}</p>
+        ${message ? `<div class="application-auth-error" role="status" aria-live="polite">${escapeBuilderInspectorHtml(message)}</div>` : ''}
+        ${awaitingConfirmation ? `
+          <button id="application-auth-return-sign-in" type="button" class="btn-primary">Return to sign in</button>
+        ` : `
+          <form id="application-login-form" novalidate aria-describedby="application-auth-guidance">
+            <label for="application-login-email">Email</label>
+            <input id="application-login-email" name="email" type="email" autocomplete="${creatingAccount ? 'email' : 'username'}" maxlength="254" required>
+            <label for="application-login-password">Password</label>
+            <input id="application-login-password" name="password" type="password" autocomplete="${creatingAccount ? 'new-password' : 'current-password'}" ${creatingAccount ? 'minlength="6" maxlength="128"' : ''} required>
+            ${creatingAccount ? `
+              <label for="application-login-confirm-password">Confirm password</label>
+              <input id="application-login-confirm-password" name="confirmPassword" type="password" autocomplete="new-password" minlength="6" maxlength="128" required>
+              <p id="application-auth-guidance" class="application-auth-guidance">Use at least 6 characters. Longer, unique passwords are safer.</p>
+            ` : '<span id="application-auth-guidance" class="sr-only">Enter your authorized account credentials.</span>'}
+            <button id="application-login-submit" type="submit" class="btn-primary">${creatingAccount ? 'Create account' : 'Sign in'}</button>
+          </form>
+          <div class="application-auth-switch">
+            <span>${creatingAccount ? 'Already have an account?' : 'New to PressurePro?'}</span>
+            <button id="application-auth-mode-switch" type="button" class="application-auth-link">${creatingAccount ? 'Sign in' : 'Create an account'}</button>
+          </div>
+        `}
       </section>
     </main>
   `;
+  document.querySelector<HTMLButtonElement>('#application-auth-return-sign-in')?.addEventListener('click', () => {
+    renderApplicationLogin(safeReturnTo);
+  });
+  document.querySelector<HTMLButtonElement>('#application-auth-mode-switch')?.addEventListener('click', () => {
+    renderApplicationLogin(safeReturnTo, undefined, creatingAccount ? 'sign-in' : 'create-account');
+  });
   const form = document.querySelector<HTMLFormElement>('#application-login-form');
   form?.addEventListener('submit', async event => {
     event.preventDefault();
     const emailInput = document.querySelector<HTMLInputElement>('#application-login-email');
     const passwordInput = document.querySelector<HTMLInputElement>('#application-login-password');
+    const confirmPasswordInput = document.querySelector<HTMLInputElement>('#application-login-confirm-password');
     const submit = document.querySelector<HTMLButtonElement>('#application-login-submit');
     const email = emailInput?.value.trim() ?? '';
     const password = passwordInput?.value ?? '';
-    if (!email || !password) {
+    if (!creatingAccount && (!email || !password)) {
       renderApplicationLogin(safeReturnTo, 'Enter your email and password.');
       return;
     }
     if (submit) {
       submit.disabled = true;
-      submit.textContent = 'Signing in…';
+      submit.textContent = creatingAccount ? 'Creating account…' : 'Signing in…';
     }
+    if (creatingAccount) {
+      const emailRedirectTo = createApplicationSignupRedirect(window.location.origin);
+      applicationAuthFormSubmissionInProgress = true;
+      const pending = applicationAuthController.signUp({
+        email,
+        password,
+        confirmPassword: confirmPasswordInput?.value ?? '',
+        emailRedirectTo: emailRedirectTo ?? ''
+      });
+      if (passwordInput) passwordInput.value = '';
+      if (confirmPasswordInput) confirmPasswordInput.value = '';
+      const result = await pending;
+      applicationAuthFormSubmissionInProgress = false;
+      if (!result.success) {
+        const signupMessage = result.reason === 'invalid-input'
+          ? result.issues[0]?.message ?? 'Check the account details and try again.'
+          : result.reason === 'in-progress'
+            ? 'Account creation is already in progress.'
+            : result.reason === 'unavailable'
+              ? 'Account creation is temporarily unavailable. Please try again.'
+              : 'We could not create the account. Check your details or try signing in.';
+        renderApplicationLogin(safeReturnTo, signupMessage, 'create-account');
+        return;
+      }
+      if (result.status === 'awaiting-confirmation') {
+        renderApplicationLogin(safeReturnTo, undefined, 'create-account', true);
+        return;
+      }
+      applyApplicationAuthState(result.state);
+      window.history.replaceState({}, '', safeReturnTo ?? '#/dashboard');
+      await bootRouter();
+      return;
+    }
+    applicationAuthFormSubmissionInProgress = true;
     const result = await applicationAuthController.signIn(email, password);
-    passwordInput!.value = '';
+    applicationAuthFormSubmissionInProgress = false;
+    if (passwordInput) passwordInput.value = '';
     if (!result.success) {
       renderApplicationLogin(
         safeReturnTo,
@@ -8739,11 +8826,14 @@ function renderApplicationLogin(returnTo?: string, message?: string): void {
 
 (window as any).retryApplicationBootstrap = async () => {
   applicationAuthInitialization = null;
+  applicationAuthHasInitialized = false;
   await bootRouter();
 };
 
 (window as any).signOutApplication = async () => {
+  applicationAuthFormSubmissionInProgress = true;
   const success = await applicationAuthController.signOut();
+  applicationAuthFormSubmissionInProgress = false;
   if (!success) {
     (window as any).showToast?.('Sign out is temporarily unavailable.', 'error');
     return;
