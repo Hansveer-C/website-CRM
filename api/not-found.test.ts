@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import notFound from './not-found';
+import { GET as notFound } from './not-found';
 
 describe('unknown API handler', () => {
   it('returns a JSON 404 instead of SPA HTML', async () => {

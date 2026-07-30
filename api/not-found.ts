@@ -3,7 +3,7 @@ const body = JSON.stringify({
   error: { code: 'NOT_FOUND', message: 'API endpoint not found.' }
 });
 
-export default function notFound(): Response {
+function notFound(): Response {
   return new Response(body, {
     status: 404,
     headers: {
@@ -13,3 +13,10 @@ export default function notFound(): Response {
     }
   });
 }
+
+export const GET = notFound;
+export const POST = notFound;
+export const PUT = notFound;
+export const PATCH = notFound;
+export const DELETE = notFound;
+export const OPTIONS = notFound;
