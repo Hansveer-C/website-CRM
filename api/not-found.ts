@@ -3,15 +3,13 @@ const body = JSON.stringify({
   error: { code: 'NOT_FOUND', message: 'API endpoint not found.' }
 });
 
-export default {
-  fetch(): Response {
-    return new Response(body, {
-      status: 404,
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Cache-Control': 'no-store',
-        'X-Content-Type-Options': 'nosniff'
-      }
-    });
-  }
-};
+export default function notFound(): Response {
+  return new Response(body, {
+    status: 404,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff'
+    }
+  });
+}
