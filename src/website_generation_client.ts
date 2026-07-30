@@ -48,7 +48,7 @@ export class WebsiteGenerationClient {
   private readonly endpoint: string;
 
   constructor(private readonly options: WebsiteGenerationClientOptions) {
-    this.request = options.fetch ?? fetch;
+    this.request = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.endpoint = options.endpoint ?? '/api/websites/generate';
   }
 

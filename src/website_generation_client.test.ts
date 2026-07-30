@@ -24,6 +24,20 @@ describe('WebsiteGenerationClient', () => {
     await new WebsiteGenerationClient({ auth: { getAccessToken: async () => 'secret-token' }, fetch: request }).generate(input, key);
     expect(request).toHaveBeenCalledWith('/api/websites/generate', expect.objectContaining({ method: 'POST', headers: expect.objectContaining({ Authorization: 'Bearer secret-token', 'Idempotency-Key': key }) }));
   });
+  it('binds the native fetch receiver in production', async () => {
+    const request = vi.fn(function (this: unknown) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation');
+      return Promise.resolve(json(successEnvelope()));
+    });
+    vi.stubGlobal('fetch', request);
+    try {
+      const productionClient = new WebsiteGenerationClient({ auth: { getAccessToken: async () => 'token' } });
+      await expect(productionClient.generate(input, key)).resolves.toMatchObject({ website: { id: 'w' } });
+      expect(request).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
   it('fails before fetch without auth', async () => expect(client(json(successEnvelope()), null).generate(input, key)).rejects.toMatchObject({ code: 'UNAUTHENTICATED' }));
   it('classifies transport failures as retryable', async () => expect(client(new Error('offline')).generate(input, key)).rejects.toMatchObject({ code: 'TRANSPORT_ERROR', retryable: true }));
   it('rejects HTML responses', async () => expect(client(new Response('<html>', { status: 200, headers: { 'Content-Type': 'text/html' } })).generate(input, key)).rejects.toMatchObject({ code: 'UNEXPECTED_CONTENT_TYPE' }));
