@@ -4,7 +4,7 @@ import {
   isWebsiteGenerationResponse,
   validateWebsiteGenerationInput,
   type WebsiteGenerationResponse
-} from '../../src/website_generation_contract';
+} from '../../src/website_generation_contract.js';
 
 type AuthenticatedSupabase = SupabaseClient & {
   auth: SupabaseClient['auth'];

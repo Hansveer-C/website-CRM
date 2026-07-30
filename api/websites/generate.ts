@@ -1,4 +1,4 @@
-import { createWebsiteGenerationHandler } from '../_lib/website_generation_handler';
+import { createWebsiteGenerationHandler } from '../_lib/website_generation_handler.js';
 
 const handler = createWebsiteGenerationHandler();
 
