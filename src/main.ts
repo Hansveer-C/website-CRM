@@ -110,6 +110,8 @@ import {
   sanitizeApplicationReturnRoute
 } from './application_bootstrap';
 import { resolveEditorRuntime } from './editor_runtime';
+import { WebsiteGenerationClient, WebsiteGenerationClientError, createWebsiteGenerationIdempotencyKey } from './website_generation_client';
+import { isWebsiteGenerationResponse, validateWebsiteGenerationInput, type WebsiteGenerationData } from './website_generation_contract';
 
 declare global {
   interface Window {
@@ -407,6 +409,8 @@ type BuilderPublicationViteEnvironment = {
     VITE_SUPABASE_URL?: string;
     VITE_SUPABASE_ANON_KEY?: string;
     VITE_SUPABASE_PUBLISHABLE_KEY?: string;
+    VITE_ENABLE_BROWSER_FIXTURES?: string;
+    VITE_BROWSER_FIXTURE_ZERO_WEBSITE?: string;
     PROD?: boolean;
 };
 
@@ -448,6 +452,12 @@ const editorRuntime = resolveEditorRuntime({
     publicationMode: builderPublicationConfiguredMode,
     mediaMode: builderPublicationEnvironment.VITE_BUILDER_MEDIA_PERSISTENCE
 });
+const browserFixturesEnabled = !builderPublicationProduction
+    && builderPublicationEnvironment.VITE_ENABLE_BROWSER_FIXTURES?.trim().toLowerCase() === 'true';
+document.documentElement.dataset.editorRuntime = editorRuntime.success ? editorRuntime.mode : 'unavailable';
+if (!builderPublicationProduction) {
+    console.info(`Editor runtime: ${document.documentElement.dataset.editorRuntime}; browser fixtures: ${browserFixturesEnabled ? 'enabled' : 'disabled'}`);
+}
 let builderPublicationSupabaseClientPromise: Promise<SupabaseClient | null> | undefined;
 
 function getBuilderPublicationSupabaseClient(): Promise<SupabaseClient | null> {
@@ -494,6 +504,30 @@ function removeLocalFixtureRows(): void {
 }
 
 if (!editorUsesLocalData()) removeLocalFixtureRows();
+if (
+    browserFixturesEnabled
+    && builderPublicationEnvironment.VITE_BROWSER_FIXTURE_ZERO_WEBSITE?.trim().toLowerCase() === 'true'
+) {
+    mockPages.splice(0);
+    mockPageSections.splice(0);
+    mockFunnels.splice(0);
+    mockWebsiteLayouts.splice(0);
+    mockWebsites.splice(0);
+    mockWebsiteRoutes.splice(0);
+    try {
+        const stored = JSON.parse(window.localStorage.getItem('browser_fixture_generated_website') || 'null');
+        if (isWebsiteGenerationResponse(stored) && stored.success) {
+            mockWebsites.push({ ...stored.data.website });
+            mockFunnels.push({ ...stored.data.funnel });
+            mockPages.push({ ...stored.data.page });
+            mockWebsiteRoutes.push({ ...stored.data.route });
+            mockPageSections.push(...stored.data.sections.map(section => ({ ...section })));
+            Object.assign(mockWebsiteSettings, stored.data.settings);
+        }
+    } catch {
+        console.warn('Browser fixture website state could not be restored.');
+    }
+}
 
 const applicationAuthController = new ApplicationAuthController({
     mode: editorRuntime.success ? editorRuntime.mode : 'unavailable',
@@ -1049,7 +1083,7 @@ async function handleBuilderNewPageBrowserPost(
 
 const originalFetch = window.fetch;
 const browserCallSimulator = createBrowserCallSimulator();
-window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : (input as any).url;
 
     if (isBuilderPublicationBrowserRequest(input)) {
@@ -1523,6 +1557,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     
     return originalFetch(input, init);
 };
+
+if (browserFixturesEnabled) window.fetch = browserFixtureFetch;
 
 (window as any).EventLogs = getEvents();
 
@@ -8995,7 +9031,7 @@ async function renderWebsiteDashboard(force = false) {
   }
   if (state.status === 'empty' || state.status === 'unavailable') {
     const empty = state.status === 'empty';
-    app.innerHTML = `${renderSidebar('website-dashboard')}<main class="main-content website-dashboard"><header class="view-header"><h1>Website Dashboard</h1></header><section class="card website-dashboard-state" role="${empty ? 'status' : 'alert'}"><h2>${empty ? 'No website has been set up for this account yet.' : 'This website is not available.'}</h2><p>${empty ? 'Use the existing website setup workflow when you are ready.' : 'Check your access or choose another owned website.'}</p><button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Retry</button></section></main>`;
+    app.innerHTML = `${renderSidebar('website-dashboard')}<main class="main-content website-dashboard"><header class="view-header"><h1>Website Dashboard</h1></header><section class="card website-dashboard-state" role="${empty ? 'status' : 'alert'}"><h2>${empty ? 'Create your first website.' : 'This website is not available.'}</h2><p>${empty ? 'Add your business details and we will create an editable homepage and site structure.' : 'Check your access or choose another owned website.'}</p>${empty ? '<button type="button" class="btn-primary" onclick="window.showOnboardingModal()">Create your website</button>' : ''}<button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Retry</button></section></main>`;
     return;
   }
   if (state.status !== 'ready' && state.status !== 'partial') return;
@@ -10672,8 +10708,55 @@ let onboardingState = {
     city: '', 
     services: [] as string[] 
 };
+let websiteGenerationInFlight = false;
+let lastGeneratedWebsiteData: WebsiteGenerationData | null = null;
+
+function reconcileGeneratedWebsite(data: WebsiteGenerationData): void {
+    lastGeneratedWebsiteData = data;
+    const userId = getActingUserId();
+    replaceOwnedDashboardRows(mockWebsites, [data.website], userId);
+    replaceOwnedDashboardRows(mockFunnels, [data.funnel], userId);
+    replaceOwnedDashboardRows(mockPages, [data.page], userId);
+    for (let index = mockWebsiteRoutes.length - 1; index >= 0; index -= 1) {
+        if (mockWebsiteRoutes[index].website_id === data.website.id) mockWebsiteRoutes.splice(index, 1);
+    }
+    mockWebsiteRoutes.push({ ...data.route });
+    for (let index = mockPageSections.length - 1; index >= 0; index -= 1) {
+        if (mockPageSections[index].page_id === data.page.id) mockPageSections.splice(index, 1);
+    }
+    mockPageSections.push(...data.sections.map(section => ({ ...section })));
+    Object.assign(mockWebsiteSettings, data.settings);
+    activeDashboardWebsiteId = data.website.id;
+}
+
+function setOnboardingError(message: string): void {
+    const region = document.getElementById('onboarding-error');
+    if (region) {
+        region.textContent = message;
+        region.hidden = !message;
+    }
+}
+
+function websiteGenerationClient(): WebsiteGenerationClient {
+    return new WebsiteGenerationClient({
+        auth: {
+            getAccessToken: async () => {
+                if (browserFixturesEnabled && editorUsesLocalData()) return 'local-browser-fixture-token';
+                const client = await getBuilderPublicationSupabaseClient();
+                if (!client) return null;
+                const session = await client.auth.getSession();
+                return session.data.session?.access_token ?? null;
+            }
+        }
+    });
+}
 
 (window as any).showOnboardingModal = () => {
+    const existingModal = document.getElementById('website-onboarding-modal');
+    if (existingModal) {
+        (existingModal.querySelector('#ob-business-name') as HTMLInputElement | null)?.focus();
+        return;
+    }
     // Reset state
     onboardingState = { 
         businessName: '', 
@@ -10693,41 +10776,41 @@ let onboardingState = {
     
     const modal = document.createElement('div');
     modal.id = 'website-onboarding-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', 'onboarding-title');
     modal.innerHTML = `
         <div id="onboarding-backdrop"></div>
         <div class="onboarding-card">
-            <h1 class="onboarding-title">Let's build your site</h1>
+            <h1 class="onboarding-title" id="onboarding-title">Let's build your site</h1>
             <p class="onboarding-subtitle">Tell us about your business to generate your premium website.</p>
             
             <div id="onboarding-form-container">
                 <div class="onboarding-form-group">
                     <label for="ob-business-name">Business Name</label>
-                    <input type="text" id="ob-business-name" class="onboarding-input" placeholder="e.g. PressurePro Cleaning" value="${onboardingState.businessName}" required>
+                    <input type="text" id="ob-business-name" class="onboarding-input" maxlength="120" placeholder="e.g. PressurePro Cleaning" value="${escapeBuilderInspectorHtml(onboardingState.businessName)}" required>
                 </div>
                 
                 <div class="onboarding-form-group">
                     <label for="ob-city">Service City</label>
-                    <input type="text" id="ob-city" class="onboarding-input" placeholder="e.g. Austin, TX" value="${onboardingState.city}" required>
+                    <input type="text" id="ob-city" class="onboarding-input" maxlength="120" placeholder="e.g. Austin, TX" value="${escapeBuilderInspectorHtml(onboardingState.city)}" required>
                 </div>
                 
                 <div class="onboarding-form-group">
                     <label for="ob-phone">Phone Number</label>
-                    <input type="tel" id="ob-phone" class="onboarding-input" placeholder="e.g. (555) 000-0000" value="${onboardingState.phone}" required>
+                    <input type="tel" id="ob-phone" class="onboarding-input" maxlength="40" placeholder="e.g. (555) 000-0000" value="${escapeBuilderInspectorHtml(onboardingState.phone)}" required>
                 </div>
                 
                 <div class="onboarding-form-group">
                     <label>Services Offered (Multi-select)</label>
                     <div class="services-grid">
-                        <div class="service-chip ${onboardingState.services.includes('Driveway Cleaning') ? 'selected' : ''}" onclick="window.toggleOnboardingService(this, 'Driveway Cleaning')">Driveway Cleaning</div>
-                        <div class="service-chip ${onboardingState.services.includes('House Washing') ? 'selected' : ''}" onclick="window.toggleOnboardingService(this, 'House Washing')">House Washing</div>
-                        <div class="service-chip ${onboardingState.services.includes('Patio Cleaning') ? 'selected' : ''}" onclick="window.toggleOnboardingService(this, 'Patio Cleaning')">Patio Cleaning</div>
-                        <div class="service-chip ${onboardingState.services.includes('Other') ? 'selected' : ''}" onclick="window.toggleOnboardingService(this, 'Other')">Other</div>
+                        ${['Driveway Cleaning', 'House Washing', 'Patio Cleaning', 'Other'].map(service => `<button type="button" class="service-chip ${onboardingState.services.includes(service) ? 'selected' : ''}" aria-pressed="${onboardingState.services.includes(service)}" onclick="window.toggleOnboardingService(this, '${service}')">${service}</button>`).join('')}
                     </div>
                 </div>
-                
+                <div id="onboarding-error" class="onboarding-error" role="alert" aria-live="assertive" hidden></div>
                 <div class="onboarding-footer">
-                    <button class="btn-primary btn-onboarding" onclick="window.submitWebsiteOnboarding()">
-                        Generate My Website
+                    <button type="button" id="onboarding-submit" class="btn-primary btn-onboarding" onclick="window.submitWebsiteOnboarding()">
+                        <span id="onboarding-submit-label">Generate My Website</span>
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-7-7 7 7-7 7"/></svg>
                     </button>
                     <p style="font-size: 0.8rem; color: #94a3b8; text-align: center;">By continuing, you agree to our terms of service.</p>
@@ -10740,8 +10823,8 @@ let onboardingState = {
                 <p class="onboarding-subtitle" style="margin-bottom: 32px;">We've generated your full funnel structure and local SEO pages. You're ready to start receiving leads.</p>
                 
                 <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 24px;">
-                    <button class="btn-primary" style="width: 100%; padding: 18px; font-weight: 600;" onclick="window.location.href='/'">
-                        View Site
+                    <button class="btn-primary" style="width: 100%; padding: 18px; font-weight: 600;" onclick="window.openGeneratedHomepage()">
+                        Edit Homepage
                     </button>
                     <button class="btn-secondary" style="width: 100%; padding: 18px; border: 1px solid #e2e8f0; background: white; font-weight: 600;" onclick="window.showWebsiteDashboard()">
                         Manage Website
@@ -10757,10 +10840,24 @@ let onboardingState = {
 };
 
 (window as any).showWebsiteDashboard = () => {
-    (window as any).navigateTo('website-structure');
+    document.getElementById('website-onboarding-modal')?.remove();
+    (window as any).navigateTo('website-dashboard');
+};
+
+(window as any).openGeneratedHomepage = () => {
+    if (!lastGeneratedWebsiteData) return;
+    document.getElementById('website-onboarding-modal')?.remove();
+    void (window as any).navigateTo('builder', undefined, {
+        builderContext: {
+            websiteId: lastGeneratedWebsiteData.website.id,
+            pageId: lastGeneratedWebsiteData.page.id,
+            action: 'edit'
+        }
+    });
 };
 
 (window as any).toggleOnboardingService = (el: HTMLElement, service: string) => {
+    if (websiteGenerationInFlight) return;
     const index = onboardingState.services.indexOf(service);
     if (index > -1) {
         onboardingState.services.splice(index, 1);
@@ -10769,69 +10866,79 @@ let onboardingState = {
         onboardingState.services.push(service);
         el.classList.add('selected');
     }
+    el.setAttribute('aria-pressed', String(el.classList.contains('selected')));
     // Update temp storage as we change chips
     window.sessionStorage.setItem('onboarding_capture', JSON.stringify(onboardingState));
 };
 
-(window as any).submitWebsiteOnboarding = () => {
+(window as any).submitWebsiteOnboarding = async () => {
+    if (websiteGenerationInFlight) return;
     const name = (document.getElementById('ob-business-name') as HTMLInputElement).value;
     const city = (document.getElementById('ob-city') as HTMLInputElement).value;
     const phone = (document.getElementById('ob-phone') as HTMLInputElement).value;
     
-    if (!name || !city || !phone) {
-        (window as any).showToast('Please fill in all required fields.', 'error');
-        return;
-    }
-    
-    if (onboardingState.services.length === 0) {
-        (window as any).showToast('Please select at least one service.', 'error');
-        return;
-    }
-    
-    // Update state
     onboardingState.businessName = name;
     onboardingState.city = city;
     onboardingState.phone = phone;
     
-    console.log('[ONBOARDING] Data captured:', onboardingState);
-    
-    // Store temporarily in session/onboarding state
     window.sessionStorage.setItem('onboarding_capture', JSON.stringify(onboardingState));
-
-    // Phase W2.2 Integration: Generate full website + funnels from inputs
-    (window as any).showToast('Generating your premium website...', 'info');
-    
-    fetch('/api/websites/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            business_name: onboardingState.businessName,
-            phone_number: onboardingState.phone,
-            city: onboardingState.city,
-            services: onboardingState.services
-        })
-    }).then(r => r.json())
-    .then(result => {
-        if (!result.success) throw new Error(result.error);
-        
-        console.log('[ONBOARDING] Website generated:', result.data);
+    const validation = validateWebsiteGenerationInput({
+        business_name: onboardingState.businessName,
+        phone_number: onboardingState.phone,
+        city: onboardingState.city,
+        services: onboardingState.services
+    });
+    if (!validation.success) {
+        setOnboardingError(Object.values(validation.fields)[0] ?? 'Check the form and try again.');
+        return;
+    }
+    const button = document.getElementById('onboarding-submit') as HTMLButtonElement | null;
+    const label = document.getElementById('onboarding-submit-label');
+    websiteGenerationInFlight = true;
+    if (button) {
+        button.disabled = true;
+        button.setAttribute('aria-disabled', 'true');
+        button.setAttribute('aria-busy', 'true');
+    }
+    if (label) label.textContent = 'Creating your website…';
+    setOnboardingError('');
+    let idempotencyKey = window.sessionStorage.getItem('website_generation_idempotency_key');
+    if (!idempotencyKey) {
+        idempotencyKey = createWebsiteGenerationIdempotencyKey();
+        window.sessionStorage.setItem('website_generation_idempotency_key', idempotencyKey);
+    }
+    try {
+        const data = await websiteGenerationClient().generate(validation.data, idempotencyKey);
+        reconcileGeneratedWebsite(data);
+        if (browserFixturesEnabled) {
+            window.localStorage.setItem('browser_fixture_generated_website', JSON.stringify({ success: true, data }));
+        }
         window.localStorage.setItem('onboarding_seen', 'true');
-        
-        // Show success view
+        window.sessionStorage.removeItem('website_generation_idempotency_key');
+        window.sessionStorage.removeItem('onboarding_capture');
         const form = document.getElementById('onboarding-form-container');
         const success = document.getElementById('onboarding-success');
         if (form && success) {
             form.style.display = 'none';
             success.style.display = 'block';
             
-            // Update global settings as well for immediate feel
             (window as any).updateGlobalSettings('businessName', name);
             (window as any).updateGlobalSettings('phone', phone);
         }
-    }).catch(err => {
-        console.error('[ONBOARDING] Generation failed:', err);
-        (window as any).showToast(err.message || 'Generation failed. Please try again.', 'error');
-    });
+    } catch (error) {
+        const message = error instanceof WebsiteGenerationClientError
+            ? error.message
+            : 'Website creation failed. Try again.';
+        setOnboardingError(`${message} Reference: ${idempotencyKey.slice(-8)}.`);
+    } finally {
+        websiteGenerationInFlight = false;
+        if (button) {
+            button.disabled = false;
+            button.setAttribute('aria-disabled', 'false');
+            button.removeAttribute('aria-busy');
+        }
+        if (label) label.textContent = 'Generate My Website';
+    }
 };
 
 (window as any).closeOnboarding = () => {
