@@ -6,7 +6,23 @@ const graph = (key: string) => ({ success: true, data: {
   route: { id: 'route-1', website_id: 'site-1', path: '/', funnel_id: 'funnel-1', created_at: '2026-07-30T00:00:00Z' },
   funnel: { id: 'funnel-1', user_id: 'system', name: 'Acme Wash Website', status: 'draft', created_at: '2026-07-30T00:00:00Z', updated_at: '2026-07-30T00:00:00Z' },
   page: { id: 'page-1', user_id: 'system', name: 'Home', slug: 'home', status: 'draft', seo_title: 'Acme Wash', seo_description: 'Austin washing', seo_keywords: ['Wash'], created_at: '2026-07-30T00:00:00Z', funnel_id: 'funnel-1', step_type: 'landing', step_order: 0 },
-  sections: [{ id: 'section-1', page_id: 'page-1', type: 'hero', content: { heading: 'Acme Wash' }, order: 0, styles: {} }],
+  sections: [
+    {
+      id: 'section-hero', page_id: 'page-1', type: 'hero', order: 0,
+      content: { heading: 'Acme Wash', subheading: 'Trusted service in Austin', button_text: 'Get a Free Quote', background_image: 'https://images.unsplash.com/photo-1541604193435-22077a288934?auto=format&fit=crop&w=1200&q=80' },
+      styles: { padding: '100px 20px', text_alignment: 'center', background: '#ffffff', visible: true }
+    },
+    {
+      id: 'section-offer', page_id: 'page-1', type: 'offer', order: 1,
+      content: { headline: 'Our Services', description: 'House Washing in Austin.', button_text: 'Request a Quote', expiry: '' },
+      styles: { padding: '80px 20px', background: '#4f46e5', color: '#ffffff', visible: true }
+    },
+    {
+      id: 'section-form', page_id: 'page-1', type: 'form', order: 2,
+      content: { title: 'Get My Free Quote', fields: ['name', 'phone'], pipeline_id: 'funnel-1' },
+      styles: { padding: '60px 20px', background: '#f8fafc', visible: true }
+    }
+  ],
   created: true, idempotency_key: key
 } });
 
@@ -40,9 +56,50 @@ test('zero-website user creates once and refreshes into the exact site', async (
   await page.getByRole('button', { name: 'Edit Homepage' }).click();
   await expect(page).toHaveURL(/#\/builder\?websiteId=site-1&pageId=page-1&action=edit$/);
   await expect(page.locator('.pb-canvas-area')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Acme Wash' })).toBeVisible();
+  await expect(page.getByText('Our Services', { exact: true })).toBeVisible();
+  await expect(page.getByText('Get My Free Quote', { exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'Layers' }).click();
+  for (const label of ['Hero', 'Offer', 'Form']) {
+    await page.getByRole('button', { name: `Select ${label} section` }).click();
+    await expect(page.locator('.pb-inspector-header').getByRole('heading', { name: label })).toBeVisible();
+  }
+  for (const [id, label] of [['section-hero', 'Hero'], ['section-offer', 'Offer'], ['section-form', 'Form']] as const) {
+    await page.locator(`#sec-preview-${id}`).evaluate((section: HTMLElement) => section.click());
+    await expect(page.locator('.pb-inspector-header').getByRole('heading', { name: label })).toBeVisible();
+  }
+  const edits = [
+    ['Hero', 'Verified Hero'],
+    ['Offer', 'Verified Offer'],
+    ['Form', 'Verified Form']
+  ] as const;
+  for (const [label, text] of edits) {
+    await page.getByRole('button', { name: `Select ${label} section` }).click();
+    await expect(page.locator('.pb-inspector-header').getByRole('heading', { name: label })).toBeVisible();
+    const heading = page.locator('.pb-inspector-field').filter({ hasText: 'Heading' }).locator('input');
+    await heading.fill(text);
+    await heading.blur();
+  }
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await page.reload();
   await expect(page).toHaveURL(/#\/builder\?websiteId=site-1&pageId=page-1&action=edit$/);
   await expect(page.locator('.pb-canvas-area')).toBeVisible();
+  await page.getByRole('tab', { name: 'Layers' }).click();
+  for (const [label, text] of edits) {
+    await page.getByRole('button', { name: `Select ${label} section` }).click();
+    await expect(page.locator('.pb-inspector-header').getByRole('heading', { name: label })).toBeVisible();
+    const heading = page.locator('.pb-inspector-field').filter({ hasText: 'Heading' }).locator('input');
+    await expect(heading).toHaveValue(text);
+  }
+  await page.getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(page.getByText(/LEGACY SECTION|Legacy Section Type/)).toHaveCount(0);
+  for (const [id, , text] of [
+    ['section-hero', 'Hero', 'Verified Hero'],
+    ['section-offer', 'Offer', 'Verified Offer'],
+    ['section-form', 'Form', 'Verified Form']
+  ] as const) {
+    await expect(page.locator(`#sec-preview-${id}`)).toContainText(text);
+  }
   await page.evaluate(() => window.navigateTo('website-dashboard'));
   await expect(page.getByRole('heading', { name: 'Acme Wash' })).toBeVisible();
   await page.getByRole('button', { name: 'Refresh' }).click();
