@@ -112,6 +112,9 @@ import {
 import { resolveEditorRuntime } from './editor_runtime';
 import { WebsiteGenerationClient, WebsiteGenerationClientError, createWebsiteGenerationIdempotencyKey } from './website_generation_client';
 import { isWebsiteGenerationResponse, validateWebsiteGenerationInput, type WebsiteGenerationData } from './website_generation_contract';
+import { createPageSectionRevisionClient, createPageSectionSaveClient } from './page_section_save_client';
+import { BuilderSaveStateController, builderSaveStatusLabel } from './builder_save_state';
+import { BuilderViewTransitionController } from './builder_view_transition';
 
 declare global {
   interface Window {
@@ -1323,7 +1326,7 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
         }
 
         // ── WB.3.5 Page Sections Auto-Save ──────────────────────────────────
-        if (url.match(/^\/api\/pages\/[^/]+\/sections$/) && method === 'PUT') {
+        if (url.match(/^\/api\/pages\/[^/]+\/(?:sections|section-save-revision)$/) && (method === 'PUT' || method === 'GET')) {
             const pageId = url.split('/')[3];
             let body: any = {};
             try {
@@ -1333,28 +1336,40 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
             } catch {}
             const sections: any[] = body.sections || [];
 
+            if (method === 'GET') {
+                const savedSections = mockPageSections.filter(section => section.page_id === pageId);
+                return builderSectionsJsonResponse({ success: true, data: { page_id: pageId, saved_count: savedSections.length, generation: 0, revision: builderPageSaveRevisions.get(pageId) ?? 0, document_hash: 'fixture-current', request_id: 'fixture' } }, 200);
+            }
+
+            const requestedFixtureFailures = Number((window as any).__builderFixtureSaveFailureCount ?? 0);
+            if (requestedFixtureFailures > 0) {
+                (window as any).__builderFixtureSaveFailureCount = requestedFixtureFailures - 1;
+                return builderSectionsJsonResponse({ success: false, error: { code: 'SUPABASE_UNAVAILABLE', message: 'Fixture save outage', request_id: 'fixture-failure', status: 503 } }, 503);
+            }
+
             const hasSupabase = editorUsesSupabase();
             const reqUser = getActingUserId() || reqContext.user?.id || '';
 
             if (!hasSupabase) {
                 if (!editorUsesLocalData()) {
-                    return builderSectionsJsonResponse({ success: false, error: 'Section persistence unavailable' }, 503);
+                    return builderSectionsJsonResponse({ success: false, error: { code: 'SUPABASE_UNAVAILABLE', message: 'Section persistence unavailable', request_id: 'fixture', status: 503 } }, 503);
                 }
                 const page = mockPages.find(item => item.id === pageId && item.user_id === reqUser);
                 if (!page || sections.some(section => section.page_id !== pageId)) {
-                    return builderSectionsJsonResponse({ success: false, error: 'Page not found' }, 404);
+                    return builderSectionsJsonResponse({ success: false, error: { code: 'PAGE_NOT_FOUND', message: 'Page not found', request_id: 'fixture', status: 404 } }, 404);
                 }
                 const replacement = orderedBuilderPageSections(sections).map(section => structuredClone(section));
                 try {
                     window.localStorage.setItem(`mock_sections_${reqUser}:${pageId}`, JSON.stringify(replacement));
                 } catch {
-                    return builderSectionsJsonResponse({ success: false, error: 'LOCAL_SECTION_STORAGE_WRITE_FAILED' }, 500);
+                    return builderSectionsJsonResponse({ success: false, error: { code: 'TRANSACTION_FAILED', message: 'Local fixture write failed', request_id: 'fixture', status: 500 } }, 500);
                 }
                 for (let index = mockPageSections.length - 1; index >= 0; index -= 1) {
                     if (mockPageSections[index].page_id === pageId) mockPageSections.splice(index, 1);
                 }
                 mockPageSections.push(...replacement);
-                return builderSectionsJsonResponse({ success: true, saved: replacement.length }, 200);
+                const revision = (Number.isSafeInteger(body.expected_revision) ? body.expected_revision : 0) + 1;
+                return builderSectionsJsonResponse({ success: true, data: { page_id: pageId, saved_count: replacement.length, generation: body.generation, revision, document_hash: `fixture-${revision}`, request_id: 'fixture' } }, 200);
             }
 
             // Upsert sections to Supabase
@@ -2405,8 +2420,29 @@ async function renderClients() {
   }
 };
 
-let isAutoSaving = false;
 let autoSaveTimeout: any;
+const builderSaveState = new BuilderSaveStateController();
+const builderPageSaveRevisions = new Map<string, number>();
+const builderViewTransitions = new BuilderViewTransitionController();
+
+function renderBuilderAutosaveIndicator(): void {
+  const indicator = document.getElementById('pb-autosave-indicator');
+  if (!indicator) return;
+  const status = builderSaveState.status;
+  const color = status === 'saved' ? '#10b981'
+    : status === 'saving' ? '#fbbf24'
+      : status === 'dirty' ? '#f97316'
+        : '#ef4444';
+  const retry = status === 'failed' || status === 'conflict'
+    ? ` <button type="button" class="pb-autosave-retry" onclick="window.retryBuilderAutosave()">Retry</button>`
+    : '';
+  indicator.innerHTML = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};box-shadow:0 0 8px ${color};"></span> ${builderSaveStatusLabel(status)}${retry}`;
+}
+
+(window as any).retryBuilderAutosave = () => {
+  builderSaveState.markDirty();
+  (window as any).triggerAutoSave();
+};
 
 type BuilderPublicationDisplayStatus = {
   label: 'Never published' | 'Published' | 'Unpublished changes' | 'Checking…' | 'Status unavailable';
@@ -2454,6 +2490,7 @@ function initializeBuilderHistory(pageId: string): BuilderHistoryController | nu
       selectedSectionId: builderSelectedSectionId,
       viewport: builderViewport
     });
+    builderSaveState.resetSaved();
     return builderHistoryController;
   } catch {
     console.error('[Builder] Current page data could not initialize undo history.');
@@ -2524,6 +2561,7 @@ function applyLiveBuilderMutation(
   }
 
   syncBuilderDocumentToPageSections(history.document);
+  builderSaveState.markDirty();
   builderSelectedSectionId = history.selectedSectionId;
   builderViewport = history.viewport;
   if (options.autosave !== false) (window as any).triggerAutoSave();
@@ -2898,11 +2936,9 @@ async function flushBuilderAutosaveForPublication(): Promise<boolean> {
     clearTimeout(autoSaveTimeout);
     autoSaveTimeout = undefined;
   }
-  isAutoSaving = true;
   const indicator = document.getElementById('pb-autosave-indicator');
   if (indicator) indicator.textContent = 'Saving…';
   const saved = await (window as any).savePageSections();
-  isAutoSaving = false;
   if (indicator) indicator.textContent = saved ? 'Saved' : 'Save failed';
   updateBuilderPublicationStatusBadge();
   return saved === true;
@@ -3273,33 +3309,21 @@ function renderBuilderPublishModal(
 
 // WB.3.5 — Auto-save: debounced 600ms, then persists via API
 (window as any).triggerAutoSave = () => {
-  isAutoSaving = true;
-
-  // Update header indicator immediately
-  const indicator = document.getElementById('pb-autosave-indicator');
-  if (indicator) {
-    indicator.innerHTML = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ffc107;box-shadow:0 0 5px #ffc107;animation:pb-pulse 1s infinite;"></span> Saving…`;
-  }
+  builderSaveState.markDirty();
+  renderBuilderAutosaveIndicator();
 
   clearTimeout(autoSaveTimeout);
   autoSaveTimeout = setTimeout(async () => {
     autoSaveTimeout = undefined;
     // Persist to Supabase via internal API
-    let saved = false;
     try {
-      saved = await (window as any).savePageSections() === true;
-    } catch (err) {
-      console.warn('[AutoSave] Persist failed silently:', err);
+      await (window as any).savePageSections();
+    } catch {
+      console.warn(`[AutoSave] SECTION_SAVE_FAILED code=NETWORK_FAILURE status=0 pageId=${builderPageId} requestId=client`);
     }
-    isAutoSaving = false;
     const page = mockPages.find((p: any) => p.id === builderPageId);
     if (page) (page as any).updated_at = new Date().toISOString();
-    const ind = document.getElementById('pb-autosave-indicator');
-    if (ind) {
-      ind.innerHTML = saved
-        ? `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#22c55e;"></span> Saved`
-        : `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ef4444;"></span> Save failed`;
-    }
+    renderBuilderAutosaveIndicator();
     updateBuilderPublicationStatusBadge();
   }, 600); // 600ms debounce — within the 300–800ms WB.3.5 spec
 };
@@ -3355,14 +3379,7 @@ let builderMode: 'edit' | 'preview' = 'edit';
 (window as any).redoBuilder = () => applyBuilderHistoryTransition('redo');
 
 function renderBuilder() {
-  if (!(document as any).startViewTransition) {
-    _renderBuilder();
-    return;
-  }
-  const transition = (document as any).startViewTransition(() => {
-    _renderBuilder();
-  });
-  void transition?.finished?.catch(() => undefined);
+  builderViewTransitions.render(document as any, _renderBuilder);
 }
 
 const hydratedBuilderSectionPageIds = new Set<string>();
@@ -3906,6 +3923,7 @@ function renderBuilderLayersPanel(sections: PageSection[]): string {
               <button
                 type="button"
                 class="pb-layer-main"
+                data-builder-section-id="${escapeBuilderInspectorHtml(section.id)}"
                 onclick='window.selectSectionForBuilder(${sectionArg}, true)'
                 ${isSelected ? 'aria-current="true"' : ''}
                 aria-label="Select ${safeAccessibleSectionLabel}"
@@ -3974,7 +3992,6 @@ async function flushActiveBuilderBeforeNewPage(): Promise<boolean> {
     clearTimeout(autoSaveTimeout);
     autoSaveTimeout = undefined;
     await (window as any).savePageSections();
-    isAutoSaving = false;
   }
   await builderSaveQueue.whenIdle();
   return true;
@@ -4905,8 +4922,9 @@ function _renderBuilder() {
 
         <div style="display: flex; align-items: center; gap: 15px;">
            <span id="pb-autosave-indicator" style="font-size: 0.75rem; color: #666; font-weight: 600; display: flex; align-items: center; gap: 8px;">
-            <span style="width: 7px; height: 7px; border-radius: 50%; background: ${isAutoSaving ? '#fbbf24' : history?.isDirty ? '#f97316' : '#10b981'}; box-shadow: 0 0 8px ${isAutoSaving ? '#fbbf24' : history?.isDirty ? '#f97316' : '#10b981'};"></span>
-            ${isAutoSaving ? 'Auto-saving...' : history?.isDirty ? 'Unsaved' : 'Cloud Saved'}
+            <span style="width: 7px; height: 7px; border-radius: 50%; background: ${builderSaveState.status === 'saved' ? '#10b981' : builderSaveState.status === 'saving' ? '#fbbf24' : builderSaveState.status === 'dirty' ? '#f97316' : '#ef4444'};"></span>
+            ${builderSaveStatusLabel(builderSaveState.status)}
+            ${builderSaveState.status === 'failed' || builderSaveState.status === 'conflict' ? `<button type="button" class="pb-autosave-retry" onclick="window.retryBuilderAutosave()">Retry</button>` : ''}
           </span>
           ${builderMode === 'edit' ? `
           <div class="pb-publication-control">
@@ -5028,7 +5046,13 @@ function _renderBuilder() {
                 ` : ''}
                 ${!isInitial ? `
                   <div id="sec-preview-${escapeBuilderInspectorHtml(section.id)}" class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''} ${section.styles?.visible === false ? 'pb-section--hidden' : ''}"
-                       onclick="${builderMode === 'edit' ? `window.selectSectionForBuilder('${section.id}')` : ''}"
+                       data-builder-section-id="${escapeBuilderInspectorHtml(section.id)}"
+                       role="${builderMode === 'edit' ? 'button' : 'region'}"
+                       tabindex="${builderMode === 'edit' ? '0' : '-1'}"
+                       aria-label="${escapeBuilderInspectorHtml(`${section.type} section`)}"
+                       aria-selected="${builderSelectedSectionId === section.id}"
+                       onclick="${builderMode === 'edit' ? `window.handleBuilderCanvasSectionClick(event, '${section.id}')` : ''}"
+                       onkeydown="${builderMode === 'edit' ? `window.handleBuilderCanvasSectionKeydown(event, '${section.id}')` : ''}"
                        style="position: relative; border: 2px solid transparent; transition: border-color 0.2s; background: white; cursor: ${builderMode === 'edit' ? 'pointer' : 'default'};">
                       
                       ${builderMode === 'edit' ? `
@@ -5159,7 +5183,7 @@ function inlineText(sectionId: string, field: string, value: string, extraStyle:
     data-section-id="${sectionId}"
     data-field="${field}"
     style="${extraStyle} ${canEdit ? '' : 'pointer-events: none;'}"
-    onclick="event.stopPropagation()"
+    onclick="window.handleBuilderCanvasSectionClick(event, '${sectionId}');event.stopPropagation()"
     oninput="window.saveInlineEdit('${sectionId}', '${field}', this)"
     onblur="window.saveInlineEdit('${sectionId}', '${field}', this);window.finishBuilderFieldEdit()"
     onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.blur();}"
@@ -5503,7 +5527,6 @@ function renderSectionPreviewContent(section: any) {
     autoSaveTimeout = undefined;
     const previousPage = mockPages.find(page => page.id === builderPageId);
     await (window as any).savePageSections();
-    isAutoSaving = false;
     if (previousPage) (previousPage as any).updated_at = new Date().toISOString();
   }
 
@@ -5548,9 +5571,29 @@ function renderSectionPreviewContent(section: any) {
   renderBuilder();
 };
 
-(window as any).selectSectionForBuilder = (id: string, shouldScroll = false) => {
+function synchronizeBuilderSelectionDom(id: string): void {
+  document.querySelectorAll<HTMLElement>('.pb-section-preview[data-builder-section-id]').forEach(section => {
+    const selected = section.dataset.builderSectionId === id;
+    section.classList.toggle('active', selected);
+    section.setAttribute('aria-selected', String(selected));
+  });
+  document.querySelectorAll<HTMLElement>('.pb-layer-row').forEach(row => {
+    const button = row.querySelector<HTMLButtonElement>('.pb-layer-main');
+    const selected = button?.dataset.builderSectionId === id;
+    row.classList.toggle('active', selected);
+    if (button) {
+      if (selected) button.setAttribute('aria-current', 'true');
+      else button.removeAttribute('aria-current');
+    }
+  });
+  const inspector = document.querySelector<HTMLElement>('.pb-inspector-panel');
   const history = getBuilderHistoryController();
-  history?.selectSection(id);
+  if (inspector && history) inspector.outerHTML = renderBuilderInspectorPanel(builderDocumentToPageSections(history.document));
+}
+
+(window as any).selectSectionForBuilder = (id: string, shouldScroll = false, preserveCanvasInteraction = false) => {
+  const history = getBuilderHistoryController();
+  const changed = history?.selectSection(id) ?? builderSelectedSectionId !== id;
   builderSelectedSectionId = history?.selectedSectionId ?? id;
   builderInsertOrder = null;
   persistBuilderContext({
@@ -5560,7 +5603,10 @@ function renderSectionPreviewContent(section: any) {
     returnTo: builderReturnTo,
     funnelId: builderReturnFunnelId
   });
-  renderBuilder();
+  if (changed) {
+    if (preserveCanvasInteraction) synchronizeBuilderSelectionDom(id);
+    else renderBuilder();
+  }
   if (shouldScroll) {
     setTimeout(() => {
       document.getElementById(`sec-preview-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -5872,7 +5918,22 @@ function renderSectionPreviewContent(section: any) {
   }, ttl);
 };
 
-// ── WB.3.5 savePageSections — persists current page sections to Supabase via API
+async function getBuilderSaveAccessToken(): Promise<string | null> {
+  if (browserFixturesEnabled) return 'browser-fixture-session';
+  const client = await getBuilderPublicationSupabaseClient();
+  if (!client) return null;
+  const session = await client.auth.getSession();
+  return session.data.session?.access_token ?? null;
+}
+
+const persistPageSectionDocument = createPageSectionSaveClient({
+  getAccessToken: getBuilderSaveAccessToken
+});
+const fetchPageSectionRevision = createPageSectionRevisionClient({
+  getAccessToken: getBuilderSaveAccessToken
+});
+
+// ── WB.3.5 savePageSections — authenticated production API + transactional RPC
 (window as any).savePageSections = async () => {
   const history = getBuilderHistoryController();
   const saveSnapshot = history?.createSaveSnapshot();
@@ -5883,30 +5944,47 @@ function renderSectionPreviewContent(section: any) {
     : mockPageSections.filter((section: any) => section.page_id === pageId);
 
   const saveOperation = builderSaveQueue.enqueue(async () => {
-    let succeeded = false;
-    try {
-      const res = await fetch(`/api/pages/${pageId}/sections`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json',
-                   'Authorization': `Bearer ${(window as any).__authToken ?? ''}` },
-        body: JSON.stringify({ sections })
-      });
-      const data = await res.json();
-      succeeded = data.success === true;
-      if (!succeeded) {
-        console.warn('[AutoSave] Section persist failed:', data.error);
+    const generation = saveSnapshot?.generation ?? 1;
+    builderSaveState.begin(generation);
+    renderBuilderAutosaveIndicator();
+    if (!builderPageSaveRevisions.has(pageId)) {
+      const revisionResult = await fetchPageSectionRevision(pageId);
+      if (!revisionResult.success) {
+        if (history && saveSnapshot) history.acknowledgeSave(saveSnapshot.generation, false);
+        builderSaveState.complete(generation, { success: false, code: revisionResult.error.code }, true);
+        console.warn(`[AutoSave] SECTION_SAVE_FAILED code=${revisionResult.error.code} status=${revisionResult.error.status} pageId=${pageId} requestId=${revisionResult.error.request_id}`);
+        renderBuilderAutosaveIndicator();
+        return false;
       }
-    } catch (err) {
-      console.warn('[AutoSave] Fetch error:', err);
+      builderPageSaveRevisions.set(pageId, revisionResult.data.revision);
     }
+    const result = await persistPageSectionDocument(pageId, {
+      generation,
+      expected_revision: builderPageSaveRevisions.get(pageId) ?? null,
+      sections
+    });
+    const succeeded = result.success;
 
     if (history && saveSnapshot) {
-      history.acknowledgeSave(saveSnapshot.generation, succeeded);
+      const acknowledgement = history.acknowledgeSave(saveSnapshot.generation, succeeded);
+      builderSaveState.complete(
+        saveSnapshot.generation,
+        result.success ? { success: true } : { success: false, code: result.error.code },
+        acknowledgement.isDirty
+      );
       if (history === builderHistoryController && history.pageId === builderPageId) {
         updateBuilderHistoryControls();
       }
+    } else {
+      builderSaveState.complete(generation, result.success ? { success: true } : { success: false, code: result.error.code }, false);
     }
-    if (succeeded) (window as any).showToast('Saved ✓', 'success');
+    if (result.success) {
+      builderPageSaveRevisions.set(pageId, result.data.revision);
+      if (builderSaveState.status === 'saved') (window as any).showToast('Saved ✓', 'success');
+    } else {
+      console.warn(`[AutoSave] SECTION_SAVE_FAILED code=${result.error.code} status=${result.error.status} pageId=${pageId} requestId=${result.error.request_id}`);
+    }
+    renderBuilderAutosaveIndicator();
     return succeeded;
   });
   return saveOperation;
@@ -8864,6 +8942,21 @@ function renderApplicationLogin(
   applicationAuthInitialization = null;
   applicationAuthHasInitialized = false;
   await bootRouter();
+};
+
+(window as any).handleBuilderCanvasSectionClick = (event: MouseEvent, id: string) => {
+  if (!(event.currentTarget instanceof HTMLElement)) return;
+  const section = event.currentTarget.closest<HTMLElement>('.pb-section-preview[data-builder-section-id]');
+  if (section?.dataset.builderSectionId !== id) return;
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  const preserveInteraction = Boolean(target?.closest('input, textarea, select, button, a, label, [contenteditable="true"]'));
+  (window as any).selectSectionForBuilder(id, false, preserveInteraction);
+};
+
+(window as any).handleBuilderCanvasSectionKeydown = (event: KeyboardEvent, id: string) => {
+  if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
+  event.preventDefault();
+  (window as any).selectSectionForBuilder(id);
 };
 
 (window as any).signOutApplication = async () => {

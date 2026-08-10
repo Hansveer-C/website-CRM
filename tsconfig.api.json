@@ -6,6 +6,10 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["api/**/*.ts", "src/website_generation_contract.ts"],
+  "include": [
+    "api/**/*.ts",
+    "src/website_generation_contract.ts",
+    "src/page_section_save_contract.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }
