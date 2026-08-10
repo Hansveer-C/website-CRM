@@ -7,7 +7,10 @@ export interface BuilderViewTransitionDocument {
 }
 
 function isExpectedSkippedTransition(error: unknown): boolean {
-  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (error instanceof DOMException) {
+    if (error.name === 'AbortError') return true;
+    if (error.name === 'InvalidStateError' && error.message.includes('Transition was aborted')) return true;
+  }
   return error instanceof Error && error.message === 'Transition was skipped';
 }
 
