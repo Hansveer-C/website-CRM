@@ -2,11 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 const migration = readFileSync(new URL('../supabase/migrations/20260810050518_save_page_sections_document.sql', import.meta.url), 'utf8').toLowerCase();
-const route = readFileSync(new URL('../api/pages/[pageId]/sections.ts', import.meta.url), 'utf8');
+const saveRoute = readFileSync(new URL('../api/page-sections.ts', import.meta.url), 'utf8');
+const revisionRoute = readFileSync(new URL('../api/page-section-save-revision.ts', import.meta.url), 'utf8');
 const vercel = readFileSync(new URL('../vercel.json', import.meta.url), 'utf8');
 
 describe('page section save deployment boundary', () => {
-  it('ships a real dynamic Vercel route', () => { expect(route).toContain('createPageSectionSaveHandler'); expect(route).toContain('export function PUT'); });
+  it('ships literal Vercel routes that resolve before the API catch-all', () => {
+    expect(saveRoute).toContain('createPageSectionSaveHandler');
+    expect(saveRoute).toContain('export function PUT');
+    expect(revisionRoute).toContain('createPageSectionSaveHandler');
+    expect(revisionRoute).toContain('export function GET');
+  });
   it('lets filesystem routes resolve before the API catch-all', () => expect(vercel.indexOf('"handle": "filesystem"')).toBeLessThan(vercel.indexOf('"src": "/api')));
   it('uses a security definer with an empty search path', () => expect(migration).toMatch(/security definer\s+set search_path = ''/));
   it('derives identity from auth.uid', () => expect(migration).toContain("v_user_id text := (select auth.uid())::text"));

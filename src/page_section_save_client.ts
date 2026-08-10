@@ -34,7 +34,7 @@ export function createPageSectionSaveClient(options: PageSectionSaveClientOption
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 15_000);
     try {
-      const response = await (options.fetch ?? fetch)(`/api/pages/${encodeURIComponent(pageId)}/sections`, {
+      const response = await (options.fetch ?? fetch)(`/api/page-sections?pageId=${encodeURIComponent(pageId)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(request),
@@ -56,7 +56,7 @@ export function createPageSectionRevisionClient(options: PageSectionSaveClientOp
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 15_000);
     try {
-      const response = await (options.fetch ?? fetch)(`/api/pages/${encodeURIComponent(pageId)}/section-save-revision`, {
+      const response = await (options.fetch ?? fetch)(`/api/page-section-save-revision?pageId=${encodeURIComponent(pageId)}`, {
         method: 'GET', headers: { Authorization: `Bearer ${token}` }, signal: controller.signal
       });
       return await readResponse(response);

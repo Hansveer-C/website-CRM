@@ -18,6 +18,7 @@ const dependencies = (rpcResult: { data: unknown; error: null | { code?: string 
 describe('page section save Vercel handler', () => {
   it('allows only PUT and GET and returns JSON', async () => { const response = await createPageSectionSaveHandler()(request({ method: 'POST' })); expect(response.status).toBe(405); expect(response.headers.get('allow')).toBe('PUT, GET'); expect(response.headers.get('content-type')).toContain('application/json'); });
   it('requires a route page ID', async () => expect((await createPageSectionSaveHandler()(request({ url: 'https://example.test/api/pages//sections' }))).status).toBe(404));
+  it('accepts a page ID from a literal endpoint query', async () => { const dep = dependencies(); const response = await createPageSectionSaveHandler(dep.options)(request({ url: 'https://example.test/api/page-sections?pageId=page-1' })); expect(response.status).toBe(200); expect(dep.rpc).toHaveBeenCalledWith('save_page_sections_document', expect.objectContaining({ p_page_id: 'page-1' })); });
   it('requires JSON content', async () => expect((await createPageSectionSaveHandler()(request({ contentType: 'text/plain' }))).status).toBe(400));
   it('rejects malformed JSON', async () => expect((await createPageSectionSaveHandler()(request({ raw: '{' }))).status).toBe(400));
   it('rejects invalid documents before authentication or RPC', async () => expect((await createPageSectionSaveHandler()(request({ value: { ...body, sections: [{ ...body.sections[0], type: 'unknown' }] } }))).status).toBe(422));

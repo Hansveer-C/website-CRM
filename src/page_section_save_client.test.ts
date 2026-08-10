@@ -10,7 +10,7 @@ describe('page section save client', () => {
   it('sends bearer auth, typed body, and encoded page ID', async () => {
     const fetcher = vi.fn(async () => response(success));
     await createPageSectionSaveClient({ getAccessToken: async () => 'secret', fetch: fetcher })('page/one', request);
-    expect(fetcher).toHaveBeenCalledWith('/api/pages/page%2Fone/sections', expect.objectContaining({ method: 'PUT', headers: expect.objectContaining({ Authorization: 'Bearer secret' }), body: JSON.stringify(request) }));
+    expect(fetcher).toHaveBeenCalledWith('/api/page-sections?pageId=page%2Fone', expect.objectContaining({ method: 'PUT', headers: expect.objectContaining({ Authorization: 'Bearer secret' }), body: JSON.stringify(request) }));
   });
   it('fails before fetch when unauthenticated', async () => {
     const fetcher = vi.fn(); const result = await createPageSectionSaveClient({ getAccessToken: async () => null, fetch: fetcher })('page', request);
@@ -27,7 +27,7 @@ describe('page section save client', () => {
   it('fetches the current revision before a fresh-session save', async () => {
     const fetcher = vi.fn(async () => response({ ...success, data: { ...success.data, generation: 0 } }));
     const result = await createPageSectionRevisionClient({ getAccessToken: async () => 'token', fetch: fetcher })('page/one');
-    expect(fetcher).toHaveBeenCalledWith('/api/pages/page%2Fone/section-save-revision', expect.objectContaining({ method: 'GET', headers: { Authorization: 'Bearer token' } }));
+    expect(fetcher).toHaveBeenCalledWith('/api/page-section-save-revision?pageId=page%2Fone', expect.objectContaining({ method: 'GET', headers: { Authorization: 'Bearer token' } }));
     expect(result).toMatchObject({ success: true, data: { revision: 2 } });
   });
 });

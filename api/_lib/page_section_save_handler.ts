@@ -34,7 +34,10 @@ function bearerToken(request: Request): string | null {
 }
 
 function pageIdFromRequest(request: Request): string {
-  const match = /\/api\/pages\/([^/]+)\/(?:sections|section-save-revision)\/?$/.exec(new URL(request.url).pathname);
+  const url = new URL(request.url);
+  const queryPageId = url.searchParams.get('pageId')?.trim() ?? '';
+  if (queryPageId) return queryPageId;
+  const match = /\/api\/pages\/([^/]+)\/(?:sections|section-save-revision)\/?$/.exec(url.pathname);
   try { return match?.[1] ? decodeURIComponent(match[1]) : ''; } catch { return ''; }
 }
 
