@@ -78,7 +78,32 @@ export interface ApplicationAuthControllerOptions {
 
 export type ApplicationLoginResult =
   | { success: true; state: Extract<ApplicationAuthState, { status: 'authenticated' }> }
-  | { success: false; reason: 'invalid-credentials' | 'unavailable' };
+  | { success: false; reason: 'invalid-credentials' | 'email-not-confirmed' | 'unavailable' };
+
+export type ApplicationLoginFailureReason = Extract<ApplicationLoginResult, { success: false }>['reason'];
+
+const CREDENTIAL_REJECTION_CODES = new Set(['invalid_credentials']);
+const EMAIL_NOT_CONFIRMED_CODES = new Set(['email_not_confirmed']);
+const TRANSIENT_AUTH_CODES = new Set([
+  'over_request_rate_limit',
+  'over_email_send_rate_limit',
+  'over_sms_send_rate_limit',
+  'request_timeout',
+  'hook_timeout',
+  'hook_timeout_after_retry',
+  'unexpected_failure'
+]);
+
+/** Classifies only stable SDK status/code fields; unknown failures fail closed. */
+export function classifyApplicationLoginError(error: ApplicationAuthError | null): ApplicationLoginFailureReason {
+  if (!error) return 'unavailable';
+  const code = error.code?.trim().toLowerCase() ?? '';
+  if (EMAIL_NOT_CONFIRMED_CODES.has(code)) return 'email-not-confirmed';
+  if (CREDENTIAL_REJECTION_CODES.has(code)) return 'invalid-credentials';
+  if (error.status === 429 || (typeof error.status === 'number' && error.status >= 500)) return 'unavailable';
+  if (TRANSIENT_AUTH_CODES.has(code)) return 'unavailable';
+  return 'unavailable';
+}
 
 const APPLICATION_EMAIL_MAX_LENGTH = 254;
 const APPLICATION_PASSWORD_MIN_LENGTH = 6;
@@ -201,7 +226,7 @@ export class ApplicationAuthController {
       const result = await this.client.auth.signInWithPassword({ email: email.trim(), password });
       if (!result.data.user?.id || result.error) {
         this.setState({ status: 'unauthenticated' });
-        return { success: false, reason: 'invalid-credentials' };
+        return { success: false, reason: classifyApplicationLoginError(result.error) };
       }
       const state = this.setState({
         status: 'authenticated',
@@ -210,6 +235,7 @@ export class ApplicationAuthController {
       }) as Extract<ApplicationAuthState, { status: 'authenticated' }>;
       return { success: true, state };
     } catch {
+      this.setState({ status: 'unauthenticated' });
       return { success: false, reason: 'unavailable' };
     }
   }

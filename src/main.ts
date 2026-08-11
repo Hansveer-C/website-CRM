@@ -97,6 +97,8 @@ import { WebsiteDashboardController, type WebsiteDashboardCoreData } from './web
 import { getWebsiteScopedPages, resolveWebsiteHomepage, type WebsiteDashboardModel, type WebsiteDashboardSummaryInput } from './website_dashboard_model';
 import { createBrowserCallSimulator } from './browser_call_simulation';
 import { isCrmApplicationHost } from './application_host';
+import { resolveApplicationHostRoute } from './application_host_route';
+import { CrmProductionHydrator, type CrmHydrationClient } from './crm_production_hydration';
 import {
   ApplicationAuthController,
   createApplicationSignupRedirect,
@@ -500,6 +502,17 @@ const applicationAuthController = new ApplicationAuthController({
     getSupabaseClient: async () => await getBuilderPublicationSupabaseClient() as unknown as ApplicationAuthClient | null,
     ...(editorRuntime.success && editorRuntime.mode === 'local' ? { localUserId: 'system' } : {})
 });
+const crmProductionHydrator = new CrmProductionHydrator(
+    async () => await getBuilderPublicationSupabaseClient() as unknown as CrmHydrationClient | null,
+    {
+      contacts: mockContacts,
+      opportunities: mockOpportunities,
+      activities: mockActivities,
+      quotes: mockQuotes,
+      quote_items: mockQuoteItems,
+      invoices: mockInvoices
+    }
+);
 let applicationAuthInitialization: Promise<ApplicationAuthState> | null = null;
 let applicationAuthHasInitialized = false;
 let applicationAuthFormSubmissionInProgress = false;
@@ -1690,6 +1703,7 @@ function getActingUserId(): string {
 }
 
 function clearProtectedRuntimeData(): void {
+  crmProductionHydrator.clear();
   removeLocalFixtureRows();
   mockAutomationLogs.splice(0);
   contactTimelineState = [];
@@ -1708,6 +1722,45 @@ function clearProtectedRuntimeData(): void {
   websiteDashboardController = null;
   lastContactCount = 0;
 }
+
+const CRM_DATA_VIEWS = new Set([
+  'dashboard', 'clients', 'contact-detail', 'opportunities', 'quotes', 'new-quote',
+  'quote-preview', 'invoices'
+]);
+
+function renderCrmDataLoading(view: string): void {
+  app.innerHTML = `${renderSidebar(view)}<main class="main-content"><header class="view-header"><h1>Loading CRM dataâ€¦</h1></header><section class="card" aria-busy="true"><p>Loading your account data.</p></section></main>`;
+}
+
+function renderCrmHydrationNotice(): void {
+  if (!editorUsesSupabase() || crmProductionHydrator.state.status !== 'error') return;
+  const failed = Object.entries(crmProductionHydrator.state.entities)
+    .filter(([, status]) => status === 'error')
+    .map(([name]) => name.replace('_', ' '));
+  const main = app.querySelector<HTMLElement>('main.main-content');
+  if (!main || main.querySelector('[data-crm-hydration-error]')) return;
+  const notice = document.createElement('section');
+  notice.className = 'card';
+  notice.dataset.crmHydrationError = 'true';
+  notice.setAttribute('role', 'alert');
+  notice.innerHTML = `<strong>Some CRM data could not be loaded.</strong><p>${failed.join(', ')} are temporarily unavailable. Loaded account data remains visible; retry before relying on empty results.</p><button type="button" class="btn-outline" onclick="window.retryCrmDataLoad()">Retry</button>`;
+  main.insertBefore(notice, main.children[1] ?? null);
+}
+
+async function ensureProductionCrmData(userId: string, view: string, force = false): Promise<void> {
+  if (!editorUsesSupabase() || !CRM_DATA_VIEWS.has(view)) return;
+  if (force || crmProductionHydrator.state.userId !== userId || crmProductionHydrator.state.status === 'idle') {
+    renderCrmDataLoading(view);
+    await crmProductionHydrator.hydrateAuthenticatedUser(userId, force);
+  }
+}
+
+(window as any).retryCrmDataLoad = async () => {
+  const userId = getActingUserId();
+  if (!userId) return;
+  await ensureProductionCrmData(userId, currentView, true);
+  await (window as any).navigateTo(currentView, selectedContactId || undefined);
+};
 
 function applyApplicationAuthState(state: ApplicationAuthState): void {
   const previousUserId = getActingUserId();
@@ -8573,6 +8626,7 @@ function renderNewQuote() {
 
   mockQuotes.push({
     id: quoteId,
+    user_id: getActingUserId(),
     contact_id: nqcId,
     opportunity_id: nqoId || '',
     status: 'draft',
@@ -8593,6 +8647,7 @@ function renderNewQuote() {
   nqItems.forEach((item: any, idx: number) => {
     mockQuoteItems.push({
       id: 'qi-' + quoteId + '-' + idx,
+      user_id: getActingUserId(),
       quote_id: quoteId,
       service_name: item.service,
       description: item.description,
@@ -8814,7 +8869,9 @@ function renderApplicationLogin(
         safeReturnTo,
         result.reason === 'invalid-credentials'
           ? 'The email or password is incorrect.'
-          : 'Sign-in is temporarily unavailable. Please try again.'
+          : result.reason === 'email-not-confirmed'
+            ? 'Confirm your email address before signing in.'
+            : 'Sign-in is temporarily unavailable. Please try again.'
       );
       return;
     }
@@ -9537,6 +9594,7 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
       renderApplicationLogin(requestedHash);
       return;
     }
+    await ensureProductionCrmData(authState.user.id, view);
     if (editorUsesSupabase() && WEBSITE_DATA_VIEWS.has(view)) {
       try {
         const core = await loadWebsiteDashboardCore({ actingUserId: authState.user.id });
@@ -9573,8 +9631,9 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
     `;
     setTimeout(() => executeNavigation(view, id, context), 350);
   } else {
-    executeNavigation(view, id, context);
+    await executeNavigation(view, id, context);
   }
+  renderCrmHydrationNotice();
 
   // Update URL for standard CRM navigation (Hash based)
   if (!['site', 'preview'].includes(view)) {
@@ -10158,6 +10217,7 @@ async function renderContactDetail(contactId: string) {
 
     mockInvoices.push({
       id: invoiceId,
+      user_id: getActingUserId(),
       contact_id: quote.contact_id,
       quote_id: quote.id,
       amount: quote.total_amount,
@@ -10210,6 +10270,7 @@ async function renderContactDetail(contactId: string) {
 
       mockInvoices.push({
         id: invoiceId,
+        user_id: getActingUserId(),
         contact_id: quote.contact_id,
         quote_id: quote.id,
         amount: quote.total_amount,
@@ -10313,6 +10374,7 @@ async function renderContactDetail(contactId: string) {
 
   mockInvoices.push({
     id: invoiceId,
+    user_id: getActingUserId(),
     contact_id: contactId,
     quote_id: latestQuote.id,
     amount: amount,
@@ -10550,20 +10612,16 @@ async function bootRouter() {
   publicSiteAbortController = null;
   const host = window.location.hostname;
   const rawPath = window.location.pathname;
-  const crmApplicationHost = isCrmApplicationHost(host);
+  const hostRoute = resolveApplicationHostRoute({ hostname: host, pathname: rawPath });
+  if (hostRoute.kind === 'public-site') {
+    await renderConfiguredPublicSite(hostRoute.pathname);
+    return;
+  }
   const targetPath = resolveWebsitePathFromBrowserPath(rawPath);
   const isPreviewRoute = rawPath === '/preview' || rawPath.startsWith('/preview/');
-  // Customer-facing /site routes and customer domains never initialize CRM auth.
+  // Explicit /site simulation remains public on CRM application hosts.
   if (targetPath && !isPreviewRoute) {
     await renderConfiguredPublicSite(targetPath);
-    return;
-  }
-  if ((rawPath === '/' || rawPath === '/index.html' || rawPath === '') && !crmApplicationHost) {
-    await renderConfiguredPublicSite('/');
-    return;
-  }
-  if (!crmApplicationHost) {
-    render404();
     return;
   }
 
@@ -10615,7 +10673,7 @@ async function bootRouter() {
        const routeContext = parts[0] === 'builder' && query
          ? { builderContext: getBuilderContextFromHash() }
          : undefined;
-       (window as any).navigateTo(parts[0], parts[1], routeContext);
+       await (window as any).navigateTo(parts[0], parts[1], routeContext);
        return;
      }
   }

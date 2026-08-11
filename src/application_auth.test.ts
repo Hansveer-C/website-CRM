@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   ApplicationAuthController,
+  classifyApplicationLoginError,
   createApplicationSignupRedirect,
   normalizeApplicationSignupEmail,
   validateApplicationSignupInput,
@@ -11,7 +12,7 @@ function client(input: {
   user?: { id: string; email?: string } | null;
   getUserError?: { name?: string; code?: string } | null;
   loginUser?: { id: string; email?: string } | null;
-  loginError?: { code?: string } | null;
+  loginError?: { name?: string; code?: string; status?: number } | null;
   signupUser?: { id: string; email?: string } | null;
   signupSessionUser?: { id: string; email?: string } | null;
   signupError?: { code?: string; status?: number } | null;
@@ -80,6 +81,60 @@ describe('ApplicationAuthController', () => {
     expect(authClient.auth.signInWithPassword).toHaveBeenCalledWith({ email: 'owner@example.com', password });
     expect(email).toBe(' owner@example.com ');
     expect(password).toBe('not-logged');
+  });
+
+  it('uses the same stable credential rejection for an unknown email', async () => {
+    const controller = new ApplicationAuthController({
+      mode: 'supabase',
+      getSupabaseClient: async () => client({ loginError: { code: 'invalid_credentials', status: 400 } })
+    });
+    await controller.initialize();
+    expect(await controller.signIn('unknown@example.com', 'secret')).toEqual({
+      success: false, reason: 'invalid-credentials'
+    });
+  });
+
+  it.each([
+    [{ code: 'invalid_credentials', status: 400 }, 'invalid-credentials'],
+    [{ code: 'email_not_confirmed', status: 400 }, 'email-not-confirmed'],
+    [{ code: 'over_request_rate_limit', status: 429 }, 'unavailable'],
+    [{ status: 500 }, 'unavailable'],
+    [{ status: 502 }, 'unavailable'],
+    [{ status: 503 }, 'unavailable'],
+    [{ code: 'request_timeout', status: 400 }, 'unavailable'],
+    [{ code: 'future_server_code', status: 400 }, 'unavailable'],
+    [{}, 'unavailable']
+  ] as const)('classifies returned Auth errors without exposing raw messages: %j', (error, reason) => {
+    expect(classifyApplicationLoginError(error)).toBe(reason);
+  });
+
+  it('keeps transient returned and thrown failures unauthenticated', async () => {
+    const returned = new ApplicationAuthController({
+      mode: 'supabase',
+      getSupabaseClient: async () => client({ loginError: { code: 'over_request_rate_limit', status: 429 } })
+    });
+    await returned.initialize();
+    expect(await returned.signIn('owner@example.com', 'secret')).toEqual({ success: false, reason: 'unavailable' });
+    expect(returned.state).toEqual({ status: 'unauthenticated' });
+
+    const throwingClient = client();
+    throwingClient.auth.signInWithPassword = vi.fn(async () => { throw new TypeError('network down'); });
+    const thrown = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => throwingClient });
+    await thrown.initialize();
+    expect(await thrown.signIn('owner@example.com', 'secret')).toEqual({ success: false, reason: 'unavailable' });
+    expect(thrown.state).toEqual({ status: 'unauthenticated' });
+  });
+
+  it('allows a retry to succeed after a transient returned failure', async () => {
+    const authClient = client();
+    authClient.auth.signInWithPassword = vi.fn()
+      .mockResolvedValueOnce({ data: { user: null }, error: { code: 'unexpected_failure', status: 503 } })
+      .mockResolvedValueOnce({ data: { user: { id: 'user-retry' } }, error: null });
+    const controller = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => authClient });
+    await controller.initialize();
+    expect(await controller.signIn('owner@example.com', 'secret')).toEqual({ success: false, reason: 'unavailable' });
+    expect(await controller.signIn('owner@example.com', 'secret')).toMatchObject({ success: true });
+    expect(controller.state).toMatchObject({ status: 'authenticated', user: { id: 'user-retry' } });
   });
 
   it('establishes login and clears state on logout', async () => {
