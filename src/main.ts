@@ -9674,8 +9674,8 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
 async function executeNavigation(view: string, id?: string, context?: any) {
   switch (view) {
     case 'dashboard': renderDashboard(); break;
-    case 'clients': renderClients(); break;
-    case 'contact-detail': if (id) renderContactDetail(id); break;
+    case 'clients': await renderClients(); break;
+    case 'contact-detail': if (id) await renderContactDetail(id); break;
     case 'opportunities': renderOpportunities(); break;
     case 'quotes': renderQuotes(); break;
     case 'new-quote': 

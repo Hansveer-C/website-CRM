@@ -20,4 +20,9 @@ describe('production CRM hydration integration', () => {
     expect(mainSource).toContain('Some CRM data could not be loaded.');
     expect(mainSource).toContain('retry before relying on empty results.');
   });
+
+  it('awaits asynchronous CRM renderers before adding the hydration result notice', () => {
+    expect(mainSource).toContain("case 'clients': await renderClients(); break;");
+    expect(mainSource).toContain("case 'contact-detail': if (id) await renderContactDetail(id); break;");
+  });
 });
