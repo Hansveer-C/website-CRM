@@ -33,5 +33,9 @@ describe('application authentication UI characterization', () => {
     expect(mainSource).toContain('The email or password is incorrect.');
     expect(mainSource).toContain('Confirm your email address before signing in.');
     expect(mainSource).toContain('Sign-in is temporarily unavailable. Please try again.');
+    expect(mainSource).toContain('Account creation is temporarily unavailable. Please try again.');
+    expect(mainSource).toMatch(
+      /result\.reason === 'unavailable'\s*\? 'Account creation is temporarily unavailable\. Please try again\.'\s*: 'We could not create the account\. Check your details or try signing in\.'/
+    );
   });
 });

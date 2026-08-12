@@ -105,6 +105,7 @@ import { resolveApplicationHostRoute } from './application_host_route';
 import { CrmProductionHydrator, type CrmHydrationClient } from './crm_production_hydration';
 import { WebsiteLayoutHydrator, type WebsiteLayoutHydrationClient } from './website_layout_hydration';
 import { WebsiteSettingsHydrator, type WebsiteSettingsHydrationClient } from './website_settings_hydration';
+import { resolveSiteRenderPage } from './site_render_page_resolution';
 import {
   createProductionLead,
   saveProductionQuote,
@@ -6804,7 +6805,8 @@ async function renderSitePage(
   funnel_id: string,
   websiteOrContext: any,
   isPreview: boolean = false,
-  edgeModel?: PublicSiteRenderModel
+  edgeModel?: PublicSiteRenderModel,
+  authoritativePage?: Page
 ) {
   const renderSequence = ++publicSiteRenderSequence;
   // Store context for lead submission (Phase W3.8)
@@ -6816,15 +6818,20 @@ async function renderSitePage(
   
   // 2. Identify primary page/step in that funnel
   const resolvedPath = websiteOrContext?.route?.path || websiteOrContext?.path || '/';
-  const resolvedPage = edgeModel?.page || (isPreview
-    ? resolvePageForPreviewPath(resolvedPath, funnel_id)
-      || mockPages.find(candidate => candidate.funnel_id === funnel_id)
-    : resolveExactPublicPage(
+  const resolvedPage = resolveSiteRenderPage({
+    funnelId: funnel_id,
+    authoritativePage,
+    edgePage: edgeModel?.page as Page | undefined,
+    preview: isPreview,
+    resolvePreviewPage: () => resolvePageForPreviewPath(resolvedPath, funnel_id),
+    resolvePreviewFunnelFallback: () => mockPages.find(candidate => candidate.funnel_id === funnel_id) || null,
+    resolvePublicPage: () => resolveExactPublicPage(
       website,
       websiteOrContext?.route,
       resolvedPath,
       funnel_id
-    ));
+    )
+  });
 
   if (!resolvedPage) {
     render404('No content mapped to this page.');
@@ -10985,7 +10992,7 @@ async function bootRouter() {
           route_type: target.path === '/' ? 'homepage' : 'service',
           funnel_id: target.funnel.id,
           page_id: target.page.id
-        }, true);
+        }, true, undefined, target.page);
         return;
       } catch {
         renderPublicPublicationUnavailable();

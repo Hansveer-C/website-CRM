@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   ApplicationAuthController,
   classifyApplicationLoginError,
+  classifyApplicationSignupError,
   createApplicationSignupRedirect,
   normalizeApplicationSignupEmail,
   validateApplicationSignupInput,
@@ -15,7 +16,7 @@ function client(input: {
   loginError?: { name?: string; code?: string; status?: number } | null;
   signupUser?: { id: string; email?: string } | null;
   signupSessionUser?: { id: string; email?: string } | null;
-  signupError?: { code?: string; status?: number } | null;
+  signupError?: { name?: string; code?: string; status?: number } | null;
 } = {}): ApplicationAuthClient {
   return {
     auth: {
@@ -256,6 +257,77 @@ describe('ApplicationAuthController', () => {
     expect(result).toEqual({ success: false, reason: 'rejected' });
     expect(JSON.stringify(result)).not.toContain('known@example.com');
     expect(JSON.stringify(result)).not.toContain('do-not-return');
+  });
+
+  it.each([
+    [{ code: 'user_already_exists', status: 422 }, 'rejected'],
+    [{ code: 'email_exists', status: 422 }, 'rejected'],
+    [{ code: 'over_request_rate_limit', status: 429 }, 'unavailable'],
+    [{ code: 'over_email_send_rate_limit', status: 429 }, 'unavailable'],
+    [{ status: 500 }, 'unavailable'],
+    [{ status: 502 }, 'unavailable'],
+    [{ status: 503 }, 'unavailable'],
+    [{ code: 'request_timeout', status: 400 }, 'unavailable'],
+    [{ code: 'network_error', name: 'AuthRetryableFetchError' }, 'unavailable'],
+    [{ code: 'future_auth_code', status: 422 }, 'unavailable'],
+    [{}, 'unavailable'],
+    [null, 'unavailable']
+  ] as const)('classifies signup Auth failures from stable metadata: %j', (error, reason) => {
+    expect(classifyApplicationSignupError(error)).toBe(reason);
+  });
+
+  it.each([
+    { code: 'over_request_rate_limit', status: 429 },
+    { status: 500 },
+    { status: 502 },
+    { status: 503 },
+    { code: 'request_timeout', status: 400 },
+    { code: 'network_error' },
+    { code: 'unknown_returned_error', status: 422 },
+    {}
+  ])('keeps returned signup service failure unauthenticated and retryable: %j', async signupError => {
+    const authClient = client({ signupError });
+    const controller = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => authClient });
+    await controller.initialize();
+    const request = {
+      email: 'owner@example.com', password: 'secret', confirmPassword: 'secret',
+      emailRedirectTo: 'https://website-crm-hans-says-projects.vercel.app/#/login'
+    };
+    expect(await controller.signUp(request)).toEqual({ success: false, reason: 'unavailable' });
+    expect(controller.state).toEqual({ status: 'unauthenticated' });
+    expect(await controller.signUp(request)).toEqual({ success: false, reason: 'unavailable' });
+    expect(authClient.auth.signUp).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([429, 503])('resets signup in-flight and allows success after HTTP %s', async status => {
+    const authClient = client();
+    authClient.auth.signUp = vi.fn()
+      .mockResolvedValueOnce({ data: { user: null, session: null }, error: { status } })
+      .mockResolvedValueOnce({ data: { user: { id: 'retry-user' }, session: null }, error: null });
+    const controller = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => authClient });
+    await controller.initialize();
+    const request = {
+      email: 'owner@example.com', password: 'secret', confirmPassword: 'secret',
+      emailRedirectTo: 'https://website-crm-hans-says-projects.vercel.app/#/login'
+    };
+    expect(await controller.signUp(request)).toEqual({ success: false, reason: 'unavailable' });
+    expect(await controller.signUp(request)).toEqual({ success: true, status: 'awaiting-confirmation' });
+  });
+
+  it('handles a thrown signup network error as unavailable and permits retry', async () => {
+    const authClient = client();
+    authClient.auth.signUp = vi.fn()
+      .mockRejectedValueOnce(new TypeError('network down'))
+      .mockResolvedValueOnce({ data: { user: { id: 'retry-user' }, session: null }, error: null });
+    const controller = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => authClient });
+    await controller.initialize();
+    const request = {
+      email: 'owner@example.com', password: 'secret', confirmPassword: 'secret',
+      emailRedirectTo: 'https://website-crm-hans-says-projects.vercel.app/#/login'
+    };
+    expect(await controller.signUp(request)).toEqual({ success: false, reason: 'unavailable' });
+    expect(controller.state).toEqual({ status: 'unauthenticated' });
+    expect(await controller.signUp(request)).toEqual({ success: true, status: 'awaiting-confirmation' });
   });
 
   it('derives only CRM-host signup redirects and validates project-compatible limits', () => {

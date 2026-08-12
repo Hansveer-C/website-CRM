@@ -50,6 +50,9 @@ describe('production false-success guards', () => {
       .toBeLessThan(bootSource.indexOf('hydrateAuthenticatedPreviewSections(target.page.id, authState.user.id)'));
     expect(bootSource.indexOf('websiteSettingsHydrator.hydrate(authState.user.id, target.website)'))
       .toBeLessThan(bootSource.indexOf('renderSitePage(target.funnel.id'));
+    expect(bootSource).toContain('}, true, undefined, target.page)');
+    expect(bootSource.indexOf('hydrateAuthenticatedPreviewSections(target.page.id, authState.user.id)'))
+      .toBeLessThan(bootSource.indexOf('}, true, undefined, target.page)'));
   });
 
   it('clears tenant-scoped settings and preview context on identity changes', () => {
