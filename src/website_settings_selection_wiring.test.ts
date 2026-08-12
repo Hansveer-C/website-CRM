@@ -41,6 +41,19 @@ describe('Website Settings explicit-selection wiring', () => {
     expect(source).toContain('buildWebsiteManagementRoute(view, activeDashboardWebsiteId)');
   });
 
+  it('carries the Website selected in Settings into every Website management link', () => {
+    const managementOpen = source.slice(
+      source.indexOf('(window as any).openWebsiteManagementView ='),
+      source.indexOf('(window as any).selectWebsiteForManagement =')
+    );
+    expect(managementOpen).toContain("currentView === 'website-settings'\n    ? activeSettingsWebsiteId");
+    expect(managementOpen).toContain("currentView === 'website-dashboard'\n      ? activeDashboardWebsiteId");
+    expect(managementOpen).toContain("currentView === 'builder'\n        ? activeBuilderWebsiteId");
+    expect(managementOpen.indexOf('activeSettingsWebsiteId')).toBeLessThan(managementOpen.indexOf('activeDashboardWebsiteId'));
+    expect(managementOpen).toContain('site.id === preferredWebsiteId && site.user_id === userId');
+    expect(managementOpen).toContain('websiteManagementRoute: route');
+  });
+
   it('does not select the first Website for page creation, attachments, navigation, structure, or SEO', () => {
     expect(source).not.toMatch(/mockWebsites\.find\([^\n]+\)\s*\|\|\s*mockWebsites\[0\]/);
     expect(source).not.toContain('const websiteId = mockWebsites[0].id');

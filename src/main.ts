@@ -9448,14 +9448,26 @@ function dashboardActionButton(model: WebsiteDashboardModel, action: BuilderNavi
 
 (window as any).openWebsiteManagementView = (view: WebsiteManagementView) => {
   const userId = getActingUserId();
-  const preferredWebsiteId = activeDashboardWebsiteId || activeBuilderWebsiteId;
+
+  const preferredWebsiteId = currentView === 'website-settings'
+    ? activeSettingsWebsiteId
+    : currentView === 'website-dashboard'
+      ? activeDashboardWebsiteId
+      : currentView === 'builder'
+        ? activeBuilderWebsiteId
+        : activeSettingsWebsiteId || activeDashboardWebsiteId || activeBuilderWebsiteId;
+
   const ownedWebsiteId = preferredWebsiteId && mockWebsites.some(site => site.id === preferredWebsiteId && site.user_id === userId)
     ? preferredWebsiteId
     : null;
+
   const route: WebsiteSettingsRouteSelection = ownedWebsiteId
     ? { status: 'valid', websiteId: ownedWebsiteId }
     : { status: 'none' };
-  void (window as any).navigateTo(view, undefined, { websiteManagementRoute: route });
+
+  void (window as any).navigateTo(view, undefined, {
+    websiteManagementRoute: route
+  });
 };
 
 (window as any).selectWebsiteForManagement = (view: WebsiteManagementView, websiteId: string) => {
