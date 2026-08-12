@@ -21,6 +21,14 @@ describe('application bootstrap', () => {
     expect(resolveApplicationBootstrap({ pathname: '/', hash: buildApplicationLoginHash('#/website-dashboard'), authState: authenticated })).toEqual({ action: 'authenticated', hash: '#/website-dashboard' });
   });
 
+  it('preserves an explicit Website Settings deep link across login', () => {
+    const settingsHash = '#/website-settings?websiteId=site-a';
+    expect(resolveApplicationBootstrap({ pathname: '/', hash: settingsHash, authState: unauthenticated }))
+      .toEqual({ action: 'login', returnTo: settingsHash });
+    expect(resolveApplicationBootstrap({ pathname: '/', hash: buildApplicationLoginHash(settingsHash), authState: authenticated }))
+      .toEqual({ action: 'authenticated', hash: settingsHash });
+  });
+
   it('keeps explicit customer site paths outside CRM authentication', () => {
     expect(resolveApplicationBootstrap({ pathname: '/site/example', hash: '', authState: unauthenticated })).toEqual({ action: 'public' });
   });

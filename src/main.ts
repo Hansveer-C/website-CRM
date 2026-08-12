@@ -105,6 +105,15 @@ import { resolveApplicationHostRoute } from './application_host_route';
 import { CrmProductionHydrator, type CrmHydrationClient } from './crm_production_hydration';
 import { WebsiteLayoutHydrator, type WebsiteLayoutHydrationClient } from './website_layout_hydration';
 import { WebsiteSettingsHydrator, type WebsiteSettingsHydrationClient } from './website_settings_hydration';
+import {
+  buildWebsiteManagementRoute,
+  buildWebsiteSettingsRoute,
+  parseWebsiteManagementRoute,
+  parseWebsiteSettingsRoute,
+  resolveWebsiteSettingsSelection,
+  type WebsiteManagementView,
+  type WebsiteSettingsRouteSelection
+} from './website_settings_selection';
 import { resolveSiteRenderPage } from './site_render_page_resolution';
 import {
   createProductionLead,
@@ -1602,7 +1611,10 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
             console.log(`[MOCK] Bulk SEO Generation for ${services.length} services in ${cities.length} cities`);
             
             // Simulation of generation
-            const website = mockWebsites[0];
+            const website = getActiveSettingsWebsite();
+            if (!website || website.user_id !== getActingUserId()) {
+                return builderSectionsJsonResponse({ success: false, error: 'Website not found' }, 404);
+            }
             const timestamp = new Date().toISOString();
             
             services.forEach((s: string) => {
@@ -1699,6 +1711,7 @@ let builderMediaSelectedAssetIds = new Set<string>();
 let builderMediaInitializing = false;
 let builderMediaInitializationError: string | null = null;
 let activeDashboardWebsiteId: string | null = null;
+let activeSettingsWebsiteId: string | null = null;
 let websiteDashboardController: WebsiteDashboardController | null = null;
 type BuilderSetupWizardDraft = {
   identity: string;
@@ -1823,6 +1836,7 @@ function clearProtectedRuntimeData(): void {
   selectedContactId = null;
   activeBuilderWebsiteId = null;
   activeDashboardWebsiteId = null;
+  activeSettingsWebsiteId = null;
   activeWebsiteContext = null;
   builderPageId = '';
   builderHistoryController = null;
@@ -1941,6 +1955,7 @@ async function ensureApplicationAuth(): Promise<ApplicationAuthState> {
   builderHistoryController = null;
   activeBuilderWebsiteId = null;
   activeDashboardWebsiteId = null;
+  activeSettingsWebsiteId = null;
   websiteDashboardController?.invalidate();
   websiteDashboardController = null;
   (window as any).currentUser = userId;
@@ -2105,10 +2120,10 @@ function renderSidebar(activeView: string) {
           
           <div class="nav-group-title">Websites</div>
           <li onclick="window.navigateTo('website-dashboard')" class="${activeView === 'website-dashboard' ? 'active' : ''}" style="font-weight: 700; color: var(--primary-color);">My Website</li>
-          <li onclick="window.navigateTo('funnels')" class="${activeView === 'funnels' && (window as any).funnelMode !== 'marketing' ? 'active' : ''}">Site Pages</li>
-          <li onclick="window.navigateTo('website-navigation')" class="${activeView === 'website-navigation' ? 'active' : ''}">Navigation</li>
-          <li onclick="window.navigateTo('seo-pages')" class="${activeView === 'seo-pages' ? 'active' : ''}">SEO Pages</li>
-          <li onclick="window.navigateTo('website-settings')" class="${activeView === 'website-settings' ? 'active' : ''}">Settings</li>
+          <li onclick="window.openWebsiteManagementView('funnels')" class="${activeView === 'funnels' && (window as any).funnelMode !== 'marketing' ? 'active' : ''}">Site Pages</li>
+          <li onclick="window.openWebsiteManagementView('website-navigation')" class="${activeView === 'website-navigation' ? 'active' : ''}">Navigation</li>
+          <li onclick="window.openWebsiteManagementView('seo-pages')" class="${activeView === 'seo-pages' ? 'active' : ''}">SEO Pages</li>
+          <li onclick="window.openWebsiteSettings()" class="${activeView === 'website-settings' ? 'active' : ''}">Settings</li>
           
           <div class="nav-group-title">System</div>
           <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
@@ -4108,9 +4123,11 @@ function getActiveBuilderWebsite(): Website | undefined {
 
 function getActiveSettingsWebsite(): Website | undefined {
   const userId = getActingUserId();
-  const explicitWebsiteId = currentView === 'builder'
-    ? activeBuilderWebsiteId
-    : activeDashboardWebsiteId || activeBuilderWebsiteId;
+  const explicitWebsiteId = currentView === 'website-settings'
+    ? activeSettingsWebsiteId
+    : currentView === 'builder'
+      ? activeBuilderWebsiteId
+      : activeDashboardWebsiteId || activeBuilderWebsiteId;
   if (explicitWebsiteId) {
     return mockWebsites.find(website => website.id === explicitWebsiteId && website.user_id === userId);
   }
@@ -7311,7 +7328,16 @@ function renderReports() {
 
 (window as any).showAttachToWebsiteModal = (funnelId: string) => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+    const ownedWebsites = mockWebsites.filter(w => w.user_id === userId);
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId)
+      ?? (ownedWebsites.length === 1 ? ownedWebsites[0] : undefined);
+    if (!website) {
+      const selector = document.createElement('div');
+      selector.id = 'attach-modal';
+      selector.innerHTML = `<div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10001; display: flex; align-items: center; justify-content: center;"><div class="card" style="width: 100%; max-width: 500px; padding: 35px;"><h3>Choose a website</h3><p>Select the owned website where this page should be attached.</p><label for="attachment-website-select">Website</label><select id="attachment-website-select"><option value="">Select a website</option>${ownedWebsites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}">${escapeBuilderInspectorHtml(site.name)}</option>`).join('')}</select><div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px;"><button class="btn-outline" onclick="document.getElementById('attach-modal').remove()">Cancel</button><button class="btn-primary" onclick="window.selectWebsiteForAttachment('${escapeBuilderInspectorHtml(funnelId)}', (document.getElementById('attachment-website-select')).value)">Continue</button></div></div></div>`;
+      document.body.appendChild(selector);
+      return;
+    }
     const existingRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
     
     const modal = document.createElement('div');
@@ -7355,13 +7381,30 @@ function renderReports() {
     document.body.appendChild(modal);
 };
 
+(window as any).selectWebsiteForAttachment = (funnelId: string, websiteId: string) => {
+    const userId = getActingUserId();
+    if (!mockWebsites.some(site => site.id === websiteId && site.user_id === userId)) {
+      (window as any).showToast('Choose an owned website.', 'error');
+      return;
+    }
+    activeDashboardWebsiteId = websiteId;
+    document.getElementById('attach-modal')?.remove();
+    (window as any).showAttachToWebsiteModal(funnelId);
+};
+
 (window as any).saveWebsiteAttachment = (funnelId: string, websiteId: string) => {
     if (blockUnsupportedProductionWebsiteMutation('Website page attachment')) return;
+    const userId = getActingUserId();
+    if (!mockWebsites.some(site => site.id === websiteId && site.user_id === userId)
+        || !mockFunnels.some(funnel => funnel.id === funnelId && funnel.user_id === userId)) {
+      (window as any).showToast('Website attachment is unavailable.', 'error');
+      return;
+    }
     const existingId = (document.getElementById('existing-route-select') as HTMLSelectElement).value;
     const newPath = (document.getElementById('new-route-path-inp') as HTMLInputElement).value.trim();
     
     if (existingId) {
-        const route = mockWebsiteRoutes.find(r => r.id === existingId);
+        const route = mockWebsiteRoutes.find(r => r.id === existingId && r.website_id === websiteId);
         if (route) {
             route.funnel_id = funnelId;
             (window as any).showToast(`Path ${route.path} updated successfully!`, 2000);
@@ -7467,7 +7510,15 @@ function renderReports() {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
     const funnelId = `fnl-${Date.now()}`;
     const pageId = `p-${Date.now()}`;
-    const websiteId = mockWebsites[0].id; // Default site
+    const userId = getActingUserId();
+    const ownedWebsites = mockWebsites.filter(site => site.user_id === userId);
+    const website = mockWebsites.find(site => site.id === activeDashboardWebsiteId && site.user_id === userId)
+      ?? (ownedWebsites.length === 1 ? ownedWebsites[0] : undefined);
+    if (!website) {
+        (window as any).showToast('Choose the website where this page should be created.', 'error');
+        return;
+    }
+    const websiteId = website.id;
 
     // 1. Create Funnel
     mockFunnels.push({
@@ -7487,7 +7538,7 @@ function renderReports() {
         name: name,
         slug: slug,
         status: 'published',
-        seo_title: `${name} | ${mockWebsites[0].name}`,
+        seo_title: `${name} | ${website.name}`,
         seo_description: '',
         seo_keywords: [],
         created_at: new Date().toISOString(),
@@ -7897,8 +7948,60 @@ function renderTemplates() {
   `;
 }
 
+function renderWebsiteSettingsSelector(websites: readonly Website[], invalid = false) {
+  app.innerHTML = `
+    ${renderSidebar('website-settings')}
+    <main class="main-content">
+      <header class="view-header"><h2>Website Branding & Tracking</h2></header>
+      <section class="card website-settings-selection" ${invalid ? 'role="alert"' : ''}>
+        <h3>Choose a website</h3>
+        <p>${invalid ? 'That website is not available for this account. Choose an owned website.' : 'Select the website whose settings you want to manage.'}</p>
+        <label for="settings-website-select">Website</label>
+        <select id="settings-website-select" onchange="window.selectWebsiteForSettings(this.value)">
+          <option value="">Select a website</option>
+          ${websites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}">${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}
+        </select>
+      </section>
+    </main>
+  `;
+}
+
+function renderWebsiteManagementSelector(view: WebsiteManagementView, websites: readonly Website[], invalid = false) {
+  const labels: Record<WebsiteManagementView, string> = {
+    'website-settings': 'Website Settings',
+    'funnels': 'Site Pages',
+    'website-navigation': 'Website Navigation',
+    'website-structure': 'Website Structure',
+    'seo-pages': 'SEO Pages'
+  };
+  app.innerHTML = `
+    ${renderSidebar(view)}
+    <main class="main-content">
+      <header class="view-header"><h2>${labels[view]}</h2></header>
+      <section class="card website-settings-selection" ${invalid ? 'role="alert"' : ''}>
+        <h3>Choose a website</h3>
+        <p>${invalid ? 'That website is not available for this account. Choose an owned website.' : `Select the website whose ${labels[view].toLowerCase()} you want to manage.`}</p>
+        <label for="management-website-select">Website</label>
+        <select id="management-website-select" onchange="window.selectWebsiteForManagement('${view}', this.value)">
+          <option value="">Select a website</option>
+          ${websites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}">${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}
+        </select>
+      </section>
+    </main>
+  `;
+}
+
+function renderWebsiteManagementSwitcher(view: WebsiteManagementView): string {
+  const userId = getActingUserId();
+  const owned = mockWebsites.filter(site => site.user_id === userId);
+  if (owned.length < 2 || !activeDashboardWebsiteId) return '';
+  return `<div class="website-dashboard-selector"><label for="management-website-select">Active website</label><select id="management-website-select" onchange="window.selectWebsiteForManagement('${view}', this.value)">${owned.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}" ${site.id === activeDashboardWebsiteId ? 'selected' : ''}>${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></div>`;
+}
+
 function renderWebsiteSettings() {
   const settings = getWebsiteSettings();
+  const userId = getActingUserId();
+  const ownedWebsites = mockWebsites.filter(website => website.user_id === userId);
   applyPrimaryColor(settings.primary_color);
   app.innerHTML = `
     ${renderSidebar('website-settings')}
@@ -7909,6 +8012,7 @@ function renderWebsiteSettings() {
            <button class="btn-primary" style="background: var(--primary-color);" onclick="window.saveGlobalSettings()">Save Settings</button>
         </div>
       </header>
+      ${ownedWebsites.length > 1 ? `<div class="website-dashboard-selector"><label for="settings-website-select">Active website</label><select id="settings-website-select" onchange="window.selectWebsiteForSettings(this.value)">${ownedWebsites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}" ${site.id === activeSettingsWebsiteId ? 'selected' : ''}>${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></div>` : ''}
       <div style="max-width: 800px;">
         <div class="card" style="margin-bottom: 24px;">
           <h3>Business Profile</h3>
@@ -7975,8 +8079,7 @@ function renderWebsiteSettings() {
 
 function renderWebsiteNavigation() {
   const userId = getActingUserId();
-  const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId)
-    || mockWebsites.find(w => w.user_id === userId);
+  const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
   if (!website) {
     renderWebsiteRepositoryUnavailable('website-navigation');
     return;
@@ -8044,6 +8147,7 @@ function renderWebsiteNavigation() {
            <button class="btn-primary" style="padding: 12px 24px;" onclick="window.saveWebsiteLayout()">${layout ? 'Save Configuration' : 'Create Navigation'}</button>
         </div>
       </header>
+      ${renderWebsiteManagementSwitcher('website-navigation')}
 
       <div style="max-width: 1000px; padding: 10px;">
         ${itemsHtml || '<div class="empty-state" style="padding: 80px; text-align: center; background: white; border-radius: 20px; border: 2px dashed #e2e8f0; color: #64748b;"><div style="font-size: 3rem; margin-bottom: 16px;">📂</div><h3>No menu items here</h3><p>Start building your navigation menu by adding your first link.</p><button class="btn-primary" style="margin-top: 20px;" onclick="window.addNavItem()">Add Item</button></div>'}
@@ -8054,7 +8158,7 @@ function renderWebsiteNavigation() {
 
 (window as any).addNavItem = () => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId) || mockWebsites.find(w => w.user_id === userId);
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
     const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : undefined;
     if (!layout) { (window as any).showToast('Create the navigation configuration first.', 'error'); return; }
     
@@ -8065,7 +8169,7 @@ function renderWebsiteNavigation() {
 
 (window as any).updateNavItem = (index: number, field: string, value: any) => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId) || mockWebsites.find(w => w.user_id === userId);
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
     const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : undefined;
     if (!layout) return;
     
@@ -8075,7 +8179,7 @@ function renderWebsiteNavigation() {
 
 (window as any).reorderNavItem = (index: number, direction: number) => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId) || mockWebsites.find(w => w.user_id === userId);
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
     const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : undefined;
     if (!layout) return;
     
@@ -8092,7 +8196,7 @@ function renderWebsiteNavigation() {
 
 (window as any).deleteNavItem = (index: number) => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId) || mockWebsites.find(w => w.user_id === userId);
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
     const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : undefined;
     if (!layout) return;
     
@@ -8102,7 +8206,7 @@ function renderWebsiteNavigation() {
 
 (window as any).saveWebsiteLayout = async () => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId) || mockWebsites.find(w => w.user_id === userId);
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
     if (!website) { (window as any).showToast('Navigation is unavailable.', 'error'); return; }
     const existing = mockWebsiteLayouts.find(layout => layout.website_id === website.id);
     const headerConfig = existing?.header_config ?? { logo_text: '', nav_items: [] };
@@ -8132,7 +8236,11 @@ function renderWebsiteNavigation() {
 };
 function renderWebsiteStructure() {
   const userId = getActingUserId();
-  const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+  const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
+  if (!website) {
+    renderWebsiteRepositoryUnavailable('website-structure');
+    return;
+  }
   const routes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
   
   const websiteUrl = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
@@ -8149,6 +8257,7 @@ function renderWebsiteStructure() {
            <button class="btn-primary" onclick="window.showAddRouteModal('${website.id}')">Add New Route</button>
         </div>
       </header>
+      ${renderWebsiteManagementSwitcher('website-structure')}
       
       <div class="card" style="margin-bottom: 24px; border-left: 4px solid var(--primary-color);">
         <div style="display: flex; align-items: center; justify-content: space-between;">
@@ -9312,6 +9421,50 @@ function dashboardActionButton(model: WebsiteDashboardModel, action: BuilderNavi
   void renderWebsiteDashboard();
 };
 
+(window as any).openWebsiteSettings = () => {
+  const userId = getActingUserId();
+  const preferredWebsiteId = currentView === 'website-settings'
+    ? activeSettingsWebsiteId
+    : currentView === 'website-dashboard'
+      ? activeDashboardWebsiteId
+      : currentView === 'builder'
+        ? activeBuilderWebsiteId
+        : activeSettingsWebsiteId || activeDashboardWebsiteId || activeBuilderWebsiteId;
+  const ownedWebsiteId = preferredWebsiteId && mockWebsites.some(site => site.id === preferredWebsiteId && site.user_id === userId)
+    ? preferredWebsiteId
+    : null;
+  const route: WebsiteSettingsRouteSelection = ownedWebsiteId
+    ? { status: 'valid', websiteId: ownedWebsiteId }
+    : { status: 'none' };
+  void (window as any).navigateTo('website-settings', undefined, { websiteSettingsRoute: route });
+};
+
+(window as any).selectWebsiteForSettings = (websiteId: string) => {
+  const route: WebsiteSettingsRouteSelection = websiteId
+    ? { status: 'valid', websiteId }
+    : { status: 'none' };
+  void (window as any).navigateTo('website-settings', undefined, { websiteSettingsRoute: route });
+};
+
+(window as any).openWebsiteManagementView = (view: WebsiteManagementView) => {
+  const userId = getActingUserId();
+  const preferredWebsiteId = activeDashboardWebsiteId || activeBuilderWebsiteId;
+  const ownedWebsiteId = preferredWebsiteId && mockWebsites.some(site => site.id === preferredWebsiteId && site.user_id === userId)
+    ? preferredWebsiteId
+    : null;
+  const route: WebsiteSettingsRouteSelection = ownedWebsiteId
+    ? { status: 'valid', websiteId: ownedWebsiteId }
+    : { status: 'none' };
+  void (window as any).navigateTo(view, undefined, { websiteManagementRoute: route });
+};
+
+(window as any).selectWebsiteForManagement = (view: WebsiteManagementView, websiteId: string) => {
+  const route: WebsiteSettingsRouteSelection = websiteId
+    ? { status: 'valid', websiteId }
+    : { status: 'none' };
+  void (window as any).navigateTo(view, undefined, { websiteManagementRoute: route });
+};
+
 (window as any).refreshWebsiteDashboard = () => void renderWebsiteDashboard(true);
 
 async function renderWebsiteDashboard(force = false) {
@@ -9356,9 +9509,15 @@ function renderFunnels(mode: 'website' | 'marketing' = 'website') {
   currentView = 'funnels';
   (window as any).funnelMode = mode;
   const userId = getActingUserId();
-  const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
-  
-  const siteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
+  const ownedWebsiteIds = new Set(mockWebsites.filter(w => w.user_id === userId).map(w => w.id));
+  const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
+  if (mode === 'website' && !website) {
+    renderWebsiteRepositoryUnavailable('funnels');
+    return;
+  }
+  const siteRoutes = mode === 'website'
+    ? mockWebsiteRoutes.filter(r => r.website_id === website!.id)
+    : mockWebsiteRoutes.filter(r => ownedWebsiteIds.has(r.website_id));
   const routedFunnelIds = new Set(siteRoutes.map(r => r.funnel_id));
   
   const allFunnels = mockFunnels.filter(f => f.user_id === userId);
@@ -9402,11 +9561,12 @@ function renderFunnels(mode: 'website' | 'marketing' = 'website') {
         </div>
         <div style="display: flex; gap: 12px;">
           ${mode === 'website' 
-            ? `<button class="btn-primary" onclick="window.showAddPageModal('${website.id}')">+ New Website Page</button>`
+            ? `<button class="btn-primary" onclick="window.showAddPageModal('${website!.id}')">+ New Website Page</button>`
             : `<button class="btn-primary" style="background: #4f46e5; border: none;" onclick="window.openNewPageModal('template')">+ New Marketing Page</button>`
           }
         </div>
       </header>
+      ${mode === 'website' ? renderWebsiteManagementSwitcher('funnels') : ''}
       
       <div id="pages-list-container" style="padding: 20px;">
         <div class="card" style="padding: 0; overflow: hidden;">
@@ -9498,9 +9658,17 @@ async function renderFunnelDetail(funnelId: string) {
       ${index < steps.length - 1 ? `<div style="width: 2px; height: 30px; background: #e2e8f0; margin-left: 19px; margin-top: -24px; margin-bottom: 4px;"></div>` : ''}
     `).join('');
 
-    const website = mockWebsites[0]; // Assuming user has one website
-    const routes = mockWebsiteRoutes.filter(r => r.funnel_id === funnelId);
-    const siteUrlBase = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
+    const userId = getActingUserId();
+    const routes = mockWebsiteRoutes
+      .filter(route => route.funnel_id === funnelId)
+      .map(route => {
+        const website = mockWebsites.find(site => site.id === route.website_id && site.user_id === userId);
+        if (!website) return null;
+        const siteUrlBase = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
+        return { ...route, path: `${siteUrlBase}${route.path}` };
+      })
+      .filter((route): route is WebsiteRoute => Boolean(route));
+    const siteUrlBase = '';
 
     container.innerHTML = `
       <!-- Website Attachment Card (W6.7) -->
@@ -9857,6 +10025,14 @@ const WEBSITE_DATA_VIEWS = new Set([
   'pages-seo', 'website-settings', 'website-navigation', 'seo-pages', 'website-structure'
 ]);
 
+const EXPLICIT_WEBSITE_MANAGEMENT_VIEWS = new Set<WebsiteManagementView>([
+  'funnels', 'website-navigation', 'website-structure', 'seo-pages'
+]);
+
+function isExplicitWebsiteManagementView(view: string): view is WebsiteManagementView {
+  return EXPLICIT_WEBSITE_MANAGEMENT_VIEWS.has(view as WebsiteManagementView);
+}
+
 function renderWebsiteRepositoryUnavailable(view: string): void {
   currentView = view;
   app.innerHTML = `${renderSidebar(view)}<main class="main-content"><header class="view-header"><h1>Website information could not be loaded.</h1></header><section class="card website-dashboard-state" role="alert"><p>Please try again.</p><button type="button" class="btn-outline" onclick="window.navigateTo('${escapeBuilderInspectorHtml(view)}')">Retry</button></section></main>`;
@@ -9940,6 +10116,16 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
   // Update URL for standard CRM navigation (Hash based)
   if (!['site', 'preview'].includes(view)) {
     let newHash = id ? `#/${view}/${id}` : `#/${view}`;
+    if (view === 'website-settings' && activeSettingsWebsiteId) {
+      newHash = buildWebsiteSettingsRoute(activeSettingsWebsiteId);
+    } else if (view === 'website-settings' && window.location.hash.startsWith('#/website-settings?')) {
+      // Preserve an invalid deep link while the fail-closed selector is shown.
+      newHash = window.location.hash;
+    } else if (isExplicitWebsiteManagementView(view) && activeDashboardWebsiteId) {
+      newHash = buildWebsiteManagementRoute(view, activeDashboardWebsiteId);
+    } else if (isExplicitWebsiteManagementView(view) && window.location.hash.startsWith(`#/${view}?`)) {
+      newHash = window.location.hash;
+    }
     if (view === 'builder' && context?.builderContext?.pageId) {
       const builderContext = context.builderContext as BuilderContext;
       if (builderContext.websiteId && builderContext.action) {
@@ -9974,6 +10160,25 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
 };
 
 async function executeNavigation(view: string, id?: string, context?: any) {
+  if (isExplicitWebsiteManagementView(view)) {
+    const selection = resolveWebsiteSettingsSelection({
+      actingUserId: getActingUserId(),
+      websites: mockWebsites,
+      route: context?.websiteManagementRoute ?? parseWebsiteManagementRoute(window.location.hash, view)
+    });
+    if (selection.status === 'empty') {
+      window.history.replaceState({}, '', '#/website-dashboard');
+      currentView = 'website-dashboard';
+      await renderWebsiteDashboard(true);
+      return;
+    }
+    if (selection.status === 'selection-required' || selection.status === 'invalid') {
+      activeDashboardWebsiteId = null;
+      renderWebsiteManagementSelector(view, selection.ownedWebsites, selection.status === 'invalid');
+      return;
+    }
+    activeDashboardWebsiteId = selection.website.id;
+  }
   switch (view) {
     case 'dashboard': renderDashboard(); break;
     case 'clients': await renderClients(); break;
@@ -10006,7 +10211,29 @@ async function executeNavigation(view: string, id?: string, context?: any) {
     case 'templates': renderTemplates(); break;
     case 'pages-seo': renderPagesSeoLanding(); break;
     case 'components': app.innerHTML = `${renderSidebar('components')}<main class="main-content"><h2>Components Shelf</h2><div class="empty-state">Library of pre-built UI components coming soon.</div></main>`; break;
-    case 'website-settings':
+    case 'website-settings': {
+      const selection = resolveWebsiteSettingsSelection({
+        actingUserId: getActingUserId(),
+        websites: mockWebsites,
+        route: context?.websiteSettingsRoute ?? parseWebsiteSettingsRoute(window.location.hash)
+      });
+      if (selection.status === 'empty') {
+        window.history.replaceState({}, '', '#/website-dashboard');
+        currentView = 'website-dashboard';
+        await renderWebsiteDashboard(true);
+        return;
+      }
+      if (selection.status === 'selection-required' || selection.status === 'invalid') {
+        activeSettingsWebsiteId = null;
+        websiteSettingsHydrator.clear();
+        applyPrimaryColor(mockWebsiteSettings.primary_color);
+        renderWebsiteSettingsSelector(selection.ownedWebsites, selection.status === 'invalid');
+        break;
+      }
+      if (activeSettingsWebsiteId !== selection.website.id) {
+        websiteSettingsHydrator.clear();
+      }
+      activeSettingsWebsiteId = selection.website.id;
       try {
         const settingsRes = await fetch('/api/settings').then(r => r.json());
         if (!settingsRes.success || !settingsRes.data) throw new Error('UNAVAILABLE');
@@ -10016,6 +10243,7 @@ async function executeNavigation(view: string, id?: string, context?: any) {
       }
       renderWebsiteSettings();
       break;
+    }
     case 'website-navigation': renderWebsiteNavigation(); break;
     case 'seo-pages': (window as any).renderSeoPages(); break;
     case 'website-structure': renderWebsiteStructure(); break;
@@ -11027,7 +11255,11 @@ async function bootRouter() {
        const parts = routePart.split('/');
        const routeContext = parts[0] === 'builder' && query
          ? { builderContext: getBuilderContextFromHash() }
-         : undefined;
+         : parts[0] === 'website-settings'
+           ? { websiteSettingsRoute: parseWebsiteSettingsRoute(decision.hash) }
+           : isExplicitWebsiteManagementView(parts[0])
+             ? { websiteManagementRoute: parseWebsiteManagementRoute(decision.hash, parts[0]) }
+           : undefined;
        await (window as any).navigateTo(parts[0], parts[1], routeContext);
        return;
      }
@@ -11379,7 +11611,13 @@ let seoWizardState = {
 };
 
 (window as any).renderSeoPages = async () => {
-    const seoPages = mockWebsiteRoutes.filter(r => r.is_seo_page);
+    const userId = getActingUserId();
+    const website = mockWebsites.find(site => site.user_id === userId && site.id === activeDashboardWebsiteId);
+    if (!website) {
+        renderWebsiteRepositoryUnavailable('seo-pages');
+        return;
+    }
+    const seoPages = mockWebsiteRoutes.filter(r => r.website_id === website.id && r.is_seo_page);
     
     // Auto-switch to wizard if empty
     if (seoPages.length === 0 && seoWizardState.mode !== 'wizard') {
@@ -11404,6 +11642,7 @@ let seoWizardState = {
                     <button class="btn-primary" onclick="window.startSeoWizard()" style="background: #10b981; border: none; padding: 12px 24px;">+ Batch Generate Pages</button>
                 </div>
             </header>
+            ${renderWebsiteManagementSwitcher('seo-pages')}
 
             <div class="card" style="margin-bottom: 30px; padding: 24px; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border: 1px solid #bae6fd; border-radius: 16px;">
                 <div style="display: flex; gap: 24px; align-items: center;">
@@ -11541,6 +11780,7 @@ function renderSeoWizard() {
                     <div style="width: ${progress}%; height: 100%; background: var(--primary-color); transition: width 0.4s ease-out;"></div>
                 </div>
             </header>
+            ${renderWebsiteManagementSwitcher('seo-pages')}
             ${content}
         </main>
     `;
@@ -11600,7 +11840,7 @@ function renderPagesSeoLanding() {
         <!-- Card 1: Site Pages -->
         <div class="card"
              style="padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 12px;"
-             onclick="window.navigateTo('funnels')"
+             onclick="window.openWebsiteManagementView('funnels')"
              onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 15px -3px rgb(0 0 0 / 0.1)'; this.style.borderColor='var(--primary-color)'"
              onmouseout="this.style.transform='none'; this.style.boxShadow='none'; this.style.borderColor='#e2e8f0'">
           <div style="display: flex; align-items: center; gap: 12px;">
@@ -11618,7 +11858,7 @@ function renderPagesSeoLanding() {
         <!-- Card 2: Local Service Pages -->
         <div class="card"
              style="padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 12px;"
-             onclick="window.navigateTo('seo-pages')"
+             onclick="window.openWebsiteManagementView('seo-pages')"
              onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 15px -3px rgb(0 0 0 / 0.1)'; this.style.borderColor='var(--primary-color)'"
              onmouseout="this.style.transform='none'; this.style.boxShadow='none'; this.style.borderColor='#e2e8f0'">
           <div style="display: flex; align-items: center; gap: 12px;">
@@ -11636,7 +11876,7 @@ function renderPagesSeoLanding() {
         <!-- Card 3: Site Structure -->
         <div class="card"
              style="padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 12px;"
-             onclick="window.navigateTo('website-structure')"
+             onclick="window.openWebsiteManagementView('website-structure')"
              onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 15px -3px rgb(0 0 0 / 0.1)'; this.style.borderColor='var(--primary-color)'"
              onmouseout="this.style.transform='none'; this.style.boxShadow='none'; this.style.borderColor='#e2e8f0'">
           <div style="display: flex; align-items: center; gap: 12px;">
@@ -11654,7 +11894,7 @@ function renderPagesSeoLanding() {
         <!-- Card 4: Navigation -->
         <div class="card"
              style="padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 12px;"
-             onclick="window.navigateTo('website-navigation')"
+             onclick="window.openWebsiteManagementView('website-navigation')"
              onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 15px -3px rgb(0 0 0 / 0.1)'; this.style.borderColor='var(--primary-color)'"
              onmouseout="this.style.transform='none'; this.style.boxShadow='none'; this.style.borderColor='#e2e8f0'">
           <div style="display: flex; align-items: center; gap: 12px;">
