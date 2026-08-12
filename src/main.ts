@@ -6858,7 +6858,8 @@ async function renderSitePage(
   const settings = edgeModel?.settings || getWebsiteSettings();
   const layout = edgeModel?.layout
     || mockWebsiteLayouts.find(l => l.website_id === website.id)
-    || getWebsiteLayout();
+    || getWebsiteLayout()
+    || { header_config: { nav_items: [] }, footer_config: {} };
   
   // W6.5: Robust Internal Linking System
   const contactRoute = edgeModel ? undefined : mockWebsiteRoutes.find(r => r.website_id === website.id && (r.path === '/contact' || r.path === '/quote'));
@@ -11033,7 +11034,7 @@ setInterval(() => {
     // If a new lead was detected, re-render the active view to show it immediately
     if (changeDetected) {
       if (currentView === 'clients') renderClients();
-      if (currentView === 'dashboard') (window as any).renderDashboard();
+      if (currentView === 'dashboard') renderDashboard();
     }
   }
 

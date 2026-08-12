@@ -45,6 +45,12 @@ describe('production false-success guards', () => {
     expect(bootSource).toContain('hydrateAuthenticatedPreviewSections');
     expect(bootSource).toContain("params.get('websiteId')");
     expect(bootSource).toContain("params.get('pageId')");
+    expect(source).toContain("|| { header_config: { nav_items: [] }, footer_config: {} }");
+  });
+
+  it('refreshes the dashboard through the module function without an undefined window bridge', () => {
+    expect(source).toContain("if (currentView === 'dashboard') renderDashboard();");
+    expect(source).not.toContain('(window as any).renderDashboard()');
   });
 
   it('marks invoices explicitly unavailable when production storage does not exist', () => {
