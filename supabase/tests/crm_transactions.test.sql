@@ -50,7 +50,7 @@ do $$ declare before_count bigint; begin
   begin
     perform public.create_internal_crm_lead('dddddddd-dddd-4ddd-8ddd-dddddddddddd','Rollback Lead','5555550404','rollback@example.test',null,null,null,'internal','missing-funnel');
     raise exception 'invalid funnel unexpectedly succeeded';
-  exception when foreign_key_violation then null; end;
+  exception when insufficient_privilege then null; end;
   if (select count(*) from public.contacts) <> before_count then raise exception 'lead transaction left a partial contact'; end if;
 end $$;
 

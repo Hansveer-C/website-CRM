@@ -39,4 +39,51 @@ describe('production false-success guards', () => {
     expect(source.slice(start, start + 500)).toContain("if (editorUsesSupabase())");
     expect(source.slice(start, start + 500)).toContain(message);
   });
+
+  it.each([
+    'saveNewPage',
+    'saveWebsiteAttachment',
+    'deletePage',
+    'finalizePageCreation',
+    'duplicatePage',
+    'togglePublish',
+    'generatePageWithAI',
+    'applyTemplate',
+    'useTemplate',
+    'updatePageName',
+    'togglePublishFromBuilder'
+  ])('blocks legacy Website handler %s before any fixture mutation', handler => {
+    const start = source.indexOf(`(window as any).${handler}`);
+    expect(start).toBeGreaterThan(-1);
+    expect(source.slice(start, start + 300)).toContain('blockUnsupportedProductionWebsiteMutation');
+  });
+
+  it('blocks browser-simulated funnel mutations in Supabase mode', () => {
+    const start = source.indexOf("if (url.startsWith('/api/funnels'))");
+    expect(source.slice(start, start + 450)).toContain("editorUsesSupabase() && method !== 'GET'");
+    expect(source.slice(start, start + 450)).toContain('temporarily unavailable in production');
+  });
+
+  it('keeps route mutations guarded and layout persistence durable', () => {
+    for (const handler of ['saveRoute', 'deleteRoute']) {
+      const start = source.indexOf(`(window as any).${handler}`);
+      expect(source.slice(start, start + 250)).toContain('editorUsesSupabase()');
+    }
+    const layoutStart = source.indexOf('(window as any).saveWebsiteLayout');
+    expect(source.slice(layoutStart, layoutStart + 1_500)).toContain("client.from('website_layouts').upsert");
+  });
+
+  it('sends one stable request key through both authenticated transport attempts', () => {
+    expect(source).toContain('authenticatedFormAttempts.begin(internalAttemptScope, leadData)');
+    expect(source.match(/body: JSON\.stringify\(internalLeadData\)/g)).toHaveLength(2);
+    expect(source).toContain('authenticatedFormAttempts.accept(internalAttemptScope, internalAttempt.key)');
+  });
+
+  it('fails authenticated lead submission truthfully when the request key is missing', () => {
+    const start = source.indexOf("if (url === '/api/leads' && method === 'POST')");
+    const leadRoute = source.slice(start, start + 2_500);
+    expect(leadRoute).toContain("typeof body.request_key !== 'string'");
+    expect(leadRoute).toContain('Production lead persistence is unavailable.');
+    expect(leadRoute).not.toContain('createLocalMockWebsiteLead(body');
+  });
 });

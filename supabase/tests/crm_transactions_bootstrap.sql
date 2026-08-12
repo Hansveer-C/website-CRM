@@ -57,7 +57,9 @@ grant select on public.contacts, public.opportunities to authenticated;
 insert into public.users(id,email) values
   ('11111111-1111-4111-8111-111111111111','a@example.test'),
   ('22222222-2222-4222-8222-222222222222','b@example.test');
-insert into public.funnels(id,user_id) values ('funnel-a','11111111-1111-4111-8111-111111111111');
+insert into public.funnels(id,user_id) values
+  ('funnel-a','11111111-1111-4111-8111-111111111111'),
+  ('funnel-b','22222222-2222-4222-8222-222222222222');
 insert into public.contacts(id,user_id,name,phone,email) values
   ('contact-a','11111111-1111-4111-8111-111111111111','Owner A','+15555550101','a-contact@example.test'),
   ('contact-b','22222222-2222-4222-8222-222222222222','Owner B','+15555550202','b-contact@example.test');

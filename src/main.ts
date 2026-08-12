@@ -77,6 +77,7 @@ import {
 } from './public_site_runtime';
 import { submitPublicLead } from './public_lead_client';
 import { resolvePublicLeadRuntime, shouldUsePublicLeadEdge } from './public_lead_runtime';
+import { FormSubmissionIdempotency } from './form_submission_idempotency';
 import {
   BUILDER_SETUP_SERVICE_CATALOG,
   parseBuilderSetupBrief,
@@ -484,6 +485,12 @@ function editorUsesSupabase(): boolean {
 
 function editorUsesLocalData(): boolean {
     return editorRuntime.success && editorRuntime.mode === 'local';
+}
+
+function blockUnsupportedProductionWebsiteMutation(action: string): boolean {
+    if (!editorUsesSupabase()) return false;
+    (window as any).showToast(`${action} is temporarily unavailable in production. No changes were made.`, 'error');
+    return true;
 }
 
 function removeLocalFixtureRows(): void {
@@ -1327,6 +1334,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
         // Funnels API (WB.1.4 Integration — Browser-safe simulation)
         if (url.startsWith('/api/funnels')) {
+            if (editorUsesSupabase() && method !== 'GET') {
+                return builderSectionsJsonResponse({ success: false, error: 'Website page changes are temporarily unavailable in production.' }, 501);
+            }
             let response: any;
 
             if (url === '/api/funnels' && method === 'GET') {
@@ -1767,6 +1777,7 @@ const publicLeadRuntime = resolvePublicLeadRuntime({
 let activeRenderedPublicSections: PageSection[] = [];
 let activeRenderedPublicPreview = false;
 const publicLeadAttempts = new Map<string, { key: string; signature: string; accepted: boolean }>();
+const authenticatedFormAttempts = new FormSubmissionIdempotency();
 type BuilderContext = {
   websiteId?: string;
   pageId: string;
@@ -2488,6 +2499,7 @@ async function renderClients() {
 };
 
 (window as any).updatePageName = (id: string, name: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Page renaming')) return;
   const page = mockPages.find(p => p.id === id);
   if (page) {
     page.name = name;
@@ -2496,6 +2508,7 @@ async function renderClients() {
 };
 
 (window as any).togglePublishFromBuilder = (id: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Legacy page publishing')) return;
   const page = mockPages.find(p => p.id === id);
   if (page) {
     page.status = page.status === 'published' ? 'draft' : 'published';
@@ -6341,6 +6354,10 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
       return;
     }
 
+    const internalAttemptScope = `${isPublic ? 'preview' : 'builder'}:${sectionId}`;
+    const internalAttempt = authenticatedFormAttempts.begin(internalAttemptScope, leadData);
+    const internalLeadData = { ...leadData, request_key: internalAttempt.key };
+
     // Timeout & Retry Logic (W4.2)
     const MAX_TIMEOUT = 10000;
     const withTimeout = (promise: Promise<any>, ms: number) =>
@@ -6354,7 +6371,7 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
         const response = await withTimeout(fetch('/api/leads', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(leadData)
+          body: JSON.stringify(internalLeadData)
         }), MAX_TIMEOUT) as Response;
         const result = await response.json();
         if (!response.ok || !result.success) {
@@ -6367,7 +6384,7 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
           const response = await withTimeout(fetch('/api/leads', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(leadData)
+            body: JSON.stringify(internalLeadData)
           }), MAX_TIMEOUT) as Response;
           const result = await response.json();
           if (!response.ok || !result.success) {
@@ -6380,6 +6397,7 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
     };
 
     const res = await performSubmission(true); // Initial try + 1 retry
+    authenticatedFormAttempts.accept(internalAttemptScope, internalAttempt.key);
 
     console.log("[CRM: FORM] Success:", res);
 
@@ -7280,6 +7298,7 @@ function renderReports() {
 };
 
 (window as any).saveWebsiteAttachment = (funnelId: string, websiteId: string) => {
+    if (blockUnsupportedProductionWebsiteMutation('Website page attachment')) return;
     const existingId = (document.getElementById('existing-route-select') as HTMLSelectElement).value;
     const newPath = (document.getElementById('new-route-path-inp') as HTMLInputElement).value.trim();
     
@@ -7382,6 +7401,7 @@ function renderReports() {
 };
 
 (window as any).finalizePageCreation = (templateId: string) => {
+    if (blockUnsupportedProductionWebsiteMutation('Legacy page creation')) return;
     const input = document.getElementById('finalize_page_name') as HTMLInputElement;
     const name = input?.value.trim();
     if (!name) { alert('Please enter a name for your page.'); return; }
@@ -7454,6 +7474,7 @@ function renderReports() {
 
 
 (window as any).duplicatePage = (id: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Page duplication')) return;
   const page = mockPages.find(p => p.id === id);
   if (!page) return;
   const newPage = {
@@ -7480,6 +7501,7 @@ function renderReports() {
 };
 
 (window as any).togglePublish = (id: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Legacy page publishing')) return;
   const page = mockPages.find(p => p.id === id);
   if (page) {
     page.status = page.status === 'published' ? 'draft' : 'published';
@@ -7489,6 +7511,7 @@ function renderReports() {
 };
 
 (window as any).generatePageWithAI = (id: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Legacy AI page generation')) return;
   // Mock AI generation
   mockPageSections.push({
     id: `ps-ai-${Date.now()}`,
@@ -7503,6 +7526,7 @@ function renderReports() {
 };
 
 (window as any).applyTemplate = (id: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Legacy template application')) return;
   // Mock template application
   mockPageSections.push({
     id: `ps-tpl-${Date.now()}`,
@@ -7731,6 +7755,7 @@ function renderComponents() {
 }
 
 (window as any).useTemplate = (templateId: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Template page creation')) return;
   const template = templates.find((t: any) => t.id === templateId);
   if (!template) return;
 
@@ -9586,6 +9611,7 @@ async function renderFunnelDetail(funnelId: string) {
 };
 
 (window as any).saveNewPage = async (websiteId: string) => {
+    if (blockUnsupportedProductionWebsiteMutation('Legacy page creation')) return;
     const nameInput = document.getElementById('new-page-name') as HTMLInputElement;
     if (!nameInput?.value) {
         alert('Please enter a page name.');
@@ -9646,6 +9672,7 @@ async function renderFunnelDetail(funnelId: string) {
 };
 
 (window as any).deletePage = (routeId: string, funnelId: string) => {
+    if (blockUnsupportedProductionWebsiteMutation('Page deletion')) return;
     if (!confirm('Are you sure? This will delete the page and its URL path.')) return;
 
     // 1. Remove Route
