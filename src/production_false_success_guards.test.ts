@@ -18,6 +18,33 @@ describe('production false-success guards', () => {
     expect(source).toContain("Lead creation is temporarily unavailable. Please try again.");
   });
 
+  it('validates the Basic-selected quote before either production or local persistence', () => {
+    const saveStart = source.indexOf('(window as any).saveQuote = async () =>');
+    const saveSource = source.slice(saveStart, saveStart + 5_500);
+    expect(saveSource.indexOf('validateSelectedQuoteTier(nqItems, selectedTier)')).toBeGreaterThan(-1);
+    expect(saveSource.indexOf('validateSelectedQuoteTier(nqItems, selectedTier)'))
+      .toBeLessThan(saveSource.indexOf('if (editorUsesSupabase())'));
+    expect(saveSource).toContain('const basicTotal = tierValidation.selectedTotal');
+    expect(saveSource).toContain('selected_tier: selectedTier');
+  });
+
+  it('derives production onboarding from durable Website ownership', () => {
+    const dashboardStart = source.indexOf('function renderDashboard()');
+    const dashboardSource = source.slice(dashboardStart, dashboardStart + 2_000);
+    expect(dashboardSource).toContain('loadWebsiteDashboardCore({ actingUserId: userId })');
+    expect(dashboardSource).toContain('durableWebsiteCount: core.websites.length');
+    expect(dashboardSource).toContain('} else if (!alreadySeenOnboarding) {');
+  });
+
+  it('resolves authenticated Preview from owned hydrated Website data', () => {
+    const bootStart = source.indexOf('async function bootRouter()');
+    const bootSource = source.slice(bootStart, bootStart + 5_000);
+    expect(bootSource).toContain('resolveAuthenticatedPreview');
+    expect(bootSource).toContain('hydrateAuthenticatedPreviewSections');
+    expect(bootSource).toContain("params.get('websiteId')");
+    expect(bootSource).toContain("params.get('pageId')");
+  });
+
   it('marks invoices explicitly unavailable when production storage does not exist', () => {
     const start = source.indexOf('function renderInvoices()');
     expect(source.slice(start, start + 700)).toContain('Invoices are not available yet.');

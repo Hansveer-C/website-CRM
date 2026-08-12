@@ -78,6 +78,9 @@ import {
 import { submitPublicLead } from './public_lead_client';
 import { resolvePublicLeadRuntime, shouldUsePublicLeadEdge } from './public_lead_runtime';
 import { FormSubmissionIdempotency } from './form_submission_idempotency';
+import { validateSelectedQuoteTier } from './quote_tier_validation';
+import { shouldShowWebsiteOnboarding } from './website_onboarding_gate';
+import { buildAuthenticatedPreviewUrl, resolveAuthenticatedPreview } from './authenticated_preview_route';
 import {
   BUILDER_SETUP_SERVICE_CATALOG,
   parseBuilderSetupBrief,
@@ -2114,9 +2117,28 @@ function renderDashboard() {
   const userId = getActingUserId();
 
   // 🏁 WB.6.1: Check for Onboarding
-  if (!window.localStorage.getItem('onboarding_seen')) {
+  const alreadySeenOnboarding = !!window.localStorage.getItem('onboarding_seen');
+  if (editorUsesSupabase()) {
+    void loadWebsiteDashboardCore({ actingUserId: userId }).then(core => {
+      if (currentView !== 'dashboard') return;
+      const shouldShow = shouldShowWebsiteOnboarding({
+        alreadySeen: alreadySeenOnboarding,
+        usesSupabase: true,
+        durableWebsiteCount: core.websites.length
+      });
+      if (shouldShow) (window as any).showOnboardingModal();
+      else document.getElementById('website-onboarding-modal')?.remove();
+    }).catch(() => {
+      // Repository failure must not be mistaken for a brand-new account.
+      document.getElementById('website-onboarding-modal')?.remove();
+    });
+  } else if (!alreadySeenOnboarding) {
     fetch('/api/funnels').then(r => r.json()).then(res => {
-      if (res.success && (!res.data || res.data.length === 0)) {
+      if (currentView === 'dashboard' && res.success && shouldShowWebsiteOnboarding({
+        alreadySeen: false,
+        usesSupabase: false,
+        localFunnelCount: Array.isArray(res.data) ? res.data.length : undefined
+      })) {
         (window as any).showOnboardingModal();
       }
     });
@@ -8769,12 +8791,14 @@ function renderNewQuote() {
   }
 
   const notes = (document.getElementById('quote-notes') as HTMLTextAreaElement)?.value || '';
+  const selectedTier = 'basic' as const;
+  const tierValidation = validateSelectedQuoteTier(nqItems, selectedTier);
+  if (!tierValidation.success) {
+    alert(tierValidation.message);
+    return;
+  }
 
   if (editorUsesSupabase()) {
-    if (!Array.isArray(nqItems) || nqItems.length === 0 || nqItems.some((item: any) => !String(item.service || '').trim() || !(item.quantity > 0) || !(item.price >= 0))) {
-      alert('Add at least one valid quote item with a service name, quantity, and price.');
-      return;
-    }
     const requestKey = (window as any).newQuoteRequestKey || crypto.randomUUID();
     (window as any).newQuoteRequestKey = requestKey;
     try {
@@ -8785,7 +8809,7 @@ function renderNewQuote() {
           request_key: requestKey,
           contact_id: nqcId,
           opportunity_id: nqoId || null,
-          selected_tier: 'basic',
+          selected_tier: selectedTier,
           notes,
           items: nqItems.map((item: any) => ({ serviceName: String(item.service).trim(), description: item.description || '', quantity: item.quantity, unitPrice: item.price, tier: item.tier }))
         })
@@ -8819,8 +8843,7 @@ function renderNewQuote() {
 
   const quoteId = 'q' + (mockQuotes.length + 1) + '-' + Math.floor(Math.random() * 100);
 
-  // Default to Basic total initially
-  const basicTotal = nqItems.filter((i: any) => i.tier === 'basic').reduce((sum: number, item: any) => sum + (item.quantity * item.price), 0);
+  const basicTotal = tierValidation.selectedTotal;
 
   mockQuotes.push({
     id: quoteId,
@@ -8829,7 +8852,7 @@ function renderNewQuote() {
     opportunity_id: nqoId || '',
     status: 'draft',
     total_amount: basicTotal,
-    selected_tier: 'basic',
+    selected_tier: selectedTier,
     notes: notes,
     created_at: new Date().toISOString()
   });
@@ -9223,6 +9246,23 @@ function dashboardActionButton(model: WebsiteDashboardModel, action: BuilderNavi
   if (!state || (state.status !== 'ready' && state.status !== 'partial') || !state.model.currentPage) return;
   const pageId = requestedPageId ?? (action === 'edit' ? state.model.homepage.id : state.model.currentPage.id);
   if (!pageId) return;
+  if (action === 'preview') {
+    const page = mockPages.find(candidate => candidate.id === pageId);
+    const route = mockWebsiteRoutes.find(candidate => (
+      candidate.website_id === state.model.website.id
+      && candidate.funnel_id === page?.funnel_id
+    ));
+    const path = pageId === state.model.homepage.id
+      ? state.model.homepage.path || '/'
+      : route?.path || `/${page?.slug || ''}`;
+    window.history.pushState({}, '', buildAuthenticatedPreviewUrl({
+      websiteId: state.model.website.id,
+      pageId,
+      path
+    }));
+    void bootRouter();
+    return;
+  }
   const target = { websiteId: state.model.website.id, pageId, action };
   void (window as any).navigateTo('builder', undefined, { builderContext: target });
 };
@@ -9687,6 +9727,35 @@ async function renderFunnelDetail(funnelId: string) {
     renderFunnels();
 };
 
+async function hydrateAuthenticatedPreviewSections(pageId: string, userId: string): Promise<void> {
+  const client = await getBuilderPublicationSupabaseClient();
+  if (!client) throw new Error('UNAVAILABLE');
+  const sectionsResult = await client.from('page_sections')
+    .select('id,page_id,type,content,order_index,styles')
+    .eq('page_id', pageId)
+    .eq('user_id', userId)
+    .order('order_index', { ascending: true });
+  if (sectionsResult.error) throw new Error('UNAVAILABLE');
+  const sections = (sectionsResult.data ?? []).map((row: any): PageSection => {
+    const rawContent = row.content && typeof row.content === 'object' ? structuredClone(row.content) : {};
+    const variant = typeof rawContent.__builder_variant === 'string' ? rawContent.__builder_variant : undefined;
+    if ('__builder_variant' in rawContent) delete rawContent.__builder_variant;
+    return {
+      id: String(row.id),
+      page_id: String(row.page_id),
+      type: String(row.type),
+      content: rawContent,
+      order: Number(row.order_index),
+      styles: row.styles && typeof row.styles === 'object' ? structuredClone(row.styles) : {},
+      ...(variant ? { variant } : {})
+    };
+  });
+  for (let index = mockPageSections.length - 1; index >= 0; index -= 1) {
+    if (mockPageSections[index].page_id === pageId) mockPageSections.splice(index, 1);
+  }
+  mockPageSections.push(...sections);
+}
+
 async function initializeBuilderNavigation(context: BuilderContext | null): Promise<boolean> {
   builderRouteUnavailableReason = null;
   const parsedRoute = parseBuilderNavigationTarget(window.location.hash);
@@ -9703,18 +9772,7 @@ async function initializeBuilderNavigation(context: BuilderContext | null): Prom
     if (resolution.status !== 'resolved') throw new Error('UNAVAILABLE');
     activeBuilderWebsiteId = resolution.website.id;
     if (dashboardUsesSupabase()) {
-      const client = await getBuilderPublicationSupabaseClient();
-      if (!client) throw new Error('UNAVAILABLE');
-      const sectionsResult = await client.from('page_sections').select('id,page_id,type,content,order_index,styles').eq('page_id', resolution.page.id).eq('user_id', userId).order('order_index', { ascending: true });
-      if (sectionsResult.error) throw new Error('UNAVAILABLE');
-      const sections = (sectionsResult.data ?? []).map((row: any): PageSection => {
-        const rawContent = row.content && typeof row.content === 'object' ? structuredClone(row.content) : {};
-        const variant = typeof rawContent.__builder_variant === 'string' ? rawContent.__builder_variant : undefined;
-        if ('__builder_variant' in rawContent) delete rawContent.__builder_variant;
-        return { id: String(row.id), page_id: String(row.page_id), type: String(row.type), content: rawContent, order: Number(row.order_index), styles: row.styles && typeof row.styles === 'object' ? structuredClone(row.styles) : {}, ...(variant ? { variant } : {}) };
-      });
-      for (let index = mockPageSections.length - 1; index >= 0; index -= 1) if (mockPageSections[index].page_id === resolution.page.id) mockPageSections.splice(index, 1);
-      mockPageSections.push(...sections);
+      await hydrateAuthenticatedPreviewSections(resolution.page.id, userId);
     }
     applyBuilderContext(context);
     builderHistoryController = null;
@@ -10859,8 +10917,45 @@ async function bootRouter() {
     return;
   }
   if (decision.action !== 'authenticated') return;
+  if (authState.status !== 'authenticated') return;
 
   if (isPreviewRoute && targetPath) {
+    if (dashboardUsesSupabase()) {
+      try {
+        const core = await loadWebsiteDashboardCore({ actingUserId: authState.user.id });
+        const params = new URLSearchParams(window.location.search);
+        const resolution = resolveAuthenticatedPreview({
+          actingUserId: authState.user.id,
+          path: targetPath,
+          explicitWebsiteId: params.get('websiteId'),
+          explicitPageId: params.get('pageId'),
+          ...core
+        });
+        if (resolution.status !== 'resolved') {
+          render404('Preview target not found.');
+          return;
+        }
+        const { target } = resolution;
+        await hydrateAuthenticatedPreviewSections(target.page.id, authState.user.id);
+        await renderSitePage(target.funnel.id, {
+          ...target.website,
+          route: target.route,
+          route_id: target.route.id,
+          path: target.path,
+          slug: target.page.slug,
+          is_seo_page: target.path !== '/',
+          city: target.route.city || '',
+          service: target.route.service || '',
+          route_type: target.path === '/' ? 'homepage' : 'service',
+          funnel_id: target.funnel.id,
+          page_id: target.page.id
+        }, true);
+        return;
+      } catch {
+        renderPublicPublicationUnavailable();
+        return;
+      }
+    }
     const result = await resolveWebsiteRequest(host, targetPath);
     if (result && result.funnel_id) {
        const resolvedRoutePath = normalizePreviewPath(result.route?.path || '/');
@@ -10949,6 +11044,7 @@ let onboardingState = {
 };
 
 (window as any).showOnboardingModal = () => {
+    if (document.getElementById('website-onboarding-modal')) return;
     // Reset state
     onboardingState = { 
         businessName: '', 

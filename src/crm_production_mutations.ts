@@ -1,4 +1,5 @@
 import type { Contact, Opportunity, Quote, QuoteItem } from './types';
+import { validateSelectedQuoteTier } from './quote_tier_validation';
 
 export type QuoteTier = 'basic' | 'standard' | 'premium';
 
@@ -49,8 +50,12 @@ export interface CrmMutationClient {
 }
 
 export class CrmMutationError extends Error {
-  constructor(public readonly code: 'UNAVAILABLE' | 'INVALID_RESPONSE') {
-    super(code === 'UNAVAILABLE' ? 'This action is temporarily unavailable.' : 'The server returned an invalid response.');
+  constructor(public readonly code: 'UNAVAILABLE' | 'INVALID_RESPONSE' | 'INVALID_INPUT', message?: string) {
+    super(message ?? (code === 'UNAVAILABLE'
+      ? 'This action is temporarily unavailable.'
+      : code === 'INVALID_INPUT'
+        ? 'The request is invalid.'
+        : 'The server returned an invalid response.'));
   }
 }
 
@@ -65,6 +70,8 @@ function requireObject(value: unknown): Record<string, unknown> {
 }
 
 export async function saveProductionQuote(client: CrmMutationClient, input: QuoteSaveInput): Promise<QuoteSaveResult> {
+  const validation = validateSelectedQuoteTier(input.items, input.selectedTier);
+  if (!validation.success) throw new CrmMutationError('INVALID_INPUT', validation.message);
   const result = await client.rpc('save_crm_quote', {
     p_request_key: input.requestKey,
     p_contact_id: input.contactId,

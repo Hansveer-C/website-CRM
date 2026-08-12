@@ -23,7 +23,46 @@ describe('production CRM mutations', () => {
 
   it('does not expose provider errors', async () => {
     const client = { rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'sensitive SQL detail' } }) } as CrmMutationClient;
-    await expect(saveProductionQuote(client, { requestKey: 'key', contactId: 'c', selectedTier: 'basic', items: [] })).rejects.toEqual(expect.objectContaining({ message: 'This action is temporarily unavailable.' }));
+    await expect(saveProductionQuote(client, {
+      requestKey: 'key', contactId: 'c', selectedTier: 'basic',
+      items: [{ serviceName: 'Wash', quantity: 1, unitPrice: 1, tier: 'basic' }]
+    })).rejects.toEqual(expect.objectContaining({ message: 'This action is temporarily unavailable.' }));
+  });
+
+  it.each([
+    [[{ serviceName: 'Standard wash', quantity: 1, unitPrice: 200, tier: 'standard' as const }]],
+    [[{ serviceName: 'Premium wash', quantity: 1, unitPrice: 300, tier: 'premium' as const }]],
+    [[
+      { serviceName: 'Standard wash', quantity: 1, unitPrice: 200, tier: 'standard' as const },
+      { serviceName: 'Premium wash', quantity: 1, unitPrice: 300, tier: 'premium' as const }
+    ]]
+  ])('rejects a Basic-selected quote without a Basic item before calling persistence', async items => {
+    const rpc = vi.fn();
+    await expect(saveProductionQuote({ rpc } as CrmMutationClient, {
+      requestKey: 'key', contactId: 'c', selectedTier: 'basic', items
+    })).rejects.toMatchObject({ code: 'INVALID_INPUT', message: 'Add at least one Basic-tier item before saving this quote.' });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('keeps selected tier, saved total, and opportunity value consistent', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      quote: { id: 'quote-2', user_id: 'user-a', contact_id: 'contact-1', selected_tier: 'basic', total_amount: 250 },
+      items: [
+        { id: 'basic', user_id: 'user-a', quote_id: 'quote-2', tier: 'basic', total: 250 },
+        { id: 'premium', user_id: 'user-a', quote_id: 'quote-2', tier: 'premium', total: 600 }
+      ],
+      opportunity: { id: 'opp-1', user_id: 'user-a', contact_id: 'contact-1', value: 250 },
+      replayed: false
+    }, error: null });
+    const result = await saveProductionQuote({ rpc } as CrmMutationClient, {
+      requestKey: 'key', contactId: 'contact-1', opportunityId: 'opp-1', selectedTier: 'basic',
+      items: [
+        { serviceName: 'Basic wash', quantity: 1, unitPrice: 250, tier: 'basic' },
+        { serviceName: 'Premium wash', quantity: 1, unitPrice: 600, tier: 'premium' }
+      ]
+    });
+    expect(result.quote).toMatchObject({ selected_tier: 'basic', total_amount: 250 });
+    expect(result.opportunity?.value).toBe(250);
   });
 
   it('maps authenticated internal lead input and returns linked records', async () => {
