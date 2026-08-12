@@ -1,6 +1,6 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
 import { templates } from './templates';
-import { Activity, Funnel, Page, PageSection, User, Website, WebsiteRoute, WebsiteSettings } from './types';
+import { Activity, Funnel, Page, PageSection, User, Website, WebsiteLayout, WebsiteRoute, WebsiteSettings } from './types';
 import { createBuilderSection, getBuilderSectionDefinition, isRegisteredBuilderSectionType } from './builder_section_registry';
 import type { BuilderInspectorFieldDefinition, BuilderInspectorTab } from './builder_inspector_schema';
 import { createBuilderInspectorPatch, getBuilderInspectorField, getBuilderInspectorFieldValue, getBuilderInspectorSchema } from './builder_inspector_schema';
@@ -99,6 +99,12 @@ import { createBrowserCallSimulator } from './browser_call_simulation';
 import { isCrmApplicationHost } from './application_host';
 import { resolveApplicationHostRoute } from './application_host_route';
 import { CrmProductionHydrator, type CrmHydrationClient } from './crm_production_hydration';
+import { WebsiteLayoutHydrator, type WebsiteLayoutHydrationClient } from './website_layout_hydration';
+import {
+  createProductionLead,
+  saveProductionQuote,
+  type CrmMutationClient
+} from './crm_production_mutations';
 import {
   ApplicationAuthController,
   createApplicationSignupRedirect,
@@ -512,6 +518,10 @@ const crmProductionHydrator = new CrmProductionHydrator(
       quote_items: mockQuoteItems,
       invoices: mockInvoices
     }
+);
+const websiteLayoutHydrator = new WebsiteLayoutHydrator(
+    async () => await getBuilderPublicationSupabaseClient() as unknown as WebsiteLayoutHydrationClient | null,
+    mockWebsiteLayouts
 );
 let applicationAuthInitialization: Promise<ApplicationAuthState> | null = null;
 let applicationAuthHasInitialized = false;
@@ -1145,6 +1155,41 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                     });
                 }
 
+                if (editorUsesSupabase()) {
+                    const client = await getBuilderPublicationSupabaseClient();
+                    if (!client || !userId || typeof body.request_key !== 'string') {
+                        throw new Error('Production lead persistence is unavailable.');
+                    }
+                    const saved = await createProductionLead(client as unknown as CrmMutationClient, {
+                        requestKey: body.request_key,
+                        name: normalizeName(body.name || ''),
+                        phone: phoneVal || body.phone,
+                        email: emailVal || undefined,
+                        address: body.address,
+                        serviceType: body.service_type,
+                        message: body.message,
+                        source: body.source,
+                        funnelId: body.funnel_id
+                    });
+                    if (saved.contact.user_id !== userId || saved.opportunity.user_id !== userId
+                        || saved.opportunity.contact_id !== saved.contact.id) {
+                        throw new Error('Production lead persistence returned an invalid owner.');
+                    }
+                    const contactIndex = mockContacts.findIndex(contact => contact.id === saved.contact.id);
+                    if (contactIndex >= 0) mockContacts[contactIndex] = saved.contact;
+                    else mockContacts.push(saved.contact);
+                    const opportunityIndex = mockOpportunities.findIndex(opportunity => opportunity.id === saved.opportunity.id);
+                    if (opportunityIndex >= 0) mockOpportunities[opportunityIndex] = saved.opportunity;
+                    else mockOpportunities.push(saved.opportunity);
+                    return new Response(JSON.stringify({
+                        success: true,
+                        data: saved.contact,
+                        opportunity: saved.opportunity,
+                        is_repeat: saved.isRepeat,
+                        replayed: saved.replayed
+                    }), { status: 201, headers: { 'Content-Type': 'application/json' } });
+                }
+
                 const fallback = createLocalMockWebsiteLead({
                     ...body,
                     phone: phoneVal || body.phone,
@@ -1170,6 +1215,12 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                 });
             } catch (error: any) {
                 console.error('[API ROUTER] Lead Ingestion Error:', error);
+                if (editorUsesSupabase()) {
+                    return new Response(JSON.stringify({ success: false, error: 'Lead creation is temporarily unavailable. Please try again.' }), {
+                        status: 503,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
                 const fallback = createLocalMockWebsiteLead(body, userId, false);
                 runAutomations('LEAD_CAPTURED', fallback.contact);
                 return new Response(JSON.stringify({
@@ -1180,6 +1231,39 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                     fallback: 'local-mock'
                 }), {
                     status: 201,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+        }
+
+        if (url === '/api/quotes' && method === 'POST') {
+            if (!editorUsesSupabase()) {
+                return new Response(JSON.stringify({ success: false, error: 'Use the local quote workflow.' }), {
+                    status: 409,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+            try {
+                const body = reqContext.body;
+                const client = await getBuilderPublicationSupabaseClient();
+                const userId = getActingUserId();
+                if (!client || !userId) throw new Error('UNAVAILABLE');
+                const saved = await saveProductionQuote(client as unknown as CrmMutationClient, {
+                    requestKey: body.request_key,
+                    contactId: body.contact_id,
+                    opportunityId: body.opportunity_id || undefined,
+                    selectedTier: body.selected_tier,
+                    notes: body.notes,
+                    items: body.items
+                });
+                if (saved.quote.user_id !== userId || saved.items.some(item => item.user_id !== userId)) throw new Error('UNAVAILABLE');
+                return new Response(JSON.stringify({ success: true, data: saved }), {
+                    status: 201,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } catch {
+                return new Response(JSON.stringify({ success: false, error: 'Quote creation is temporarily unavailable. Please try again.' }), {
+                    status: 503,
                     headers: { 'Content-Type': 'application/json' }
                 });
             }
@@ -1490,6 +1574,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         }
 
         if (url === '/api/websites/bulk-seo' && method === 'POST') {
+            if (!editorUsesLocalData()) return builderSectionsJsonResponse({ success: false, error: 'SEO route generation is temporarily unavailable.' }, 501);
             const { services, cities } = reqContext.body || {};
             console.log(`[MOCK] Bulk SEO Generation for ${services.length} services in ${cities.length} cities`);
             
@@ -1524,6 +1609,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         }
 
         if (url.startsWith('/api/websites/routes/') && method === 'DELETE') {
+            if (!editorUsesLocalData()) return builderSectionsJsonResponse({ success: false, error: 'Route deletion is temporarily unavailable.' }, 501);
             const routeId = url.split('/')[4];
             const idx = mockWebsiteRoutes.findIndex(r => r.id === routeId);
             if (idx > -1) {
@@ -1704,6 +1790,7 @@ function getActingUserId(): string {
 
 function clearProtectedRuntimeData(): void {
   crmProductionHydrator.clear();
+  websiteLayoutHydrator.clear();
   removeLocalFixtureRows();
   mockAutomationLogs.splice(0);
   contactTimelineState = [];
@@ -7805,11 +7892,23 @@ function renderWebsiteSettings() {
 
 function renderWebsiteNavigation() {
   const userId = getActingUserId();
-  const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
-  const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+  const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId)
+    || mockWebsites.find(w => w.user_id === userId);
+  if (!website) {
+    renderWebsiteRepositoryUnavailable('website-navigation');
+    return;
+  }
+  if (editorUsesSupabase() && websiteLayoutHydrator.state.status === 'loading') {
+    app.innerHTML = `${renderSidebar('website-navigation')}<main class="main-content" aria-busy="true"><header class="view-header"><h2>Website Navigation</h2></header><section class="card"><p>Loading navigation configuration…</p></section></main>`;
+    return;
+  }
+  if (editorUsesSupabase() && websiteLayoutHydrator.state.status === 'error') {
+    app.innerHTML = `${renderSidebar('website-navigation')}<main class="main-content"><header class="view-header"><h2>Website Navigation</h2></header><section class="card" role="alert"><h3>Navigation could not be loaded.</h3><p>Your saved configuration was not changed.</p><button class="btn-outline" onclick="window.navigateTo('website-navigation')">Retry</button></section></main>`;
+    return;
+  }
+  const layout = mockWebsiteLayouts.find(l => l.website_id === website.id);
   
-  if (!layout.header_config.nav_items) layout.header_config.nav_items = [];
-  const navItems = layout.header_config.nav_items;
+  const navItems = layout?.header_config.nav_items ?? [];
 
   // 🌿 Fix.2: Get available pages for the dropdown
   const siteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
@@ -7858,8 +7957,8 @@ function renderWebsiteNavigation() {
           <p style="color: #64748b; margin-top: 6px;">Manage your site's header menu. Links are restricted to your published pages to prevent dead ends.</p>
         </div>
         <div style="display: flex; gap: 12px;">
-           <button class="btn-primary" style="background: #8a2be2; border: none; padding: 12px 24px;" onclick="window.addNavItem()">+ Add Menu Item</button>
-           <button class="btn-primary" style="padding: 12px 24px;" onclick="window.saveWebsiteLayout()">Save Configuration</button>
+           ${layout ? `<button class="btn-primary" style="background: #8a2be2; border: none; padding: 12px 24px;" onclick="window.addNavItem()">+ Add Menu Item</button>` : ''}
+           <button class="btn-primary" style="padding: 12px 24px;" onclick="window.saveWebsiteLayout()">${layout ? 'Save Configuration' : 'Create Navigation'}</button>
         </div>
       </header>
 
@@ -7872,8 +7971,9 @@ function renderWebsiteNavigation() {
 
 (window as any).addNavItem = () => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
-    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId) || mockWebsites.find(w => w.user_id === userId);
+    const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : undefined;
+    if (!layout) { (window as any).showToast('Create the navigation configuration first.', 'error'); return; }
     
     if (!layout.header_config.nav_items) layout.header_config.nav_items = [];
     layout.header_config.nav_items.push({ label: 'New Link', path: '/', visible: true });
@@ -7882,8 +7982,9 @@ function renderWebsiteNavigation() {
 
 (window as any).updateNavItem = (index: number, field: string, value: any) => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
-    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId) || mockWebsites.find(w => w.user_id === userId);
+    const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : undefined;
+    if (!layout) return;
     
     (layout.header_config.nav_items[index] as any)[field] = value;
     renderWebsiteNavigation();
@@ -7891,8 +7992,9 @@ function renderWebsiteNavigation() {
 
 (window as any).reorderNavItem = (index: number, direction: number) => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
-    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId) || mockWebsites.find(w => w.user_id === userId);
+    const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : undefined;
+    if (!layout) return;
     
     const items = layout.header_config.nav_items;
     const newIndex = index + direction;
@@ -7907,18 +8009,43 @@ function renderWebsiteNavigation() {
 
 (window as any).deleteNavItem = (index: number) => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
-    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId) || mockWebsites.find(w => w.user_id === userId);
+    const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : undefined;
+    if (!layout) return;
     
     layout.header_config.nav_items.splice(index, 1);
     renderWebsiteNavigation();
 };
 
 (window as any).saveWebsiteLayout = async () => {
-    (window as any).showToast('Saving navigation layout...', 2000);
-    setTimeout(() => {
-        (window as any).showToast('Navigation updated successfully!', 2000);
-    }, 600);
+    const userId = getActingUserId();
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId) || mockWebsites.find(w => w.user_id === userId);
+    if (!website) { (window as any).showToast('Navigation is unavailable.', 'error'); return; }
+    const existing = mockWebsiteLayouts.find(layout => layout.website_id === website.id);
+    const headerConfig = existing?.header_config ?? { logo_text: '', nav_items: [] };
+    const footerConfig = existing?.footer_config ?? {};
+    if (!editorUsesSupabase()) {
+      if (!existing) mockWebsiteLayouts.push({ id: `layout-${Date.now()}`, website_id: website.id, header_config: headerConfig, footer_config: footerConfig, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+      (window as any).showToast('Navigation updated successfully!', 'success');
+      renderWebsiteNavigation();
+      return;
+    }
+    (window as any).showToast('Saving navigation layout...', 'saving');
+    try {
+      const client = await getBuilderPublicationSupabaseClient();
+      if (!client) throw new Error('UNAVAILABLE');
+      const result = await client.from('website_layouts').upsert({ website_id: website.id, header_config: headerConfig, footer_config: footerConfig, updated_at: new Date().toISOString() }, { onConflict: 'website_id' }).select('*').single();
+      if (result.error || !result.data || result.data.website_id !== website.id) throw new Error('UNAVAILABLE');
+      const saved = result.data as WebsiteLayout;
+      const index = mockWebsiteLayouts.findIndex(layout => layout.website_id === website.id);
+      if (index >= 0) mockWebsiteLayouts[index] = saved;
+      else mockWebsiteLayouts.push(saved);
+      websiteLayoutHydrator.state = { status: 'loaded', userId };
+      (window as any).showToast('Navigation updated successfully!', 'success');
+      renderWebsiteNavigation();
+    } catch {
+      (window as any).showToast('Navigation could not be saved. Please try again.', 'error');
+    }
 };
 function renderWebsiteStructure() {
   const userId = getActingUserId();
@@ -8032,6 +8159,7 @@ function renderWebsiteStructure() {
 };
 
 (window as any).saveRoute = async (websiteId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Route creation is temporarily unavailable.', 'error'); return; }
   const pathInput = document.getElementById('route-path') as HTMLInputElement;
   const funnelSelect = document.getElementById('route-funnel-id') as HTMLSelectElement;
   
@@ -8068,6 +8196,7 @@ function renderWebsiteStructure() {
 };
 
 (window as any).deleteRoute = (id: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Route deletion is temporarily unavailable.', 'error'); return; }
   if (!confirm('Are you sure you want to delete this route? This path will no longer load its page.')) return;
   
   const index = mockWebsiteRoutes.findIndex(r => r.id === id);
@@ -8077,41 +8206,31 @@ function renderWebsiteStructure() {
   }
 };
 
-(window as any).updateSettingsField = (field: string, value: string) => {
+(window as any).updateSettingsField = async (field: string, value: string) => {
     const s = getWebsiteSettings();
-    (s as any)[field] = value;
-
-    if (field === 'primary_color') {
-        applyPrimaryColor(value);
-        const colorDisplay = document.getElementById('settings-primary-color-display');
-        if (colorDisplay) colorDisplay.textContent = value;
-    }
-    if (field === 'logo_url') {
-        const logoImg = document.getElementById('settings-logo-img') as HTMLImageElement | null;
-        if (logoImg) logoImg.src = value;
-    }
-
-    const promise = fetch('/api/settings', {
+    const previous = (s as any)[field];
+    const response = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(s)
-    })
-    .then(res => res.json())
-    .then(res => {
-        if (res.success) {
-            console.log('[SETTINGS] Field persisted:', field, value);
-        } else {
-            console.warn('[SETTINGS] Persistence response was failure:', res.error);
-        }
-        return res;
-    })
-    .catch(err => {
-        console.error('[SETTINGS] Network error on field save:', err);
-        throw err;
+        body: JSON.stringify({ [field]: value })
     });
-
-    console.log('Settings updated:', field, value);
-    return promise;
+    const result = await response.json();
+    if (!response.ok || result.success !== true || !result.data) {
+      (s as any)[field] = previous;
+      (window as any).showToast('Website setting could not be saved.', 'error');
+      throw new Error('SETTINGS_UNAVAILABLE');
+    }
+    Object.assign(s, result.data);
+    if (field === 'primary_color') {
+      applyPrimaryColor((s as any)[field]);
+      const colorDisplay = document.getElementById('settings-primary-color-display');
+      if (colorDisplay) colorDisplay.textContent = (s as any)[field];
+    }
+    if (field === 'logo_url') {
+      const logoImg = document.getElementById('settings-logo-img') as HTMLImageElement | null;
+      if (logoImg) logoImg.src = (s as any)[field];
+    }
+    return result;
 };
 
 (window as any).handleLogoUpload = async (file: File) => {
@@ -8202,6 +8321,7 @@ function renderQuickstart() {
 }
 
 function renderLeadCapture() {
+  (window as any).internalLeadRequestKey ||= crypto.randomUUID();
   app.innerHTML = `
     ${renderSidebar('lead-capture')}
     <main class="main-content">
@@ -8276,10 +8396,12 @@ async function handleLeadCaptureSubmission(e: Event) {
       address,
       service_type,
       message,
-      source: 'internal'
+      source: 'internal',
+      request_key: (window as any).internalLeadRequestKey
     });
 
     console.log("Internal Lead Created:", result);
+    (window as any).internalLeadRequestKey = '';
     alert(`Success! Lead created for ${name}.`);
     window.navigateTo('clients');
 
@@ -8395,6 +8517,10 @@ function renderQuotes() {
 }
 
 function renderInvoices() {
+  if (editorUsesSupabase()) {
+    app.innerHTML = `${renderSidebar('invoices')}<main class="main-content"><header class="view-header"><h2>Invoices</h2></header><section class="card" role="status"><h3>Invoices are not available yet.</h3><p>Production invoice persistence has not been implemented. No invoice changes will be stored until that backend is available.</p></section></main>`;
+    return;
+  }
   const filteredInvoices = mockInvoices.filter(i => {
     if (invoiceStatusFilter === 'all') return true;
     return i.status === invoiceStatusFilter;
@@ -8607,7 +8733,7 @@ function renderNewQuote() {
   }
 };
 
-(window as any).saveQuote = () => {
+(window as any).saveQuote = async () => {
   const nqcId = (window as any).newQuoteContactId;
   const nqoId = (window as any).newQuoteOpportunityId;
   const nqItems = (window as any).newQuoteLineItems;
@@ -8618,6 +8744,53 @@ function renderNewQuote() {
   }
 
   const notes = (document.getElementById('quote-notes') as HTMLTextAreaElement)?.value || '';
+
+  if (editorUsesSupabase()) {
+    if (!Array.isArray(nqItems) || nqItems.length === 0 || nqItems.some((item: any) => !String(item.service || '').trim() || !(item.quantity > 0) || !(item.price >= 0))) {
+      alert('Add at least one valid quote item with a service name, quantity, and price.');
+      return;
+    }
+    const requestKey = (window as any).newQuoteRequestKey || crypto.randomUUID();
+    (window as any).newQuoteRequestKey = requestKey;
+    try {
+      const response = await fetch('/api/quotes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          request_key: requestKey,
+          contact_id: nqcId,
+          opportunity_id: nqoId || null,
+          selected_tier: 'basic',
+          notes,
+          items: nqItems.map((item: any) => ({ serviceName: String(item.service).trim(), description: item.description || '', quantity: item.quantity, unitPrice: item.price, tier: item.tier }))
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error || 'Quote creation failed.');
+      const saved = payload.data;
+      const quoteIndex = mockQuotes.findIndex(quote => quote.id === saved.quote.id);
+      if (quoteIndex >= 0) mockQuotes[quoteIndex] = saved.quote;
+      else mockQuotes.push(saved.quote);
+      for (const item of saved.items) {
+        const itemIndex = mockQuoteItems.findIndex(existing => existing.id === item.id);
+        if (itemIndex >= 0) mockQuoteItems[itemIndex] = item;
+        else mockQuoteItems.push(item);
+      }
+      if (saved.opportunity) {
+        const opportunityIndex = mockOpportunities.findIndex(opportunity => opportunity.id === saved.opportunity.id);
+        if (opportunityIndex >= 0) mockOpportunities[opportunityIndex] = saved.opportunity;
+      }
+      (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0, tier: 'basic' }];
+      (window as any).newQuoteContactId = '';
+      (window as any).newQuoteOpportunityId = '';
+      (window as any).newQuoteRequestKey = '';
+      (window as any).showToast('Quote created successfully.', 'success');
+      await (window as any).navigateTo('quotes');
+    } catch (error: any) {
+      (window as any).showToast(error?.message || 'Quote creation is temporarily unavailable.', 'error');
+    }
+    return;
+  }
 
   const quoteId = 'q' + (mockQuotes.length + 1) + '-' + Math.floor(Math.random() * 100);
 
@@ -8666,6 +8839,7 @@ function renderNewQuote() {
 };
 
 function updateOpportunityStage(opportunity_id: string, new_stage: string) {
+  if (editorUsesSupabase()) { (window as any).showToast('Opportunity updates are temporarily unavailable.', 'error'); return; }
   const opp = mockOpportunities.find(o => o.id === opportunity_id);
   if (opp) {
     opp.pipeline_stage = new_stage;
@@ -8922,11 +9096,13 @@ async function loadWebsiteDashboardCore(request: { actingUserId: string }): Prom
   const websites = ((websitesResult.data ?? []) as Website[])
     .filter(item => typeof item.id === 'string' && item.id.length > 0 && item.user_id === userId);
   const websiteIds = websites.map(item => item.id);
+  const layoutHydration = websiteLayoutHydrator.hydrate(userId, websites);
   const [routesResult, funnelsResult, pagesResult] = await Promise.all([
     websiteIds.length ? client.from('website_routes').select('*').in('website_id', websiteIds).order('path', { ascending: true }) : Promise.resolve({ data: [], error: null }),
     client.from('funnels').select('*').eq('user_id', userId).order('created_at', { ascending: true }),
     client.from('pages').select('*').eq('user_id', userId).order('created_at', { ascending: true })
   ]);
+  await layoutHydration;
   if (routesResult.error || funnelsResult.error || pagesResult.error) throw new Error('UNAVAILABLE');
   const ownedWebsiteIds = new Set(websites.map(item => item.id));
   const routes = ((routesResult.data ?? []) as WebsiteRoute[])
@@ -9682,6 +9858,7 @@ async function executeNavigation(view: string, id?: string, context?: any) {
       (window as any).newQuoteContactId = id || '';
       (window as any).newQuoteOpportunityId = '';
       (window as any).newQuoteLineItems = [];
+      (window as any).newQuoteRequestKey = crypto.randomUUID();
       renderNewQuote(); 
       break;
     case 'invoices': renderInvoices(); break;
@@ -9778,6 +9955,7 @@ ${publishedPages.map(page => `  <url>
 };
 
 (window as any).selectQuoteTier = (quoteId: string, tier: 'basic' | 'standard' | 'premium') => {
+  if (editorUsesSupabase()) { (window as any).showToast('Quote option updates are temporarily unavailable.', 'error'); return; }
   const quote = mockQuotes.find(q => q.id === quoteId);
   if (quote) {
     quote.selected_tier = tier;
@@ -10068,6 +10246,7 @@ async function renderContactDetail(contactId: string) {
 }
 
 (window as any).logCall = (contactId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Activity creation is temporarily unavailable.', 'error'); return; }
   const note = prompt("Enter call summary:");
   if (note) {
     mockActivities.push({
@@ -10084,6 +10263,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).addNote = (contactId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Activity creation is temporarily unavailable.', 'error'); return; }
   const note = prompt("Enter your note:");
   if (note) {
     mockActivities.push({
@@ -10100,6 +10280,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).completeTask = (activityId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Activity updates are temporarily unavailable.', 'error'); return; }
   const activity = mockActivities.find(a => a.id === activityId);
   if (activity) {
     activity.completed = true;
@@ -10108,6 +10289,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).createOpportunity = (contactId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Opportunity creation is temporarily unavailable.', 'error'); return; }
   const valueInput = prompt("Enter Opportunity value (e.g. 500):", "0");
   const value = parseFloat(valueInput || "0");
 
@@ -10131,6 +10313,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).updateOpportunityField = (oppId: string, field: string, value: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Opportunity updates are temporarily unavailable.', 'error'); return; }
   const opp = mockOpportunities.find(o => o.id === oppId);
   if (opp) {
     if (field === 'value') {
@@ -10143,6 +10326,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).updateContactField = (contactId: string, field: string, value: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Contact updates are temporarily unavailable.', 'error'); return; }
   const contact = mockContacts.find(c => c.id === contactId);
   if (contact) {
     if (field === 'phone') {
@@ -10174,6 +10358,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).markAsPaid = (invoiceId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Invoice persistence is not available yet.', 'error'); return; }
   const invoice = mockInvoices.find(i => i.id === invoiceId);
   if (invoice) {
     invoice.status = 'paid';
@@ -10203,6 +10388,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).convertToInvoice = (quoteId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Invoice persistence is not available yet.', 'error'); return; }
   const quote = mockQuotes.find(q => q.id === quoteId);
   if (quote) {
     // Check for existing invoice
@@ -10242,6 +10428,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).approveQuote = (quoteId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Quote status updates are temporarily unavailable.', 'error'); return; }
   const quote = mockQuotes.find(q => q.id === quoteId);
   if (quote) {
     quote.status = 'approved';
@@ -10296,6 +10483,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).rejectQuote = (quoteId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Quote status updates are temporarily unavailable.', 'error'); return; }
   const quote = mockQuotes.find(q => q.id === quoteId);
   if (quote) {
     quote.status = 'rejected';
@@ -10320,6 +10508,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).sendQuote = (quoteId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Quote sending is temporarily unavailable.', 'error'); return; }
   const quote = mockQuotes.find(q => q.id === quoteId);
   if (quote) {
     quote.status = 'sent';
@@ -10354,6 +10543,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).createInvoice = (contactId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Invoice persistence is not available yet.', 'error'); return; }
   const contactQuotes = mockQuotes.filter(q => q.contact_id === contactId);
   if (contactQuotes.length === 0) {
     alert("Please create a Quote first.");
