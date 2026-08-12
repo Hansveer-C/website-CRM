@@ -34,6 +34,8 @@ describe('production false-success guards', () => {
     expect(dashboardSource).toContain('loadWebsiteDashboardCore({ actingUserId: userId })');
     expect(dashboardSource).toContain('durableWebsiteCount: core.websites.length');
     expect(dashboardSource).toContain('} else if (!alreadySeenOnboarding) {');
+    expect(dashboardSource.indexOf("document.getElementById('website-onboarding-modal')?.remove()"))
+      .toBeLessThan(dashboardSource.indexOf("if (currentView !== 'dashboard') return"));
   });
 
   it('resolves authenticated Preview from owned hydrated Website data', () => {

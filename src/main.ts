@@ -2120,6 +2120,10 @@ function renderDashboard() {
   const alreadySeenOnboarding = !!window.localStorage.getItem('onboarding_seen');
   if (editorUsesSupabase()) {
     void loadWebsiteDashboardCore({ actingUserId: userId }).then(core => {
+      if (core.websites.length > 0) {
+        document.getElementById('website-onboarding-modal')?.remove();
+        return;
+      }
       if (currentView !== 'dashboard') return;
       const shouldShow = shouldShowWebsiteOnboarding({
         alreadySeen: alreadySeenOnboarding,
