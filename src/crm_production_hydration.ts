@@ -1,6 +1,6 @@
 import type { Activity, Contact, Invoice, Opportunity, Quote, QuoteItem } from './types';
 
-export type CrmEntityName = 'contacts' | 'opportunities' | 'activities' | 'quotes' | 'quote_items' | 'invoices';
+export type CrmEntityName = 'contacts' | 'opportunities' | 'activities' | 'quotes' | 'quote_items';
 export type CrmEntityLoadState = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface CrmProductionCollections {
@@ -31,16 +31,17 @@ export interface CrmHydrationClient {
   };
 }
 
-const ENTITY_NAMES: readonly CrmEntityName[] = [
-  'contacts', 'opportunities', 'activities', 'quotes', 'quote_items', 'invoices'
+const SUPPORTED_ENTITY_NAMES: readonly CrmEntityName[] = [
+  'contacts', 'opportunities', 'activities', 'quotes', 'quote_items'
 ];
 
 function entityStates(value: CrmEntityLoadState): Record<CrmEntityName, CrmEntityLoadState> {
-  return Object.fromEntries(ENTITY_NAMES.map(name => [name, value])) as Record<CrmEntityName, CrmEntityLoadState>;
+  return Object.fromEntries(SUPPORTED_ENTITY_NAMES.map(name => [name, value])) as Record<CrmEntityName, CrmEntityLoadState>;
 }
 
 function clearCollections(collections: CrmProductionCollections): void {
-  for (const name of ENTITY_NAMES) collections[name].splice(0);
+  for (const name of SUPPORTED_ENTITY_NAMES) collections[name].splice(0);
+  collections.invoices.splice(0);
 }
 
 function isOwnedRow(value: unknown, userId: string): value is { user_id: string } {
@@ -88,7 +89,7 @@ export class CrmProductionHydrator {
       if (generation === this.generation) this.state = { status: 'error', userId, entities: entityStates('error') };
       return this.state;
     }
-    const results = await Promise.all(ENTITY_NAMES.map(async name => {
+    const results = await Promise.all(SUPPORTED_ENTITY_NAMES.map(async name => {
       try {
         const result = await client.from(name).select('*').eq('user_id', userId);
         if (result.error) return { name, status: 'error' as const, rows: [] };

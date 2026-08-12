@@ -35,15 +35,16 @@ const ownerRows = {
 };
 
 describe('CrmProductionHydrator', () => {
-  it('hydrates every CRM entity through an authenticated owner filter', async () => {
+  it('hydrates every supported CRM entity and never queries unavailable invoices', async () => {
     const target = collections(true);
     const source = client(ownerRows);
     const hydrator = new CrmProductionHydrator(async () => source, target);
     expect((await hydrator.hydrateAuthenticatedUser('user-1')).status).toBe('ready');
     expect(Object.fromEntries(Object.entries(target).map(([name, rows]) => [name, rows.map((row: { id: string }) => row.id)]))).toEqual({
-      contacts: ['c1'], opportunities: ['o1'], activities: ['a1'], quotes: ['q1'], quote_items: ['qi1'], invoices: ['i1']
+      contacts: ['c1'], opportunities: ['o1'], activities: ['a1'], quotes: ['q1'], quote_items: ['qi1'], invoices: []
     });
-    expect(source.queries).toHaveLength(6);
+    expect(source.queries).toHaveLength(5);
+    expect(source.from).not.toHaveBeenCalledWith('invoices');
     expect(source.queries.every(([, column, value]) => column === 'user_id' && value === 'user-1')).toBe(true);
   });
 
@@ -65,6 +66,17 @@ describe('CrmProductionHydrator', () => {
     expect(await failed.hydrateAuthenticatedUser('user-1')).toMatchObject({
       status: 'error', entities: { quotes: 'error', contacts: 'ready' }
     });
+  });
+
+  it('reports ready when all five supported entities load and leaves invoices empty', async () => {
+    const target = collections();
+    target.invoices.push({ id: 'stale', user_id: 'user-0' } as never);
+    const source = client(ownerRows, ['invoices']);
+    const state = await new CrmProductionHydrator(async () => source, target).hydrateAuthenticatedUser('user-1');
+    expect(state.status).toBe('ready');
+    expect(Object.values(state.entities)).toEqual(['ready', 'ready', 'ready', 'ready', 'ready']);
+    expect(target.invoices).toEqual([]);
+    expect(source.from).not.toHaveBeenCalledWith('invoices');
   });
 
   it('clears on logout, isolates account switches, and never duplicates repeated hydration', async () => {

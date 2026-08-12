@@ -46,6 +46,35 @@ describe('production false-success guards', () => {
     expect(bootSource).toContain("params.get('websiteId')");
     expect(bootSource).toContain("params.get('pageId')");
     expect(source).toContain("|| { header_config: { nav_items: [] }, footer_config: {} }");
+    expect(bootSource.indexOf('websiteSettingsHydrator.hydrate(authState.user.id, target.website)'))
+      .toBeLessThan(bootSource.indexOf('hydrateAuthenticatedPreviewSections(target.page.id, authState.user.id)'));
+    expect(bootSource.indexOf('websiteSettingsHydrator.hydrate(authState.user.id, target.website)'))
+      .toBeLessThan(bootSource.indexOf('renderSitePage(target.funnel.id'));
+  });
+
+  it('clears tenant-scoped settings and preview context on identity changes', () => {
+    const clearStart = source.indexOf('function clearProtectedRuntimeData()');
+    const clearSource = source.slice(clearStart, clearStart + 1_000);
+    expect(clearSource).toContain('websiteSettingsHydrator.clear()');
+    expect(clearSource).toContain('applyPrimaryColor(mockWebsiteSettings.primary_color)');
+    expect(clearSource).toContain('activeWebsiteContext = null');
+  });
+
+  it('removes seeded settings before production authentication can render', () => {
+    const hydratorStart = source.indexOf('const websiteSettingsHydrator = new WebsiteSettingsHydrator');
+    const authStart = source.indexOf('const applicationAuthController = new ApplicationAuthController');
+    const initialization = source.slice(authStart, hydratorStart + 700);
+    expect(initialization).toContain('if (!editorUsesLocalData())');
+    expect(initialization).toContain('websiteSettingsHydrator.clear()');
+    expect(initialization).toContain('applyPrimaryColor(mockWebsiteSettings.primary_color)');
+  });
+
+  it('clears settings before switching the active dashboard Website', () => {
+    const switchStart = source.indexOf('(window as any).selectDashboardWebsite');
+    const switchSource = source.slice(switchStart, switchStart + 500);
+    expect(switchSource.indexOf('websiteSettingsHydrator.clear()'))
+      .toBeLessThan(switchSource.indexOf('activeDashboardWebsiteId = websiteId'));
+    expect(switchSource).toContain('activeBuilderWebsiteId = null');
   });
 
   it('refreshes the dashboard through the module function without an undefined window bridge', () => {

@@ -104,6 +104,7 @@ import { isCrmApplicationHost } from './application_host';
 import { resolveApplicationHostRoute } from './application_host_route';
 import { CrmProductionHydrator, type CrmHydrationClient } from './crm_production_hydration';
 import { WebsiteLayoutHydrator, type WebsiteLayoutHydrationClient } from './website_layout_hydration';
+import { WebsiteSettingsHydrator, type WebsiteSettingsHydrationClient } from './website_settings_hydration';
 import {
   createProductionLead,
   saveProductionQuote,
@@ -533,6 +534,14 @@ const websiteLayoutHydrator = new WebsiteLayoutHydrator(
     async () => await getBuilderPublicationSupabaseClient() as unknown as WebsiteLayoutHydrationClient | null,
     mockWebsiteLayouts
 );
+const websiteSettingsHydrator = new WebsiteSettingsHydrator(
+    async () => await getBuilderPublicationSupabaseClient() as unknown as WebsiteSettingsHydrationClient | null,
+    mockWebsiteSettings
+);
+if (!editorUsesLocalData()) {
+  websiteSettingsHydrator.clear();
+  applyPrimaryColor(mockWebsiteSettings.primary_color);
+}
 let applicationAuthInitialization: Promise<ApplicationAuthState> | null = null;
 let applicationAuthHasInitialized = false;
 let applicationAuthFormSubmissionInProgress = false;
@@ -1515,8 +1524,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         // ── WB.3.4 Bulk SEO Generation ──────────────────────────────────
         if (url === '/api/settings') {
             const reqUser = getActingUserId();
-            const userSite = getActiveBuilderWebsite()
-                || mockWebsites.find(website => website.user_id === reqUser);
+            const userSite = getActiveSettingsWebsite();
             if (!userSite || userSite.user_id !== reqUser) {
                 return builderSectionsJsonResponse({ success: false, error: 'Website not found' }, 404);
             }
@@ -1537,15 +1545,14 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                     return builderSectionsJsonResponse({ success: false, error: 'Unauthorized' }, 401);
                 }
                 if (method === 'GET') {
-                    const result = await client.from('website_settings').select('*')
-                        .eq('user_id', reqUser).eq('website_id', websiteId).limit(1).maybeSingle();
-                    if (result.error) return builderSectionsJsonResponse({ success: false, error: 'Settings unavailable' }, 503);
-                    if (!result.data) return builderSectionsJsonResponse({ success: false, error: 'Settings not found' }, 404);
-                    Object.assign(mockWebsiteSettings, result.data);
+                    const state = await websiteSettingsHydrator.hydrate(reqUser, userSite, true);
+                    if (state.status === 'error') return builderSectionsJsonResponse({ success: false, error: 'Settings unavailable' }, 503);
                     applyPrimaryColor(mockWebsiteSettings.primary_color);
-                    return builderSectionsJsonResponse({ success: true, data: result.data }, 200);
+                    return builderSectionsJsonResponse({ success: true, data: structuredClone(mockWebsiteSettings), missing: state.status === 'empty' }, 200);
                 }
                 if (method === 'POST') {
+                    const state = await websiteSettingsHydrator.hydrate(reqUser, userSite);
+                    if (state.status === 'error') return builderSectionsJsonResponse({ success: false, error: 'Settings unavailable' }, 503);
                     const patch = Object.fromEntries(Object.entries(reqContext.body || {})
                         .filter(([key]) => settingsFields.has(key)));
                     const existing = await client.from('website_settings').select('id')
@@ -1558,7 +1565,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                         website_id: websiteId
                     }, { onConflict: 'user_id,website_id' }).select('*').single();
                     if (result.error || !result.data) return builderSectionsJsonResponse({ success: false, error: 'Settings unavailable' }, 503);
-                    Object.assign(mockWebsiteSettings, result.data);
+                    if (!websiteSettingsHydrator.acceptConfirmed(reqUser, websiteId, result.data)) {
+                        return builderSectionsJsonResponse({ success: false, error: 'Settings unavailable' }, 503);
+                    }
                     applyPrimaryColor(mockWebsiteSettings.primary_color);
                     return builderSectionsJsonResponse({ success: true, data: result.data }, 200);
                 }
@@ -1805,12 +1814,15 @@ function getActingUserId(): string {
 function clearProtectedRuntimeData(): void {
   crmProductionHydrator.clear();
   websiteLayoutHydrator.clear();
+  websiteSettingsHydrator.clear();
+  applyPrimaryColor(mockWebsiteSettings.primary_color);
   removeLocalFixtureRows();
   mockAutomationLogs.splice(0);
   contactTimelineState = [];
   selectedContactId = null;
   activeBuilderWebsiteId = null;
   activeDashboardWebsiteId = null;
+  activeWebsiteContext = null;
   builderPageId = '';
   builderHistoryController = null;
   builderPageSettingsController = null;
@@ -1971,14 +1983,14 @@ let mockGlobalSettings = {
     facebook_pixel_id: readInput('[data-settings-field="facebook_pixel_id"]') ?? s.facebook_pixel_id,
     gtm_id: readInput('[data-settings-field="gtm_id"]') ?? s.gtm_id
   };
-  Object.assign(s, formValues);
+  const candidate = { ...s, ...formValues };
 
   // Basic validation before save
-  if (!s.business_name || s.business_name.trim() === '') {
+  if (!candidate.business_name || candidate.business_name.trim() === '') {
     (window as any).showToast?.('Business name cannot be empty.', 'error');
     return;
   }
-  if (s.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.email)) {
+  if (candidate.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(candidate.email)) {
     (window as any).showToast?.('Please enter a valid email address.', 'error');
     return;
   }
@@ -1990,7 +2002,7 @@ let mockGlobalSettings = {
     const res = await fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(s)
+      body: JSON.stringify(candidate)
     }).then(r => r.json());
 
     if (res.success) {
@@ -4088,6 +4100,18 @@ function getActiveBuilderWebsite(): Website | undefined {
   const userId = getActingUserId();
   if (activeBuilderWebsiteId) {
     return mockWebsites.find(website => website.id === activeBuilderWebsiteId && website.user_id === userId);
+  }
+  const owned = mockWebsites.filter(website => website.user_id === userId);
+  return owned.length === 1 ? owned[0] : undefined;
+}
+
+function getActiveSettingsWebsite(): Website | undefined {
+  const userId = getActingUserId();
+  const explicitWebsiteId = currentView === 'builder'
+    ? activeBuilderWebsiteId
+    : activeDashboardWebsiteId || activeBuilderWebsiteId;
+  if (explicitWebsiteId) {
+    return mockWebsites.find(website => website.id === explicitWebsiteId && website.user_id === userId);
   }
   const owned = mockWebsites.filter(website => website.user_id === userId);
   return owned.length === 1 ? owned[0] : undefined;
@@ -9274,6 +9298,8 @@ function dashboardActionButton(model: WebsiteDashboardModel, action: BuilderNavi
 
 (window as any).selectDashboardWebsite = (websiteId: string) => {
   if (!websiteId) return;
+  websiteSettingsHydrator.clear();
+  activeBuilderWebsiteId = null;
   activeDashboardWebsiteId = websiteId;
   window.history.pushState({}, '', `#/website-dashboard?websiteId=${encodeURIComponent(websiteId)}`);
   void renderWebsiteDashboard();
@@ -9777,6 +9803,9 @@ async function initializeBuilderNavigation(context: BuilderContext | null): Prom
     if (resolution.status !== 'resolved') throw new Error('UNAVAILABLE');
     activeBuilderWebsiteId = resolution.website.id;
     if (dashboardUsesSupabase()) {
+      const settingsState = await websiteSettingsHydrator.hydrate(userId, resolution.website);
+      if (settingsState.status === 'error') throw new Error('UNAVAILABLE');
+      applyPrimaryColor(mockWebsiteSettings.primary_color);
       await hydrateAuthenticatedPreviewSections(resolution.page.id, userId);
     }
     applyBuilderContext(context);
@@ -9973,11 +10002,10 @@ async function executeNavigation(view: string, id?: string, context?: any) {
     case 'website-settings':
       try {
         const settingsRes = await fetch('/api/settings').then(r => r.json());
-        if (settingsRes.success && settingsRes.data) {
-          Object.assign(mockWebsiteSettings, settingsRes.data);
-        }
+        if (!settingsRes.success || !settingsRes.data) throw new Error('UNAVAILABLE');
       } catch (err) {
-        console.warn('Failed to load settings on navigation:', err);
+        renderWebsiteRepositoryUnavailable('website-settings');
+        return;
       }
       renderWebsiteSettings();
       break;
@@ -10941,6 +10969,9 @@ async function bootRouter() {
           return;
         }
         const { target } = resolution;
+        const settingsState = await websiteSettingsHydrator.hydrate(authState.user.id, target.website);
+        if (settingsState.status === 'error') throw new Error('UNAVAILABLE');
+        applyPrimaryColor(mockWebsiteSettings.primary_color);
         await hydrateAuthenticatedPreviewSections(target.page.id, authState.user.id);
         await renderSitePage(target.funnel.id, {
           ...target.website,
