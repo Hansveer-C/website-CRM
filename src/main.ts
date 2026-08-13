@@ -10112,7 +10112,8 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
 }
 
 (window as any).navigateTo = async (view: string, id?: string, context?: any) => {
-  const navigationOperation = protectedAsyncOperationGuard.begin('application-navigation', getActingUserId());
+  const navigationInvocation = protectedAsyncOperationGuard.beginUnbound('application-navigation');
+  let navigationOperation: ProtectedAsyncOperationToken;
   publicSiteRenderSequence += 1;
   if (view !== 'site') {
     publicSiteAbortController?.abort();
@@ -10120,6 +10121,9 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
   }
   if (view !== 'site') {
     const authState = await ensureApplicationAuth();
+    const boundNavigation = protectedAsyncOperationGuard.bindCurrent(navigationInvocation, getActingUserId());
+    if (!boundNavigation) return;
+    navigationOperation = boundNavigation;
     if (authState.status === 'initializing' || authState.status === 'unavailable') {
       if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
       renderApplicationUnavailable();
@@ -10168,6 +10172,10 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
         return;
       }
     }
+  } else {
+    const boundNavigation = protectedAsyncOperationGuard.bindCurrent(navigationInvocation, getActingUserId());
+    if (!boundNavigation) return;
+    navigationOperation = boundNavigation;
   }
   const previousView = currentView;
   currentView = view;
@@ -11270,8 +11278,10 @@ async function bootRouter() {
     return;
   }
 
-  const navigationOperation = protectedAsyncOperationGuard.begin('application-navigation', getActingUserId());
+  const navigationInvocation = protectedAsyncOperationGuard.beginUnbound('application-navigation');
   const authState = await ensureApplicationAuth();
+  const navigationOperation = protectedAsyncOperationGuard.bindCurrent(navigationInvocation, getActingUserId());
+  if (!navigationOperation) return;
   const decision = resolveApplicationBootstrap({
     pathname: rawPath,
     hash: window.location.hash,

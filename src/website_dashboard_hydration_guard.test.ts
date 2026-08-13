@@ -131,6 +131,23 @@ describe('ProtectedAsyncOperationGuard dashboard scope', () => {
     expect(guard.commitIfCurrent(token, 'user-b', mutation)).toBe(false);
     expect(mutation).not.toHaveBeenCalled();
   });
+
+  it('binds a fresh router invocation after Auth restoration resets the protected runtime', () => {
+    const guard = new ProtectedAsyncOperationGuard();
+    const invocation = guard.beginUnbound('application-navigation');
+    guard.invalidateRuntime();
+    const bound = guard.bindCurrent(invocation, 'user-a');
+    expect(bound).not.toBeNull();
+    expect(guard.isCurrent(bound!, 'user-a')).toBe(true);
+  });
+
+  it('does not bind an older invocation after a newer navigation starts', () => {
+    const guard = new ProtectedAsyncOperationGuard();
+    const older = guard.beginUnbound('application-navigation');
+    const newer = guard.beginUnbound('application-navigation');
+    expect(guard.bindCurrent(older, 'user-a')).toBeNull();
+    expect(guard.bindCurrent(newer, 'user-a')).not.toBeNull();
+  });
 });
 
 describe('Website dashboard hydration wiring', () => {

@@ -19,6 +19,7 @@ export function isSupersededOperationError(error: unknown): error is SupersededO
 export class ProtectedAsyncOperationGuard {
   private runtimeGeneration = 0;
   private readonly operationGenerations = new Map<string, number>();
+  private readonly invocationGenerations = new Map<string, number>();
 
   begin(scope: string, userIdInput: string): ProtectedAsyncOperationToken {
     const operationGeneration = (this.operationGenerations.get(scope) ?? 0) + 1;
@@ -27,6 +28,28 @@ export class ProtectedAsyncOperationGuard {
       runtimeGeneration: this.runtimeGeneration,
       operationGeneration,
       scope,
+      userId: userIdInput.trim()
+    };
+  }
+
+  beginUnbound(scope: string): ProtectedAsyncOperationToken {
+    const operationGeneration = (this.invocationGenerations.get(scope) ?? 0) + 1;
+    this.invocationGenerations.set(scope, operationGeneration);
+    this.operationGenerations.set(scope, operationGeneration);
+    return {
+      runtimeGeneration: -1,
+      operationGeneration,
+      scope,
+      userId: ''
+    };
+  }
+
+  bindCurrent(token: ProtectedAsyncOperationToken, userIdInput: string): ProtectedAsyncOperationToken | null {
+    if (token.operationGeneration !== this.invocationGenerations.get(token.scope)) return null;
+    this.operationGenerations.set(token.scope, token.operationGeneration);
+    return {
+      ...token,
+      runtimeGeneration: this.runtimeGeneration,
       userId: userIdInput.trim()
     };
   }
