@@ -56,16 +56,18 @@ describe('WebsiteLayoutHydrator', () => {
     expect(target).toEqual([]);
   });
 
-  it('ignores a stale account response after an account switch', async () => {
+  it('ignores a stale account response after an account switch and preserves the new account layout', async () => {
     const target: WebsiteLayout[] = [];
     let release!: (value: { data: unknown[]; error: null }) => void;
     const delayed = new Promise<{ data: unknown[]; error: null }>(resolve => { release = resolve; });
     const firstClient: WebsiteLayoutHydrationClient = { from: () => ({ select: () => ({ in: () => delayed }) }) };
-    const hydrator = new WebsiteLayoutHydrator(async () => firstClient, target);
+    let activeClient: WebsiteLayoutHydrationClient = firstClient;
+    const hydrator = new WebsiteLayoutHydrator(async () => activeClient, target);
     const first = hydrator.hydrate('user-a', [website('site-a')]);
-    hydrator.clear();
+    activeClient = client([layout('current', 'site-b')]);
+    await hydrator.hydrate('user-b', [website('site-b', 'user-b')]);
     release({ data: [layout('stale', 'site-a')], error: null });
     await first;
-    expect(target).toEqual([]);
+    expect(target.map(row => row.id)).toEqual(['current']);
   });
 });

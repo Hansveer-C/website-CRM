@@ -105,6 +105,7 @@ import { resolveApplicationHostRoute } from './application_host_route';
 import { CrmProductionHydrator, type CrmHydrationClient } from './crm_production_hydration';
 import { WebsiteLayoutHydrator, type WebsiteLayoutHydrationClient } from './website_layout_hydration';
 import { WebsiteSettingsHydrator, type WebsiteSettingsHydrationClient } from './website_settings_hydration';
+import { WebsiteDashboardHydrationGuard } from './website_dashboard_hydration_guard';
 import {
   buildWebsiteManagementRoute,
   buildWebsiteSettingsRoute,
@@ -548,6 +549,7 @@ const websiteSettingsHydrator = new WebsiteSettingsHydrator(
     async () => await getBuilderPublicationSupabaseClient() as unknown as WebsiteSettingsHydrationClient | null,
     mockWebsiteSettings
 );
+const websiteDashboardHydrationGuard = new WebsiteDashboardHydrationGuard();
 if (!editorUsesLocalData()) {
   websiteSettingsHydrator.clear();
   applyPrimaryColor(mockWebsiteSettings.primary_color);
@@ -1826,6 +1828,7 @@ function getActingUserId(): string {
 }
 
 function clearProtectedRuntimeData(): void {
+  websiteDashboardHydrationGuard.invalidate();
   crmProductionHydrator.clear();
   websiteLayoutHydrator.clear();
   websiteSettingsHydrator.clear();
@@ -1956,6 +1959,7 @@ async function ensureApplicationAuth(): Promise<ApplicationAuthState> {
   activeBuilderWebsiteId = null;
   activeDashboardWebsiteId = null;
   activeSettingsWebsiteId = null;
+  websiteDashboardHydrationGuard.invalidate();
   websiteDashboardController?.invalidate();
   websiteDashboardController = null;
   (window as any).currentUser = userId;
@@ -9280,6 +9284,7 @@ async function loadWebsiteDashboardCore(request: { actingUserId: string }): Prom
     PagesRepo.hydrateLocalPages(userId);
     return { websites: mockWebsites.map(item => ({ ...item })), routes: mockWebsiteRoutes.map(item => ({ ...item })), funnels: mockFunnels.map(item => ({ ...item })), pages: mockPages.map(item => ({ ...item })) };
   }
+  const hydrationToken = websiteDashboardHydrationGuard.begin(userId);
   const client = await getBuilderPublicationSupabaseClient();
   if (!client) throw new Error('UNAVAILABLE');
   const auth = await client.auth.getUser();
@@ -9304,11 +9309,14 @@ async function loadWebsiteDashboardCore(request: { actingUserId: string }): Prom
     .filter(item => typeof item.id === 'string' && item.user_id === userId);
   const pages = ((pagesResult.data ?? []) as Page[])
     .filter(item => typeof item.id === 'string' && item.user_id === userId);
-  replaceOwnedDashboardRows(mockWebsites, websites, userId);
-  replaceOwnedDashboardRows(mockFunnels, funnels, userId);
-  replaceOwnedDashboardRows(mockPages, pages, userId);
-  for (let index = mockWebsiteRoutes.length - 1; index >= 0; index -= 1) if (ownedWebsiteIds.has(mockWebsiteRoutes[index].website_id)) mockWebsiteRoutes.splice(index, 1);
-  mockWebsiteRoutes.push(...routes.map(item => ({ ...item })));
+  const committed = websiteDashboardHydrationGuard.commitIfCurrent(hydrationToken, getActingUserId(), () => {
+    replaceOwnedDashboardRows(mockWebsites, websites, userId);
+    replaceOwnedDashboardRows(mockFunnels, funnels, userId);
+    replaceOwnedDashboardRows(mockPages, pages, userId);
+    for (let index = mockWebsiteRoutes.length - 1; index >= 0; index -= 1) if (ownedWebsiteIds.has(mockWebsiteRoutes[index].website_id)) mockWebsiteRoutes.splice(index, 1);
+    mockWebsiteRoutes.push(...routes.map(item => ({ ...item })));
+  });
+  if (!committed) throw new Error('UNAVAILABLE');
   return { websites, routes, funnels, pages };
 }
 
