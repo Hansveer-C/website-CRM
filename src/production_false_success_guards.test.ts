@@ -47,11 +47,11 @@ describe('production false-success guards', () => {
     expect(bootSource).toContain("params.get('pageId')");
     expect(source).toContain("|| { header_config: { nav_items: [] }, footer_config: {} }");
     expect(bootSource.indexOf('websiteSettingsHydrator.hydrate(authState.user.id, target.website)'))
-      .toBeLessThan(bootSource.indexOf('hydrateAuthenticatedPreviewSections(target.page.id, authState.user.id)'));
+      .toBeLessThan(bootSource.indexOf('hydrateAuthenticatedPreviewSections(previewOperation.pageId, previewOperation.userId, previewOperation.navigation)'));
     expect(bootSource.indexOf('websiteSettingsHydrator.hydrate(authState.user.id, target.website)'))
       .toBeLessThan(bootSource.indexOf('renderSitePage(target.funnel.id'));
     expect(bootSource).toContain('}, true, undefined, target.page)');
-    expect(bootSource.indexOf('hydrateAuthenticatedPreviewSections(target.page.id, authState.user.id)'))
+    expect(bootSource.indexOf('hydrateAuthenticatedPreviewSections(previewOperation.pageId, previewOperation.userId, previewOperation.navigation)'))
       .toBeLessThan(bootSource.indexOf('}, true, undefined, target.page)'));
   });
 

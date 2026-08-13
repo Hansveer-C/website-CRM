@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { WebsiteDashboardHydrationGuard } from './website_dashboard_hydration_guard';
+import { ProtectedAsyncOperationGuard, SupersededOperationError } from './website_dashboard_hydration_guard';
 
 const deferred = () => {
   let release!: () => void;
@@ -27,28 +27,28 @@ const snapshot = (user: string): Snapshot => ({
 });
 
 function createHarness() {
-  const guard = new WebsiteDashboardHydrationGuard();
+  const guard = new ProtectedAsyncOperationGuard();
   const shared = emptySnapshot();
   let currentUser = '';
   const replace = vi.fn((value: Snapshot) => {
     Object.assign(shared, structuredClone(value));
   });
   const hydrate = async (userId: string, wait: Promise<void>, value: Snapshot) => {
-    const token = guard.begin(userId);
+    const token = guard.begin('website-dashboard-core', userId);
     await wait;
-    if (!guard.commitIfCurrent(token, currentUser, () => replace(value))) throw new Error('UNAVAILABLE');
+    if (!guard.commitIfCurrent(token, currentUser, () => replace(value))) throw new SupersededOperationError();
   };
   return {
     guard,
     shared,
     replace,
     setUser: (userId: string) => { currentUser = userId; },
-    logout: () => { currentUser = ''; guard.invalidate(); },
+    logout: () => { currentUser = ''; guard.invalidateRuntime(); },
     hydrate
   };
 }
 
-describe('WebsiteDashboardHydrationGuard', () => {
+describe('ProtectedAsyncOperationGuard dashboard scope', () => {
   it('keeps user B state intact when delayed user A results finish last', async () => {
     const harness = createHarness();
     const a = deferred();
@@ -57,16 +57,16 @@ describe('WebsiteDashboardHydrationGuard', () => {
     harness.setUser('user-b');
     await harness.hydrate('user-b', Promise.resolve(), snapshot('user-b'));
     a.release();
-    await expect(staleA).rejects.toThrow('UNAVAILABLE');
+    await expect(staleA).rejects.toBeInstanceOf(SupersededOperationError);
     expect(harness.shared).toEqual(snapshot('user-b'));
     expect(JSON.stringify(harness.shared)).not.toContain('user-a');
     expect(harness.replace).toHaveBeenCalledTimes(1);
   });
 
   it('never reaches the shared replacement callback for a stale generation', () => {
-    const guard = new WebsiteDashboardHydrationGuard();
-    const stale = guard.begin('user-a');
-    guard.begin('user-b');
+    const guard = new ProtectedAsyncOperationGuard();
+    const stale = guard.begin('website-dashboard-core', 'user-a');
+    guard.begin('website-dashboard-core', 'user-b');
     const replaceOwnedDashboardRows = vi.fn();
     const pushRoutes = vi.fn();
     expect(guard.commitIfCurrent(stale, 'user-a', () => {
@@ -84,7 +84,7 @@ describe('WebsiteDashboardHydrationGuard', () => {
     const request = harness.hydrate('user-a', pending.promise, snapshot('user-a'));
     harness.logout();
     pending.release();
-    await expect(request).rejects.toThrow('UNAVAILABLE');
+    await expect(request).rejects.toBeInstanceOf(SupersededOperationError);
     expect(harness.replace).not.toHaveBeenCalled();
   });
 
@@ -97,7 +97,7 @@ describe('WebsiteDashboardHydrationGuard', () => {
     harness.setUser('user-b');
     await harness.hydrate('user-b', Promise.resolve(), snapshot('user-b'));
     pending.release();
-    await expect(stale).rejects.toThrow('UNAVAILABLE');
+    await expect(stale).rejects.toBeInstanceOf(SupersededOperationError);
     expect(harness.shared).toEqual(snapshot('user-b'));
   });
 
@@ -109,7 +109,7 @@ describe('WebsiteDashboardHydrationGuard', () => {
     harness.setUser('user-a');
     await harness.hydrate('user-a', Promise.resolve(), snapshot('user-a'));
     pending.release();
-    await expect(stale).rejects.toThrow('UNAVAILABLE');
+    await expect(stale).rejects.toBeInstanceOf(SupersededOperationError);
     expect(harness.shared).toEqual(snapshot('user-a'));
   });
 
@@ -125,8 +125,8 @@ describe('WebsiteDashboardHydrationGuard', () => {
   });
 
   it('rejects an identity mismatch even when its generation is otherwise current', () => {
-    const guard = new WebsiteDashboardHydrationGuard();
-    const token = guard.begin('user-a');
+    const guard = new ProtectedAsyncOperationGuard();
+    const token = guard.begin('website-dashboard-core', 'user-a');
     const mutation = vi.fn();
     expect(guard.commitIfCurrent(token, 'user-b', mutation)).toBe(false);
     expect(mutation).not.toHaveBeenCalled();
@@ -137,8 +137,8 @@ describe('Website dashboard hydration wiring', () => {
   const main = readFileSync(fileURLToPath(new URL('./main.ts', import.meta.url)), 'utf8');
 
   it('validates generation and current identity immediately around synchronous shared writes', () => {
-    const start = main.indexOf('const committed = websiteDashboardHydrationGuard.commitIfCurrent');
-    const end = main.indexOf("if (!committed) throw new Error('UNAVAILABLE');", start);
+    const start = main.indexOf('const committed = protectedAsyncOperationGuard.commitIfCurrent(hydrationToken');
+    const end = main.indexOf('if (!committed) throw new SupersededOperationError();', start);
     const guardedWrites = main.slice(start, end);
     expect(start).toBeGreaterThan(-1);
     expect(guardedWrites).toContain('hydrationToken, getActingUserId(), () => {');
@@ -152,13 +152,13 @@ describe('Website dashboard hydration wiring', () => {
   it('invalidates core hydration on protected resets and explicit local identity switches', () => {
     const clear = main.slice(main.indexOf('function clearProtectedRuntimeData'), main.indexOf('const CRM_DATA_VIEWS'));
     const switchUser = main.slice(main.indexOf('(window as any).switchUser'), main.indexOf('// QA Simulation State'));
-    expect(clear).toContain('websiteDashboardHydrationGuard.invalidate()');
-    expect(switchUser).toContain('websiteDashboardHydrationGuard.invalidate()');
+    expect(clear).toContain('protectedAsyncOperationGuard.invalidateRuntime()');
+    expect(switchUser).toContain('protectedAsyncOperationGuard.invalidateRuntime()');
   });
 
   it('leaves local fixture hydration ahead of the production generation guard', () => {
     const loadCore = main.slice(main.indexOf('async function loadWebsiteDashboardCore'), main.indexOf('async function countDashboardMediaAssets'));
-    expect(loadCore.indexOf('if (!dashboardUsesSupabase())')).toBeLessThan(loadCore.indexOf('websiteDashboardHydrationGuard.begin(userId)'));
+    expect(loadCore.indexOf('if (!dashboardUsesSupabase())')).toBeLessThan(loadCore.indexOf("protectedAsyncOperationGuard.begin('website-dashboard-core', userId)"));
   });
 
   it.each([

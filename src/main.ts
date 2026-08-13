@@ -105,7 +105,12 @@ import { resolveApplicationHostRoute } from './application_host_route';
 import { CrmProductionHydrator, type CrmHydrationClient } from './crm_production_hydration';
 import { WebsiteLayoutHydrator, type WebsiteLayoutHydrationClient } from './website_layout_hydration';
 import { WebsiteSettingsHydrator, type WebsiteSettingsHydrationClient } from './website_settings_hydration';
-import { WebsiteDashboardHydrationGuard } from './website_dashboard_hydration_guard';
+import {
+  ProtectedAsyncOperationGuard,
+  SupersededOperationError,
+  isSupersededOperationError,
+  type ProtectedAsyncOperationToken
+} from './website_dashboard_hydration_guard';
 import {
   buildWebsiteManagementRoute,
   buildWebsiteSettingsRoute,
@@ -549,7 +554,7 @@ const websiteSettingsHydrator = new WebsiteSettingsHydrator(
     async () => await getBuilderPublicationSupabaseClient() as unknown as WebsiteSettingsHydrationClient | null,
     mockWebsiteSettings
 );
-const websiteDashboardHydrationGuard = new WebsiteDashboardHydrationGuard();
+const protectedAsyncOperationGuard = new ProtectedAsyncOperationGuard();
 if (!editorUsesLocalData()) {
   websiteSettingsHydrator.clear();
   applyPrimaryColor(mockWebsiteSettings.primary_color);
@@ -1169,6 +1174,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         if (url === '/api/leads' && method === 'POST') {
             const body = reqContext.body;
             const userId = getActingUserId();
+            const leadOperation = protectedAsyncOperationGuard.begin(`internal-lead:${String(body?.request_key ?? '')}`, userId);
             console.log('[API ROUTER] Inbound Lead Submission:', body);
 
             try {
@@ -1206,6 +1212,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                         || saved.opportunity.contact_id !== saved.contact.id) {
                         throw new Error('Production lead persistence returned an invalid owner.');
                     }
+                    protectedAsyncOperationGuard.requireCurrent(leadOperation, getActingUserId());
                     const contactIndex = mockContacts.findIndex(contact => contact.id === saved.contact.id);
                     if (contactIndex >= 0) mockContacts[contactIndex] = saved.contact;
                     else mockContacts.push(saved.contact);
@@ -1245,6 +1252,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                     headers: { 'Content-Type': 'application/json' }
                 });
             } catch (error: any) {
+                if (isSupersededOperationError(error)) throw error;
                 console.error('[API ROUTER] Lead Ingestion Error:', error);
                 if (editorUsesSupabase()) {
                     return new Response(JSON.stringify({ success: false, error: 'Lead creation is temporarily unavailable. Please try again.' }), {
@@ -1274,10 +1282,11 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                     headers: { 'Content-Type': 'application/json' }
                 });
             }
+            const body = reqContext.body;
+            const userId = getActingUserId();
+            const quoteOperation = protectedAsyncOperationGuard.begin(`quote-api:${String(body?.request_key ?? '')}`, userId);
             try {
-                const body = reqContext.body;
                 const client = await getBuilderPublicationSupabaseClient();
-                const userId = getActingUserId();
                 if (!client || !userId) throw new Error('UNAVAILABLE');
                 const saved = await saveProductionQuote(client as unknown as CrmMutationClient, {
                     requestKey: body.request_key,
@@ -1288,11 +1297,13 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
                     items: body.items
                 });
                 if (saved.quote.user_id !== userId || saved.items.some(item => item.user_id !== userId)) throw new Error('UNAVAILABLE');
+                protectedAsyncOperationGuard.requireCurrent(quoteOperation, getActingUserId());
                 return new Response(JSON.stringify({ success: true, data: saved }), {
                     status: 201,
                     headers: { 'Content-Type': 'application/json' }
                 });
-            } catch {
+            } catch (error) {
+                if (isSupersededOperationError(error)) throw error;
                 return new Response(JSON.stringify({ success: false, error: 'Quote creation is temporarily unavailable. Please try again.' }), {
                     status: 503,
                     headers: { 'Content-Type': 'application/json' }
@@ -1828,7 +1839,7 @@ function getActingUserId(): string {
 }
 
 function clearProtectedRuntimeData(): void {
-  websiteDashboardHydrationGuard.invalidate();
+  protectedAsyncOperationGuard.invalidateRuntime();
   crmProductionHydrator.clear();
   websiteLayoutHydrator.clear();
   websiteSettingsHydrator.clear();
@@ -1843,6 +1854,7 @@ function clearProtectedRuntimeData(): void {
   activeWebsiteContext = null;
   builderPageId = '';
   builderHistoryController = null;
+  builderPageSettingsController?.cancelPending();
   builderPageSettingsController = null;
   builderNewPageController = null;
   builderNewPageControllerIdentity = '';
@@ -1959,7 +1971,7 @@ async function ensureApplicationAuth(): Promise<ApplicationAuthState> {
   activeBuilderWebsiteId = null;
   activeDashboardWebsiteId = null;
   activeSettingsWebsiteId = null;
-  websiteDashboardHydrationGuard.invalidate();
+  protectedAsyncOperationGuard.invalidateRuntime();
   websiteDashboardController?.invalidate();
   websiteDashboardController = null;
   (window as any).currentUser = userId;
@@ -4829,7 +4841,11 @@ function buildBuilderSetupBrief(): BuilderSetupBriefV1 | null {
   };
 }
 
-async function persistBuilderSetupPagePatch(pageId: string, patch: BuilderPageSettingsPatch): Promise<boolean> {
+async function persistBuilderSetupPagePatch(
+  pageId: string,
+  patch: BuilderPageSettingsPatch,
+  operation?: ProtectedAsyncOperationToken
+): Promise<boolean> {
   if (!Object.keys(patch).length) return true;
   try {
     const response = await fetch(`/api/pages/${encodeURIComponent(pageId)}/settings`, {
@@ -4837,6 +4853,7 @@ async function persistBuilderSetupPagePatch(pageId: string, patch: BuilderPageSe
     });
     const result = await response.json();
     if (!response.ok || result.success !== true || !result.data) return false;
+    if (operation) protectedAsyncOperationGuard.requireCurrent(operation, getActingUserId());
     const index = mockPages.findIndex(page => page.id === pageId);
     if (index >= 0) mockPages[index] = applyBuilderPageSettings(mockPages[index], pageToBuilderPageSettings(result.data));
     if (index >= 0 && builderHistoryController?.pageId === pageId) builderHistoryController.synchronizePageMetadata(mockPages[index]);
@@ -4849,6 +4866,8 @@ function createLiveBuilderSetupController(): BuilderSetupController | null {
   const page = mockPages.find(item => item.id === builderPageId);
   const history = getBuilderHistoryController();
   if (!website || !page || !history) return null;
+  const setupOperation = protectedAsyncOperationGuard.begin(`builder-setup:${website.id}:${page.id}`, getActingUserId());
+  const setupIsCurrent = () => protectedAsyncOperationGuard.isCurrent(setupOperation, getActingUserId());
   return new BuilderSetupController({
     getContext: () => ({
       websiteId: getActiveBuilderWebsite()?.id ?? '',
@@ -4863,10 +4882,16 @@ function createLiveBuilderSetupController(): BuilderSetupController | null {
       previousBuildBrief: mockWebsiteSettings.build_brief
     }),
     persistence: {
-      persistPageSettings: persistBuilderSetupPagePatch,
-      applyDocument: document => applyLiveBuilderMutation(current => ({ ...current, sections: structuredClone(document.sections) }), { category: 'structural', fieldId: 'guided-setup', coalesce: false, selectSectionId: document.sections[0]?.id ?? null }, { autosave: false, render: false }),
-      persistDocument: async () => (await (window as any).savePageSections()) === true,
+      persistPageSettings: (pageId, patch) => persistBuilderSetupPagePatch(pageId, patch, setupOperation),
+      applyDocument: document => setupIsCurrent()
+        && applyLiveBuilderMutation(current => ({ ...current, sections: structuredClone(document.sections) }), { category: 'structural', fieldId: 'guided-setup', coalesce: false, selectSectionId: document.sections[0]?.id ?? null }, { autosave: false, render: false }),
+      persistDocument: async () => {
+        if (!setupIsCurrent()) return false;
+        const saved = await (window as any).savePageSections() === true;
+        return setupIsCurrent() && saved;
+      },
       restoreDocument: () => {
+        if (!setupIsCurrent()) return false;
         const active = getBuilderHistoryController();
         if (!active?.undo()) return false;
         syncBuilderDocumentToPageSections(active.document);
@@ -4877,6 +4902,7 @@ function createLiveBuilderSetupController(): BuilderSetupController | null {
           const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ build_brief: brief }) });
           const result = await response.json();
           if (!response.ok || result.success !== true) return false;
+          protectedAsyncOperationGuard.requireCurrent(setupOperation, getActingUserId());
           mockWebsiteSettings.build_brief = brief as any;
           return true;
         } catch { return false; }
@@ -4977,7 +5003,7 @@ function renderBuilderSetupDialog(): string {
 (window as any).setBuilderSetupMode = (mode: BuilderSetupApplyMode) => { if (!builderSetupDraft) return; builderSetupDraft.mode = mode; builderSetupDraft.replaceConfirmed = getCurrentBuilderSections().length === 0; const brief = buildBuilderSetupBrief(); if (brief) builderSetupController?.generate(brief, mode, builderSetupDraft.applySeoMetadata); renderBuilder(); };
 (window as any).confirmBuilderSetupReplace = (confirmed: boolean) => { if (builderSetupDraft) { builderSetupDraft.replaceConfirmed = confirmed; renderBuilder(); } };
 (window as any).toggleBuilderSetupSeo = (enabled: boolean) => { if (!builderSetupDraft?.mode) return; builderSetupDraft.applySeoMetadata = enabled; const brief = buildBuilderSetupBrief(); if (brief) builderSetupController?.generate(brief, builderSetupDraft.mode, enabled); renderBuilder(); };
-(window as any).applyBuilderSetup = async () => { const controller = builderSetupController; if (!controller || controller.status === 'applying') return; const pending = controller.apply(); renderBuilder(); const result = await pending; if (result.success) { builderSetupWizardOpen = false; builderSetupDraft = null; document.body.classList.remove('pb-setup-modal-open'); renderBuilder(); (window as any).showToast('Setup applied. Your public site was not published.', 'success'); setTimeout(() => document.querySelector<HTMLElement>('.pb-canvas-inner .pb-section-preview')?.focus(), 0); } else { renderBuilder(); } };
+(window as any).applyBuilderSetup = async () => { const controller = builderSetupController; if (!controller || controller.status === 'applying') return; const operation = protectedAsyncOperationGuard.begin('builder-setup-ui', getActingUserId()); const pending = controller.apply(); renderBuilder(); const result = await pending; if (!protectedAsyncOperationGuard.isCurrent(operation, getActingUserId()) || controller !== builderSetupController) return; if (result.success) { builderSetupWizardOpen = false; builderSetupDraft = null; document.body.classList.remove('pb-setup-modal-open'); renderBuilder(); (window as any).showToast('Setup applied. Your public site was not published.', 'success'); setTimeout(() => document.querySelector<HTMLElement>('.pb-canvas-inner .pb-section-preview')?.focus(), 0); } else { renderBuilder(); } };
 
 window.addEventListener('keydown', event => {
   if (!builderSetupWizardOpen) return;
@@ -6070,8 +6096,13 @@ function renderSectionPreviewContent(section: any) {
   const sections = saveSnapshot
     ? builderDocumentToPageSections(saveSnapshot.document)
     : mockPageSections.filter((section: any) => section.page_id === pageId);
+  const saveOperation = protectedAsyncOperationGuard.begin(
+    `builder-section-save:${pageId}:${saveSnapshot?.generation ?? 'current'}`,
+    getActingUserId()
+  );
 
-  const saveOperation = builderSaveQueue.enqueue(async () => {
+  const queuedSave = builderSaveQueue.enqueue(async () => {
+    if (!protectedAsyncOperationGuard.isCurrent(saveOperation, getActingUserId())) return false;
     let succeeded = false;
     try {
       const res = await fetch(`/api/pages/${pageId}/sections`, {
@@ -6089,6 +6120,7 @@ function renderSectionPreviewContent(section: any) {
       console.warn('[AutoSave] Fetch error:', err);
     }
 
+    if (!protectedAsyncOperationGuard.isCurrent(saveOperation, getActingUserId())) return false;
     if (history && saveSnapshot) {
       history.acknowledgeSave(saveSnapshot.generation, succeeded);
       if (history === builderHistoryController && history.pageId === builderPageId) {
@@ -6098,7 +6130,7 @@ function renderSectionPreviewContent(section: any) {
     if (succeeded) (window as any).showToast('Saved ✓', 'success');
     return succeeded;
   });
-  return saveOperation;
+  return queuedSave;
 };
 
 // Attach to window for global access/testing
@@ -6429,6 +6461,9 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
     const internalAttemptScope = `${isPublic ? 'preview' : 'builder'}:${sectionId}`;
     const internalAttempt = authenticatedFormAttempts.begin(internalAttemptScope, leadData);
     const internalLeadData = { ...leadData, request_key: internalAttempt.key };
+    const internalLeadUiOperation = editorUsesSupabase()
+      ? protectedAsyncOperationGuard.begin(`internal-lead-ui:${internalAttemptScope}`, getActingUserId())
+      : null;
 
     // Timeout & Retry Logic (W4.2)
     const MAX_TIMEOUT = 10000;
@@ -6469,6 +6504,7 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
     };
 
     const res = await performSubmission(true); // Initial try + 1 retry
+    if (internalLeadUiOperation) protectedAsyncOperationGuard.requireCurrent(internalLeadUiOperation, getActingUserId());
     authenticatedFormAttempts.accept(internalAttemptScope, internalAttempt.key);
 
     console.log("[CRM: FORM] Success:", res);
@@ -6509,6 +6545,7 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
     }
 
   } catch (error: any) {
+    if (isSupersededOperationError(error)) return;
     console.error("[CRM: FORM] Persistent failure after retry:", error);
 
     if (shouldUsePublicLeadEdge(publicLeadRuntime, {
@@ -8950,6 +8987,7 @@ function renderNewQuote() {
   if (editorUsesSupabase()) {
     const requestKey = (window as any).newQuoteRequestKey || crypto.randomUUID();
     (window as any).newQuoteRequestKey = requestKey;
+    const quoteOperation = protectedAsyncOperationGuard.begin(`quote-ui:${requestKey}`, getActingUserId());
     try {
       const response = await fetch('/api/quotes', {
         method: 'POST',
@@ -8966,25 +9004,31 @@ function renderNewQuote() {
       const payload = await response.json();
       if (!response.ok || !payload.success) throw new Error(payload.error || 'Quote creation failed.');
       const saved = payload.data;
-      const quoteIndex = mockQuotes.findIndex(quote => quote.id === saved.quote.id);
-      if (quoteIndex >= 0) mockQuotes[quoteIndex] = saved.quote;
-      else mockQuotes.push(saved.quote);
-      for (const item of saved.items) {
-        const itemIndex = mockQuoteItems.findIndex(existing => existing.id === item.id);
-        if (itemIndex >= 0) mockQuoteItems[itemIndex] = item;
-        else mockQuoteItems.push(item);
-      }
-      if (saved.opportunity) {
-        const opportunityIndex = mockOpportunities.findIndex(opportunity => opportunity.id === saved.opportunity.id);
-        if (opportunityIndex >= 0) mockOpportunities[opportunityIndex] = saved.opportunity;
-      }
-      (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0, tier: 'basic' }];
-      (window as any).newQuoteContactId = '';
-      (window as any).newQuoteOpportunityId = '';
-      (window as any).newQuoteRequestKey = '';
-      (window as any).showToast('Quote created successfully.', 'success');
-      await (window as any).navigateTo('quotes');
+      let quoteNavigation: Promise<void> | undefined;
+      const committed = protectedAsyncOperationGuard.commitIfCurrent(quoteOperation, getActingUserId(), () => {
+        const quoteIndex = mockQuotes.findIndex(quote => quote.id === saved.quote.id);
+        if (quoteIndex >= 0) mockQuotes[quoteIndex] = saved.quote;
+        else mockQuotes.push(saved.quote);
+        for (const item of saved.items) {
+          const itemIndex = mockQuoteItems.findIndex(existing => existing.id === item.id);
+          if (itemIndex >= 0) mockQuoteItems[itemIndex] = item;
+          else mockQuoteItems.push(item);
+        }
+        if (saved.opportunity) {
+          const opportunityIndex = mockOpportunities.findIndex(opportunity => opportunity.id === saved.opportunity.id);
+          if (opportunityIndex >= 0) mockOpportunities[opportunityIndex] = saved.opportunity;
+        }
+        (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0, tier: 'basic' }];
+        (window as any).newQuoteContactId = '';
+        (window as any).newQuoteOpportunityId = '';
+        (window as any).newQuoteRequestKey = '';
+        (window as any).showToast('Quote created successfully.', 'success');
+        quoteNavigation = (window as any).navigateTo('quotes');
+      });
+      if (!committed) return;
+      await quoteNavigation;
     } catch (error: any) {
+      if (isSupersededOperationError(error)) return;
       (window as any).showToast(error?.message || 'Quote creation is temporarily unavailable.', 'error');
     }
     return;
@@ -9284,7 +9328,7 @@ async function loadWebsiteDashboardCore(request: { actingUserId: string }): Prom
     PagesRepo.hydrateLocalPages(userId);
     return { websites: mockWebsites.map(item => ({ ...item })), routes: mockWebsiteRoutes.map(item => ({ ...item })), funnels: mockFunnels.map(item => ({ ...item })), pages: mockPages.map(item => ({ ...item })) };
   }
-  const hydrationToken = websiteDashboardHydrationGuard.begin(userId);
+  const hydrationToken = protectedAsyncOperationGuard.begin('website-dashboard-core', userId);
   const client = await getBuilderPublicationSupabaseClient();
   if (!client) throw new Error('UNAVAILABLE');
   const auth = await client.auth.getUser();
@@ -9309,14 +9353,14 @@ async function loadWebsiteDashboardCore(request: { actingUserId: string }): Prom
     .filter(item => typeof item.id === 'string' && item.user_id === userId);
   const pages = ((pagesResult.data ?? []) as Page[])
     .filter(item => typeof item.id === 'string' && item.user_id === userId);
-  const committed = websiteDashboardHydrationGuard.commitIfCurrent(hydrationToken, getActingUserId(), () => {
+  const committed = protectedAsyncOperationGuard.commitIfCurrent(hydrationToken, getActingUserId(), () => {
     replaceOwnedDashboardRows(mockWebsites, websites, userId);
     replaceOwnedDashboardRows(mockFunnels, funnels, userId);
     replaceOwnedDashboardRows(mockPages, pages, userId);
     for (let index = mockWebsiteRoutes.length - 1; index >= 0; index -= 1) if (ownedWebsiteIds.has(mockWebsiteRoutes[index].website_id)) mockWebsiteRoutes.splice(index, 1);
     mockWebsiteRoutes.push(...routes.map(item => ({ ...item })));
   });
-  if (!committed) throw new Error('UNAVAILABLE');
+  if (!committed) throw new SupersededOperationError();
   return { websites, routes, funnels, pages };
 }
 
@@ -9953,7 +9997,11 @@ async function renderFunnelDetail(funnelId: string) {
     renderFunnels();
 };
 
-async function hydrateAuthenticatedPreviewSections(pageId: string, userId: string): Promise<void> {
+async function hydrateAuthenticatedPreviewSections(
+  pageId: string,
+  userId: string,
+  operation: ProtectedAsyncOperationToken
+): Promise<void> {
   const client = await getBuilderPublicationSupabaseClient();
   if (!client) throw new Error('UNAVAILABLE');
   const sectionsResult = await client.from('page_sections')
@@ -9976,6 +10024,7 @@ async function hydrateAuthenticatedPreviewSections(pageId: string, userId: strin
       ...(variant ? { variant } : {})
     };
   });
+  protectedAsyncOperationGuard.requireCurrent(operation, getActingUserId());
   for (let index = mockPageSections.length - 1; index >= 0; index -= 1) {
     if (mockPageSections[index].page_id === pageId) mockPageSections.splice(index, 1);
   }
@@ -9991,6 +10040,7 @@ async function initializeBuilderNavigation(context: BuilderContext | null): Prom
   }
   if (!context?.websiteId || !context.pageId) return applyBuilderContext(context);
   const userId = typeof (window as any).currentUser === 'string' ? (window as any).currentUser.trim() : '';
+  const builderOperation = protectedAsyncOperationGuard.begin('builder-navigation', userId);
   try {
     if (dashboardUsesSupabase()) await loadWebsiteDashboardCore({ actingUserId: userId });
     const target = { websiteId: context.websiteId, pageId: context.pageId, action: context.action ?? 'edit' as BuilderNavigationAction };
@@ -10000,16 +10050,19 @@ async function initializeBuilderNavigation(context: BuilderContext | null): Prom
     if (dashboardUsesSupabase()) {
       const settingsState = await websiteSettingsHydrator.hydrate(userId, resolution.website);
       if (settingsState.status === 'error') throw new Error('UNAVAILABLE');
+      protectedAsyncOperationGuard.requireCurrent(builderOperation, getActingUserId());
       applyPrimaryColor(mockWebsiteSettings.primary_color);
-      await hydrateAuthenticatedPreviewSections(resolution.page.id, userId);
+      await hydrateAuthenticatedPreviewSections(resolution.page.id, userId, builderOperation);
     }
+    protectedAsyncOperationGuard.requireCurrent(builderOperation, getActingUserId());
     applyBuilderContext(context);
     builderHistoryController = null;
     builderPageSettingsController = null;
     builderMediaController = null;
     builderMediaControllerIdentity = '';
     return true;
-  } catch {
+  } catch (error) {
+    if (isSupersededOperationError(error)) throw error;
     builderRouteUnavailableReason = 'The selected page is no longer available.';
     return false;
   }
@@ -10059,6 +10112,7 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
 }
 
 (window as any).navigateTo = async (view: string, id?: string, context?: any) => {
+  const navigationOperation = protectedAsyncOperationGuard.begin('application-navigation', getActingUserId());
   publicSiteRenderSequence += 1;
   if (view !== 'site') {
     publicSiteAbortController?.abort();
@@ -10067,10 +10121,12 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
   if (view !== 'site') {
     const authState = await ensureApplicationAuth();
     if (authState.status === 'initializing' || authState.status === 'unavailable') {
+      if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
       renderApplicationUnavailable();
       return;
     }
     if (view === 'login') {
+      if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
       const returnTo = getLoginReturnRoute(window.location.hash);
       if (authState.status === 'authenticated') {
         window.history.replaceState({}, '', returnTo ?? '#/dashboard');
@@ -10083,6 +10139,7 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
       return;
     }
     if (authState.status === 'unauthenticated') {
+      if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
       const currentHash = sanitizeApplicationReturnRoute(window.location.hash);
       const requestedHash = currentHash && currentHash.slice(2).split(/[/?]/, 1)[0] === view
         ? currentHash
@@ -10093,16 +10150,20 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
       return;
     }
     await ensureProductionCrmData(authState.user.id, view);
+    if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
     if (editorUsesSupabase() && WEBSITE_DATA_VIEWS.has(view)) {
       try {
         const core = await loadWebsiteDashboardCore({ actingUserId: authState.user.id });
+        protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
         if (core.websites.length === 0) {
           window.history.replaceState({}, '', '#/website-dashboard');
           currentView = 'website-dashboard';
           await renderWebsiteDashboard(true);
           return;
         }
-      } catch {
+      } catch (error) {
+        if (isSupersededOperationError(error)
+          || !protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
         renderWebsiteRepositoryUnavailable(view);
         return;
       }
@@ -10127,10 +10188,22 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
         ${renderSkeleton(view as any)}
       </main>
     `;
-    setTimeout(() => executeNavigation(view, id, context), 350);
+    setTimeout(() => {
+      if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
+      void executeNavigation(view, id, context, navigationOperation).catch(error => {
+        if (!isSupersededOperationError(error)) console.error('[Navigation] Deferred render failed:', error);
+      });
+    }, 350);
   } else {
-    await executeNavigation(view, id, context);
+    try {
+      await executeNavigation(view, id, context, navigationOperation);
+    } catch (error) {
+      if (isSupersededOperationError(error)
+        || !protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
+      throw error;
+    }
   }
+  if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
   renderCrmHydrationNotice();
 
   // Update URL for standard CRM navigation (Hash based)
@@ -10179,7 +10252,13 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
   }
 };
 
-async function executeNavigation(view: string, id?: string, context?: any) {
+async function executeNavigation(
+  view: string,
+  id?: string,
+  context?: any,
+  navigationOperation?: ProtectedAsyncOperationToken
+) {
+  if (navigationOperation) protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
   if (isExplicitWebsiteManagementView(view)) {
     const selection = resolveWebsiteSettingsSelection({
       actingUserId: getActingUserId(),
@@ -10223,6 +10302,7 @@ async function executeNavigation(view: string, id?: string, context?: any) {
     case 'builder': {
       const builderContext = (context?.builderContext ?? getBuilderContextFromHash()) as BuilderContext | null;
       await initializeBuilderNavigation(builderContext);
+      if (navigationOperation) protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
       const prepared = prepareBuilderInitialAction(builderContext);
       renderBuilder();
       await finishBuilderInitialAction(builderContext, prepared);
@@ -10258,9 +10338,11 @@ async function executeNavigation(view: string, id?: string, context?: any) {
         const settingsRes = await fetch('/api/settings').then(r => r.json());
         if (!settingsRes.success || !settingsRes.data) throw new Error('UNAVAILABLE');
       } catch (err) {
+        if (navigationOperation && !protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
         renderWebsiteRepositoryUnavailable('website-settings');
         return;
       }
+      if (navigationOperation) protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
       renderWebsiteSettings();
       break;
     }
@@ -11188,6 +11270,7 @@ async function bootRouter() {
     return;
   }
 
+  const navigationOperation = protectedAsyncOperationGuard.begin('application-navigation', getActingUserId());
   const authState = await ensureApplicationAuth();
   const decision = resolveApplicationBootstrap({
     pathname: rawPath,
@@ -11195,10 +11278,12 @@ async function bootRouter() {
     authState
   });
   if (decision.action === 'unavailable') {
+    if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
     renderApplicationUnavailable();
     return;
   }
   if (decision.action === 'login') {
+    if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
     const loginHash = buildApplicationLoginHash(decision.returnTo);
     if (window.location.hash !== loginHash) window.history.replaceState({}, '', loginHash);
     renderApplicationLogin(decision.returnTo);
@@ -11211,6 +11296,7 @@ async function bootRouter() {
     if (dashboardUsesSupabase()) {
       try {
         const core = await loadWebsiteDashboardCore({ actingUserId: authState.user.id });
+        protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
         const params = new URLSearchParams(window.location.search);
         const resolution = resolveAuthenticatedPreview({
           actingUserId: authState.user.id,
@@ -11220,14 +11306,23 @@ async function bootRouter() {
           ...core
         });
         if (resolution.status !== 'resolved') {
+          protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
           render404('Preview target not found.');
           return;
         }
         const { target } = resolution;
+        const previewOperation = {
+          navigation: navigationOperation,
+          userId: authState.user.id,
+          websiteId: target.website.id,
+          pageId: target.page.id
+        };
         const settingsState = await websiteSettingsHydrator.hydrate(authState.user.id, target.website);
         if (settingsState.status === 'error') throw new Error('UNAVAILABLE');
+        protectedAsyncOperationGuard.requireCurrent(previewOperation.navigation, getActingUserId());
         applyPrimaryColor(mockWebsiteSettings.primary_color);
-        await hydrateAuthenticatedPreviewSections(target.page.id, authState.user.id);
+        await hydrateAuthenticatedPreviewSections(previewOperation.pageId, previewOperation.userId, previewOperation.navigation);
+        protectedAsyncOperationGuard.requireCurrent(previewOperation.navigation, getActingUserId());
         await renderSitePage(target.funnel.id, {
           ...target.website,
           route: target.route,
@@ -11242,7 +11337,9 @@ async function bootRouter() {
           page_id: target.page.id
         }, true, undefined, target.page);
         return;
-      } catch {
+      } catch (error) {
+        if (isSupersededOperationError(error)
+          || !protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
         renderPublicPublicationUnavailable();
         return;
       }
