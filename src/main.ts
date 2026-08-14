@@ -8258,6 +8258,7 @@ function renderWebsiteNavigation() {
       renderWebsiteNavigation();
       return;
     }
+    const saveOperation = protectedAsyncOperationGuard.begin(`website-layout-save:${website.id}`, userId);
     (window as any).showToast('Saving navigation layout...', 'saving');
     try {
       const client = await getBuilderPublicationSupabaseClient();
@@ -8265,13 +8266,20 @@ function renderWebsiteNavigation() {
       const result = await client.from('website_layouts').upsert({ website_id: website.id, header_config: headerConfig, footer_config: footerConfig, updated_at: new Date().toISOString() }, { onConflict: 'website_id' }).select('*').single();
       if (result.error || !result.data || result.data.website_id !== website.id) throw new Error('UNAVAILABLE');
       const saved = result.data as WebsiteLayout;
-      const index = mockWebsiteLayouts.findIndex(layout => layout.website_id === website.id);
-      if (index >= 0) mockWebsiteLayouts[index] = saved;
-      else mockWebsiteLayouts.push(saved);
-      websiteLayoutHydrator.state = { status: 'loaded', userId };
-      (window as any).showToast('Navigation updated successfully!', 'success');
-      renderWebsiteNavigation();
-    } catch {
+      const committed = protectedAsyncOperationGuard.commitIfCurrent(saveOperation, getActingUserId(), () => {
+        if (activeDashboardWebsiteId !== website.id) throw new SupersededOperationError();
+        const index = mockWebsiteLayouts.findIndex(layout => layout.website_id === website.id);
+        if (index >= 0) mockWebsiteLayouts[index] = saved;
+        else mockWebsiteLayouts.push(saved);
+        websiteLayoutHydrator.state = { status: 'loaded', userId };
+        (window as any).showToast('Navigation updated successfully!', 'success');
+        renderWebsiteNavigation();
+      });
+      if (!committed) return;
+    } catch (error) {
+      if (isSupersededOperationError(error)
+        || !protectedAsyncOperationGuard.isCurrent(saveOperation, getActingUserId())
+        || activeDashboardWebsiteId !== website.id) return;
       (window as any).showToast('Navigation could not be saved. Please try again.', 'error');
     }
 };
@@ -9344,7 +9352,9 @@ async function loadWebsiteDashboardCore(request: { actingUserId: string }): Prom
     client.from('funnels').select('*').eq('user_id', userId).order('created_at', { ascending: true }),
     client.from('pages').select('*').eq('user_id', userId).order('created_at', { ascending: true })
   ]);
-  await layoutHydration;
+  const layoutState = await layoutHydration;
+  protectedAsyncOperationGuard.requireCurrent(hydrationToken, getActingUserId());
+  if (layoutState.status === 'error') throw new Error('UNAVAILABLE');
   if (routesResult.error || funnelsResult.error || pagesResult.error) throw new Error('UNAVAILABLE');
   const ownedWebsiteIds = new Set(websites.map(item => item.id));
   const routes = ((routesResult.data ?? []) as WebsiteRoute[])
