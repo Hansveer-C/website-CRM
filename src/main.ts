@@ -1,4 +1,5 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
+import { escapeHtmlText, safeTelHref } from './crm_html_output';
 import { templates } from './templates';
 import { Activity, Funnel, Page, PageSection, User, Website, WebsiteLayout, WebsiteRoute, WebsiteSettings } from './types';
 import { createBuilderSection, getBuilderSectionDefinition, isRegisteredBuilderSectionType } from './builder_section_registry';
@@ -2282,7 +2283,7 @@ function renderDashboard() {
             ${leadsBySource.map(s => `
               <div class="report-item">
                 <div class="report-item-header">
-                  <span>${s.source}</span>
+                  <span>${escapeHtmlText(s.source)}</span>
                   <span style="font-weight: 600;">${s.count} Leads</span>
                 </div>
                 <div class="visual-bar-bg">
@@ -2336,8 +2337,8 @@ function renderDashboard() {
     const contact = mockContacts.find(c => c.id === task.contact_id);
     return `
                   <tr style="background: #fffafa;">
-                    <td style="font-weight: 600;">${contact ? contact.name : 'Unknown'}</td>
-                    <td>${task.description}</td>
+                    <td style="font-weight: 600;">${escapeHtmlText(contact ? contact.name : 'Unknown')}</td>
+                    <td>${escapeHtmlText(task.description)}</td>
                     <td style="color: #ff4444; font-weight: 500;">${new Date(task.due_date).toLocaleDateString()}</td>
                     <td><button class="btn-primary" style="padding: 6px 12px; font-size: 0.8rem; background: #ff4444; border-radius: 4px;">Resolve</button></td>
                   </tr>
@@ -2384,11 +2385,12 @@ async function renderClients() {
     const hasAttentionFlag = needsAttention(contact);
     const isNewLead = isNew(contact.created_at);
 
+    const telHref = safeTelHref(contact.phone);
     return `
       <tr onclick="window.navigateTo('contact-detail', '${contact.id}')" style="cursor: pointer; border-bottom: 1px solid #f1f5f9; transition: background 0.1s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
         <td style="padding: 16px 24px;">
           <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px; flex-wrap: wrap;">
-            <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${contact.name}</div>
+            <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${escapeHtmlText(contact.name)}</div>
             ${hasAttentionFlag ? `
               <span style="background: #fee2e2; color: #991b1b; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid #fecaca;">⚠️ Needs Attention</span>
             ` : (isNewLead ? `
@@ -2396,19 +2398,19 @@ async function renderClients() {
             ` : '')}
           </div>
           <div style="font-size: 0.75rem; color: #64748b; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 250px;">
-            ${latest ? `<span style="color: #94a3b8; font-weight: 600;">Last:</span> ${latest.content}` : '<span style="color: #cbd5e1; font-style: italic;">No activity yet</span>'}
+            ${latest ? `<span style="color: #94a3b8; font-weight: 600;">Last:</span> ${escapeHtmlText(latest.content)}` : '<span style="color: #cbd5e1; font-style: italic;">No activity yet</span>'}
           </div>
         </td>
-        <td><div style="font-weight: 500; font-size: 0.9rem; color: #334155;">${contact.phone}</div></td>
+        <td><div style="font-weight: 500; font-size: 0.9rem; color: #334155;">${escapeHtmlText(contact.phone)}</div></td>
         <td><span class="badge badge-${contact.status}" style="font-size: 0.7rem;">${contact.status}</span></td>
-        <td><span style="font-size: 0.8rem; color: #64748b;">${contact.source}</span></td>
-        <td style="font-size: 0.8rem; color: #64748b;">${latest ? latest.created_at : '-'}</td>
+        <td><span style="font-size: 0.8rem; color: #64748b;">${escapeHtmlText(contact.source)}</span></td>
+        <td style="font-size: 0.8rem; color: #64748b;">${escapeHtmlText(latest ? latest.created_at : '-')}</td>
         <td>
           <div style="display: flex; gap: 8px; align-items: center;">
             <button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${contact.id}')">View</button>
             <button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #6366f1;" onclick="event.stopPropagation(); window.textContact('${contact.id}')">💬 Text</button>
-            ${(contact.status === 'lead' && isNewLead) ? `
-              <a href="tel:${contact.phone}" class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #10b981; text-decoration: none; display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation();">
+            ${(contact.status === 'lead' && isNewLead && telHref) ? `
+              <a href="${escapeHtmlText(telHref)}" class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #10b981; text-decoration: none; display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation();">
                 📞 Call Now
               </a>
             ` : ''}
@@ -2430,7 +2432,7 @@ async function renderClients() {
         <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
           <div style="flex: 1; min-width: 300px;">
             <input type="text" id="client-search" placeholder="Search by name or phone..." 
-                   value="${clientSearchQuery}" 
+                   value="${escapeHtmlText(clientSearchQuery)}"
                    style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
           </div>
           <div style="display: flex; gap: 10px;">
@@ -2529,10 +2531,10 @@ async function renderClients() {
   `;
   modal.innerHTML = `
     <div style="background: white; padding: 30px; border-radius: 12px; width: 450px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); color: #333;">
-      <h3 style="margin-top: 0; margin-bottom: 5px;">Texting ${contact.name}</h3>
+      <h3 style="margin-top: 0; margin-bottom: 5px;">Texting ${escapeHtmlText(contact.name)}</h3>
       <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 20px;">
         ${hasPhone 
-          ? `Recieving at: <span style="font-weight: 600;">${contact.phone}</span>` 
+          ? `Recieving at: <span style="font-weight: 600;">${escapeHtmlText(contact.phone)}</span>`
           : `<span style="color: #dc2626; font-weight: 600;">🛑 No phone number available</span>`}
       </p>
       
@@ -6043,10 +6045,12 @@ function renderSectionPreviewContent(section: any) {
 
   const toast = document.createElement('div');
   toast.className = `pb-toast-${type}`;
-  toast.innerHTML = `
-    <span style="font-size:1rem;line-height:1;">${c.icon}</span>
-    <span>${message}</span>
-  `;
+  const icon = document.createElement('span');
+  icon.style.cssText = 'font-size:1rem;line-height:1;';
+  icon.textContent = c.icon;
+  const messageText = document.createElement('span');
+  messageText.textContent = message;
+  toast.append(icon, messageText);
   toast.style.cssText = `
     position: fixed;
     bottom: 24px;
@@ -8671,7 +8675,7 @@ function renderOpportunities() {
       const contact = mockContacts.find(c => c.id === opp.contact_id);
       return `
         <div class="kanban-card" draggable="true" ondragstart="drag(event, '${opp.id}')" onclick="window.navigateTo('contact-detail', '${opp.contact_id}')" style="cursor: pointer; display: flex; flex-direction: column; gap: 4px;">
-          <div class="contact-name">${contact ? contact.name : 'Unknown Contact'}</div>
+          <div class="contact-name">${escapeHtmlText(contact ? contact.name : 'Unknown Contact')}</div>
           <div class="opportunity-value" style="display: flex; align-items: center; gap: 4px;">
             <span>$</span>
             <input type="number" 
@@ -8681,8 +8685,8 @@ function renderOpportunities() {
                    onclick="event.stopPropagation()" 
                    onchange="window.updateOpportunityField('${opp.id}', 'value', this.value)">
           </div>
-          <div class="contact-phone">${contact ? contact.phone : 'N/A'}</div>
-          ${opp.notes ? `<div style="font-size: 0.7rem; color: #94a3b8; font-style: italic; border-top: 1px solid #f1f5f9; padding-top: 4px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${opp.notes.replace(/\n/g, ' ')}</div>` : ''}
+          <div class="contact-phone">${escapeHtmlText(contact ? contact.phone : 'N/A')}</div>
+          ${opp.notes ? `<div style="font-size: 0.7rem; color: #94a3b8; font-style: italic; border-top: 1px solid #f1f5f9; padding-top: 4px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtmlText(opp.notes.replace(/\n/g, ' '))}</div>` : ''}
         </div>
       `;
     }).join('');
@@ -8717,7 +8721,7 @@ function renderQuotes() {
     return `
       <tr onclick="window.navigateTo('contact-detail', '${quote.contact_id}')" style="cursor: pointer;">
         <td style="font-weight: 600; color: var(--primary-color);">Q-${quote.id}</td>
-        <td>${contact ? contact.name : 'Unknown'}</td>
+        <td>${escapeHtmlText(contact ? contact.name : 'Unknown')}</td>
         <td><span class="badge badge-${quote.status}">${quote.status}</span></td>
         <td style="font-weight: 600;">$${quote.total_amount.toLocaleString()}</td>
         <td>${new Date(quote.created_at).toLocaleDateString()}</td>
@@ -8780,7 +8784,7 @@ function renderInvoices() {
     return `
       <tr onclick="window.navigateTo('contact-detail', '${invoice.contact_id}')" style="cursor: pointer;">
         <td style="font-weight: 600; color: var(--primary-color);">INV-${invoice.id}</td>
-        <td>${contact ? contact.name : 'Unknown'}</td>
+        <td>${escapeHtmlText(contact ? contact.name : 'Unknown')}</td>
         <td style="font-weight: 600;">$${invoice.amount.toLocaleString()}</td>
         <td><span class="badge badge-${invoice.status}">${invoice.status}</span></td>
         <td>${new Date(invoice.due_date).toLocaleDateString()}</td>
@@ -8862,8 +8866,8 @@ function renderNewQuote() {
             <div style="padding: 15px; border: 1px solid #f0f0f0; border-radius: 8px; margin-bottom: 15px; position: relative;">
               <button onclick="window.removeLineItem(${item.index})" style="position: absolute; right: 8px; top: 8px; background: none; border: none; color: #ccc; cursor: pointer; font-size: 1.2rem;">×</button>
               <div style="margin-bottom: 10px;">
-                <input type="text" placeholder="Service Name" value="${item.service}" style="width: 100%; border: none; font-weight: 600; font-size: 0.95rem; margin-bottom: 4px;" oninput="window.updateLineItem(${item.index}, 'service', this.value, false)">
-                <input type="text" placeholder="Short description" value="${item.description}" style="width: 100%; border: none; font-size: 0.85rem; color: #666;" oninput="window.updateLineItem(${item.index}, 'description', this.value, false)">
+                <input type="text" placeholder="Service Name" value="${escapeHtmlText(item.service)}" style="width: 100%; border: none; font-weight: 600; font-size: 0.95rem; margin-bottom: 4px;" oninput="window.updateLineItem(${item.index}, 'service', this.value, false)">
+                <input type="text" placeholder="Short description" value="${escapeHtmlText(item.description)}" style="width: 100%; border: none; font-size: 0.85rem; color: #666;" oninput="window.updateLineItem(${item.index}, 'description', this.value, false)">
               </div>
               <div style="display: flex; gap: 10px; align-items: center; background: #f8fafc; padding: 10px; border-radius: 6px;">
                 <div style="flex: 1;">
@@ -8910,14 +8914,14 @@ function renderNewQuote() {
               <label>Select Contact</label>
               <select id="quote-contact" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;" onchange="window.updateNewQuoteContact(this.value)">
                 <option value="">-- Choose Contact --</option>
-                ${contacts.map(c => `<option value="${c.id}" ${nqcId === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+                ${contacts.map(c => `<option value="${escapeHtmlText(c.id)}" ${nqcId === c.id ? 'selected' : ''}>${escapeHtmlText(c.name)}</option>`).join('')}
               </select>
             </div>
             <div class="form-group" style="margin: 0;">
               <label>Select Opportunity (Optional)</label>
               <select id="quote-opportunity" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;" onchange="window.newQuoteOpportunityId = this.value">
                 <option value="">-- No Opportunity --</option>
-                ${opportunities.map(o => `<option value="${o.id}" ${nqoId === o.id ? 'selected' : ''}>$${o.value} - ${o.pipeline_stage}</option>`).join('')}
+                ${opportunities.map(o => `<option value="${escapeHtmlText(o.id)}" ${nqoId === o.id ? 'selected' : ''}>$${o.value} - ${escapeHtmlText(o.pipeline_stage)}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -10492,8 +10496,8 @@ function renderQuotePreview(quoteId: string) {
           <ul style="list-style: none; padding: 0; margin: 0;">
             ${tierItems.map(item => `
               <li style="padding: 12px 0; border-bottom: 1px solid ${isSelected ? '#d0e5ff' : '#f8fafc'};">
-                <div style="font-weight: 600; font-size: 0.95rem; color: #1e293b; margin-bottom: 2px;">${item.service_name}</div>
-                <div style="font-size: 0.85rem; color: #64748b; line-height: 1.4;">${item.description}</div>
+                <div style="font-weight: 600; font-size: 0.95rem; color: #1e293b; margin-bottom: 2px;">${escapeHtmlText(item.service_name)}</div>
+                <div style="font-size: 0.85rem; color: #64748b; line-height: 1.4;">${escapeHtmlText(item.description)}</div>
                 <div style="text-align: right; font-weight: 700; color: #1e293b; margin-top: 8px; font-size: 0.95rem;">$${item.total.toLocaleString()}</div>
               </li>
             `).join('')}
@@ -10531,11 +10535,11 @@ function renderQuotePreview(quoteId: string) {
           <div style="display: flex; gap: 60px;">
             <div>
               <div style="text-transform: uppercase; color: #94a3b8; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; margin-bottom: 12px;">Client Details</div>
-              <div style="font-weight: 700; font-size: 1.25rem; color: #1e293b; margin-bottom: 8px;">${contact ? contact.name : 'Valued Customer'}</div>
+              <div style="font-weight: 700; font-size: 1.25rem; color: #1e293b; margin-bottom: 8px;">${escapeHtmlText(contact ? contact.name : 'Valued Customer')}</div>
               <div style="color: #64748b; line-height: 1.5;">
-                ${contact ? contact.address : ''}<br>
-                ${contact ? contact.email || '' : ''}<br>
-                ${contact ? contact.phone : ''}
+                ${escapeHtmlText(contact ? contact.address : '')}<br>
+                ${escapeHtmlText(contact ? contact.email || '' : '')}<br>
+                ${escapeHtmlText(contact ? contact.phone : '')}
               </div>
             </div>
           </div>
@@ -10553,7 +10557,7 @@ function renderQuotePreview(quoteId: string) {
         ${quote.notes ? `
           <div style="margin-top: 40px; border-top: 1px solid #f1f5f9; padding-top: 40px;">
             <div style="text-transform: uppercase; color: #94a3b8; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; margin-bottom: 15px;">Additional Terms & Notes</div>
-            <div style="color: #475569; line-height: 1.8; font-size: 1rem; white-space: pre-wrap;">${quote.notes}</div>
+            <div style="color: #475569; line-height: 1.8; font-size: 1rem; white-space: pre-wrap;">${escapeHtmlText(quote.notes)}</div>
           </div>
         ` : ''}
 
@@ -10581,7 +10585,7 @@ async function loadTimeline(contactId: string) {
   if (timelineContainer) {
     timelineContainer.innerHTML = contactTimelineState.map(group => `
             <div style="margin-bottom: 25px;">
-                <div style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">${group.label}</div>
+                <div style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">${escapeHtmlText(group.label)}</div>
                 <div style="display: flex; flex-direction: column; gap: 4px;">
                     ${group.items.map((item: any) => {
       const isMissed = item.type === 'call_missed';
@@ -10590,8 +10594,8 @@ async function loadTimeline(contactId: string) {
 
       return `
                             <div style="background: #fff; border-radius: 8px; padding: 12px 15px; border-left: 3px solid ${borderColor}; margin-bottom: 4px;">
-                                <div style="font-size: 0.95rem; color: ${color}; font-weight: ${isMissed ? '600' : '500'}; margin-bottom: 4px;">${item.content}</div>
-                                <div style="font-size: 0.8rem; color: #64748b;">${item.created_at}</div>
+                                <div style="font-size: 0.95rem; color: ${color}; font-weight: ${isMissed ? '600' : '500'}; margin-bottom: 4px;">${escapeHtmlText(item.content)}</div>
+                                <div style="font-size: 0.8rem; color: #64748b;">${escapeHtmlText(item.created_at)}</div>
                             </div>
                         `;
     }).join('')}
@@ -10630,6 +10634,7 @@ async function renderContactDetail(contactId: string) {
 
   const contactOpps = mockOpportunities.filter(opp => opp.contact_id === contactId);
   const contactQuotes = mockQuotes.filter(q => q.contact_id === contactId);
+  const telHref = safeTelHref(contact.phone);
   app.innerHTML = `
     ${renderSidebar('clients')}
     <main class="main-content" style="padding: 24px; max-width: 1100px; margin: 0 auto; background: #fff;">
@@ -10640,7 +10645,7 @@ async function renderContactDetail(contactId: string) {
             <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
             Back
           </button>
-          <h2 style="margin: 0; font-size: 1.6rem; font-weight: 800; color: #0f172a;">${contact.name}</h2>
+          <h2 style="margin: 0; font-size: 1.6rem; font-weight: 800; color: #0f172a;">${escapeHtmlText(contact.name)}</h2>
           <span class="badge badge-${contact.status}" style="font-size: 0.75rem; padding: 4px 10px;">${contact.status}</span>
         </div>
         <div style="display: flex; gap: 8px;">
@@ -10653,26 +10658,26 @@ async function renderContactDetail(contactId: string) {
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 20px;">
          <div>
            <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Phone</div>
-           <input type="text" value="${contact.phone}" onchange="window.updateContactField('${contactId}', 'phone', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
+           <input type="text" value="${escapeHtmlText(contact.phone)}" onchange="window.updateContactField('${contactId}', 'phone', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
          </div>
          <div>
            <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Email</div>
-           <input type="email" value="${contact.email || ''}" placeholder="Add email..." onchange="window.updateContactField('${contactId}', 'email', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
+           <input type="email" value="${escapeHtmlText(contact.email || '')}" placeholder="Add email..." onchange="window.updateContactField('${contactId}', 'email', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
          </div>
          <div>
            <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Source</div>
-           <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${contact.source}</div>
+           <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${escapeHtmlText(contact.source)}</div>
          </div>
          <div>
            <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Address</div>
-           <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${contact.address}">${contact.address}</div>
+           <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtmlText(contact.address)}">${escapeHtmlText(contact.address)}</div>
          </div>
       </div>
 
       <!-- 2. Priority Quick Actions -->
       <div style="display: flex; gap: 12px; margin-bottom: 30px;">
-        ${contact.phone ? `
-          <a href="tel:${contact.phone}" class="btn-primary" style="background: #10b981; flex: 1; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
+        ${telHref ? `
+          <a href="${escapeHtmlText(telHref)}" class="btn-primary" style="background: #10b981; flex: 1; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
             📞 Call Lead Now
           </a>
           <button class="btn-primary" onclick="window.sendQuickSMS('${contact.id}')" style="background: #6366f1; flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);">
@@ -10712,7 +10717,7 @@ async function renderContactDetail(contactId: string) {
                 <div style="padding: 10px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center;">
                   <div>
                     <div style="font-weight: 700; color: #1e293b; font-size: 0.9rem;">$${opp.value.toLocaleString()}</div>
-                    <div style="font-size: 0.75rem; color: #64748b;">${opp.pipeline_stage}</div>
+                    <div style="font-size: 0.75rem; color: #64748b;">${escapeHtmlText(opp.pipeline_stage)}</div>
                   </div>
                   <span class="badge badge-${opp.status}" style="font-size: 0.65rem;">${opp.status}</span>
                 </div>
