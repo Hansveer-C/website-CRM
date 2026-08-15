@@ -9003,7 +9003,12 @@ function renderNewQuote() {
   if (editorUsesSupabase()) {
     const requestKey = (window as any).newQuoteRequestKey || crypto.randomUUID();
     (window as any).newQuoteRequestKey = requestKey;
-    const quoteOperation = protectedAsyncOperationGuard.begin(`quote-ui:${requestKey}`, getActingUserId());
+    const userId = getActingUserId();
+    const navigationOperation = currentView === 'new-quote'
+      ? protectedAsyncOperationGuard.captureCurrent('application-navigation', userId)
+      : null;
+    if (!navigationOperation) return;
+    const quoteOperation = protectedAsyncOperationGuard.begin(`quote-ui:${requestKey}`, userId);
     try {
       const response = await fetch('/api/quotes', {
         method: 'POST',
@@ -9020,7 +9025,6 @@ function renderNewQuote() {
       const payload = await response.json();
       if (!response.ok || !payload.success) throw new Error(payload.error || 'Quote creation failed.');
       const saved = payload.data;
-      let quoteNavigation: Promise<void> | undefined;
       const committed = protectedAsyncOperationGuard.commitIfCurrent(quoteOperation, getActingUserId(), () => {
         const quoteIndex = mockQuotes.findIndex(quote => quote.id === saved.quote.id);
         if (quoteIndex >= 0) mockQuotes[quoteIndex] = saved.quote;
@@ -9034,17 +9038,21 @@ function renderNewQuote() {
           const opportunityIndex = mockOpportunities.findIndex(opportunity => opportunity.id === saved.opportunity.id);
           if (opportunityIndex >= 0) mockOpportunities[opportunityIndex] = saved.opportunity;
         }
-        (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0, tier: 'basic' }];
-        (window as any).newQuoteContactId = '';
-        (window as any).newQuoteOpportunityId = '';
-        (window as any).newQuoteRequestKey = '';
-        (window as any).showToast('Quote created successfully.', 'success');
-        quoteNavigation = (window as any).navigateTo('quotes');
       });
       if (!committed) return;
-      await quoteNavigation;
+      if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())
+        || currentView !== 'new-quote') return;
+      (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0, tier: 'basic' }];
+      (window as any).newQuoteContactId = '';
+      (window as any).newQuoteOpportunityId = '';
+      (window as any).newQuoteRequestKey = '';
+      (window as any).showToast('Quote created successfully.', 'success');
+      await (window as any).navigateTo('quotes');
     } catch (error: any) {
-      if (isSupersededOperationError(error)) return;
+      if (isSupersededOperationError(error)
+        || !protectedAsyncOperationGuard.isCurrent(quoteOperation, getActingUserId())
+        || !protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())
+        || currentView !== 'new-quote') return;
       (window as any).showToast(error?.message || 'Quote creation is temporarily unavailable.', 'error');
     }
     return;

@@ -120,6 +120,158 @@ describe('protected durable CRM mutation races', () => {
   });
 });
 
+type QuoteSaveResult = {
+  ok: boolean;
+  quoteId?: string;
+  itemId?: string;
+  opportunityValue?: number;
+};
+
+function createQuoteNavigationHarness() {
+  const guard = new ProtectedAsyncOperationGuard();
+  let currentUser = '';
+  let currentView = '';
+  let screen = '';
+  const durable = new Map<string, QuoteSaveResult>();
+  const shared = { quotes: [] as string[], items: [] as string[], opportunityValue: 0 };
+  const form = { contactId: 'contact-a', requestKey: 'request-a', itemService: 'Pressure wash' };
+  const successToast = vi.fn();
+  const errorToast = vi.fn();
+  const navigate = vi.fn((view: string) => {
+    const invocation = guard.beginUnbound('application-navigation');
+    guard.bindCurrent(invocation, currentUser);
+    currentView = view;
+    screen = view;
+  });
+  const switchUser = (userId: string, view: string) => {
+    guard.invalidateRuntime();
+    currentUser = userId;
+    currentView = view;
+    screen = view;
+    shared.quotes.splice(0);
+    shared.items.splice(0);
+    shared.opportunityValue = 0;
+    navigate(view);
+  };
+  const save = async (userId: string, requestKey: string, resultPromise: Promise<QuoteSaveResult>) => {
+    const navigation = guard.captureCurrent('application-navigation', userId);
+    if (!navigation || currentView !== 'new-quote') throw new Error('INVALID_TEST_SETUP');
+    const operation = guard.begin(`quote-ui:${requestKey}`, userId);
+    try {
+      const result = await resultPromise;
+      if (!result.ok) throw new Error('Quote creation failed.');
+      durable.set(`${userId}:${requestKey}`, result);
+      const committed = guard.commitIfCurrent(operation, currentUser, () => {
+        shared.quotes.push(result.quoteId!);
+        shared.items.push(result.itemId!);
+        shared.opportunityValue = result.opportunityValue!;
+      });
+      if (!committed) return;
+      if (!guard.isCurrent(navigation, currentUser) || currentView !== 'new-quote') return;
+      form.contactId = '';
+      form.requestKey = '';
+      form.itemService = '';
+      successToast();
+      navigate('quotes');
+    } catch (error) {
+      if (isSupersededOperationError(error)
+        || !guard.isCurrent(operation, currentUser)
+        || !guard.isCurrent(navigation, currentUser)
+        || currentView !== 'new-quote') return;
+      errorToast();
+    }
+  };
+  return {
+    durable, shared, form, successToast, errorToast, navigate, switchUser, save,
+    get screen() { return screen; }
+  };
+}
+
+describe('quote save navigation-bound continuation', () => {
+  it.each(['dashboard', 'clients'])('keeps %s visible while committing the completed quote transaction', async nextView => {
+    const harness = createQuoteNavigationHarness();
+    const pending = deferred<QuoteSaveResult>();
+    harness.switchUser('A', 'new-quote');
+    const save = harness.save('A', 'request-a', pending.promise);
+    harness.navigate(nextView);
+    pending.resolve({ ok: true, quoteId: 'quote-a', itemId: 'item-a', opportunityValue: 750 });
+    await save;
+    expect(harness.screen).toBe(nextView);
+    expect(harness.shared).toEqual({ quotes: ['quote-a'], items: ['item-a'], opportunityValue: 750 });
+    expect(harness.durable.has('A:request-a')).toBe(true);
+    expect(harness.successToast).not.toHaveBeenCalled();
+    expect(harness.navigate).not.toHaveBeenCalledWith('quotes');
+    expect(harness.form).toEqual({ contactId: 'contact-a', requestKey: 'request-a', itemService: 'Pressure wash' });
+  });
+
+  it('suppresses a failed abandoned quote save over the newer view', async () => {
+    const harness = createQuoteNavigationHarness();
+    const pending = deferred<QuoteSaveResult>();
+    harness.switchUser('A', 'new-quote');
+    const save = harness.save('A', 'request-a', pending.promise);
+    harness.navigate('dashboard');
+    pending.resolve({ ok: false });
+    await save;
+    expect(harness.screen).toBe('dashboard');
+    expect(harness.errorToast).not.toHaveBeenCalled();
+    expect(harness.navigate).not.toHaveBeenCalledWith('quotes');
+  });
+
+  it('shows a legitimate quote-save error while the initiating navigation is current', async () => {
+    const harness = createQuoteNavigationHarness();
+    harness.switchUser('A', 'new-quote');
+    await harness.save('A', 'request-a', Promise.resolve({ ok: false }));
+    expect(harness.screen).toBe('new-quote');
+    expect(harness.errorToast).toHaveBeenCalledTimes(1);
+    expect(harness.navigate).not.toHaveBeenCalledWith('quotes');
+  });
+
+  it('does not revive an old quote save after navigating away and back', async () => {
+    const harness = createQuoteNavigationHarness();
+    const pending = deferred<QuoteSaveResult>();
+    harness.switchUser('A', 'new-quote');
+    const save = harness.save('A', 'request-a', pending.promise);
+    harness.navigate('dashboard');
+    harness.navigate('new-quote');
+    harness.form.contactId = 'contact-new';
+    harness.form.requestKey = 'request-new';
+    harness.form.itemService = 'New invocation item';
+    pending.resolve({ ok: true, quoteId: 'quote-a', itemId: 'item-a', opportunityValue: 500 });
+    await save;
+    expect(harness.screen).toBe('new-quote');
+    expect(harness.shared.quotes).toEqual(['quote-a']);
+    expect(harness.form).toEqual({ contactId: 'contact-new', requestKey: 'request-new', itemService: 'New invocation item' });
+    expect(harness.successToast).not.toHaveBeenCalled();
+    expect(harness.navigate).not.toHaveBeenCalledWith('quotes');
+  });
+
+  it('retains normal current-view success behavior', async () => {
+    const harness = createQuoteNavigationHarness();
+    harness.switchUser('A', 'new-quote');
+    await harness.save('A', 'request-a', Promise.resolve({ ok: true, quoteId: 'quote-a', itemId: 'item-a', opportunityValue: 1000 }));
+    expect(harness.shared).toEqual({ quotes: ['quote-a'], items: ['item-a'], opportunityValue: 1000 });
+    expect(harness.form).toEqual({ contactId: '', requestKey: '', itemService: '' });
+    expect(harness.successToast).toHaveBeenCalledTimes(1);
+    expect(harness.navigate).toHaveBeenCalledWith('quotes');
+    expect(harness.screen).toBe('quotes');
+  });
+
+  it('keeps logout and account-switch continuations discarded', async () => {
+    for (const nextUser of ['', 'B']) {
+      const harness = createQuoteNavigationHarness();
+      const pending = deferred<QuoteSaveResult>();
+      harness.switchUser('A', 'new-quote');
+      const save = harness.save('A', 'request-a', pending.promise);
+      harness.switchUser(nextUser, nextUser ? 'dashboard' : 'login');
+      pending.resolve({ ok: true, quoteId: 'quote-a', itemId: 'item-a', opportunityValue: 250 });
+      await save;
+      expect(harness.shared).toEqual({ quotes: [], items: [], opportunityValue: 0 });
+      expect(harness.successToast).not.toHaveBeenCalled();
+      expect(harness.navigate).not.toHaveBeenCalledWith('quotes');
+    }
+  });
+});
+
 function createPreviewHarness() {
   const guard = new ProtectedAsyncOperationGuard();
   let currentUser = '';
@@ -268,7 +420,7 @@ describe('adjacent authenticated Builder persistence race', () => {
 describe('production stale-operation wiring', () => {
   const main = readFileSync(fileURLToPath(new URL('./main.ts', import.meta.url)), 'utf8');
 
-  it('guards lead and quote shared writes plus tenant-derived UI before synchronous commit', () => {
+  it('guards lead and quote shared writes, then separately gates quote UI on navigation authority', () => {
     const lead = main.slice(main.indexOf("if (url === '/api/leads'"), main.indexOf("if (url === '/api/quotes'"));
     const quote = main.slice(main.indexOf('(window as any).saveQuote'), main.indexOf("const quoteId = 'q'"));
     expect(lead).toContain('protectedAsyncOperationGuard.requireCurrent(leadOperation, getActingUserId());');
@@ -277,9 +429,17 @@ describe('production stale-operation wiring', () => {
     expect(quoteCommit).toContain('mockQuotes.findIndex');
     expect(quoteCommit).toContain('mockQuoteItems.findIndex');
     expect(quoteCommit).toContain('mockOpportunities.findIndex');
-    expect(quoteCommit).toContain("showToast('Quote created successfully.'");
-    expect(quoteCommit).toContain("navigateTo('quotes')");
+    expect(quoteCommit).not.toContain("showToast('Quote created successfully.'");
+    expect(quoteCommit).not.toContain("navigateTo('quotes')");
     expect(quoteCommit).not.toContain('await ');
+    expect(quote).toContain("captureCurrent('application-navigation', userId)");
+    expect(quote).toContain("currentView !== 'new-quote'");
+    expect(quote.indexOf('isCurrent(navigationOperation')).toBeLessThan(quote.indexOf("showToast('Quote created successfully.'"));
+    expect(quote.indexOf("showToast('Quote created successfully.'")).toBeLessThan(quote.indexOf("navigateTo('quotes')"));
+    expect(quote.indexOf('if (editorUsesSupabase())')).toBeLessThan(quote.indexOf("captureCurrent('application-navigation'"));
+    const localQuote = main.slice(main.indexOf("const quoteId = 'q'"), main.indexOf('function updateOpportunityStage'));
+    expect(localQuote).not.toContain("captureCurrent('application-navigation'");
+    expect(localQuote).toContain("navigateTo('quotes')");
   });
 
   it('guards Preview sections, settings-derived styling, final render, and stale error rendering', () => {
