@@ -100,6 +100,7 @@ function createSaveHarness() {
   const guard = new ProtectedAsyncOperationGuard();
   let currentUser = '';
   let activeWebsite = '';
+  let currentView = '';
   let screen = '';
   const layouts: string[] = [];
   const durable = new Map<string, string>();
@@ -110,11 +111,20 @@ function createSaveHarness() {
     guard.invalidateRuntime();
     currentUser = userId;
     activeWebsite = websiteId;
+    currentView = nextScreen;
     screen = nextScreen;
     layouts.splice(0);
   };
-  const switchWebsite = (websiteId: string, nextScreen: string) => { activeWebsite = websiteId; screen = nextScreen; };
+  const navigate = (view: string) => {
+    const invocation = guard.beginUnbound('application-navigation');
+    guard.bindCurrent(invocation, currentUser);
+    currentView = view;
+    screen = view;
+  };
+  const switchWebsite = (websiteId: string, nextScreen: string) => { activeWebsite = websiteId; navigate(nextScreen); };
   const save = async (userId: string, websiteId: string, result: Promise<SaveResult>) => {
+    const navigation = guard.captureCurrent('application-navigation', userId);
+    if (!navigation || currentView !== 'website-navigation') throw new Error('INVALID_TEST_SETUP');
     const operation = guard.begin(`website-layout-save:${websiteId}`, userId);
     try {
       const response = await result;
@@ -123,14 +133,17 @@ function createSaveHarness() {
       const committed = guard.commitIfCurrent(operation, currentUser, () => {
         if (activeWebsite !== websiteId) throw new SupersededOperationError();
         layouts.splice(0, layouts.length, response.marker!);
-        successToast();
-        renderNavigation(websiteId);
       });
       if (!committed) return;
+      if (!guard.isCurrent(navigation, currentUser) || currentView !== 'website-navigation') return;
+      successToast();
+      renderNavigation(websiteId);
     } catch (error) {
       if (isSupersededOperationError(error)
         || !guard.isCurrent(operation, currentUser)
-        || activeWebsite !== websiteId) return;
+        || activeWebsite !== websiteId
+        || !guard.isCurrent(navigation, currentUser)
+        || currentView !== 'website-navigation') return;
       errorToast();
     }
   };
@@ -138,13 +151,14 @@ function createSaveHarness() {
     const saved = durable.get(`${userId}:${websiteId}`);
     layouts.splice(0, layouts.length, ...(saved ? [saved] : []));
   };
-  return { layouts, durable, successToast, errorToast, renderNavigation, switchUser, switchWebsite, save, hydrate, get screen() { return screen; } };
+  return { layouts, durable, successToast, errorToast, renderNavigation, switchUser, switchWebsite, navigate, save, hydrate, get screen() { return screen; } };
 }
 
 describe('Website layout save protected continuation', () => {
   it('commits normal same-user saves and later hydrates their durable result', async () => {
     const harness = createSaveHarness();
-    harness.switchUser('A', 'navigation:A-site', 'A-site');
+    harness.switchUser('A', 'bootstrap', 'A-site');
+    harness.navigate('website-navigation');
     await harness.save('A', 'A-site', Promise.resolve({ ok: true, marker: 'A-layout' }));
     expect(harness.layouts).toEqual(['A-layout']);
     expect(harness.successToast).toHaveBeenCalledTimes(1);
@@ -157,7 +171,8 @@ describe('Website layout save protected continuation', () => {
   it('discards delayed A success after logout or B login while preserving the durable save', async () => {
     const logoutHarness = createSaveHarness();
     const logoutPending = deferred<SaveResult>();
-    logoutHarness.switchUser('A', 'A-navigation', 'A-site');
+    logoutHarness.switchUser('A', 'bootstrap', 'A-site');
+    logoutHarness.navigate('website-navigation');
     const afterLogout = logoutHarness.save('A', 'A-site', logoutPending.promise);
     logoutHarness.switchUser('', 'login');
     logoutPending.resolve({ ok: true, marker: 'A-layout' });
@@ -170,7 +185,8 @@ describe('Website layout save protected continuation', () => {
 
     const loginHarness = createSaveHarness();
     const loginPending = deferred<SaveResult>();
-    loginHarness.switchUser('A', 'A-navigation', 'A-site');
+    loginHarness.switchUser('A', 'bootstrap', 'A-site');
+    loginHarness.navigate('website-navigation');
     const afterLogin = loginHarness.save('A', 'A-site', loginPending.promise);
     loginHarness.switchUser('B', 'B-dashboard', 'B-site');
     loginPending.resolve({ ok: true, marker: 'A-layout' });
@@ -183,7 +199,8 @@ describe('Website layout save protected continuation', () => {
   it('protects the B to A reverse race and a same-user Website switch', async () => {
     const harness = createSaveHarness();
     const pendingB = deferred<SaveResult>();
-    harness.switchUser('B', 'B-navigation', 'B-site');
+    harness.switchUser('B', 'bootstrap', 'B-site');
+    harness.navigate('website-navigation');
     const staleB = harness.save('B', 'B-site', pendingB.promise);
     harness.switchUser('A', 'A-dashboard', 'A-site');
     pendingB.resolve({ ok: true, marker: 'B-layout' });
@@ -191,6 +208,7 @@ describe('Website layout save protected continuation', () => {
     expect(harness.screen).toBe('A-dashboard');
     expect(harness.layouts).toEqual([]);
 
+    harness.navigate('website-navigation');
     const pendingA = deferred<SaveResult>();
     const staleWebsite = harness.save('A', 'A-site', pendingA.promise);
     harness.switchWebsite('A-site-2', 'navigation:A-site-2');
@@ -204,7 +222,8 @@ describe('Website layout save protected continuation', () => {
 
   it('shows only current save failures and suppresses stale failure toasts', async () => {
     const harness = createSaveHarness();
-    harness.switchUser('A', 'A-navigation', 'A-site');
+    harness.switchUser('A', 'bootstrap', 'A-site');
+    harness.navigate('website-navigation');
     await harness.save('A', 'A-site', Promise.resolve({ ok: false }));
     expect(harness.errorToast).toHaveBeenCalledTimes(1);
     const pending = deferred<SaveResult>();
@@ -213,6 +232,50 @@ describe('Website layout save protected continuation', () => {
     pending.resolve({ ok: false });
     await stale;
     expect(harness.errorToast).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['dashboard', 'clients'])('keeps %s visible while safely committing a completed layout save', async nextView => {
+    const harness = createSaveHarness();
+    const pending = deferred<SaveResult>();
+    harness.switchUser('A', 'bootstrap', 'A-site');
+    harness.navigate('website-navigation');
+    const save = harness.save('A', 'A-site', pending.promise);
+    harness.navigate(nextView);
+    pending.resolve({ ok: true, marker: 'A-layout' });
+    await save;
+    expect(harness.screen).toBe(nextView);
+    expect(harness.layouts).toEqual(['A-layout']);
+    expect(harness.successToast).not.toHaveBeenCalled();
+    expect(harness.renderNavigation).not.toHaveBeenCalled();
+  });
+
+  it('suppresses an abandoned save failure over a newer view', async () => {
+    const harness = createSaveHarness();
+    const pending = deferred<SaveResult>();
+    harness.switchUser('A', 'bootstrap', 'A-site');
+    harness.navigate('website-navigation');
+    const save = harness.save('A', 'A-site', pending.promise);
+    harness.navigate('clients');
+    pending.resolve({ ok: false });
+    await save;
+    expect(harness.screen).toBe('clients');
+    expect(harness.errorToast).not.toHaveBeenCalled();
+  });
+
+  it('does not revive an old save after navigating away and back to Navigation', async () => {
+    const harness = createSaveHarness();
+    const pending = deferred<SaveResult>();
+    harness.switchUser('A', 'bootstrap', 'A-site');
+    harness.navigate('website-navigation');
+    const save = harness.save('A', 'A-site', pending.promise);
+    harness.navigate('dashboard');
+    harness.navigate('website-navigation');
+    pending.resolve({ ok: true, marker: 'A-layout' });
+    await save;
+    expect(harness.screen).toBe('website-navigation');
+    expect(harness.layouts).toEqual(['A-layout']);
+    expect(harness.successToast).not.toHaveBeenCalled();
+    expect(harness.renderNavigation).not.toHaveBeenCalled();
   });
 });
 
@@ -234,9 +297,13 @@ describe('production Website layout lifecycle wiring', () => {
     expect(commit).toContain('activeDashboardWebsiteId !== website.id');
     expect(commit).toContain('mockWebsiteLayouts.findIndex');
     expect(commit).toContain('websiteLayoutHydrator.state');
-    expect(commit).toContain("showToast('Navigation updated successfully!', 'success')");
-    expect(commit).toContain('renderWebsiteNavigation()');
+    expect(commit).not.toContain("showToast('Navigation updated successfully!', 'success')");
+    expect(commit).not.toContain('renderWebsiteNavigation()');
     expect(commit).not.toContain('await ');
+    expect(save).toContain("captureCurrent('application-navigation', userId)");
+    expect(save).toContain("currentView !== 'website-navigation'");
+    const production = save.slice(save.indexOf('const navigationOperation'));
+    expect(production.indexOf("isCurrent(navigationOperation")).toBeLessThan(production.indexOf("showToast('Navigation updated successfully!', 'success')"));
     expect(save).toContain('isSupersededOperationError(error)');
   });
 });

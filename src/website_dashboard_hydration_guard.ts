@@ -54,6 +54,17 @@ export class ProtectedAsyncOperationGuard {
     };
   }
 
+  captureCurrent(scope: string, userIdInput: string): ProtectedAsyncOperationToken | null {
+    const operationGeneration = this.operationGenerations.get(scope);
+    if (operationGeneration === undefined) return null;
+    return {
+      runtimeGeneration: this.runtimeGeneration,
+      operationGeneration,
+      scope,
+      userId: userIdInput.trim()
+    };
+  }
+
   invalidateRuntime(): void {
     this.runtimeGeneration += 1;
     this.operationGenerations.clear();

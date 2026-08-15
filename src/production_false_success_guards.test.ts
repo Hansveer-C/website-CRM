@@ -137,7 +137,7 @@ describe('production false-success guards', () => {
       expect(source.slice(start, start + 250)).toContain('editorUsesSupabase()');
     }
     const layoutStart = source.indexOf('(window as any).saveWebsiteLayout');
-    expect(source.slice(layoutStart, layoutStart + 1_500)).toContain("client.from('website_layouts').upsert");
+    expect(source.slice(layoutStart, layoutStart + 2_200)).toContain("client.from('website_layouts').upsert");
   });
 
   it('sends one stable request key through both authenticated transport attempts', () => {

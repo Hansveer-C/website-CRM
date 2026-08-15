@@ -8258,6 +8258,10 @@ function renderWebsiteNavigation() {
       renderWebsiteNavigation();
       return;
     }
+    const navigationOperation = currentView === 'website-navigation'
+      ? protectedAsyncOperationGuard.captureCurrent('application-navigation', userId)
+      : null;
+    if (!navigationOperation) { (window as any).showToast('Navigation is unavailable.', 'error'); return; }
     const saveOperation = protectedAsyncOperationGuard.begin(`website-layout-save:${website.id}`, userId);
     (window as any).showToast('Saving navigation layout...', 'saving');
     try {
@@ -8272,14 +8276,18 @@ function renderWebsiteNavigation() {
         if (index >= 0) mockWebsiteLayouts[index] = saved;
         else mockWebsiteLayouts.push(saved);
         websiteLayoutHydrator.state = { status: 'loaded', userId };
-        (window as any).showToast('Navigation updated successfully!', 'success');
-        renderWebsiteNavigation();
       });
       if (!committed) return;
+      if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())
+        || currentView !== 'website-navigation') return;
+      (window as any).showToast('Navigation updated successfully!', 'success');
+      renderWebsiteNavigation();
     } catch (error) {
       if (isSupersededOperationError(error)
         || !protectedAsyncOperationGuard.isCurrent(saveOperation, getActingUserId())
-        || activeDashboardWebsiteId !== website.id) return;
+        || activeDashboardWebsiteId !== website.id
+        || !protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())
+        || currentView !== 'website-navigation') return;
       (window as any).showToast('Navigation could not be saved. Please try again.', 'error');
     }
 };

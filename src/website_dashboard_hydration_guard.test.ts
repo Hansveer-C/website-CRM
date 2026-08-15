@@ -148,6 +148,21 @@ describe('ProtectedAsyncOperationGuard dashboard scope', () => {
     expect(guard.bindCurrent(older, 'user-a')).toBeNull();
     expect(guard.bindCurrent(newer, 'user-a')).not.toBeNull();
   });
+
+  it('captures the current navigation without incrementing it and never revives it after later navigation', () => {
+    const guard = new ProtectedAsyncOperationGuard();
+    const first = guard.beginUnbound('application-navigation');
+    const boundFirst = guard.bindCurrent(first, 'user-a')!;
+    const captured = guard.captureCurrent('application-navigation', 'user-a')!;
+    expect(captured).toEqual(boundFirst);
+    expect(guard.isCurrent(captured, 'user-a')).toBe(true);
+    const second = guard.beginUnbound('application-navigation');
+    guard.bindCurrent(second, 'user-a');
+    expect(guard.isCurrent(captured, 'user-a')).toBe(false);
+    const third = guard.beginUnbound('application-navigation');
+    guard.bindCurrent(third, 'user-a');
+    expect(guard.isCurrent(captured, 'user-a')).toBe(false);
+  });
 });
 
 describe('Website dashboard hydration wiring', () => {
