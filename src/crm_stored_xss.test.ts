@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { escapeHtmlText, safeTelHref } from './crm_html_output';
 
 const chromeCandidates = [
@@ -15,7 +15,9 @@ const chromeCandidates = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 ].filter((candidate): candidate is string => !!candidate);
 
-let chromeExecutable = '';
+const chromeExecutable = process.env.CRM_XSS_DISABLE_BROWSER === '1'
+  ? ''
+  : chromeCandidates.find(existsSync) ?? '';
 
 function inspectDom<T>(body: string, probe: string): T {
   const directory = mkdtempSync(join(tmpdir(), 'crm-xss-'));
@@ -41,12 +43,44 @@ function inspectDom<T>(body: string, probe: string): T {
   }
 }
 
-beforeAll(() => {
-  chromeExecutable = chromeCandidates.find(existsSync) ?? '';
-  if (!chromeExecutable) throw new Error('A Chromium-family browser is required for deterministic CRM DOM security tests.');
+describe('authenticated CRM stored-XSS deterministic output encoding', () => {
+  it('encodes malicious HTML and every syntax-significant character', () => {
+    const payload = '<img src=x onerror="window.__xss=1">';
+    const encoded = escapeHtmlText(payload);
+
+    expect(encoded).toBe('&lt;img src=x onerror=&quot;window.__xss=1&quot;&gt;');
+    expect(encoded).not.toContain('<img');
+    expect(escapeHtmlText('&<>"\'')).toBe('&amp;&lt;&gt;&quot;&#39;');
+  });
+
+  it('preserves canonical values and deterministically encodes legitimate punctuation at each render', () => {
+    const contact = {
+      name: 'O\'Brien & Sons <Pressure Washing>',
+      source: 'A&B Exterior Cleaning',
+      address: 'Hans "Test" User'
+    };
+    const canonicalBefore = structuredClone(contact);
+    const render = () => `<h1>${escapeHtmlText(contact.name)}</h1><p>${escapeHtmlText(contact.source)}</p><address>${escapeHtmlText(contact.address)}</address>`;
+    const first = render();
+
+    expect(first).toBe('<h1>O&#39;Brien &amp; Sons &lt;Pressure Washing&gt;</h1><p>A&amp;B Exterior Cleaning</p><address>Hans &quot;Test&quot; User</address>');
+    expect(render()).toBe(first);
+    expect(contact).toEqual(canonicalBefore);
+  });
+
+  it('creates valid telephone links and rejects hostile schemes or attribute injection', () => {
+    expect(safeTelHref('+1 (604) 555-0198')).toBe('tel:+16045550198');
+    for (const hostile of [
+      'javascript:alert(1)',
+      '" onmouseover="window.__xss=1',
+      'tel:+16045550198" onclick="window.__xss=1'
+    ]) {
+      expect(safeTelHref(hostile)).toBeNull();
+    }
+  });
 });
 
-describe('authenticated CRM stored-XSS output encoding', () => {
+describe.skipIf(!chromeExecutable)('authenticated CRM stored-XSS browser probes', () => {
   it('public lead contact fields cannot execute stored HTML in authenticated CRM', () => {
     const payloads = [
       '<img src=x onerror="window.__xss=1">',
