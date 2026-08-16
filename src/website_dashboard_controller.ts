@@ -34,6 +34,7 @@ export type WebsiteDashboardControllerState =
   | { status: 'idle' }
   | { status: 'loading'; request: WebsiteDashboardLoadRequest }
   | { status: 'selection-required' | 'empty' | 'unavailable'; resolution: ActiveWebsiteResolution }
+  | { status: 'error'; reason: 'repository-failure' }
   | { status: 'ready' | 'partial'; model: WebsiteDashboardModel; websites: readonly Website[]; warning?: string };
 
 export class WebsiteDashboardController {
@@ -130,8 +131,7 @@ export class WebsiteDashboardController {
       return this.state;
     } catch {
       if (generation !== this.generation) return this.state;
-      const resolution: ActiveWebsiteResolution = { status: 'unavailable', reason: 'explicit-website-unavailable', ownedWebsites: [] };
-      this.state = { status: 'unavailable', resolution };
+      this.state = { status: 'error', reason: 'repository-failure' };
       return this.state;
     }
   }

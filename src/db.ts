@@ -101,6 +101,7 @@ export const mockActivities: Activity[] = [
 export const mockQuotes: Quote[] = [
   {
     id: 'q1',
+    user_id: 'system',
     contact_id: 'c2',
     opportunity_id: 'o1',
     status: 'sent',
@@ -113,6 +114,7 @@ export const mockQuotes: Quote[] = [
 export const mockQuoteItems: QuoteItem[] = [
   {
     id: 'qi1',
+    user_id: 'system',
     quote_id: 'q1',
     service_name: 'Driveway Cleaning',
     description: 'High pressure wash for standard 2-car driveway',
@@ -125,6 +127,7 @@ export const mockQuoteItems: QuoteItem[] = [
 export const mockInvoices: Invoice[] = [
   {
     id: 'i1',
+    user_id: 'system',
     contact_id: 'c2',
     quote_id: 'q1',
     status: 'unpaid',

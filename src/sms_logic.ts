@@ -194,12 +194,14 @@ export async function retryMessage(message_id: string, user_id?: string): Promis
   if (msg.status !== 'failed' || !msg.retryable) return { success: false, error: 'Retry not possible' };
 
   const contactRes = await getContact(msg.contact_id, user_id);
-  if (!contactRes.success || !contactRes.data || !contactRes.data.phone) {
+  if (!contactRes.success || !contactRes.data) {
       return { success: false, error: 'Contact/phone missing' };
   }
   const contact = contactRes.data;
+  const phone = contact.phone;
+  if (!phone) return { success: false, error: 'Contact/phone missing' };
 
-  const result = await smsService.sendSMS({ to: contact.phone, message: msg.content, user_id: msg.user_id });
+  const result = await smsService.sendSMS({ to: phone, message: msg.content, user_id: msg.user_id });
   
   if (result.success) {
     await updateMessageStatus(message_id, 'sent', result.provider_message_id, false);

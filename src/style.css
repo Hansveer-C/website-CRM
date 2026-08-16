@@ -4761,3 +4761,38 @@ body.pb-publish-modal-open {
   .website-dashboard-primary-actions, .website-dashboard-primary-actions .website-dashboard-action-wrap, .website-dashboard-primary-actions .website-dashboard-action { width: 100%; }
   .website-dashboard-summary { grid-template-columns: 1fr; }
 }
+
+.application-auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  box-sizing: border-box;
+  background: #f1f5f9;
+}
+.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
+.application-auth-card {
+  width: min(100%, 420px);
+  padding: 36px;
+  border: 1px solid #dbe3ee;
+  border-radius: 16px;
+  box-sizing: border-box;
+  background: #fff;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, .1);
+}
+.application-auth-brand { color: #2563eb; font-size: 1.3rem; font-weight: 850; }
+.application-auth-card h1 { margin: 20px 0 8px; color: #0f172a; font-size: 1.75rem; }
+.application-auth-card p { margin: 0 0 24px; color: #64748b; line-height: 1.55; }
+.application-auth-card form { display: grid; gap: 10px; }
+.application-auth-card label { margin-top: 6px; color: #334155; font-size: .85rem; font-weight: 750; }
+.application-auth-card input { min-height: 44px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; box-sizing: border-box; font: inherit; }
+.application-auth-card input:focus-visible { outline: 3px solid #bfdbfe; border-color: #2563eb; }
+.application-auth-card button { min-height: 44px; margin-top: 10px; }
+.application-auth-error { margin-bottom: 14px; padding: 11px 12px; border-radius: 8px; background: #fef2f2; color: #b91c1c; font-size: .85rem; }
+.application-auth-guidance { margin: 2px 0 0 !important; color: #64748b; font-size: .78rem; }
+.application-auth-switch { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 18px; color: #64748b; font-size: .85rem; }
+.application-auth-link { min-height: auto !important; margin: 0 !important; padding: 4px; border: 0; background: transparent; color: #2563eb; font: inherit; font-weight: 750; cursor: pointer; }
+.application-auth-link:hover { text-decoration: underline; }
+.application-auth-card button:focus-visible { outline: 3px solid #bfdbfe; outline-offset: 2px; }
+.application-auth-card button:disabled { opacity: .6; cursor: wait; }
+.sidebar-sign-out { width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
