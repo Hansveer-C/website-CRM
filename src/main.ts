@@ -143,6 +143,8 @@ import {
 import { resolveEditorRuntime } from './editor_runtime';
 import { WebsiteGenerationClient, WebsiteGenerationClientError, createWebsiteGenerationIdempotencyKey } from './website_generation_client';
 import { isWebsiteGenerationResponse, validateWebsiteGenerationInput, type WebsiteGenerationData } from './website_generation_contract';
+import { WebsiteGenerationAuthority, type WebsiteGenerationAuthorityToken } from './website_generation_authority';
+import { createBuilderSectionId } from './builder_section_id';
 import { createPageSectionRevisionClient, createPageSectionSaveClient } from './page_section_save_client';
 import { BuilderSaveStateController, builderSaveStatusLabel } from './builder_save_state';
 import { BuilderViewTransitionController } from './builder_view_transition';
@@ -594,6 +596,7 @@ const websiteSettingsHydrator = new WebsiteSettingsHydrator(
     mockWebsiteSettings
 );
 const protectedAsyncOperationGuard = new ProtectedAsyncOperationGuard();
+const websiteGenerationAuthority = new WebsiteGenerationAuthority(protectedAsyncOperationGuard);
 if (!editorUsesLocalData()) {
   websiteSettingsHydrator.clear();
   applyPrimaryColor(mockWebsiteSettings.primary_color);
@@ -1895,6 +1898,8 @@ function getActingUserId(): string {
 
 function clearProtectedRuntimeData(): void {
   protectedAsyncOperationGuard.invalidateRuntime();
+  websiteGenerationInFlight = false;
+  lastGeneratedWebsiteData = null;
   crmProductionHydrator.clear();
   websiteLayoutHydrator.clear();
   websiteSettingsHydrator.clear();
@@ -5939,7 +5944,7 @@ function synchronizeBuilderSelectionDom(id: string): void {
 
   builderInsertOrder = null;
 
-  const sectionId = `sec-${Date.now()}`;
+  const sectionId = createBuilderSectionId();
   let newSection: PageSection;
 
   if (isRegisteredBuilderSectionType(component.type)) {
@@ -11617,9 +11622,8 @@ let onboardingState = {
 let websiteGenerationInFlight = false;
 let lastGeneratedWebsiteData: WebsiteGenerationData | null = null;
 
-function reconcileGeneratedWebsite(data: WebsiteGenerationData): void {
+function reconcileGeneratedWebsite(data: WebsiteGenerationData, userId: string): void {
     lastGeneratedWebsiteData = data;
-    const userId = getActingUserId();
     replaceOwnedDashboardRows(mockWebsites, [data.website], userId);
     replaceOwnedDashboardRows(mockFunnels, [data.funnel], userId);
     replaceOwnedDashboardRows(mockPages, [data.page], userId);
@@ -11813,9 +11817,36 @@ function websiteGenerationClient(): WebsiteGenerationClient {
         idempotencyKey = createWebsiteGenerationIdempotencyKey();
         window.sessionStorage.setItem('website_generation_idempotency_key', idempotencyKey);
     }
+    const usesProductionAuthority = editorUsesSupabase();
+    const generationAuthority: WebsiteGenerationAuthorityToken | null = usesProductionAuthority
+        ? websiteGenerationAuthority.begin(getActingUserId(), idempotencyKey)
+        : null;
+    if (usesProductionAuthority && !generationAuthority) {
+        websiteGenerationInFlight = false;
+        if (button) {
+            button.disabled = false;
+            button.setAttribute('aria-disabled', 'false');
+            button.removeAttribute('aria-busy');
+        }
+        if (label) label.textContent = 'Generate My Website';
+        setOnboardingError('Website creation is unavailable. Refresh and try again.');
+        return;
+    }
     try {
         const data = await websiteGenerationClient().generate(validation.data, idempotencyKey);
-        reconcileGeneratedWebsite(data);
+        if (generationAuthority) {
+            const committed = websiteGenerationAuthority.commitGraph(
+                generationAuthority,
+                getActingUserId(),
+                data,
+                () => reconcileGeneratedWebsite(data, generationAuthority.userId)
+            );
+            if (committed === 'stale') return;
+            if (committed === 'invalid') throw new Error('INVALID_GENERATED_WEBSITE_GRAPH');
+            if (!websiteGenerationAuthority.isViewCurrent(generationAuthority, getActingUserId())) return;
+        } else {
+            reconcileGeneratedWebsite(data, getActingUserId());
+        }
         if (browserFixturesEnabled) {
             window.localStorage.setItem('browser_fixture_generated_website', JSON.stringify({ success: true, data }));
         }
@@ -11832,12 +11863,18 @@ function websiteGenerationClient(): WebsiteGenerationClient {
             (window as any).updateGlobalSettings('phone', phone);
         }
     } catch (error) {
+        if (generationAuthority
+            && !websiteGenerationAuthority.isViewCurrent(generationAuthority, getActingUserId())) return;
         const message = error instanceof WebsiteGenerationClientError
             ? error.message
             : 'Website creation failed. Try again.';
         setOnboardingError(`${message} Reference: ${idempotencyKey.slice(-8)}.`);
     } finally {
+        if (generationAuthority
+            && !websiteGenerationAuthority.isOperationCurrent(generationAuthority, getActingUserId())) return;
         websiteGenerationInFlight = false;
+        if (generationAuthority
+            && !websiteGenerationAuthority.isViewCurrent(generationAuthority, getActingUserId())) return;
         if (button) {
             button.disabled = false;
             button.setAttribute('aria-disabled', 'false');
