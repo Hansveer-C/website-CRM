@@ -21,6 +21,8 @@ import { SupabaseBuilderMediaRepository } from './builder_media_repository_supab
 import { createBuilderMediaRuntime } from './builder_media_runtime';
 import { builderDocumentToPageSections, createBuilderDocument, validateBuilderDocument } from './builder_document';
 import type { BuilderDocument } from './builder_document';
+import { resolveBuilderFixtureSectionRoute } from './builder_fixture_section_route';
+import { BuilderPageRevisionAuthority } from './builder_page_revision_authority';
 import {
   BuilderHistoryController,
   BuilderSerializedSaveQueue,
@@ -141,6 +143,13 @@ import {
   sanitizeApplicationReturnRoute
 } from './application_bootstrap';
 import { resolveEditorRuntime } from './editor_runtime';
+import { WebsiteGenerationClient, WebsiteGenerationClientError, createWebsiteGenerationIdempotencyKey } from './website_generation_client';
+import { isWebsiteGenerationResponse, validateWebsiteGenerationInput, type WebsiteGenerationData } from './website_generation_contract';
+import { WebsiteGenerationAuthority, type WebsiteGenerationAuthorityToken } from './website_generation_authority';
+import { createBuilderSectionId } from './builder_section_id';
+import { createPageSectionRevisionClient, createPageSectionSaveClient } from './page_section_save_client';
+import { BuilderSaveStateController, builderSaveStatusLabel } from './builder_save_state';
+import { BuilderViewTransitionController } from './builder_view_transition';
 
 declare global {
   interface Window {
@@ -438,6 +447,8 @@ type BuilderPublicationViteEnvironment = {
     VITE_SUPABASE_URL?: string;
     VITE_SUPABASE_ANON_KEY?: string;
     VITE_SUPABASE_PUBLISHABLE_KEY?: string;
+    VITE_ENABLE_BROWSER_FIXTURES?: string;
+    VITE_BROWSER_FIXTURE_ZERO_WEBSITE?: string;
     PROD?: boolean;
 };
 
@@ -479,6 +490,12 @@ const editorRuntime = resolveEditorRuntime({
     publicationMode: builderPublicationConfiguredMode,
     mediaMode: builderPublicationEnvironment.VITE_BUILDER_MEDIA_PERSISTENCE
 });
+const browserFixturesEnabled = !builderPublicationProduction
+    && builderPublicationEnvironment.VITE_ENABLE_BROWSER_FIXTURES?.trim().toLowerCase() === 'true';
+document.documentElement.dataset.editorRuntime = editorRuntime.success ? editorRuntime.mode : 'unavailable';
+if (!builderPublicationProduction) {
+    console.info(`Editor runtime: ${document.documentElement.dataset.editorRuntime}; browser fixtures: ${browserFixturesEnabled ? 'enabled' : 'disabled'}`);
+}
 let builderPublicationSupabaseClientPromise: Promise<SupabaseClient | null> | undefined;
 
 function getBuilderPublicationSupabaseClient(): Promise<SupabaseClient | null> {
@@ -531,6 +548,30 @@ function removeLocalFixtureRows(): void {
 }
 
 if (!editorUsesLocalData()) removeLocalFixtureRows();
+if (
+    browserFixturesEnabled
+    && builderPublicationEnvironment.VITE_BROWSER_FIXTURE_ZERO_WEBSITE?.trim().toLowerCase() === 'true'
+) {
+    mockPages.splice(0);
+    mockPageSections.splice(0);
+    mockFunnels.splice(0);
+    mockWebsiteLayouts.splice(0);
+    mockWebsites.splice(0);
+    mockWebsiteRoutes.splice(0);
+    try {
+        const stored = JSON.parse(window.localStorage.getItem('browser_fixture_generated_website') || 'null');
+        if (isWebsiteGenerationResponse(stored) && stored.success) {
+            mockWebsites.push({ ...stored.data.website });
+            mockFunnels.push({ ...stored.data.funnel });
+            mockPages.push({ ...stored.data.page });
+            mockWebsiteRoutes.push({ ...stored.data.route });
+            mockPageSections.push(...stored.data.sections.map(section => ({ ...section })));
+            Object.assign(mockWebsiteSettings, stored.data.settings);
+        }
+    } catch {
+        console.warn('Browser fixture website state could not be restored.');
+    }
+}
 
 const applicationAuthController = new ApplicationAuthController({
     mode: editorRuntime.success ? editorRuntime.mode : 'unavailable',
@@ -557,6 +598,7 @@ const websiteSettingsHydrator = new WebsiteSettingsHydrator(
     mockWebsiteSettings
 );
 const protectedAsyncOperationGuard = new ProtectedAsyncOperationGuard();
+const websiteGenerationAuthority = new WebsiteGenerationAuthority(protectedAsyncOperationGuard);
 if (!editorUsesLocalData()) {
   websiteSettingsHydrator.clear();
   applyPrimaryColor(mockWebsiteSettings.primary_color);
@@ -1110,8 +1152,8 @@ async function handleBuilderNewPageBrowserPost(
 
 const originalFetch = window.fetch;
 const browserCallSimulator = createBrowserCallSimulator();
-window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : (input as any).url;
+const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = getBuilderSectionsRequestUrl(input) ?? '';
 
     if (isBuilderPublicationBrowserRequest(input)) {
         try {
@@ -1139,7 +1181,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     if (builderNewPageResponse) return builderNewPageResponse;
     
     if (url.startsWith('/api/')) {
-        const method = init?.method || 'GET';
+        const method = getBuilderSectionsRequestMethod(input, init).toUpperCase();
         const bodyString = init?.body ? (init.body as string) : undefined;
         console.log(`[MOCK INTERCEPTOR] Intercepting ${method} ${url}`);
         
@@ -1433,8 +1475,13 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         }
 
         // ── WB.3.5 Page Sections Auto-Save ──────────────────────────────────
-        if (url.match(/^\/api\/pages\/[^/]+\/sections$/) && method === 'PUT') {
-            const pageId = url.split('/')[3];
+        const literalSectionRoute = resolveBuilderFixtureSectionRoute(url, method, window.location.origin);
+        const historicalSectionRoute = /^\/api\/pages\/([^/?]+)\/(sections|section-save-revision)(?:\?.*)?$/.exec(url);
+        if (literalSectionRoute || (historicalSectionRoute && (method === 'PUT' || method === 'GET'))) {
+            const pageId = literalSectionRoute?.pageId ?? historicalSectionRoute?.[1] ?? null;
+            if (!pageId) {
+                return builderSectionsJsonResponse({ success: false, error: { code: 'INVALID_INPUT', message: 'Page ID is required', request_id: 'fixture', status: 400 } }, 400);
+            }
             let body: any = {};
             try {
                 body = typeof reqContext.body === 'string'
@@ -1443,28 +1490,40 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
             } catch {}
             const sections: any[] = body.sections || [];
 
+            if (literalSectionRoute?.kind === 'revision' || (!literalSectionRoute && method === 'GET')) {
+                const savedSections = mockPageSections.filter(section => section.page_id === pageId);
+                return builderSectionsJsonResponse({ success: true, data: { page_id: pageId, saved_count: savedSections.length, generation: 0, revision: builderPageRevisionAuthority.get(pageId) ?? 0, document_hash: 'fixture-current', request_id: 'fixture' } }, 200);
+            }
+
+            const requestedFixtureFailures = Number((window as any).__builderFixtureSaveFailureCount ?? 0);
+            if (requestedFixtureFailures > 0) {
+                (window as any).__builderFixtureSaveFailureCount = requestedFixtureFailures - 1;
+                return builderSectionsJsonResponse({ success: false, error: { code: 'SUPABASE_UNAVAILABLE', message: 'Fixture save outage', request_id: 'fixture-failure', status: 503 } }, 503);
+            }
+
             const hasSupabase = editorUsesSupabase();
             const reqUser = getActingUserId() || reqContext.user?.id || '';
 
             if (!hasSupabase) {
                 if (!editorUsesLocalData()) {
-                    return builderSectionsJsonResponse({ success: false, error: 'Section persistence unavailable' }, 503);
+                    return builderSectionsJsonResponse({ success: false, error: { code: 'SUPABASE_UNAVAILABLE', message: 'Section persistence unavailable', request_id: 'fixture', status: 503 } }, 503);
                 }
                 const page = mockPages.find(item => item.id === pageId && item.user_id === reqUser);
                 if (!page || sections.some(section => section.page_id !== pageId)) {
-                    return builderSectionsJsonResponse({ success: false, error: 'Page not found' }, 404);
+                    return builderSectionsJsonResponse({ success: false, error: { code: 'PAGE_NOT_FOUND', message: 'Page not found', request_id: 'fixture', status: 404 } }, 404);
                 }
                 const replacement = orderedBuilderPageSections(sections).map(section => structuredClone(section));
                 try {
                     window.localStorage.setItem(`mock_sections_${reqUser}:${pageId}`, JSON.stringify(replacement));
                 } catch {
-                    return builderSectionsJsonResponse({ success: false, error: 'LOCAL_SECTION_STORAGE_WRITE_FAILED' }, 500);
+                    return builderSectionsJsonResponse({ success: false, error: { code: 'TRANSACTION_FAILED', message: 'Local fixture write failed', request_id: 'fixture', status: 500 } }, 500);
                 }
                 for (let index = mockPageSections.length - 1; index >= 0; index -= 1) {
                     if (mockPageSections[index].page_id === pageId) mockPageSections.splice(index, 1);
                 }
                 mockPageSections.push(...replacement);
-                return builderSectionsJsonResponse({ success: true, saved: replacement.length }, 200);
+                const revision = (Number.isSafeInteger(body.expected_revision) ? body.expected_revision : 0) + 1;
+                return builderSectionsJsonResponse({ success: true, data: { page_id: pageId, saved_count: replacement.length, generation: body.generation, revision, document_hash: `fixture-${revision}`, request_id: 'fixture' } }, 200);
             }
 
             // Upsert sections to Supabase
@@ -1673,6 +1732,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     return originalFetch(input, init);
 };
 
+if (browserFixturesEnabled) window.fetch = browserFixtureFetch;
+
 (window as any).EventLogs = getEvents();
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
@@ -1844,6 +1905,8 @@ function getActingUserId(): string {
 
 function clearProtectedRuntimeData(): void {
   protectedAsyncOperationGuard.invalidateRuntime();
+  websiteGenerationInFlight = false;
+  lastGeneratedWebsiteData = null;
   crmProductionHydrator.clear();
   websiteLayoutHydrator.clear();
   websiteSettingsHydrator.clear();
@@ -2603,8 +2666,37 @@ async function renderClients() {
   }
 };
 
-let isAutoSaving = false;
 let autoSaveTimeout: any;
+const builderSaveState = new BuilderSaveStateController();
+const builderPageRevisionAuthority = new BuilderPageRevisionAuthority();
+const builderViewTransitions = new BuilderViewTransitionController();
+
+function renderBuilderAutosaveIndicator(): void {
+  const indicator = document.getElementById('pb-autosave-indicator');
+  if (!indicator) return;
+  const status = builderSaveState.status;
+  const color = status === 'saved' ? '#10b981'
+    : status === 'saving' ? '#fbbf24'
+      : status === 'dirty' ? '#f97316'
+        : '#ef4444';
+  const recovery = status === 'failed'
+    ? ` <button type="button" class="pb-autosave-retry" onclick="window.retryBuilderAutosave()">Retry</button>`
+    : status === 'conflict'
+      ? ` <button type="button" class="pb-autosave-retry" onclick="window.reloadBuilderAfterConflict()">Reload page</button>`
+      : '';
+  indicator.innerHTML = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};box-shadow:0 0 8px ${color};"></span> ${builderSaveStatusLabel(status)}${recovery}`;
+}
+
+(window as any).reloadBuilderAfterConflict = () => window.location.reload();
+
+(window as any).retryBuilderAutosave = () => {
+  if (builderPageRevisionAuthority.requiresReload(builderPageId)) {
+    (window as any).reloadBuilderAfterConflict();
+    return;
+  }
+  builderSaveState.markDirty();
+  (window as any).triggerAutoSave();
+};
 
 type BuilderPublicationDisplayStatus = {
   label: 'Never published' | 'Published' | 'Unpublished changes' | 'Checking…' | 'Status unavailable';
@@ -2652,6 +2744,11 @@ function initializeBuilderHistory(pageId: string): BuilderHistoryController | nu
       selectedSectionId: builderSelectedSectionId,
       viewport: builderViewport
     });
+    if (builderPageRevisionAuthority.requiresReload(pageId)) {
+      builderSaveState.requireReloadForConflict();
+    } else {
+      builderSaveState.resetSaved();
+    }
     return builderHistoryController;
   } catch {
     console.error('[Builder] Current page data could not initialize undo history.');
@@ -2722,6 +2819,7 @@ function applyLiveBuilderMutation(
   }
 
   syncBuilderDocumentToPageSections(history.document);
+  builderSaveState.markDirty();
   builderSelectedSectionId = history.selectedSectionId;
   builderViewport = history.viewport;
   if (options.autosave !== false) (window as any).triggerAutoSave();
@@ -3096,11 +3194,9 @@ async function flushBuilderAutosaveForPublication(): Promise<boolean> {
     clearTimeout(autoSaveTimeout);
     autoSaveTimeout = undefined;
   }
-  isAutoSaving = true;
   const indicator = document.getElementById('pb-autosave-indicator');
   if (indicator) indicator.textContent = 'Saving…';
   const saved = await (window as any).savePageSections();
-  isAutoSaving = false;
   if (indicator) indicator.textContent = saved ? 'Saved' : 'Save failed';
   updateBuilderPublicationStatusBadge();
   return saved === true;
@@ -3471,33 +3567,21 @@ function renderBuilderPublishModal(
 
 // WB.3.5 — Auto-save: debounced 600ms, then persists via API
 (window as any).triggerAutoSave = () => {
-  isAutoSaving = true;
-
-  // Update header indicator immediately
-  const indicator = document.getElementById('pb-autosave-indicator');
-  if (indicator) {
-    indicator.innerHTML = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ffc107;box-shadow:0 0 5px #ffc107;animation:pb-pulse 1s infinite;"></span> Saving…`;
-  }
+  builderSaveState.markDirty();
+  renderBuilderAutosaveIndicator();
 
   clearTimeout(autoSaveTimeout);
   autoSaveTimeout = setTimeout(async () => {
     autoSaveTimeout = undefined;
     // Persist to Supabase via internal API
-    let saved = false;
     try {
-      saved = await (window as any).savePageSections() === true;
-    } catch (err) {
-      console.warn('[AutoSave] Persist failed silently:', err);
+      await (window as any).savePageSections();
+    } catch {
+      console.warn(`[AutoSave] SECTION_SAVE_FAILED code=NETWORK_FAILURE status=0 pageId=${builderPageId} requestId=client`);
     }
-    isAutoSaving = false;
     const page = mockPages.find((p: any) => p.id === builderPageId);
     if (page) (page as any).updated_at = new Date().toISOString();
-    const ind = document.getElementById('pb-autosave-indicator');
-    if (ind) {
-      ind.innerHTML = saved
-        ? `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#22c55e;"></span> Saved`
-        : `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ef4444;"></span> Save failed`;
-    }
+    renderBuilderAutosaveIndicator();
     updateBuilderPublicationStatusBadge();
   }, 600); // 600ms debounce — within the 300–800ms WB.3.5 spec
 };
@@ -3553,14 +3637,7 @@ let builderMode: 'edit' | 'preview' = 'edit';
 (window as any).redoBuilder = () => applyBuilderHistoryTransition('redo');
 
 function renderBuilder() {
-  if (!(document as any).startViewTransition) {
-    _renderBuilder();
-    return;
-  }
-  const transition = (document as any).startViewTransition(() => {
-    _renderBuilder();
-  });
-  void transition?.finished?.catch(() => undefined);
+  builderViewTransitions.render(document as any, _renderBuilder);
 }
 
 const hydratedBuilderSectionPageIds = new Set<string>();
@@ -3799,8 +3876,8 @@ function renderBuilderInspectorPanel(sections: PageSection[]): string {
     return `
       <aside class="pb-inspector-panel">
         <div class="pb-inspector-empty">
-          <h3>Custom section</h3>
-          <p>This section can still be edited using its existing on-page controls.</p>
+          <h3>Legacy section</h3>
+          <p>This section is preserved losslessly and is read-only in the current Builder.</p>
         </div>
       </aside>
     `;
@@ -4104,6 +4181,7 @@ function renderBuilderLayersPanel(sections: PageSection[]): string {
               <button
                 type="button"
                 class="pb-layer-main"
+                data-builder-section-id="${escapeBuilderInspectorHtml(section.id)}"
                 onclick='window.selectSectionForBuilder(${sectionArg}, true)'
                 ${isSelected ? 'aria-current="true"' : ''}
                 aria-label="Select ${safeAccessibleSectionLabel}"
@@ -4186,7 +4264,6 @@ async function flushActiveBuilderBeforeNewPage(): Promise<boolean> {
     clearTimeout(autoSaveTimeout);
     autoSaveTimeout = undefined;
     await (window as any).savePageSections();
-    isAutoSaving = false;
   }
   await builderSaveQueue.whenIdle();
   return true;
@@ -5131,8 +5208,9 @@ function _renderBuilder() {
 
         <div style="display: flex; align-items: center; gap: 15px;">
            <span id="pb-autosave-indicator" style="font-size: 0.75rem; color: #666; font-weight: 600; display: flex; align-items: center; gap: 8px;">
-            <span style="width: 7px; height: 7px; border-radius: 50%; background: ${isAutoSaving ? '#fbbf24' : history?.isDirty ? '#f97316' : '#10b981'}; box-shadow: 0 0 8px ${isAutoSaving ? '#fbbf24' : history?.isDirty ? '#f97316' : '#10b981'};"></span>
-            ${isAutoSaving ? 'Auto-saving...' : history?.isDirty ? 'Unsaved' : 'Cloud Saved'}
+            <span style="width: 7px; height: 7px; border-radius: 50%; background: ${builderSaveState.status === 'saved' ? '#10b981' : builderSaveState.status === 'saving' ? '#fbbf24' : builderSaveState.status === 'dirty' ? '#f97316' : '#ef4444'};"></span>
+            ${builderSaveStatusLabel(builderSaveState.status)}
+            ${builderSaveState.status === 'failed' ? `<button type="button" class="pb-autosave-retry" onclick="window.retryBuilderAutosave()">Retry</button>` : builderSaveState.status === 'conflict' ? `<button type="button" class="pb-autosave-retry" onclick="window.reloadBuilderAfterConflict()">Reload page</button>` : ''}
           </span>
           ${builderMode === 'edit' ? `
           <div class="pb-publication-control">
@@ -5254,7 +5332,13 @@ function _renderBuilder() {
                 ` : ''}
                 ${!isInitial ? `
                   <div id="sec-preview-${escapeBuilderInspectorHtml(section.id)}" class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''} ${section.styles?.visible === false ? 'pb-section--hidden' : ''}"
-                       onclick="${builderMode === 'edit' ? `window.selectSectionForBuilder('${section.id}')` : ''}"
+                       data-builder-section-id="${escapeBuilderInspectorHtml(section.id)}"
+                       role="${builderMode === 'edit' ? 'button' : 'region'}"
+                       tabindex="${builderMode === 'edit' ? '0' : '-1'}"
+                       aria-label="${escapeBuilderInspectorHtml(`${section.type} section`)}"
+                       aria-selected="${builderSelectedSectionId === section.id}"
+                       onclick="${builderMode === 'edit' ? `window.handleBuilderCanvasSectionClick(event, '${section.id}')` : ''}"
+                       onkeydown="${builderMode === 'edit' ? `window.handleBuilderCanvasSectionKeydown(event, '${section.id}')` : ''}"
                        style="position: relative; border: 2px solid transparent; transition: border-color 0.2s; background: white; cursor: ${builderMode === 'edit' ? 'pointer' : 'default'};">
                       
                       ${builderMode === 'edit' ? `
@@ -5385,7 +5469,7 @@ function inlineText(sectionId: string, field: string, value: string, extraStyle:
     data-section-id="${sectionId}"
     data-field="${field}"
     style="${extraStyle} ${canEdit ? '' : 'pointer-events: none;'}"
-    onclick="event.stopPropagation()"
+    onclick="window.handleBuilderCanvasSectionClick(event, '${sectionId}');event.stopPropagation()"
     oninput="window.saveInlineEdit('${sectionId}', '${field}', this)"
     onblur="window.saveInlineEdit('${sectionId}', '${field}', this);window.finishBuilderFieldEdit()"
     onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.blur();}"
@@ -5650,8 +5734,8 @@ function renderSectionPreviewContent(section: any) {
     }
     default:
       return `<div style="padding: 60px; background: #fff; border-radius: 20px; border: 2px dashed #eee; text-align: center; color: #999;">
-                <strong style="color: #666; font-size: 1.1rem;">LEGACY SECTION: ${section.type.toUpperCase()}</strong><br>
-                <p style="margin-top: 10px; font-size: 0.9rem;">This section will not appear on the live site.</p>
+                <strong style="color: #666; font-size: 1.1rem;">LEGACY SECTION: ${escapeBuilderInspectorHtml(String(section.type).toUpperCase())}</strong><br>
+                <p style="margin-top: 10px; font-size: 0.9rem;">This section is preserved and is read-only in the current Builder.</p>
               </div>`;
   }
 }
@@ -5729,7 +5813,6 @@ function renderSectionPreviewContent(section: any) {
     autoSaveTimeout = undefined;
     const previousPage = mockPages.find(page => page.id === builderPageId);
     await (window as any).savePageSections();
-    isAutoSaving = false;
     if (previousPage) (previousPage as any).updated_at = new Date().toISOString();
   }
 
@@ -5774,9 +5857,29 @@ function renderSectionPreviewContent(section: any) {
   renderBuilder();
 };
 
-(window as any).selectSectionForBuilder = (id: string, shouldScroll = false) => {
+function synchronizeBuilderSelectionDom(id: string): void {
+  document.querySelectorAll<HTMLElement>('.pb-section-preview[data-builder-section-id]').forEach(section => {
+    const selected = section.dataset.builderSectionId === id;
+    section.classList.toggle('active', selected);
+    section.setAttribute('aria-selected', String(selected));
+  });
+  document.querySelectorAll<HTMLElement>('.pb-layer-row').forEach(row => {
+    const button = row.querySelector<HTMLButtonElement>('.pb-layer-main');
+    const selected = button?.dataset.builderSectionId === id;
+    row.classList.toggle('active', selected);
+    if (button) {
+      if (selected) button.setAttribute('aria-current', 'true');
+      else button.removeAttribute('aria-current');
+    }
+  });
+  const inspector = document.querySelector<HTMLElement>('.pb-inspector-panel');
   const history = getBuilderHistoryController();
-  history?.selectSection(id);
+  if (inspector && history) inspector.outerHTML = renderBuilderInspectorPanel(builderDocumentToPageSections(history.document));
+}
+
+(window as any).selectSectionForBuilder = (id: string, shouldScroll = false, preserveCanvasInteraction = false) => {
+  const history = getBuilderHistoryController();
+  const changed = history?.selectSection(id) ?? builderSelectedSectionId !== id;
   builderSelectedSectionId = history?.selectedSectionId ?? id;
   builderInsertOrder = null;
   persistBuilderContext({
@@ -5786,7 +5889,10 @@ function renderSectionPreviewContent(section: any) {
     returnTo: builderReturnTo,
     funnelId: builderReturnFunnelId
   });
-  renderBuilder();
+  if (changed) {
+    if (preserveCanvasInteraction) synchronizeBuilderSelectionDom(id);
+    else renderBuilder();
+  }
   if (shouldScroll) {
     setTimeout(() => {
       document.getElementById(`sec-preview-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -5857,7 +5963,7 @@ function renderSectionPreviewContent(section: any) {
 
   builderInsertOrder = null;
 
-  const sectionId = `sec-${Date.now()}`;
+  const sectionId = createBuilderSectionId();
   let newSection: PageSection;
 
   if (isRegisteredBuilderSectionType(component.type)) {
@@ -6100,7 +6206,22 @@ function renderSectionPreviewContent(section: any) {
   }, ttl);
 };
 
-// ── WB.3.5 savePageSections — persists current page sections to Supabase via API
+async function getBuilderSaveAccessToken(): Promise<string | null> {
+  if (browserFixturesEnabled) return 'browser-fixture-session';
+  const client = await getBuilderPublicationSupabaseClient();
+  if (!client) return null;
+  const session = await client.auth.getSession();
+  return session.data.session?.access_token ?? null;
+}
+
+const persistPageSectionDocument = createPageSectionSaveClient({
+  getAccessToken: getBuilderSaveAccessToken
+});
+const fetchPageSectionRevision = createPageSectionRevisionClient({
+  getAccessToken: getBuilderSaveAccessToken
+});
+
+// ── WB.3.5 savePageSections — authenticated production API + transactional RPC
 (window as any).savePageSections = async () => {
   const history = getBuilderHistoryController();
   const saveSnapshot = history?.createSaveSnapshot();
@@ -6116,31 +6237,56 @@ function renderSectionPreviewContent(section: any) {
 
   const queuedSave = builderSaveQueue.enqueue(async () => {
     if (!protectedAsyncOperationGuard.isCurrent(saveOperation, getActingUserId())) return false;
-    let succeeded = false;
-    try {
-      const res = await fetch(`/api/pages/${pageId}/sections`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json',
-                   'Authorization': `Bearer ${(window as any).__authToken ?? ''}` },
-        body: JSON.stringify({ sections })
-      });
-      const data = await res.json();
-      succeeded = data.success === true;
-      if (!succeeded) {
-        console.warn('[AutoSave] Section persist failed:', data.error);
-      }
-    } catch (err) {
-      console.warn('[AutoSave] Fetch error:', err);
+    const generation = saveSnapshot?.generation ?? 1;
+    if (builderPageRevisionAuthority.requiresReload(pageId)) {
+      if (history && saveSnapshot) history.acknowledgeSave(saveSnapshot.generation, false);
+      builderSaveState.requireReloadForConflict();
+      renderBuilderAutosaveIndicator();
+      return false;
     }
+    builderSaveState.begin(generation);
+    renderBuilderAutosaveIndicator();
+    if (!builderPageRevisionAuthority.has(pageId)) {
+      const revisionResult = await fetchPageSectionRevision(pageId);
+      if (!protectedAsyncOperationGuard.isCurrent(saveOperation, getActingUserId())) return false;
+      if (!revisionResult.success) {
+        if (history && saveSnapshot) history.acknowledgeSave(saveSnapshot.generation, false);
+        builderSaveState.complete(generation, { success: false, code: revisionResult.error.code }, true);
+        console.warn(`[AutoSave] SECTION_SAVE_FAILED code=${revisionResult.error.code} status=${revisionResult.error.status} pageId=${pageId} requestId=${revisionResult.error.request_id}`);
+        renderBuilderAutosaveIndicator();
+        return false;
+      }
+      builderPageRevisionAuthority.accept(pageId, revisionResult.data.revision);
+    }
+    const result = await persistPageSectionDocument(pageId, {
+      generation,
+      expected_revision: builderPageRevisionAuthority.get(pageId) ?? null,
+      sections
+    });
+    const succeeded = result.success;
 
     if (!protectedAsyncOperationGuard.isCurrent(saveOperation, getActingUserId())) return false;
     if (history && saveSnapshot) {
-      history.acknowledgeSave(saveSnapshot.generation, succeeded);
+      const acknowledgement = history.acknowledgeSave(saveSnapshot.generation, succeeded);
+      builderSaveState.complete(
+        saveSnapshot.generation,
+        result.success ? { success: true } : { success: false, code: result.error.code },
+        acknowledgement.isDirty
+      );
       if (history === builderHistoryController && history.pageId === builderPageId) {
         updateBuilderHistoryControls();
       }
+    } else {
+      builderSaveState.complete(generation, result.success ? { success: true } : { success: false, code: result.error.code }, false);
     }
-    if (succeeded) (window as any).showToast('Saved ✓', 'success');
+    if (result.success) {
+      builderPageRevisionAuthority.accept(pageId, result.data.revision);
+      if (builderSaveState.status === 'saved') (window as any).showToast('Saved ✓', 'success');
+    } else {
+      if (result.error.code === 'CONFLICT') builderPageRevisionAuthority.invalidateAfterConflict(pageId);
+      console.warn(`[AutoSave] SECTION_SAVE_FAILED code=${result.error.code} status=${result.error.status} pageId=${pageId} requestId=${result.error.request_id}`);
+    }
+    renderBuilderAutosaveIndicator();
     return succeeded;
   });
   return queuedSave;
@@ -9339,6 +9485,21 @@ function renderApplicationLogin(
   await bootRouter();
 };
 
+(window as any).handleBuilderCanvasSectionClick = (event: MouseEvent, id: string) => {
+  if (!(event.currentTarget instanceof HTMLElement)) return;
+  const section = event.currentTarget.closest<HTMLElement>('.pb-section-preview[data-builder-section-id]');
+  if (section?.dataset.builderSectionId !== id) return;
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  const preserveInteraction = Boolean(target?.closest('input, textarea, select, button, a, label, [contenteditable="true"]'));
+  (window as any).selectSectionForBuilder(id, false, preserveInteraction);
+};
+
+(window as any).handleBuilderCanvasSectionKeydown = (event: KeyboardEvent, id: string) => {
+  if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
+  event.preventDefault();
+  (window as any).selectSectionForBuilder(id);
+};
+
 (window as any).signOutApplication = async () => {
   applicationAuthFormSubmissionInProgress = true;
   const success = await applicationAuthController.signOut();
@@ -9587,7 +9748,7 @@ async function renderWebsiteDashboard(force = false) {
   }
   if (state.status === 'empty' || state.status === 'unavailable') {
     const empty = state.status === 'empty';
-    app.innerHTML = `${renderSidebar('website-dashboard')}<main class="main-content website-dashboard"><header class="view-header"><h1>Website Dashboard</h1></header><section class="card website-dashboard-state" role="${empty ? 'status' : 'alert'}"><h2>${empty ? 'No website has been set up for this account yet.' : 'This website is not available.'}</h2><p>${empty ? 'Use the existing website setup workflow when you are ready.' : 'Check your access or choose another owned website.'}</p><button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Retry</button></section></main>`;
+    app.innerHTML = `${renderSidebar('website-dashboard')}<main class="main-content website-dashboard"><header class="view-header"><h1>Website Dashboard</h1></header><section class="card website-dashboard-state" role="${empty ? 'status' : 'alert'}"><h2>${empty ? 'Create your first website.' : 'This website is not available.'}</h2><p>${empty ? 'Add your business details and we will create an editable homepage and site structure.' : 'Check your access or choose another owned website.'}</p>${empty ? '<button type="button" class="btn-primary" onclick="window.showOnboardingModal()">Create your website</button>' : ''}<button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Retry</button></section></main>`;
     return;
   }
   if (state.status !== 'ready' && state.status !== 'partial') return;
@@ -11484,9 +11645,54 @@ let onboardingState = {
     city: '', 
     services: [] as string[] 
 };
+let websiteGenerationInFlight = false;
+let lastGeneratedWebsiteData: WebsiteGenerationData | null = null;
+
+function reconcileGeneratedWebsite(data: WebsiteGenerationData, userId: string): void {
+    lastGeneratedWebsiteData = data;
+    replaceOwnedDashboardRows(mockWebsites, [data.website], userId);
+    replaceOwnedDashboardRows(mockFunnels, [data.funnel], userId);
+    replaceOwnedDashboardRows(mockPages, [data.page], userId);
+    for (let index = mockWebsiteRoutes.length - 1; index >= 0; index -= 1) {
+        if (mockWebsiteRoutes[index].website_id === data.website.id) mockWebsiteRoutes.splice(index, 1);
+    }
+    mockWebsiteRoutes.push({ ...data.route });
+    for (let index = mockPageSections.length - 1; index >= 0; index -= 1) {
+        if (mockPageSections[index].page_id === data.page.id) mockPageSections.splice(index, 1);
+    }
+    mockPageSections.push(...data.sections.map(section => ({ ...section })));
+    Object.assign(mockWebsiteSettings, data.settings);
+    activeDashboardWebsiteId = data.website.id;
+}
+
+function setOnboardingError(message: string): void {
+    const region = document.getElementById('onboarding-error');
+    if (region) {
+        region.textContent = message;
+        region.hidden = !message;
+    }
+}
+
+function websiteGenerationClient(): WebsiteGenerationClient {
+    return new WebsiteGenerationClient({
+        auth: {
+            getAccessToken: async () => {
+                if (browserFixturesEnabled && editorUsesLocalData()) return 'local-browser-fixture-token';
+                const client = await getBuilderPublicationSupabaseClient();
+                if (!client) return null;
+                const session = await client.auth.getSession();
+                return session.data.session?.access_token ?? null;
+            }
+        }
+    });
+}
 
 (window as any).showOnboardingModal = () => {
-    if (document.getElementById('website-onboarding-modal')) return;
+    const existingModal = document.getElementById('website-onboarding-modal');
+    if (existingModal) {
+        (existingModal.querySelector('#ob-business-name') as HTMLInputElement | null)?.focus();
+        return;
+    }
     // Reset state
     onboardingState = { 
         businessName: '', 
@@ -11506,41 +11712,41 @@ let onboardingState = {
     
     const modal = document.createElement('div');
     modal.id = 'website-onboarding-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', 'onboarding-title');
     modal.innerHTML = `
         <div id="onboarding-backdrop"></div>
         <div class="onboarding-card">
-            <h1 class="onboarding-title">Let's build your site</h1>
+            <h1 class="onboarding-title" id="onboarding-title">Let's build your site</h1>
             <p class="onboarding-subtitle">Tell us about your business to generate your premium website.</p>
             
             <div id="onboarding-form-container">
                 <div class="onboarding-form-group">
                     <label for="ob-business-name">Business Name</label>
-                    <input type="text" id="ob-business-name" class="onboarding-input" placeholder="e.g. PressurePro Cleaning" value="${onboardingState.businessName}" required>
+                    <input type="text" id="ob-business-name" class="onboarding-input" maxlength="120" placeholder="e.g. PressurePro Cleaning" value="${escapeBuilderInspectorHtml(onboardingState.businessName)}" required>
                 </div>
                 
                 <div class="onboarding-form-group">
                     <label for="ob-city">Service City</label>
-                    <input type="text" id="ob-city" class="onboarding-input" placeholder="e.g. Austin, TX" value="${onboardingState.city}" required>
+                    <input type="text" id="ob-city" class="onboarding-input" maxlength="120" placeholder="e.g. Austin, TX" value="${escapeBuilderInspectorHtml(onboardingState.city)}" required>
                 </div>
                 
                 <div class="onboarding-form-group">
                     <label for="ob-phone">Phone Number</label>
-                    <input type="tel" id="ob-phone" class="onboarding-input" placeholder="e.g. (555) 000-0000" value="${onboardingState.phone}" required>
+                    <input type="tel" id="ob-phone" class="onboarding-input" maxlength="40" placeholder="e.g. (555) 000-0000" value="${escapeBuilderInspectorHtml(onboardingState.phone)}" required>
                 </div>
                 
                 <div class="onboarding-form-group">
                     <label>Services Offered (Multi-select)</label>
                     <div class="services-grid">
-                        <div class="service-chip ${onboardingState.services.includes('Driveway Cleaning') ? 'selected' : ''}" onclick="window.toggleOnboardingService(this, 'Driveway Cleaning')">Driveway Cleaning</div>
-                        <div class="service-chip ${onboardingState.services.includes('House Washing') ? 'selected' : ''}" onclick="window.toggleOnboardingService(this, 'House Washing')">House Washing</div>
-                        <div class="service-chip ${onboardingState.services.includes('Patio Cleaning') ? 'selected' : ''}" onclick="window.toggleOnboardingService(this, 'Patio Cleaning')">Patio Cleaning</div>
-                        <div class="service-chip ${onboardingState.services.includes('Other') ? 'selected' : ''}" onclick="window.toggleOnboardingService(this, 'Other')">Other</div>
+                        ${['Driveway Cleaning', 'House Washing', 'Patio Cleaning', 'Other'].map(service => `<button type="button" class="service-chip ${onboardingState.services.includes(service) ? 'selected' : ''}" aria-pressed="${onboardingState.services.includes(service)}" onclick="window.toggleOnboardingService(this, '${service}')">${service}</button>`).join('')}
                     </div>
                 </div>
-                
+                <div id="onboarding-error" class="onboarding-error" role="alert" aria-live="assertive" hidden></div>
                 <div class="onboarding-footer">
-                    <button class="btn-primary btn-onboarding" onclick="window.submitWebsiteOnboarding()">
-                        Generate My Website
+                    <button type="button" id="onboarding-submit" class="btn-primary btn-onboarding" onclick="window.submitWebsiteOnboarding()">
+                        <span id="onboarding-submit-label">Generate My Website</span>
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-7-7 7 7-7 7"/></svg>
                     </button>
                     <p style="font-size: 0.8rem; color: #94a3b8; text-align: center;">By continuing, you agree to our terms of service.</p>
@@ -11553,8 +11759,8 @@ let onboardingState = {
                 <p class="onboarding-subtitle" style="margin-bottom: 32px;">We've generated your full funnel structure and local SEO pages. You're ready to start receiving leads.</p>
                 
                 <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 24px;">
-                    <button class="btn-primary" style="width: 100%; padding: 18px; font-weight: 600;" onclick="window.location.href='/'">
-                        View Site
+                    <button class="btn-primary" style="width: 100%; padding: 18px; font-weight: 600;" onclick="window.openGeneratedHomepage()">
+                        Edit Homepage
                     </button>
                     <button class="btn-secondary" style="width: 100%; padding: 18px; border: 1px solid #e2e8f0; background: white; font-weight: 600;" onclick="window.showWebsiteDashboard()">
                         Manage Website
@@ -11570,10 +11776,24 @@ let onboardingState = {
 };
 
 (window as any).showWebsiteDashboard = () => {
-    (window as any).navigateTo('website-structure');
+    document.getElementById('website-onboarding-modal')?.remove();
+    (window as any).navigateTo('website-dashboard');
+};
+
+(window as any).openGeneratedHomepage = () => {
+    if (!lastGeneratedWebsiteData) return;
+    document.getElementById('website-onboarding-modal')?.remove();
+    void (window as any).navigateTo('builder', undefined, {
+        builderContext: {
+            websiteId: lastGeneratedWebsiteData.website.id,
+            pageId: lastGeneratedWebsiteData.page.id,
+            action: 'edit'
+        }
+    });
 };
 
 (window as any).toggleOnboardingService = (el: HTMLElement, service: string) => {
+    if (websiteGenerationInFlight) return;
     const index = onboardingState.services.indexOf(service);
     if (index > -1) {
         onboardingState.services.splice(index, 1);
@@ -11582,69 +11802,112 @@ let onboardingState = {
         onboardingState.services.push(service);
         el.classList.add('selected');
     }
+    el.setAttribute('aria-pressed', String(el.classList.contains('selected')));
     // Update temp storage as we change chips
     window.sessionStorage.setItem('onboarding_capture', JSON.stringify(onboardingState));
 };
 
-(window as any).submitWebsiteOnboarding = () => {
+(window as any).submitWebsiteOnboarding = async () => {
+    if (websiteGenerationInFlight) return;
     const name = (document.getElementById('ob-business-name') as HTMLInputElement).value;
     const city = (document.getElementById('ob-city') as HTMLInputElement).value;
     const phone = (document.getElementById('ob-phone') as HTMLInputElement).value;
     
-    if (!name || !city || !phone) {
-        (window as any).showToast('Please fill in all required fields.', 'error');
-        return;
-    }
-    
-    if (onboardingState.services.length === 0) {
-        (window as any).showToast('Please select at least one service.', 'error');
-        return;
-    }
-    
-    // Update state
     onboardingState.businessName = name;
     onboardingState.city = city;
     onboardingState.phone = phone;
     
-    console.log('[ONBOARDING] Data captured:', onboardingState);
-    
-    // Store temporarily in session/onboarding state
     window.sessionStorage.setItem('onboarding_capture', JSON.stringify(onboardingState));
-
-    // Phase W2.2 Integration: Generate full website + funnels from inputs
-    (window as any).showToast('Generating your premium website...', 'info');
-    
-    fetch('/api/websites/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            business_name: onboardingState.businessName,
-            phone_number: onboardingState.phone,
-            city: onboardingState.city,
-            services: onboardingState.services
-        })
-    }).then(r => r.json())
-    .then(result => {
-        if (!result.success) throw new Error(result.error);
-        
-        console.log('[ONBOARDING] Website generated:', result.data);
+    const validation = validateWebsiteGenerationInput({
+        business_name: onboardingState.businessName,
+        phone_number: onboardingState.phone,
+        city: onboardingState.city,
+        services: onboardingState.services
+    });
+    if (!validation.success) {
+        setOnboardingError(Object.values(validation.fields)[0] ?? 'Check the form and try again.');
+        return;
+    }
+    const button = document.getElementById('onboarding-submit') as HTMLButtonElement | null;
+    const label = document.getElementById('onboarding-submit-label');
+    websiteGenerationInFlight = true;
+    if (button) {
+        button.disabled = true;
+        button.setAttribute('aria-disabled', 'true');
+        button.setAttribute('aria-busy', 'true');
+    }
+    if (label) label.textContent = 'Creating your website…';
+    setOnboardingError('');
+    let idempotencyKey = window.sessionStorage.getItem('website_generation_idempotency_key');
+    if (!idempotencyKey) {
+        idempotencyKey = createWebsiteGenerationIdempotencyKey();
+        window.sessionStorage.setItem('website_generation_idempotency_key', idempotencyKey);
+    }
+    const usesProductionAuthority = editorUsesSupabase();
+    const generationAuthority: WebsiteGenerationAuthorityToken | null = usesProductionAuthority
+        ? websiteGenerationAuthority.begin(getActingUserId(), idempotencyKey)
+        : null;
+    if (usesProductionAuthority && !generationAuthority) {
+        websiteGenerationInFlight = false;
+        if (button) {
+            button.disabled = false;
+            button.setAttribute('aria-disabled', 'false');
+            button.removeAttribute('aria-busy');
+        }
+        if (label) label.textContent = 'Generate My Website';
+        setOnboardingError('Website creation is unavailable. Refresh and try again.');
+        return;
+    }
+    try {
+        const data = await websiteGenerationClient().generate(validation.data, idempotencyKey);
+        if (generationAuthority) {
+            const committed = websiteGenerationAuthority.commitGraph(
+                generationAuthority,
+                getActingUserId(),
+                data,
+                () => reconcileGeneratedWebsite(data, generationAuthority.userId)
+            );
+            if (committed === 'stale') return;
+            if (committed === 'invalid') throw new Error('INVALID_GENERATED_WEBSITE_GRAPH');
+            if (!websiteGenerationAuthority.isViewCurrent(generationAuthority, getActingUserId())) return;
+        } else {
+            reconcileGeneratedWebsite(data, getActingUserId());
+        }
+        if (browserFixturesEnabled) {
+            window.localStorage.setItem('browser_fixture_generated_website', JSON.stringify({ success: true, data }));
+        }
         window.localStorage.setItem('onboarding_seen', 'true');
-        
-        // Show success view
+        window.sessionStorage.removeItem('website_generation_idempotency_key');
+        window.sessionStorage.removeItem('onboarding_capture');
         const form = document.getElementById('onboarding-form-container');
         const success = document.getElementById('onboarding-success');
         if (form && success) {
             form.style.display = 'none';
             success.style.display = 'block';
             
-            // Update global settings as well for immediate feel
             (window as any).updateGlobalSettings('businessName', name);
             (window as any).updateGlobalSettings('phone', phone);
         }
-    }).catch(err => {
-        console.error('[ONBOARDING] Generation failed:', err);
-        (window as any).showToast(err.message || 'Generation failed. Please try again.', 'error');
-    });
+    } catch (error) {
+        if (generationAuthority
+            && !websiteGenerationAuthority.isViewCurrent(generationAuthority, getActingUserId())) return;
+        const message = error instanceof WebsiteGenerationClientError
+            ? error.message
+            : 'Website creation failed. Try again.';
+        setOnboardingError(`${message} Reference: ${idempotencyKey.slice(-8)}.`);
+    } finally {
+        if (generationAuthority
+            && !websiteGenerationAuthority.isOperationCurrent(generationAuthority, getActingUserId())) return;
+        websiteGenerationInFlight = false;
+        if (generationAuthority
+            && !websiteGenerationAuthority.isViewCurrent(generationAuthority, getActingUserId())) return;
+        if (button) {
+            button.disabled = false;
+            button.setAttribute('aria-disabled', 'false');
+            button.removeAttribute('aria-busy');
+        }
+        if (label) label.textContent = 'Generate My Website';
+    }
 };
 
 (window as any).closeOnboarding = () => {

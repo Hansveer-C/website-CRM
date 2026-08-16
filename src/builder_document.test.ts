@@ -3,6 +3,7 @@ import type { Page, PageSection } from './types';
 import {
   builderDocumentToPageSections,
   createBuilderDocument,
+  normalizePersistedBuilderSections,
   validateBuilderDocument
 } from './builder_document';
 
@@ -115,6 +116,37 @@ describe('BuilderDocument adapter', () => {
     expect(roundTripped[2]).not.toBe(originalSections[0]);
     expect(roundTripped[2].content).not.toBe(originalSections[0].content);
     expect(roundTripped[2].styles).not.toBe(originalSections[0].styles);
+  });
+
+  it('normalizes an exact one-based mixed legacy document to zero-based order losslessly', () => {
+    const types = ['hero', 'services', 'benefits', 'before_after', 'cta', 'contact_info', 'map'];
+    const sections = types.map((type, index): PageSection => ({
+      id: `legacy-${type}`,
+      page_id: 'page-1',
+      funnel_id: 'funnel-1',
+      type,
+      variant: `legacy-${index}`,
+      order: index + 1,
+      content: { marker: type, nested: { values: [index, null, false] } },
+      styles: { visible: index % 2 === 0, custom: { token: `style-${index}` } }
+    }));
+
+    const document = createBuilderDocument(makePage(), sections);
+    const roundTripped = builderDocumentToPageSections(document);
+
+    expect(roundTripped.map(section => section.order)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(roundTripped.map(({ order: _order, ...section }) => section)).toEqual(
+      sections.map(({ order: _order, ...section }) => section)
+    );
+    expect(sections.map(section => section.order)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it('leaves zero-based documents and non-canonical order shapes unchanged', () => {
+    const zeroBased = makeSections().map((section, index) => ({ ...section, order: index }));
+    const sparse = makeSections().map((section, index) => ({ ...section, order: index * 2 + 1 }));
+
+    expect(normalizePersistedBuilderSections(zeroBased).map(section => section.order)).toEqual([0, 1, 2]);
+    expect(normalizePersistedBuilderSections(sparse).map(section => section.order)).toEqual([1, 3, 5]);
   });
 
   it('detects unsupported versions, missing fields, page mismatches, invalid orders, and ordering errors', () => {

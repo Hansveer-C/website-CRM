@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(fileURLToPath(new URL('./main.ts', import.meta.url)), 'utf8');
+const source = readFileSync(fileURLToPath(new URL('./main.ts', import.meta.url)), 'utf8').replace(/\r\n/g, '\n');
 
 describe('Website Settings explicit-selection wiring', () => {
   it('resolves the owned Website before querying settings', () => {
