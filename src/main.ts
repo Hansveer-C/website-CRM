@@ -1,7 +1,8 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
 import { escapeHtmlText, safeTelHref } from './crm_html_output';
+import { contactMatchesClientSearch, formatContactPhone, hasContactPhone } from './crm_contact_phone';
 import { templates } from './templates';
-import { Activity, Funnel, Page, PageSection, User, Website, WebsiteLayout, WebsiteRoute, WebsiteSettings } from './types';
+import { Activity, Contact, Funnel, Page, PageSection, User, Website, WebsiteLayout, WebsiteRoute, WebsiteSettings } from './types';
 import { createBuilderSection, getBuilderSectionDefinition, isRegisteredBuilderSectionType } from './builder_section_registry';
 import type { BuilderInspectorFieldDefinition, BuilderInspectorTab } from './builder_inspector_schema';
 import { createBuilderInspectorPatch, getBuilderInspectorField, getBuilderInspectorFieldValue, getBuilderInspectorSchema } from './builder_inspector_schema';
@@ -1684,9 +1685,11 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 
 // Normalize existing mock data
 mockContacts.forEach(c => {
-  const norm = normalizePhone(c.phone);
-  c.phone = norm.normalized;
-  if (norm.invalid) c.invalid_phone = true;
+  if (c.phone !== null) {
+    const norm = normalizePhone(c.phone);
+    c.phone = norm.normalized;
+    if (norm.invalid) c.invalid_phone = true;
+  }
   c.name = normalizeName(c.name);
   c.email = normalizeEmail(c.email);
 });
@@ -2370,11 +2373,10 @@ async function renderClients() {
 
   const response = await fetch('/api/contacts');
   const result = await response.json();
-  const contacts: any[] = result.data || result;
+  const contacts: Contact[] = result.data || result;
 
   const filteredContacts = contacts.filter(contact => {
-    const matchesSearch = contact.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
-      contact.phone.includes(clientSearchQuery);
+    const matchesSearch = contactMatchesClientSearch(contact, clientSearchQuery);
     const matchesFilter = clientStatusFilter === 'all' || contact.status === clientStatusFilter;
     return matchesSearch && matchesFilter;
   });
@@ -2386,6 +2388,7 @@ async function renderClients() {
     const isNewLead = isNew(contact.created_at);
 
     const telHref = safeTelHref(contact.phone);
+    const canText = hasContactPhone(contact.phone);
     return `
       <tr onclick="window.navigateTo('contact-detail', '${contact.id}')" style="cursor: pointer; border-bottom: 1px solid #f1f5f9; transition: background 0.1s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
         <td style="padding: 16px 24px;">
@@ -2401,14 +2404,16 @@ async function renderClients() {
             ${latest ? `<span style="color: #94a3b8; font-weight: 600;">Last:</span> ${escapeHtmlText(latest.content)}` : '<span style="color: #cbd5e1; font-style: italic;">No activity yet</span>'}
           </div>
         </td>
-        <td><div style="font-weight: 500; font-size: 0.9rem; color: #334155;">${escapeHtmlText(contact.phone)}</div></td>
+        <td><div style="font-weight: 500; font-size: 0.9rem; color: #334155;">${escapeHtmlText(formatContactPhone(contact.phone))}</div></td>
         <td><span class="badge badge-${contact.status}" style="font-size: 0.7rem;">${contact.status}</span></td>
         <td><span style="font-size: 0.8rem; color: #64748b;">${escapeHtmlText(contact.source)}</span></td>
         <td style="font-size: 0.8rem; color: #64748b;">${escapeHtmlText(latest ? latest.created_at : '-')}</td>
         <td>
           <div style="display: flex; gap: 8px; align-items: center;">
             <button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${contact.id}')">View</button>
-            <button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #6366f1;" onclick="event.stopPropagation(); window.textContact('${contact.id}')">💬 Text</button>
+            ${canText
+              ? `<button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #6366f1;" onclick="event.stopPropagation(); window.textContact('${contact.id}')">💬 Text</button>`
+              : `<button class="btn-primary" disabled title="No phone number available" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #94a3b8; opacity: 0.55; cursor: not-allowed;" onclick="event.stopPropagation()">💬 Text</button>`}
             ${(contact.status === 'lead' && isNewLead && telHref) ? `
               <a href="${escapeHtmlText(telHref)}" class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #10b981; text-decoration: none; display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation();">
                 📞 Call Now
@@ -2491,7 +2496,11 @@ async function renderClients() {
 
   try {
     (window as any).showToast('Sending SMS...', 2000);
-    await sendMessageToContact(contactId, content);
+    const sendResult = await sendMessageToContact(contactId, content);
+    if (!sendResult.success) {
+      (window as any).showToast(sendResult.error || 'Error: Could not send SMS', 5000);
+      return;
+    }
     (window as any).showToast('Message sent! Timeline updated.');
     (window as any).closeSmsComposer();
     
@@ -2509,7 +2518,7 @@ async function renderClients() {
 
 (window as any).openSmsComposer = async (contactId: string) => {
   const response = await fetch(`/api/contacts/${contactId}`);
-  const contact = await response.json();
+  const contact: Contact | null = await response.json();
   
   if (!contact || response.status === 404) {
     (window as any).showToast('Contact not found.', 3000);
@@ -2517,7 +2526,7 @@ async function renderClients() {
   }
   
   // Check for valid phone (Phase 2.6)
-  const hasPhone = contact.phone && contact.phone.trim().length > 0;
+  const hasPhone = hasContactPhone(contact.phone);
 
   // Pre-fill with a default follow-up message (Phase 2.3)
   const defaultMessage = "Hey, I saw your request—how can I help?";
@@ -8685,7 +8694,7 @@ function renderOpportunities() {
                    onclick="event.stopPropagation()" 
                    onchange="window.updateOpportunityField('${opp.id}', 'value', this.value)">
           </div>
-          <div class="contact-phone">${escapeHtmlText(contact ? contact.phone : 'N/A')}</div>
+          <div class="contact-phone">${escapeHtmlText(contact ? formatContactPhone(contact.phone) : 'N/A')}</div>
           ${opp.notes ? `<div style="font-size: 0.7rem; color: #94a3b8; font-style: italic; border-top: 1px solid #f1f5f9; padding-top: 4px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtmlText(opp.notes.replace(/\n/g, ' '))}</div>` : ''}
         </div>
       `;
@@ -10539,7 +10548,7 @@ function renderQuotePreview(quoteId: string) {
               <div style="color: #64748b; line-height: 1.5;">
                 ${escapeHtmlText(contact ? contact.address : '')}<br>
                 ${escapeHtmlText(contact ? contact.email || '' : '')}<br>
-                ${escapeHtmlText(contact ? contact.phone : '')}
+                ${escapeHtmlText(contact ? formatContactPhone(contact.phone) : '')}
               </div>
             </div>
           </div>
@@ -10624,7 +10633,7 @@ async function renderContactDetail(contactId: string) {
 
   const response = await fetch(`/api/contacts/${contactId}`);
   const result = await response.json();
-  const contact = result.data || result;
+  const contact: Contact | null = result.data || result;
 
   if (!contact || response.status === 404) {
     (window as any).showToast('Contact not found.', 3000);
@@ -10658,7 +10667,7 @@ async function renderContactDetail(contactId: string) {
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 20px;">
          <div>
            <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Phone</div>
-           <input type="text" value="${escapeHtmlText(contact.phone)}" onchange="window.updateContactField('${contactId}', 'phone', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
+           <input type="text" value="${escapeHtmlText(contact.phone ?? '')}" placeholder="Add phone..." onchange="window.updateContactField('${contactId}', 'phone', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
          </div>
          <div>
            <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Email</div>

@@ -6,7 +6,7 @@ export interface Contact {
   id: string;
   user_id: string;
   name: string;
-  phone: string;
+  phone: string | null;
   email: string | null;
   address: string;
   tags: string[];
