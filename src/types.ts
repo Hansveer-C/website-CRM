@@ -6,7 +6,7 @@ export interface Contact {
   id: string;
   user_id: string;
   name: string;
-  phone: string;
+  phone: string | null;
   email: string | null;
   address: string;
   tags: string[];
@@ -69,6 +69,7 @@ export type QuoteStatus = 'draft' | 'sent' | 'approved' | 'rejected';
 
 export interface Quote {
   id: string;
+  user_id: string;
   contact_id: string;
   opportunity_id: string;
   status: QuoteStatus;
@@ -80,6 +81,7 @@ export interface Quote {
 
 export interface QuoteItem {
   id: string;
+  user_id: string;
   quote_id: string;
   service_name: string;
   description: string;
@@ -93,6 +95,7 @@ export type InvoiceStatus = 'unpaid' | 'paid' | 'overdue';
 
 export interface Invoice {
   id: string;
+  user_id: string;
   contact_id: string;
   quote_id: string;
   amount: number;

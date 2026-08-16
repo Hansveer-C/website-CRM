@@ -1,6 +1,8 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
+import { escapeHtmlText, safeTelHref } from './crm_html_output';
+import { contactMatchesClientSearch, formatContactPhone, hasContactPhone } from './crm_contact_phone';
 import { templates } from './templates';
-import { Activity, Funnel, Page, PageSection, User, Website, WebsiteRoute, WebsiteSettings } from './types';
+import { Activity, Contact, Funnel, Page, PageSection, User, Website, WebsiteLayout, WebsiteRoute, WebsiteSettings } from './types';
 import { createBuilderSection, getBuilderSectionDefinition, isRegisteredBuilderSectionType } from './builder_section_registry';
 import type { BuilderInspectorFieldDefinition, BuilderInspectorTab } from './builder_inspector_schema';
 import { createBuilderInspectorPatch, getBuilderInspectorField, getBuilderInspectorFieldValue, getBuilderInspectorSchema } from './builder_inspector_schema';
@@ -77,6 +79,10 @@ import {
 } from './public_site_runtime';
 import { submitPublicLead } from './public_lead_client';
 import { resolvePublicLeadRuntime, shouldUsePublicLeadEdge } from './public_lead_runtime';
+import { FormSubmissionIdempotency } from './form_submission_idempotency';
+import { validateSelectedQuoteTier } from './quote_tier_validation';
+import { shouldShowWebsiteOnboarding } from './website_onboarding_gate';
+import { buildAuthenticatedPreviewUrl, resolveAuthenticatedPreview } from './authenticated_preview_route';
 import {
   BUILDER_SETUP_SERVICE_CATALOG,
   parseBuilderSetupBrief,
@@ -97,6 +103,31 @@ import { WebsiteDashboardController, type WebsiteDashboardCoreData } from './web
 import { getWebsiteScopedPages, resolveWebsiteHomepage, type WebsiteDashboardModel, type WebsiteDashboardSummaryInput } from './website_dashboard_model';
 import { createBrowserCallSimulator } from './browser_call_simulation';
 import { isCrmApplicationHost } from './application_host';
+import { resolveApplicationHostRoute } from './application_host_route';
+import { CrmProductionHydrator, type CrmHydrationClient } from './crm_production_hydration';
+import { WebsiteLayoutHydrator, type WebsiteLayoutHydrationClient } from './website_layout_hydration';
+import { WebsiteSettingsHydrator, type WebsiteSettingsHydrationClient } from './website_settings_hydration';
+import {
+  ProtectedAsyncOperationGuard,
+  SupersededOperationError,
+  isSupersededOperationError,
+  type ProtectedAsyncOperationToken
+} from './website_dashboard_hydration_guard';
+import {
+  buildWebsiteManagementRoute,
+  buildWebsiteSettingsRoute,
+  parseWebsiteManagementRoute,
+  parseWebsiteSettingsRoute,
+  resolveWebsiteSettingsSelection,
+  type WebsiteManagementView,
+  type WebsiteSettingsRouteSelection
+} from './website_settings_selection';
+import { resolveSiteRenderPage } from './site_render_page_resolution';
+import {
+  createProductionLead,
+  saveProductionQuote,
+  type CrmMutationClient
+} from './crm_production_mutations';
 import {
   ApplicationAuthController,
   createApplicationSignupRedirect,
@@ -491,6 +522,12 @@ function editorUsesLocalData(): boolean {
     return editorRuntime.success && editorRuntime.mode === 'local';
 }
 
+function blockUnsupportedProductionWebsiteMutation(action: string): boolean {
+    if (!editorUsesSupabase()) return false;
+    (window as any).showToast(`${action} is temporarily unavailable in production. No changes were made.`, 'error');
+    return true;
+}
+
 function removeLocalFixtureRows(): void {
     mockContacts.splice(0);
     mockOpportunities.splice(0);
@@ -537,6 +574,30 @@ const applicationAuthController = new ApplicationAuthController({
     getSupabaseClient: async () => await getBuilderPublicationSupabaseClient() as unknown as ApplicationAuthClient | null,
     ...(editorRuntime.success && editorRuntime.mode === 'local' ? { localUserId: 'system' } : {})
 });
+const crmProductionHydrator = new CrmProductionHydrator(
+    async () => await getBuilderPublicationSupabaseClient() as unknown as CrmHydrationClient | null,
+    {
+      contacts: mockContacts,
+      opportunities: mockOpportunities,
+      activities: mockActivities,
+      quotes: mockQuotes,
+      quote_items: mockQuoteItems,
+      invoices: mockInvoices
+    }
+);
+const websiteLayoutHydrator = new WebsiteLayoutHydrator(
+    async () => await getBuilderPublicationSupabaseClient() as unknown as WebsiteLayoutHydrationClient | null,
+    mockWebsiteLayouts
+);
+const websiteSettingsHydrator = new WebsiteSettingsHydrator(
+    async () => await getBuilderPublicationSupabaseClient() as unknown as WebsiteSettingsHydrationClient | null,
+    mockWebsiteSettings
+);
+const protectedAsyncOperationGuard = new ProtectedAsyncOperationGuard();
+if (!editorUsesLocalData()) {
+  websiteSettingsHydrator.clear();
+  applyPrimaryColor(mockWebsiteSettings.primary_color);
+}
 let applicationAuthInitialization: Promise<ApplicationAuthState> | null = null;
 let applicationAuthHasInitialized = false;
 let applicationAuthFormSubmissionInProgress = false;
@@ -1152,6 +1213,7 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
         if (url === '/api/leads' && method === 'POST') {
             const body = reqContext.body;
             const userId = getActingUserId();
+            const leadOperation = protectedAsyncOperationGuard.begin(`internal-lead:${String(body?.request_key ?? '')}`, userId);
             console.log('[API ROUTER] Inbound Lead Submission:', body);
 
             try {
@@ -1167,6 +1229,42 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
                         status: 201,
                         headers: { 'Content-Type': 'application/json' }
                     });
+                }
+
+                if (editorUsesSupabase()) {
+                    const client = await getBuilderPublicationSupabaseClient();
+                    if (!client || !userId || typeof body.request_key !== 'string') {
+                        throw new Error('Production lead persistence is unavailable.');
+                    }
+                    const saved = await createProductionLead(client as unknown as CrmMutationClient, {
+                        requestKey: body.request_key,
+                        name: normalizeName(body.name || ''),
+                        phone: phoneVal || body.phone,
+                        email: emailVal || undefined,
+                        address: body.address,
+                        serviceType: body.service_type,
+                        message: body.message,
+                        source: body.source,
+                        funnelId: body.funnel_id
+                    });
+                    if (saved.contact.user_id !== userId || saved.opportunity.user_id !== userId
+                        || saved.opportunity.contact_id !== saved.contact.id) {
+                        throw new Error('Production lead persistence returned an invalid owner.');
+                    }
+                    protectedAsyncOperationGuard.requireCurrent(leadOperation, getActingUserId());
+                    const contactIndex = mockContacts.findIndex(contact => contact.id === saved.contact.id);
+                    if (contactIndex >= 0) mockContacts[contactIndex] = saved.contact;
+                    else mockContacts.push(saved.contact);
+                    const opportunityIndex = mockOpportunities.findIndex(opportunity => opportunity.id === saved.opportunity.id);
+                    if (opportunityIndex >= 0) mockOpportunities[opportunityIndex] = saved.opportunity;
+                    else mockOpportunities.push(saved.opportunity);
+                    return new Response(JSON.stringify({
+                        success: true,
+                        data: saved.contact,
+                        opportunity: saved.opportunity,
+                        is_repeat: saved.isRepeat,
+                        replayed: saved.replayed
+                    }), { status: 201, headers: { 'Content-Type': 'application/json' } });
                 }
 
                 const fallback = createLocalMockWebsiteLead({
@@ -1193,7 +1291,14 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
                     headers: { 'Content-Type': 'application/json' }
                 });
             } catch (error: any) {
+                if (isSupersededOperationError(error)) throw error;
                 console.error('[API ROUTER] Lead Ingestion Error:', error);
+                if (editorUsesSupabase()) {
+                    return new Response(JSON.stringify({ success: false, error: 'Lead creation is temporarily unavailable. Please try again.' }), {
+                        status: 503,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
                 const fallback = createLocalMockWebsiteLead(body, userId, false);
                 runAutomations('LEAD_CAPTURED', fallback.contact);
                 return new Response(JSON.stringify({
@@ -1204,6 +1309,42 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
                     fallback: 'local-mock'
                 }), {
                     status: 201,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+        }
+
+        if (url === '/api/quotes' && method === 'POST') {
+            if (!editorUsesSupabase()) {
+                return new Response(JSON.stringify({ success: false, error: 'Use the local quote workflow.' }), {
+                    status: 409,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            }
+            const body = reqContext.body;
+            const userId = getActingUserId();
+            const quoteOperation = protectedAsyncOperationGuard.begin(`quote-api:${String(body?.request_key ?? '')}`, userId);
+            try {
+                const client = await getBuilderPublicationSupabaseClient();
+                if (!client || !userId) throw new Error('UNAVAILABLE');
+                const saved = await saveProductionQuote(client as unknown as CrmMutationClient, {
+                    requestKey: body.request_key,
+                    contactId: body.contact_id,
+                    opportunityId: body.opportunity_id || undefined,
+                    selectedTier: body.selected_tier,
+                    notes: body.notes,
+                    items: body.items
+                });
+                if (saved.quote.user_id !== userId || saved.items.some(item => item.user_id !== userId)) throw new Error('UNAVAILABLE');
+                protectedAsyncOperationGuard.requireCurrent(quoteOperation, getActingUserId());
+                return new Response(JSON.stringify({ success: true, data: saved }), {
+                    status: 201,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } catch (error) {
+                if (isSupersededOperationError(error)) throw error;
+                return new Response(JSON.stringify({ success: false, error: 'Quote creation is temporarily unavailable. Please try again.' }), {
+                    status: 503,
                     headers: { 'Content-Type': 'application/json' }
                 });
             }
@@ -1267,6 +1408,9 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
 
         // Funnels API (WB.1.4 Integration — Browser-safe simulation)
         if (url.startsWith('/api/funnels')) {
+            if (editorUsesSupabase() && method !== 'GET') {
+                return builderSectionsJsonResponse({ success: false, error: 'Website page changes are temporarily unavailable in production.' }, 501);
+            }
             let response: any;
 
             if (url === '/api/funnels' && method === 'GET') {
@@ -1454,8 +1598,7 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
         // ── WB.3.4 Bulk SEO Generation ──────────────────────────────────
         if (url === '/api/settings') {
             const reqUser = getActingUserId();
-            const userSite = getActiveBuilderWebsite()
-                || mockWebsites.find(website => website.user_id === reqUser);
+            const userSite = getActiveSettingsWebsite();
             if (!userSite || userSite.user_id !== reqUser) {
                 return builderSectionsJsonResponse({ success: false, error: 'Website not found' }, 404);
             }
@@ -1476,15 +1619,14 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
                     return builderSectionsJsonResponse({ success: false, error: 'Unauthorized' }, 401);
                 }
                 if (method === 'GET') {
-                    const result = await client.from('website_settings').select('*')
-                        .eq('user_id', reqUser).eq('website_id', websiteId).limit(1).maybeSingle();
-                    if (result.error) return builderSectionsJsonResponse({ success: false, error: 'Settings unavailable' }, 503);
-                    if (!result.data) return builderSectionsJsonResponse({ success: false, error: 'Settings not found' }, 404);
-                    Object.assign(mockWebsiteSettings, result.data);
+                    const state = await websiteSettingsHydrator.hydrate(reqUser, userSite, true);
+                    if (state.status === 'error') return builderSectionsJsonResponse({ success: false, error: 'Settings unavailable' }, 503);
                     applyPrimaryColor(mockWebsiteSettings.primary_color);
-                    return builderSectionsJsonResponse({ success: true, data: result.data }, 200);
+                    return builderSectionsJsonResponse({ success: true, data: structuredClone(mockWebsiteSettings), missing: state.status === 'empty' }, 200);
                 }
                 if (method === 'POST') {
+                    const state = await websiteSettingsHydrator.hydrate(reqUser, userSite);
+                    if (state.status === 'error') return builderSectionsJsonResponse({ success: false, error: 'Settings unavailable' }, 503);
                     const patch = Object.fromEntries(Object.entries(reqContext.body || {})
                         .filter(([key]) => settingsFields.has(key)));
                     const existing = await client.from('website_settings').select('id')
@@ -1497,7 +1639,9 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
                         website_id: websiteId
                     }, { onConflict: 'user_id,website_id' }).select('*').single();
                     if (result.error || !result.data) return builderSectionsJsonResponse({ success: false, error: 'Settings unavailable' }, 503);
-                    Object.assign(mockWebsiteSettings, result.data);
+                    if (!websiteSettingsHydrator.acceptConfirmed(reqUser, websiteId, result.data)) {
+                        return builderSectionsJsonResponse({ success: false, error: 'Settings unavailable' }, 503);
+                    }
                     applyPrimaryColor(mockWebsiteSettings.primary_color);
                     return builderSectionsJsonResponse({ success: true, data: result.data }, 200);
                 }
@@ -1526,11 +1670,15 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
         }
 
         if (url === '/api/websites/bulk-seo' && method === 'POST') {
+            if (!editorUsesLocalData()) return builderSectionsJsonResponse({ success: false, error: 'SEO route generation is temporarily unavailable.' }, 501);
             const { services, cities } = reqContext.body || {};
             console.log(`[MOCK] Bulk SEO Generation for ${services.length} services in ${cities.length} cities`);
             
             // Simulation of generation
-            const website = mockWebsites[0];
+            const website = getActiveSettingsWebsite();
+            if (!website || website.user_id !== getActingUserId()) {
+                return builderSectionsJsonResponse({ success: false, error: 'Website not found' }, 404);
+            }
             const timestamp = new Date().toISOString();
             
             services.forEach((s: string) => {
@@ -1560,6 +1708,7 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
         }
 
         if (url.startsWith('/api/websites/routes/') && method === 'DELETE') {
+            if (!editorUsesLocalData()) return builderSectionsJsonResponse({ success: false, error: 'Route deletion is temporarily unavailable.' }, 501);
             const routeId = url.split('/')[4];
             const idx = mockWebsiteRoutes.findIndex(r => r.id === routeId);
             if (idx > -1) {
@@ -1587,9 +1736,11 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 
 // Normalize existing mock data
 mockContacts.forEach(c => {
-  const norm = normalizePhone(c.phone);
-  c.phone = norm.normalized;
-  if (norm.invalid) c.invalid_phone = true;
+  if (c.phone !== null) {
+    const norm = normalizePhone(c.phone);
+    c.phone = norm.normalized;
+    if (norm.invalid) c.invalid_phone = true;
+  }
   c.name = normalizeName(c.name);
   c.email = normalizeEmail(c.email);
 });
@@ -1628,6 +1779,7 @@ let builderMediaSelectedAssetIds = new Set<string>();
 let builderMediaInitializing = false;
 let builderMediaInitializationError: string | null = null;
 let activeDashboardWebsiteId: string | null = null;
+let activeSettingsWebsiteId: string | null = null;
 let websiteDashboardController: WebsiteDashboardController | null = null;
 type BuilderSetupWizardDraft = {
   identity: string;
@@ -1719,6 +1871,7 @@ const publicLeadRuntime = resolvePublicLeadRuntime({
 let activeRenderedPublicSections: PageSection[] = [];
 let activeRenderedPublicPreview = false;
 const publicLeadAttempts = new Map<string, { key: string; signature: string; accepted: boolean }>();
+const authenticatedFormAttempts = new FormSubmissionIdempotency();
 type BuilderContext = {
   websiteId?: string;
   pageId: string;
@@ -1741,14 +1894,22 @@ function getActingUserId(): string {
 }
 
 function clearProtectedRuntimeData(): void {
+  protectedAsyncOperationGuard.invalidateRuntime();
+  crmProductionHydrator.clear();
+  websiteLayoutHydrator.clear();
+  websiteSettingsHydrator.clear();
+  applyPrimaryColor(mockWebsiteSettings.primary_color);
   removeLocalFixtureRows();
   mockAutomationLogs.splice(0);
   contactTimelineState = [];
   selectedContactId = null;
   activeBuilderWebsiteId = null;
   activeDashboardWebsiteId = null;
+  activeSettingsWebsiteId = null;
+  activeWebsiteContext = null;
   builderPageId = '';
   builderHistoryController = null;
+  builderPageSettingsController?.cancelPending();
   builderPageSettingsController = null;
   builderNewPageController = null;
   builderNewPageControllerIdentity = '';
@@ -1759,6 +1920,45 @@ function clearProtectedRuntimeData(): void {
   websiteDashboardController = null;
   lastContactCount = 0;
 }
+
+const CRM_DATA_VIEWS = new Set([
+  'dashboard', 'clients', 'contact-detail', 'opportunities', 'quotes', 'new-quote',
+  'quote-preview', 'invoices'
+]);
+
+function renderCrmDataLoading(view: string): void {
+  app.innerHTML = `${renderSidebar(view)}<main class="main-content"><header class="view-header"><h1>Loading CRM dataâ€¦</h1></header><section class="card" aria-busy="true"><p>Loading your account data.</p></section></main>`;
+}
+
+function renderCrmHydrationNotice(): void {
+  if (!editorUsesSupabase() || crmProductionHydrator.state.status !== 'error') return;
+  const failed = Object.entries(crmProductionHydrator.state.entities)
+    .filter(([, status]) => status === 'error')
+    .map(([name]) => name.replace('_', ' '));
+  const main = app.querySelector<HTMLElement>('main.main-content');
+  if (!main || main.querySelector('[data-crm-hydration-error]')) return;
+  const notice = document.createElement('section');
+  notice.className = 'card';
+  notice.dataset.crmHydrationError = 'true';
+  notice.setAttribute('role', 'alert');
+  notice.innerHTML = `<strong>Some CRM data could not be loaded.</strong><p>${failed.join(', ')} are temporarily unavailable. Loaded account data remains visible; retry before relying on empty results.</p><button type="button" class="btn-outline" onclick="window.retryCrmDataLoad()">Retry</button>`;
+  main.insertBefore(notice, main.children[1] ?? null);
+}
+
+async function ensureProductionCrmData(userId: string, view: string, force = false): Promise<void> {
+  if (!editorUsesSupabase() || !CRM_DATA_VIEWS.has(view)) return;
+  if (force || crmProductionHydrator.state.userId !== userId || crmProductionHydrator.state.status === 'idle') {
+    renderCrmDataLoading(view);
+    await crmProductionHydrator.hydrateAuthenticatedUser(userId, force);
+  }
+}
+
+(window as any).retryCrmDataLoad = async () => {
+  const userId = getActingUserId();
+  if (!userId) return;
+  await ensureProductionCrmData(userId, currentView, true);
+  await (window as any).navigateTo(currentView, selectedContactId || undefined);
+};
 
 function applyApplicationAuthState(state: ApplicationAuthState): void {
   const previousUserId = getActingUserId();
@@ -1825,6 +2025,8 @@ async function ensureApplicationAuth(): Promise<ApplicationAuthState> {
   builderHistoryController = null;
   activeBuilderWebsiteId = null;
   activeDashboardWebsiteId = null;
+  activeSettingsWebsiteId = null;
+  protectedAsyncOperationGuard.invalidateRuntime();
   websiteDashboardController?.invalidate();
   websiteDashboardController = null;
   (window as any).currentUser = userId;
@@ -1868,14 +2070,14 @@ let mockGlobalSettings = {
     facebook_pixel_id: readInput('[data-settings-field="facebook_pixel_id"]') ?? s.facebook_pixel_id,
     gtm_id: readInput('[data-settings-field="gtm_id"]') ?? s.gtm_id
   };
-  Object.assign(s, formValues);
+  const candidate = { ...s, ...formValues };
 
   // Basic validation before save
-  if (!s.business_name || s.business_name.trim() === '') {
+  if (!candidate.business_name || candidate.business_name.trim() === '') {
     (window as any).showToast?.('Business name cannot be empty.', 'error');
     return;
   }
-  if (s.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.email)) {
+  if (candidate.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(candidate.email)) {
     (window as any).showToast?.('Please enter a valid email address.', 'error');
     return;
   }
@@ -1887,7 +2089,7 @@ let mockGlobalSettings = {
     const res = await fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(s)
+      body: JSON.stringify(candidate)
     }).then(r => r.json());
 
     if (res.success) {
@@ -1989,10 +2191,10 @@ function renderSidebar(activeView: string) {
           
           <div class="nav-group-title">Websites</div>
           <li onclick="window.navigateTo('website-dashboard')" class="${activeView === 'website-dashboard' ? 'active' : ''}" style="font-weight: 700; color: var(--primary-color);">My Website</li>
-          <li onclick="window.navigateTo('funnels')" class="${activeView === 'funnels' && (window as any).funnelMode !== 'marketing' ? 'active' : ''}">Site Pages</li>
-          <li onclick="window.navigateTo('website-navigation')" class="${activeView === 'website-navigation' ? 'active' : ''}">Navigation</li>
-          <li onclick="window.navigateTo('seo-pages')" class="${activeView === 'seo-pages' ? 'active' : ''}">SEO Pages</li>
-          <li onclick="window.navigateTo('website-settings')" class="${activeView === 'website-settings' ? 'active' : ''}">Settings</li>
+          <li onclick="window.openWebsiteManagementView('funnels')" class="${activeView === 'funnels' && (window as any).funnelMode !== 'marketing' ? 'active' : ''}">Site Pages</li>
+          <li onclick="window.openWebsiteManagementView('website-navigation')" class="${activeView === 'website-navigation' ? 'active' : ''}">Navigation</li>
+          <li onclick="window.openWebsiteManagementView('seo-pages')" class="${activeView === 'seo-pages' ? 'active' : ''}">SEO Pages</li>
+          <li onclick="window.openWebsiteSettings()" class="${activeView === 'website-settings' ? 'active' : ''}">Settings</li>
           
           <div class="nav-group-title">System</div>
           <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
@@ -2014,9 +2216,32 @@ function renderDashboard() {
   const userId = getActingUserId();
 
   // 🏁 WB.6.1: Check for Onboarding
-  if (!window.localStorage.getItem('onboarding_seen')) {
+  const alreadySeenOnboarding = !!window.localStorage.getItem('onboarding_seen');
+  if (editorUsesSupabase()) {
+    void loadWebsiteDashboardCore({ actingUserId: userId }).then(core => {
+      if (core.websites.length > 0) {
+        document.getElementById('website-onboarding-modal')?.remove();
+        return;
+      }
+      if (currentView !== 'dashboard') return;
+      const shouldShow = shouldShowWebsiteOnboarding({
+        alreadySeen: alreadySeenOnboarding,
+        usesSupabase: true,
+        durableWebsiteCount: core.websites.length
+      });
+      if (shouldShow) (window as any).showOnboardingModal();
+      else document.getElementById('website-onboarding-modal')?.remove();
+    }).catch(() => {
+      // Repository failure must not be mistaken for a brand-new account.
+      document.getElementById('website-onboarding-modal')?.remove();
+    });
+  } else if (!alreadySeenOnboarding) {
     fetch('/api/funnels').then(r => r.json()).then(res => {
-      if (res.success && (!res.data || res.data.length === 0)) {
+      if (currentView === 'dashboard' && res.success && shouldShowWebsiteOnboarding({
+        alreadySeen: false,
+        usesSupabase: false,
+        localFunnelCount: Array.isArray(res.data) ? res.data.length : undefined
+      })) {
         (window as any).showOnboardingModal();
       }
     });
@@ -2112,7 +2337,7 @@ function renderDashboard() {
             ${leadsBySource.map(s => `
               <div class="report-item">
                 <div class="report-item-header">
-                  <span>${s.source}</span>
+                  <span>${escapeHtmlText(s.source)}</span>
                   <span style="font-weight: 600;">${s.count} Leads</span>
                 </div>
                 <div class="visual-bar-bg">
@@ -2166,8 +2391,8 @@ function renderDashboard() {
     const contact = mockContacts.find(c => c.id === task.contact_id);
     return `
                   <tr style="background: #fffafa;">
-                    <td style="font-weight: 600;">${contact ? contact.name : 'Unknown'}</td>
-                    <td>${task.description}</td>
+                    <td style="font-weight: 600;">${escapeHtmlText(contact ? contact.name : 'Unknown')}</td>
+                    <td>${escapeHtmlText(task.description)}</td>
                     <td style="color: #ff4444; font-weight: 500;">${new Date(task.due_date).toLocaleDateString()}</td>
                     <td><button class="btn-primary" style="padding: 6px 12px; font-size: 0.8rem; background: #ff4444; border-radius: 4px;">Resolve</button></td>
                   </tr>
@@ -2199,11 +2424,10 @@ async function renderClients() {
 
   const response = await fetch('/api/contacts');
   const result = await response.json();
-  const contacts: any[] = result.data || result;
+  const contacts: Contact[] = result.data || result;
 
   const filteredContacts = contacts.filter(contact => {
-    const matchesSearch = contact.name.toLowerCase().includes(clientSearchQuery.toLowerCase()) ||
-      contact.phone.includes(clientSearchQuery);
+    const matchesSearch = contactMatchesClientSearch(contact, clientSearchQuery);
     const matchesFilter = clientStatusFilter === 'all' || contact.status === clientStatusFilter;
     return matchesSearch && matchesFilter;
   });
@@ -2214,11 +2438,13 @@ async function renderClients() {
     const hasAttentionFlag = needsAttention(contact);
     const isNewLead = isNew(contact.created_at);
 
+    const telHref = safeTelHref(contact.phone);
+    const canText = hasContactPhone(contact.phone);
     return `
       <tr onclick="window.navigateTo('contact-detail', '${contact.id}')" style="cursor: pointer; border-bottom: 1px solid #f1f5f9; transition: background 0.1s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
         <td style="padding: 16px 24px;">
           <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px; flex-wrap: wrap;">
-            <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${contact.name}</div>
+            <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${escapeHtmlText(contact.name)}</div>
             ${hasAttentionFlag ? `
               <span style="background: #fee2e2; color: #991b1b; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid #fecaca;">⚠️ Needs Attention</span>
             ` : (isNewLead ? `
@@ -2226,19 +2452,21 @@ async function renderClients() {
             ` : '')}
           </div>
           <div style="font-size: 0.75rem; color: #64748b; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 250px;">
-            ${latest ? `<span style="color: #94a3b8; font-weight: 600;">Last:</span> ${latest.content}` : '<span style="color: #cbd5e1; font-style: italic;">No activity yet</span>'}
+            ${latest ? `<span style="color: #94a3b8; font-weight: 600;">Last:</span> ${escapeHtmlText(latest.content)}` : '<span style="color: #cbd5e1; font-style: italic;">No activity yet</span>'}
           </div>
         </td>
-        <td><div style="font-weight: 500; font-size: 0.9rem; color: #334155;">${contact.phone}</div></td>
+        <td><div style="font-weight: 500; font-size: 0.9rem; color: #334155;">${escapeHtmlText(formatContactPhone(contact.phone))}</div></td>
         <td><span class="badge badge-${contact.status}" style="font-size: 0.7rem;">${contact.status}</span></td>
-        <td><span style="font-size: 0.8rem; color: #64748b;">${contact.source}</span></td>
-        <td style="font-size: 0.8rem; color: #64748b;">${latest ? latest.created_at : '-'}</td>
+        <td><span style="font-size: 0.8rem; color: #64748b;">${escapeHtmlText(contact.source)}</span></td>
+        <td style="font-size: 0.8rem; color: #64748b;">${escapeHtmlText(latest ? latest.created_at : '-')}</td>
         <td>
           <div style="display: flex; gap: 8px; align-items: center;">
             <button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${contact.id}')">View</button>
-            <button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #6366f1;" onclick="event.stopPropagation(); window.textContact('${contact.id}')">💬 Text</button>
-            ${(contact.status === 'lead' && isNewLead) ? `
-              <a href="tel:${contact.phone}" class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #10b981; text-decoration: none; display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation();">
+            ${canText
+              ? `<button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #6366f1;" onclick="event.stopPropagation(); window.textContact('${contact.id}')">💬 Text</button>`
+              : `<button class="btn-primary" disabled title="No phone number available" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #94a3b8; opacity: 0.55; cursor: not-allowed;" onclick="event.stopPropagation()">💬 Text</button>`}
+            ${(contact.status === 'lead' && isNewLead && telHref) ? `
+              <a href="${escapeHtmlText(telHref)}" class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #10b981; text-decoration: none; display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation();">
                 📞 Call Now
               </a>
             ` : ''}
@@ -2260,7 +2488,7 @@ async function renderClients() {
         <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
           <div style="flex: 1; min-width: 300px;">
             <input type="text" id="client-search" placeholder="Search by name or phone..." 
-                   value="${clientSearchQuery}" 
+                   value="${escapeHtmlText(clientSearchQuery)}"
                    style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
           </div>
           <div style="display: flex; gap: 10px;">
@@ -2319,7 +2547,11 @@ async function renderClients() {
 
   try {
     (window as any).showToast('Sending SMS...', 2000);
-    await sendMessageToContact(contactId, content);
+    const sendResult = await sendMessageToContact(contactId, content);
+    if (!sendResult.success) {
+      (window as any).showToast(sendResult.error || 'Error: Could not send SMS', 5000);
+      return;
+    }
     (window as any).showToast('Message sent! Timeline updated.');
     (window as any).closeSmsComposer();
     
@@ -2337,7 +2569,7 @@ async function renderClients() {
 
 (window as any).openSmsComposer = async (contactId: string) => {
   const response = await fetch(`/api/contacts/${contactId}`);
-  const contact = await response.json();
+  const contact: Contact | null = await response.json();
   
   if (!contact || response.status === 404) {
     (window as any).showToast('Contact not found.', 3000);
@@ -2345,7 +2577,7 @@ async function renderClients() {
   }
   
   // Check for valid phone (Phase 2.6)
-  const hasPhone = contact.phone && contact.phone.trim().length > 0;
+  const hasPhone = hasContactPhone(contact.phone);
 
   // Pre-fill with a default follow-up message (Phase 2.3)
   const defaultMessage = "Hey, I saw your request—how can I help?";
@@ -2359,10 +2591,10 @@ async function renderClients() {
   `;
   modal.innerHTML = `
     <div style="background: white; padding: 30px; border-radius: 12px; width: 450px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); color: #333;">
-      <h3 style="margin-top: 0; margin-bottom: 5px;">Texting ${contact.name}</h3>
+      <h3 style="margin-top: 0; margin-bottom: 5px;">Texting ${escapeHtmlText(contact.name)}</h3>
       <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 20px;">
         ${hasPhone 
-          ? `Recieving at: <span style="font-weight: 600;">${contact.phone}</span>` 
+          ? `Recieving at: <span style="font-weight: 600;">${escapeHtmlText(contact.phone)}</span>`
           : `<span style="color: #dc2626; font-weight: 600;">🛑 No phone number available</span>`}
       </p>
       
@@ -2399,6 +2631,7 @@ async function renderClients() {
 };
 
 (window as any).updatePageName = (id: string, name: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Page renaming')) return;
   const page = mockPages.find(p => p.id === id);
   if (page) {
     page.name = name;
@@ -2407,6 +2640,7 @@ async function renderClients() {
 };
 
 (window as any).togglePublishFromBuilder = (id: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Legacy page publishing')) return;
   const page = mockPages.find(p => p.id === id);
   if (page) {
     page.status = page.status === 'published' ? 'draft' : 'published';
@@ -3968,6 +4202,20 @@ function getActiveBuilderWebsite(): Website | undefined {
   return owned.length === 1 ? owned[0] : undefined;
 }
 
+function getActiveSettingsWebsite(): Website | undefined {
+  const userId = getActingUserId();
+  const explicitWebsiteId = currentView === 'website-settings'
+    ? activeSettingsWebsiteId
+    : currentView === 'builder'
+      ? activeBuilderWebsiteId
+      : activeDashboardWebsiteId || activeBuilderWebsiteId;
+  if (explicitWebsiteId) {
+    return mockWebsites.find(website => website.id === explicitWebsiteId && website.user_id === userId);
+  }
+  const owned = mockWebsites.filter(website => website.user_id === userId);
+  return owned.length === 1 ? owned[0] : undefined;
+}
+
 function getBuilderNewPageContext(): BuilderNewPageContext {
   const actingUserId = typeof (window as any).currentUser === 'string'
     ? (window as any).currentUser.trim()
@@ -4657,7 +4905,11 @@ function buildBuilderSetupBrief(): BuilderSetupBriefV1 | null {
   };
 }
 
-async function persistBuilderSetupPagePatch(pageId: string, patch: BuilderPageSettingsPatch): Promise<boolean> {
+async function persistBuilderSetupPagePatch(
+  pageId: string,
+  patch: BuilderPageSettingsPatch,
+  operation?: ProtectedAsyncOperationToken
+): Promise<boolean> {
   if (!Object.keys(patch).length) return true;
   try {
     const response = await fetch(`/api/pages/${encodeURIComponent(pageId)}/settings`, {
@@ -4665,6 +4917,7 @@ async function persistBuilderSetupPagePatch(pageId: string, patch: BuilderPageSe
     });
     const result = await response.json();
     if (!response.ok || result.success !== true || !result.data) return false;
+    if (operation) protectedAsyncOperationGuard.requireCurrent(operation, getActingUserId());
     const index = mockPages.findIndex(page => page.id === pageId);
     if (index >= 0) mockPages[index] = applyBuilderPageSettings(mockPages[index], pageToBuilderPageSettings(result.data));
     if (index >= 0 && builderHistoryController?.pageId === pageId) builderHistoryController.synchronizePageMetadata(mockPages[index]);
@@ -4677,6 +4930,8 @@ function createLiveBuilderSetupController(): BuilderSetupController | null {
   const page = mockPages.find(item => item.id === builderPageId);
   const history = getBuilderHistoryController();
   if (!website || !page || !history) return null;
+  const setupOperation = protectedAsyncOperationGuard.begin(`builder-setup:${website.id}:${page.id}`, getActingUserId());
+  const setupIsCurrent = () => protectedAsyncOperationGuard.isCurrent(setupOperation, getActingUserId());
   return new BuilderSetupController({
     getContext: () => ({
       websiteId: getActiveBuilderWebsite()?.id ?? '',
@@ -4691,10 +4946,16 @@ function createLiveBuilderSetupController(): BuilderSetupController | null {
       previousBuildBrief: mockWebsiteSettings.build_brief
     }),
     persistence: {
-      persistPageSettings: persistBuilderSetupPagePatch,
-      applyDocument: document => applyLiveBuilderMutation(current => ({ ...current, sections: structuredClone(document.sections) }), { category: 'structural', fieldId: 'guided-setup', coalesce: false, selectSectionId: document.sections[0]?.id ?? null }, { autosave: false, render: false }),
-      persistDocument: async () => (await (window as any).savePageSections()) === true,
+      persistPageSettings: (pageId, patch) => persistBuilderSetupPagePatch(pageId, patch, setupOperation),
+      applyDocument: document => setupIsCurrent()
+        && applyLiveBuilderMutation(current => ({ ...current, sections: structuredClone(document.sections) }), { category: 'structural', fieldId: 'guided-setup', coalesce: false, selectSectionId: document.sections[0]?.id ?? null }, { autosave: false, render: false }),
+      persistDocument: async () => {
+        if (!setupIsCurrent()) return false;
+        const saved = await (window as any).savePageSections() === true;
+        return setupIsCurrent() && saved;
+      },
       restoreDocument: () => {
+        if (!setupIsCurrent()) return false;
         const active = getBuilderHistoryController();
         if (!active?.undo()) return false;
         syncBuilderDocumentToPageSections(active.document);
@@ -4705,6 +4966,7 @@ function createLiveBuilderSetupController(): BuilderSetupController | null {
           const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ build_brief: brief }) });
           const result = await response.json();
           if (!response.ok || result.success !== true) return false;
+          protectedAsyncOperationGuard.requireCurrent(setupOperation, getActingUserId());
           mockWebsiteSettings.build_brief = brief as any;
           return true;
         } catch { return false; }
@@ -4805,7 +5067,7 @@ function renderBuilderSetupDialog(): string {
 (window as any).setBuilderSetupMode = (mode: BuilderSetupApplyMode) => { if (!builderSetupDraft) return; builderSetupDraft.mode = mode; builderSetupDraft.replaceConfirmed = getCurrentBuilderSections().length === 0; const brief = buildBuilderSetupBrief(); if (brief) builderSetupController?.generate(brief, mode, builderSetupDraft.applySeoMetadata); renderBuilder(); };
 (window as any).confirmBuilderSetupReplace = (confirmed: boolean) => { if (builderSetupDraft) { builderSetupDraft.replaceConfirmed = confirmed; renderBuilder(); } };
 (window as any).toggleBuilderSetupSeo = (enabled: boolean) => { if (!builderSetupDraft?.mode) return; builderSetupDraft.applySeoMetadata = enabled; const brief = buildBuilderSetupBrief(); if (brief) builderSetupController?.generate(brief, builderSetupDraft.mode, enabled); renderBuilder(); };
-(window as any).applyBuilderSetup = async () => { const controller = builderSetupController; if (!controller || controller.status === 'applying') return; const pending = controller.apply(); renderBuilder(); const result = await pending; if (result.success) { builderSetupWizardOpen = false; builderSetupDraft = null; document.body.classList.remove('pb-setup-modal-open'); renderBuilder(); (window as any).showToast('Setup applied. Your public site was not published.', 'success'); setTimeout(() => document.querySelector<HTMLElement>('.pb-canvas-inner .pb-section-preview')?.focus(), 0); } else { renderBuilder(); } };
+(window as any).applyBuilderSetup = async () => { const controller = builderSetupController; if (!controller || controller.status === 'applying') return; const operation = protectedAsyncOperationGuard.begin('builder-setup-ui', getActingUserId()); const pending = controller.apply(); renderBuilder(); const result = await pending; if (!protectedAsyncOperationGuard.isCurrent(operation, getActingUserId()) || controller !== builderSetupController) return; if (result.success) { builderSetupWizardOpen = false; builderSetupDraft = null; document.body.classList.remove('pb-setup-modal-open'); renderBuilder(); (window as any).showToast('Setup applied. Your public site was not published.', 'success'); setTimeout(() => document.querySelector<HTMLElement>('.pb-canvas-inner .pb-section-preview')?.focus(), 0); } else { renderBuilder(); } };
 
 window.addEventListener('keydown', event => {
   if (!builderSetupWizardOpen) return;
@@ -5874,10 +6136,12 @@ function synchronizeBuilderSelectionDom(id: string): void {
 
   const toast = document.createElement('div');
   toast.className = `pb-toast-${type}`;
-  toast.innerHTML = `
-    <span style="font-size:1rem;line-height:1;">${c.icon}</span>
-    <span>${message}</span>
-  `;
+  const icon = document.createElement('span');
+  icon.style.cssText = 'font-size:1rem;line-height:1;';
+  icon.textContent = c.icon;
+  const messageText = document.createElement('span');
+  messageText.textContent = message;
+  toast.append(icon, messageText);
   toast.style.cssText = `
     position: fixed;
     bottom: 24px;
@@ -5942,13 +6206,19 @@ const fetchPageSectionRevision = createPageSectionRevisionClient({
   const sections = saveSnapshot
     ? builderDocumentToPageSections(saveSnapshot.document)
     : mockPageSections.filter((section: any) => section.page_id === pageId);
+  const saveOperation = protectedAsyncOperationGuard.begin(
+    `builder-section-save:${pageId}:${saveSnapshot?.generation ?? 'current'}`,
+    getActingUserId()
+  );
 
-  const saveOperation = builderSaveQueue.enqueue(async () => {
+  const queuedSave = builderSaveQueue.enqueue(async () => {
+    if (!protectedAsyncOperationGuard.isCurrent(saveOperation, getActingUserId())) return false;
     const generation = saveSnapshot?.generation ?? 1;
     builderSaveState.begin(generation);
     renderBuilderAutosaveIndicator();
     if (!builderPageSaveRevisions.has(pageId)) {
       const revisionResult = await fetchPageSectionRevision(pageId);
+      if (!protectedAsyncOperationGuard.isCurrent(saveOperation, getActingUserId())) return false;
       if (!revisionResult.success) {
         if (history && saveSnapshot) history.acknowledgeSave(saveSnapshot.generation, false);
         builderSaveState.complete(generation, { success: false, code: revisionResult.error.code }, true);
@@ -5965,6 +6235,7 @@ const fetchPageSectionRevision = createPageSectionRevisionClient({
     });
     const succeeded = result.success;
 
+    if (!protectedAsyncOperationGuard.isCurrent(saveOperation, getActingUserId())) return false;
     if (history && saveSnapshot) {
       const acknowledgement = history.acknowledgeSave(saveSnapshot.generation, succeeded);
       builderSaveState.complete(
@@ -5987,7 +6258,7 @@ const fetchPageSectionRevision = createPageSectionRevisionClient({
     renderBuilderAutosaveIndicator();
     return succeeded;
   });
-  return saveOperation;
+  return queuedSave;
 };
 
 // Attach to window for global access/testing
@@ -6315,6 +6586,13 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
       return;
     }
 
+    const internalAttemptScope = `${isPublic ? 'preview' : 'builder'}:${sectionId}`;
+    const internalAttempt = authenticatedFormAttempts.begin(internalAttemptScope, leadData);
+    const internalLeadData = { ...leadData, request_key: internalAttempt.key };
+    const internalLeadUiOperation = editorUsesSupabase()
+      ? protectedAsyncOperationGuard.begin(`internal-lead-ui:${internalAttemptScope}`, getActingUserId())
+      : null;
+
     // Timeout & Retry Logic (W4.2)
     const MAX_TIMEOUT = 10000;
     const withTimeout = (promise: Promise<any>, ms: number) =>
@@ -6328,7 +6606,7 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
         const response = await withTimeout(fetch('/api/leads', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(leadData)
+          body: JSON.stringify(internalLeadData)
         }), MAX_TIMEOUT) as Response;
         const result = await response.json();
         if (!response.ok || !result.success) {
@@ -6341,7 +6619,7 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
           const response = await withTimeout(fetch('/api/leads', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(leadData)
+            body: JSON.stringify(internalLeadData)
           }), MAX_TIMEOUT) as Response;
           const result = await response.json();
           if (!response.ok || !result.success) {
@@ -6354,6 +6632,8 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
     };
 
     const res = await performSubmission(true); // Initial try + 1 retry
+    if (internalLeadUiOperation) protectedAsyncOperationGuard.requireCurrent(internalLeadUiOperation, getActingUserId());
+    authenticatedFormAttempts.accept(internalAttemptScope, internalAttempt.key);
 
     console.log("[CRM: FORM] Success:", res);
 
@@ -6393,6 +6673,7 @@ function renderStandardForm(id: string, content: any, isPublic: boolean) {
     }
 
   } catch (error: any) {
+    if (isSupersededOperationError(error)) return;
     console.error("[CRM: FORM] Persistent failure after retry:", error);
 
     if (shouldUsePublicLeadEdge(publicLeadRuntime, {
@@ -6710,7 +6991,8 @@ async function renderSitePage(
   funnel_id: string,
   websiteOrContext: any,
   isPreview: boolean = false,
-  edgeModel?: PublicSiteRenderModel
+  edgeModel?: PublicSiteRenderModel,
+  authoritativePage?: Page
 ) {
   const renderSequence = ++publicSiteRenderSequence;
   // Store context for lead submission (Phase W3.8)
@@ -6722,15 +7004,20 @@ async function renderSitePage(
   
   // 2. Identify primary page/step in that funnel
   const resolvedPath = websiteOrContext?.route?.path || websiteOrContext?.path || '/';
-  const resolvedPage = edgeModel?.page || (isPreview
-    ? resolvePageForPreviewPath(resolvedPath, funnel_id)
-      || mockPages.find(candidate => candidate.funnel_id === funnel_id)
-    : resolveExactPublicPage(
+  const resolvedPage = resolveSiteRenderPage({
+    funnelId: funnel_id,
+    authoritativePage,
+    edgePage: edgeModel?.page as Page | undefined,
+    preview: isPreview,
+    resolvePreviewPage: () => resolvePageForPreviewPath(resolvedPath, funnel_id),
+    resolvePreviewFunnelFallback: () => mockPages.find(candidate => candidate.funnel_id === funnel_id) || null,
+    resolvePublicPage: () => resolveExactPublicPage(
       website,
       websiteOrContext?.route,
       resolvedPath,
       funnel_id
-    ));
+    )
+  });
 
   if (!resolvedPage) {
     render404('No content mapped to this page.');
@@ -6788,7 +7075,8 @@ async function renderSitePage(
   const settings = edgeModel?.settings || getWebsiteSettings();
   const layout = edgeModel?.layout
     || mockWebsiteLayouts.find(l => l.website_id === website.id)
-    || getWebsiteLayout();
+    || getWebsiteLayout()
+    || { header_config: { nav_items: [] }, footer_config: {} };
   
   // W6.5: Robust Internal Linking System
   const contactRoute = edgeModel ? undefined : mockWebsiteRoutes.find(r => r.website_id === website.id && (r.path === '/contact' || r.path === '/quote'));
@@ -7209,7 +7497,16 @@ function renderReports() {
 
 (window as any).showAttachToWebsiteModal = (funnelId: string) => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+    const ownedWebsites = mockWebsites.filter(w => w.user_id === userId);
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId)
+      ?? (ownedWebsites.length === 1 ? ownedWebsites[0] : undefined);
+    if (!website) {
+      const selector = document.createElement('div');
+      selector.id = 'attach-modal';
+      selector.innerHTML = `<div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 10001; display: flex; align-items: center; justify-content: center;"><div class="card" style="width: 100%; max-width: 500px; padding: 35px;"><h3>Choose a website</h3><p>Select the owned website where this page should be attached.</p><label for="attachment-website-select">Website</label><select id="attachment-website-select"><option value="">Select a website</option>${ownedWebsites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}">${escapeBuilderInspectorHtml(site.name)}</option>`).join('')}</select><div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px;"><button class="btn-outline" onclick="document.getElementById('attach-modal').remove()">Cancel</button><button class="btn-primary" onclick="window.selectWebsiteForAttachment('${escapeBuilderInspectorHtml(funnelId)}', (document.getElementById('attachment-website-select')).value)">Continue</button></div></div></div>`;
+      document.body.appendChild(selector);
+      return;
+    }
     const existingRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
     
     const modal = document.createElement('div');
@@ -7253,12 +7550,30 @@ function renderReports() {
     document.body.appendChild(modal);
 };
 
+(window as any).selectWebsiteForAttachment = (funnelId: string, websiteId: string) => {
+    const userId = getActingUserId();
+    if (!mockWebsites.some(site => site.id === websiteId && site.user_id === userId)) {
+      (window as any).showToast('Choose an owned website.', 'error');
+      return;
+    }
+    activeDashboardWebsiteId = websiteId;
+    document.getElementById('attach-modal')?.remove();
+    (window as any).showAttachToWebsiteModal(funnelId);
+};
+
 (window as any).saveWebsiteAttachment = (funnelId: string, websiteId: string) => {
+    if (blockUnsupportedProductionWebsiteMutation('Website page attachment')) return;
+    const userId = getActingUserId();
+    if (!mockWebsites.some(site => site.id === websiteId && site.user_id === userId)
+        || !mockFunnels.some(funnel => funnel.id === funnelId && funnel.user_id === userId)) {
+      (window as any).showToast('Website attachment is unavailable.', 'error');
+      return;
+    }
     const existingId = (document.getElementById('existing-route-select') as HTMLSelectElement).value;
     const newPath = (document.getElementById('new-route-path-inp') as HTMLInputElement).value.trim();
     
     if (existingId) {
-        const route = mockWebsiteRoutes.find(r => r.id === existingId);
+        const route = mockWebsiteRoutes.find(r => r.id === existingId && r.website_id === websiteId);
         if (route) {
             route.funnel_id = funnelId;
             (window as any).showToast(`Path ${route.path} updated successfully!`, 2000);
@@ -7356,6 +7671,7 @@ function renderReports() {
 };
 
 (window as any).finalizePageCreation = (templateId: string) => {
+    if (blockUnsupportedProductionWebsiteMutation('Legacy page creation')) return;
     const input = document.getElementById('finalize_page_name') as HTMLInputElement;
     const name = input?.value.trim();
     if (!name) { alert('Please enter a name for your page.'); return; }
@@ -7363,7 +7679,15 @@ function renderReports() {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
     const funnelId = `fnl-${Date.now()}`;
     const pageId = `p-${Date.now()}`;
-    const websiteId = mockWebsites[0].id; // Default site
+    const userId = getActingUserId();
+    const ownedWebsites = mockWebsites.filter(site => site.user_id === userId);
+    const website = mockWebsites.find(site => site.id === activeDashboardWebsiteId && site.user_id === userId)
+      ?? (ownedWebsites.length === 1 ? ownedWebsites[0] : undefined);
+    if (!website) {
+        (window as any).showToast('Choose the website where this page should be created.', 'error');
+        return;
+    }
+    const websiteId = website.id;
 
     // 1. Create Funnel
     mockFunnels.push({
@@ -7383,7 +7707,7 @@ function renderReports() {
         name: name,
         slug: slug,
         status: 'published',
-        seo_title: `${name} | ${mockWebsites[0].name}`,
+        seo_title: `${name} | ${website.name}`,
         seo_description: '',
         seo_keywords: [],
         created_at: new Date().toISOString(),
@@ -7428,6 +7752,7 @@ function renderReports() {
 
 
 (window as any).duplicatePage = (id: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Page duplication')) return;
   const page = mockPages.find(p => p.id === id);
   if (!page) return;
   const newPage = {
@@ -7454,6 +7779,7 @@ function renderReports() {
 };
 
 (window as any).togglePublish = (id: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Legacy page publishing')) return;
   const page = mockPages.find(p => p.id === id);
   if (page) {
     page.status = page.status === 'published' ? 'draft' : 'published';
@@ -7463,6 +7789,7 @@ function renderReports() {
 };
 
 (window as any).generatePageWithAI = (id: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Legacy AI page generation')) return;
   // Mock AI generation
   mockPageSections.push({
     id: `ps-ai-${Date.now()}`,
@@ -7477,6 +7804,7 @@ function renderReports() {
 };
 
 (window as any).applyTemplate = (id: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Legacy template application')) return;
   // Mock template application
   mockPageSections.push({
     id: `ps-tpl-${Date.now()}`,
@@ -7705,6 +8033,7 @@ function renderComponents() {
 }
 
 (window as any).useTemplate = (templateId: string) => {
+  if (blockUnsupportedProductionWebsiteMutation('Template page creation')) return;
   const template = templates.find((t: any) => t.id === templateId);
   if (!template) return;
 
@@ -7788,8 +8117,60 @@ function renderTemplates() {
   `;
 }
 
+function renderWebsiteSettingsSelector(websites: readonly Website[], invalid = false) {
+  app.innerHTML = `
+    ${renderSidebar('website-settings')}
+    <main class="main-content">
+      <header class="view-header"><h2>Website Branding & Tracking</h2></header>
+      <section class="card website-settings-selection" ${invalid ? 'role="alert"' : ''}>
+        <h3>Choose a website</h3>
+        <p>${invalid ? 'That website is not available for this account. Choose an owned website.' : 'Select the website whose settings you want to manage.'}</p>
+        <label for="settings-website-select">Website</label>
+        <select id="settings-website-select" onchange="window.selectWebsiteForSettings(this.value)">
+          <option value="">Select a website</option>
+          ${websites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}">${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}
+        </select>
+      </section>
+    </main>
+  `;
+}
+
+function renderWebsiteManagementSelector(view: WebsiteManagementView, websites: readonly Website[], invalid = false) {
+  const labels: Record<WebsiteManagementView, string> = {
+    'website-settings': 'Website Settings',
+    'funnels': 'Site Pages',
+    'website-navigation': 'Website Navigation',
+    'website-structure': 'Website Structure',
+    'seo-pages': 'SEO Pages'
+  };
+  app.innerHTML = `
+    ${renderSidebar(view)}
+    <main class="main-content">
+      <header class="view-header"><h2>${labels[view]}</h2></header>
+      <section class="card website-settings-selection" ${invalid ? 'role="alert"' : ''}>
+        <h3>Choose a website</h3>
+        <p>${invalid ? 'That website is not available for this account. Choose an owned website.' : `Select the website whose ${labels[view].toLowerCase()} you want to manage.`}</p>
+        <label for="management-website-select">Website</label>
+        <select id="management-website-select" onchange="window.selectWebsiteForManagement('${view}', this.value)">
+          <option value="">Select a website</option>
+          ${websites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}">${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}
+        </select>
+      </section>
+    </main>
+  `;
+}
+
+function renderWebsiteManagementSwitcher(view: WebsiteManagementView): string {
+  const userId = getActingUserId();
+  const owned = mockWebsites.filter(site => site.user_id === userId);
+  if (owned.length < 2 || !activeDashboardWebsiteId) return '';
+  return `<div class="website-dashboard-selector"><label for="management-website-select">Active website</label><select id="management-website-select" onchange="window.selectWebsiteForManagement('${view}', this.value)">${owned.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}" ${site.id === activeDashboardWebsiteId ? 'selected' : ''}>${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></div>`;
+}
+
 function renderWebsiteSettings() {
   const settings = getWebsiteSettings();
+  const userId = getActingUserId();
+  const ownedWebsites = mockWebsites.filter(website => website.user_id === userId);
   applyPrimaryColor(settings.primary_color);
   app.innerHTML = `
     ${renderSidebar('website-settings')}
@@ -7800,6 +8181,7 @@ function renderWebsiteSettings() {
            <button class="btn-primary" style="background: var(--primary-color);" onclick="window.saveGlobalSettings()">Save Settings</button>
         </div>
       </header>
+      ${ownedWebsites.length > 1 ? `<div class="website-dashboard-selector"><label for="settings-website-select">Active website</label><select id="settings-website-select" onchange="window.selectWebsiteForSettings(this.value)">${ownedWebsites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}" ${site.id === activeSettingsWebsiteId ? 'selected' : ''}>${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></div>` : ''}
       <div style="max-width: 800px;">
         <div class="card" style="margin-bottom: 24px;">
           <h3>Business Profile</h3>
@@ -7866,11 +8248,22 @@ function renderWebsiteSettings() {
 
 function renderWebsiteNavigation() {
   const userId = getActingUserId();
-  const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
-  const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+  const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
+  if (!website) {
+    renderWebsiteRepositoryUnavailable('website-navigation');
+    return;
+  }
+  if (editorUsesSupabase() && websiteLayoutHydrator.state.status === 'loading') {
+    app.innerHTML = `${renderSidebar('website-navigation')}<main class="main-content" aria-busy="true"><header class="view-header"><h2>Website Navigation</h2></header><section class="card"><p>Loading navigation configuration…</p></section></main>`;
+    return;
+  }
+  if (editorUsesSupabase() && websiteLayoutHydrator.state.status === 'error') {
+    app.innerHTML = `${renderSidebar('website-navigation')}<main class="main-content"><header class="view-header"><h2>Website Navigation</h2></header><section class="card" role="alert"><h3>Navigation could not be loaded.</h3><p>Your saved configuration was not changed.</p><button class="btn-outline" onclick="window.navigateTo('website-navigation')">Retry</button></section></main>`;
+    return;
+  }
+  const layout = mockWebsiteLayouts.find(l => l.website_id === website.id);
   
-  if (!layout.header_config.nav_items) layout.header_config.nav_items = [];
-  const navItems = layout.header_config.nav_items;
+  const navItems = layout?.header_config.nav_items ?? [];
 
   // 🌿 Fix.2: Get available pages for the dropdown
   const siteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
@@ -7919,10 +8312,11 @@ function renderWebsiteNavigation() {
           <p style="color: #64748b; margin-top: 6px;">Manage your site's header menu. Links are restricted to your published pages to prevent dead ends.</p>
         </div>
         <div style="display: flex; gap: 12px;">
-           <button class="btn-primary" style="background: #8a2be2; border: none; padding: 12px 24px;" onclick="window.addNavItem()">+ Add Menu Item</button>
-           <button class="btn-primary" style="padding: 12px 24px;" onclick="window.saveWebsiteLayout()">Save Configuration</button>
+           ${layout ? `<button class="btn-primary" style="background: #8a2be2; border: none; padding: 12px 24px;" onclick="window.addNavItem()">+ Add Menu Item</button>` : ''}
+           <button class="btn-primary" style="padding: 12px 24px;" onclick="window.saveWebsiteLayout()">${layout ? 'Save Configuration' : 'Create Navigation'}</button>
         </div>
       </header>
+      ${renderWebsiteManagementSwitcher('website-navigation')}
 
       <div style="max-width: 1000px; padding: 10px;">
         ${itemsHtml || '<div class="empty-state" style="padding: 80px; text-align: center; background: white; border-radius: 20px; border: 2px dashed #e2e8f0; color: #64748b;"><div style="font-size: 3rem; margin-bottom: 16px;">📂</div><h3>No menu items here</h3><p>Start building your navigation menu by adding your first link.</p><button class="btn-primary" style="margin-top: 20px;" onclick="window.addNavItem()">Add Item</button></div>'}
@@ -7933,8 +8327,9 @@ function renderWebsiteNavigation() {
 
 (window as any).addNavItem = () => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
-    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
+    const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : undefined;
+    if (!layout) { (window as any).showToast('Create the navigation configuration first.', 'error'); return; }
     
     if (!layout.header_config.nav_items) layout.header_config.nav_items = [];
     layout.header_config.nav_items.push({ label: 'New Link', path: '/', visible: true });
@@ -7943,8 +8338,9 @@ function renderWebsiteNavigation() {
 
 (window as any).updateNavItem = (index: number, field: string, value: any) => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
-    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
+    const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : undefined;
+    if (!layout) return;
     
     (layout.header_config.nav_items[index] as any)[field] = value;
     renderWebsiteNavigation();
@@ -7952,8 +8348,9 @@ function renderWebsiteNavigation() {
 
 (window as any).reorderNavItem = (index: number, direction: number) => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
-    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
+    const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : undefined;
+    if (!layout) return;
     
     const items = layout.header_config.nav_items;
     const newIndex = index + direction;
@@ -7968,22 +8365,67 @@ function renderWebsiteNavigation() {
 
 (window as any).deleteNavItem = (index: number) => {
     const userId = getActingUserId();
-    const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
-    const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || mockWebsiteLayouts[0];
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
+    const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : undefined;
+    if (!layout) return;
     
     layout.header_config.nav_items.splice(index, 1);
     renderWebsiteNavigation();
 };
 
 (window as any).saveWebsiteLayout = async () => {
-    (window as any).showToast('Saving navigation layout...', 2000);
-    setTimeout(() => {
-        (window as any).showToast('Navigation updated successfully!', 2000);
-    }, 600);
+    const userId = getActingUserId();
+    const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
+    if (!website) { (window as any).showToast('Navigation is unavailable.', 'error'); return; }
+    const existing = mockWebsiteLayouts.find(layout => layout.website_id === website.id);
+    const headerConfig = existing?.header_config ?? { logo_text: '', nav_items: [] };
+    const footerConfig = existing?.footer_config ?? {};
+    if (!editorUsesSupabase()) {
+      if (!existing) mockWebsiteLayouts.push({ id: `layout-${Date.now()}`, website_id: website.id, header_config: headerConfig, footer_config: footerConfig, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+      (window as any).showToast('Navigation updated successfully!', 'success');
+      renderWebsiteNavigation();
+      return;
+    }
+    const navigationOperation = currentView === 'website-navigation'
+      ? protectedAsyncOperationGuard.captureCurrent('application-navigation', userId)
+      : null;
+    if (!navigationOperation) { (window as any).showToast('Navigation is unavailable.', 'error'); return; }
+    const saveOperation = protectedAsyncOperationGuard.begin(`website-layout-save:${website.id}`, userId);
+    (window as any).showToast('Saving navigation layout...', 'saving');
+    try {
+      const client = await getBuilderPublicationSupabaseClient();
+      if (!client) throw new Error('UNAVAILABLE');
+      const result = await client.from('website_layouts').upsert({ website_id: website.id, header_config: headerConfig, footer_config: footerConfig, updated_at: new Date().toISOString() }, { onConflict: 'website_id' }).select('*').single();
+      if (result.error || !result.data || result.data.website_id !== website.id) throw new Error('UNAVAILABLE');
+      const saved = result.data as WebsiteLayout;
+      const committed = protectedAsyncOperationGuard.commitIfCurrent(saveOperation, getActingUserId(), () => {
+        if (activeDashboardWebsiteId !== website.id) throw new SupersededOperationError();
+        const index = mockWebsiteLayouts.findIndex(layout => layout.website_id === website.id);
+        if (index >= 0) mockWebsiteLayouts[index] = saved;
+        else mockWebsiteLayouts.push(saved);
+        websiteLayoutHydrator.state = { status: 'loaded', userId };
+      });
+      if (!committed) return;
+      if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())
+        || currentView !== 'website-navigation') return;
+      (window as any).showToast('Navigation updated successfully!', 'success');
+      renderWebsiteNavigation();
+    } catch (error) {
+      if (isSupersededOperationError(error)
+        || !protectedAsyncOperationGuard.isCurrent(saveOperation, getActingUserId())
+        || activeDashboardWebsiteId !== website.id
+        || !protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())
+        || currentView !== 'website-navigation') return;
+      (window as any).showToast('Navigation could not be saved. Please try again.', 'error');
+    }
 };
 function renderWebsiteStructure() {
   const userId = getActingUserId();
-  const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
+  const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
+  if (!website) {
+    renderWebsiteRepositoryUnavailable('website-structure');
+    return;
+  }
   const routes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
   
   const websiteUrl = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
@@ -8000,6 +8442,7 @@ function renderWebsiteStructure() {
            <button class="btn-primary" onclick="window.showAddRouteModal('${website.id}')">Add New Route</button>
         </div>
       </header>
+      ${renderWebsiteManagementSwitcher('website-structure')}
       
       <div class="card" style="margin-bottom: 24px; border-left: 4px solid var(--primary-color);">
         <div style="display: flex; align-items: center; justify-content: space-between;">
@@ -8093,6 +8536,7 @@ function renderWebsiteStructure() {
 };
 
 (window as any).saveRoute = async (websiteId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Route creation is temporarily unavailable.', 'error'); return; }
   const pathInput = document.getElementById('route-path') as HTMLInputElement;
   const funnelSelect = document.getElementById('route-funnel-id') as HTMLSelectElement;
   
@@ -8129,6 +8573,7 @@ function renderWebsiteStructure() {
 };
 
 (window as any).deleteRoute = (id: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Route deletion is temporarily unavailable.', 'error'); return; }
   if (!confirm('Are you sure you want to delete this route? This path will no longer load its page.')) return;
   
   const index = mockWebsiteRoutes.findIndex(r => r.id === id);
@@ -8138,41 +8583,31 @@ function renderWebsiteStructure() {
   }
 };
 
-(window as any).updateSettingsField = (field: string, value: string) => {
+(window as any).updateSettingsField = async (field: string, value: string) => {
     const s = getWebsiteSettings();
-    (s as any)[field] = value;
-
-    if (field === 'primary_color') {
-        applyPrimaryColor(value);
-        const colorDisplay = document.getElementById('settings-primary-color-display');
-        if (colorDisplay) colorDisplay.textContent = value;
-    }
-    if (field === 'logo_url') {
-        const logoImg = document.getElementById('settings-logo-img') as HTMLImageElement | null;
-        if (logoImg) logoImg.src = value;
-    }
-
-    const promise = fetch('/api/settings', {
+    const previous = (s as any)[field];
+    const response = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(s)
-    })
-    .then(res => res.json())
-    .then(res => {
-        if (res.success) {
-            console.log('[SETTINGS] Field persisted:', field, value);
-        } else {
-            console.warn('[SETTINGS] Persistence response was failure:', res.error);
-        }
-        return res;
-    })
-    .catch(err => {
-        console.error('[SETTINGS] Network error on field save:', err);
-        throw err;
+        body: JSON.stringify({ [field]: value })
     });
-
-    console.log('Settings updated:', field, value);
-    return promise;
+    const result = await response.json();
+    if (!response.ok || result.success !== true || !result.data) {
+      (s as any)[field] = previous;
+      (window as any).showToast('Website setting could not be saved.', 'error');
+      throw new Error('SETTINGS_UNAVAILABLE');
+    }
+    Object.assign(s, result.data);
+    if (field === 'primary_color') {
+      applyPrimaryColor((s as any)[field]);
+      const colorDisplay = document.getElementById('settings-primary-color-display');
+      if (colorDisplay) colorDisplay.textContent = (s as any)[field];
+    }
+    if (field === 'logo_url') {
+      const logoImg = document.getElementById('settings-logo-img') as HTMLImageElement | null;
+      if (logoImg) logoImg.src = (s as any)[field];
+    }
+    return result;
 };
 
 (window as any).handleLogoUpload = async (file: File) => {
@@ -8263,6 +8698,7 @@ function renderQuickstart() {
 }
 
 function renderLeadCapture() {
+  (window as any).internalLeadRequestKey ||= crypto.randomUUID();
   app.innerHTML = `
     ${renderSidebar('lead-capture')}
     <main class="main-content">
@@ -8337,10 +8773,12 @@ async function handleLeadCaptureSubmission(e: Event) {
       address,
       service_type,
       message,
-      source: 'internal'
+      source: 'internal',
+      request_key: (window as any).internalLeadRequestKey
     });
 
     console.log("Internal Lead Created:", result);
+    (window as any).internalLeadRequestKey = '';
     alert(`Success! Lead created for ${name}.`);
     window.navigateTo('clients');
 
@@ -8361,7 +8799,7 @@ function renderOpportunities() {
       const contact = mockContacts.find(c => c.id === opp.contact_id);
       return `
         <div class="kanban-card" draggable="true" ondragstart="drag(event, '${opp.id}')" onclick="window.navigateTo('contact-detail', '${opp.contact_id}')" style="cursor: pointer; display: flex; flex-direction: column; gap: 4px;">
-          <div class="contact-name">${contact ? contact.name : 'Unknown Contact'}</div>
+          <div class="contact-name">${escapeHtmlText(contact ? contact.name : 'Unknown Contact')}</div>
           <div class="opportunity-value" style="display: flex; align-items: center; gap: 4px;">
             <span>$</span>
             <input type="number" 
@@ -8371,8 +8809,8 @@ function renderOpportunities() {
                    onclick="event.stopPropagation()" 
                    onchange="window.updateOpportunityField('${opp.id}', 'value', this.value)">
           </div>
-          <div class="contact-phone">${contact ? contact.phone : 'N/A'}</div>
-          ${opp.notes ? `<div style="font-size: 0.7rem; color: #94a3b8; font-style: italic; border-top: 1px solid #f1f5f9; padding-top: 4px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${opp.notes.replace(/\n/g, ' ')}</div>` : ''}
+          <div class="contact-phone">${escapeHtmlText(contact ? formatContactPhone(contact.phone) : 'N/A')}</div>
+          ${opp.notes ? `<div style="font-size: 0.7rem; color: #94a3b8; font-style: italic; border-top: 1px solid #f1f5f9; padding-top: 4px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtmlText(opp.notes.replace(/\n/g, ' '))}</div>` : ''}
         </div>
       `;
     }).join('');
@@ -8407,7 +8845,7 @@ function renderQuotes() {
     return `
       <tr onclick="window.navigateTo('contact-detail', '${quote.contact_id}')" style="cursor: pointer;">
         <td style="font-weight: 600; color: var(--primary-color);">Q-${quote.id}</td>
-        <td>${contact ? contact.name : 'Unknown'}</td>
+        <td>${escapeHtmlText(contact ? contact.name : 'Unknown')}</td>
         <td><span class="badge badge-${quote.status}">${quote.status}</span></td>
         <td style="font-weight: 600;">$${quote.total_amount.toLocaleString()}</td>
         <td>${new Date(quote.created_at).toLocaleDateString()}</td>
@@ -8456,6 +8894,10 @@ function renderQuotes() {
 }
 
 function renderInvoices() {
+  if (editorUsesSupabase()) {
+    app.innerHTML = `${renderSidebar('invoices')}<main class="main-content"><header class="view-header"><h2>Invoices</h2></header><section class="card" role="status"><h3>Invoices are not available yet.</h3><p>Production invoice persistence has not been implemented. No invoice changes will be stored until that backend is available.</p></section></main>`;
+    return;
+  }
   const filteredInvoices = mockInvoices.filter(i => {
     if (invoiceStatusFilter === 'all') return true;
     return i.status === invoiceStatusFilter;
@@ -8466,7 +8908,7 @@ function renderInvoices() {
     return `
       <tr onclick="window.navigateTo('contact-detail', '${invoice.contact_id}')" style="cursor: pointer;">
         <td style="font-weight: 600; color: var(--primary-color);">INV-${invoice.id}</td>
-        <td>${contact ? contact.name : 'Unknown'}</td>
+        <td>${escapeHtmlText(contact ? contact.name : 'Unknown')}</td>
         <td style="font-weight: 600;">$${invoice.amount.toLocaleString()}</td>
         <td><span class="badge badge-${invoice.status}">${invoice.status}</span></td>
         <td>${new Date(invoice.due_date).toLocaleDateString()}</td>
@@ -8548,8 +8990,8 @@ function renderNewQuote() {
             <div style="padding: 15px; border: 1px solid #f0f0f0; border-radius: 8px; margin-bottom: 15px; position: relative;">
               <button onclick="window.removeLineItem(${item.index})" style="position: absolute; right: 8px; top: 8px; background: none; border: none; color: #ccc; cursor: pointer; font-size: 1.2rem;">×</button>
               <div style="margin-bottom: 10px;">
-                <input type="text" placeholder="Service Name" value="${item.service}" style="width: 100%; border: none; font-weight: 600; font-size: 0.95rem; margin-bottom: 4px;" oninput="window.updateLineItem(${item.index}, 'service', this.value, false)">
-                <input type="text" placeholder="Short description" value="${item.description}" style="width: 100%; border: none; font-size: 0.85rem; color: #666;" oninput="window.updateLineItem(${item.index}, 'description', this.value, false)">
+                <input type="text" placeholder="Service Name" value="${escapeHtmlText(item.service)}" style="width: 100%; border: none; font-weight: 600; font-size: 0.95rem; margin-bottom: 4px;" oninput="window.updateLineItem(${item.index}, 'service', this.value, false)">
+                <input type="text" placeholder="Short description" value="${escapeHtmlText(item.description)}" style="width: 100%; border: none; font-size: 0.85rem; color: #666;" oninput="window.updateLineItem(${item.index}, 'description', this.value, false)">
               </div>
               <div style="display: flex; gap: 10px; align-items: center; background: #f8fafc; padding: 10px; border-radius: 6px;">
                 <div style="flex: 1;">
@@ -8596,14 +9038,14 @@ function renderNewQuote() {
               <label>Select Contact</label>
               <select id="quote-contact" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;" onchange="window.updateNewQuoteContact(this.value)">
                 <option value="">-- Choose Contact --</option>
-                ${contacts.map(c => `<option value="${c.id}" ${nqcId === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+                ${contacts.map(c => `<option value="${escapeHtmlText(c.id)}" ${nqcId === c.id ? 'selected' : ''}>${escapeHtmlText(c.name)}</option>`).join('')}
               </select>
             </div>
             <div class="form-group" style="margin: 0;">
               <label>Select Opportunity (Optional)</label>
               <select id="quote-opportunity" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;" onchange="window.newQuoteOpportunityId = this.value">
                 <option value="">-- No Opportunity --</option>
-                ${opportunities.map(o => `<option value="${o.id}" ${nqoId === o.id ? 'selected' : ''}>$${o.value} - ${o.pipeline_stage}</option>`).join('')}
+                ${opportunities.map(o => `<option value="${escapeHtmlText(o.id)}" ${nqoId === o.id ? 'selected' : ''}>$${o.value} - ${escapeHtmlText(o.pipeline_stage)}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -8668,7 +9110,7 @@ function renderNewQuote() {
   }
 };
 
-(window as any).saveQuote = () => {
+(window as any).saveQuote = async () => {
   const nqcId = (window as any).newQuoteContactId;
   const nqoId = (window as any).newQuoteOpportunityId;
   const nqItems = (window as any).newQuoteLineItems;
@@ -8679,19 +9121,83 @@ function renderNewQuote() {
   }
 
   const notes = (document.getElementById('quote-notes') as HTMLTextAreaElement)?.value || '';
+  const selectedTier = 'basic' as const;
+  const tierValidation = validateSelectedQuoteTier(nqItems, selectedTier);
+  if (!tierValidation.success) {
+    alert(tierValidation.message);
+    return;
+  }
+
+  if (editorUsesSupabase()) {
+    const requestKey = (window as any).newQuoteRequestKey || crypto.randomUUID();
+    (window as any).newQuoteRequestKey = requestKey;
+    const userId = getActingUserId();
+    const navigationOperation = currentView === 'new-quote'
+      ? protectedAsyncOperationGuard.captureCurrent('application-navigation', userId)
+      : null;
+    if (!navigationOperation) return;
+    const quoteOperation = protectedAsyncOperationGuard.begin(`quote-ui:${requestKey}`, userId);
+    try {
+      const response = await fetch('/api/quotes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          request_key: requestKey,
+          contact_id: nqcId,
+          opportunity_id: nqoId || null,
+          selected_tier: selectedTier,
+          notes,
+          items: nqItems.map((item: any) => ({ serviceName: String(item.service).trim(), description: item.description || '', quantity: item.quantity, unitPrice: item.price, tier: item.tier }))
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error || 'Quote creation failed.');
+      const saved = payload.data;
+      const committed = protectedAsyncOperationGuard.commitIfCurrent(quoteOperation, getActingUserId(), () => {
+        const quoteIndex = mockQuotes.findIndex(quote => quote.id === saved.quote.id);
+        if (quoteIndex >= 0) mockQuotes[quoteIndex] = saved.quote;
+        else mockQuotes.push(saved.quote);
+        for (const item of saved.items) {
+          const itemIndex = mockQuoteItems.findIndex(existing => existing.id === item.id);
+          if (itemIndex >= 0) mockQuoteItems[itemIndex] = item;
+          else mockQuoteItems.push(item);
+        }
+        if (saved.opportunity) {
+          const opportunityIndex = mockOpportunities.findIndex(opportunity => opportunity.id === saved.opportunity.id);
+          if (opportunityIndex >= 0) mockOpportunities[opportunityIndex] = saved.opportunity;
+        }
+      });
+      if (!committed) return;
+      if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())
+        || currentView !== 'new-quote') return;
+      (window as any).newQuoteLineItems = [{ service: '', description: '', quantity: 1, price: 0, tier: 'basic' }];
+      (window as any).newQuoteContactId = '';
+      (window as any).newQuoteOpportunityId = '';
+      (window as any).newQuoteRequestKey = '';
+      (window as any).showToast('Quote created successfully.', 'success');
+      await (window as any).navigateTo('quotes');
+    } catch (error: any) {
+      if (isSupersededOperationError(error)
+        || !protectedAsyncOperationGuard.isCurrent(quoteOperation, getActingUserId())
+        || !protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())
+        || currentView !== 'new-quote') return;
+      (window as any).showToast(error?.message || 'Quote creation is temporarily unavailable.', 'error');
+    }
+    return;
+  }
 
   const quoteId = 'q' + (mockQuotes.length + 1) + '-' + Math.floor(Math.random() * 100);
 
-  // Default to Basic total initially
-  const basicTotal = nqItems.filter((i: any) => i.tier === 'basic').reduce((sum: number, item: any) => sum + (item.quantity * item.price), 0);
+  const basicTotal = tierValidation.selectedTotal;
 
   mockQuotes.push({
     id: quoteId,
+    user_id: getActingUserId(),
     contact_id: nqcId,
     opportunity_id: nqoId || '',
     status: 'draft',
     total_amount: basicTotal,
-    selected_tier: 'basic',
+    selected_tier: selectedTier,
     notes: notes,
     created_at: new Date().toISOString()
   });
@@ -8707,6 +9213,7 @@ function renderNewQuote() {
   nqItems.forEach((item: any, idx: number) => {
     mockQuoteItems.push({
       id: 'qi-' + quoteId + '-' + idx,
+      user_id: getActingUserId(),
       quote_id: quoteId,
       service_name: item.service,
       description: item.description,
@@ -8725,6 +9232,7 @@ function renderNewQuote() {
 };
 
 function updateOpportunityStage(opportunity_id: string, new_stage: string) {
+  if (editorUsesSupabase()) { (window as any).showToast('Opportunity updates are temporarily unavailable.', 'error'); return; }
   const opp = mockOpportunities.find(o => o.id === opportunity_id);
   if (opp) {
     opp.pipeline_stage = new_stage;
@@ -8928,7 +9436,9 @@ function renderApplicationLogin(
         safeReturnTo,
         result.reason === 'invalid-credentials'
           ? 'The email or password is incorrect.'
-          : 'Sign-in is temporarily unavailable. Please try again.'
+          : result.reason === 'email-not-confirmed'
+            ? 'Confirm your email address before signing in.'
+            : 'Sign-in is temporarily unavailable. Please try again.'
       );
       return;
     }
@@ -8985,6 +9495,7 @@ async function loadWebsiteDashboardCore(request: { actingUserId: string }): Prom
     PagesRepo.hydrateLocalPages(userId);
     return { websites: mockWebsites.map(item => ({ ...item })), routes: mockWebsiteRoutes.map(item => ({ ...item })), funnels: mockFunnels.map(item => ({ ...item })), pages: mockPages.map(item => ({ ...item })) };
   }
+  const hydrationToken = protectedAsyncOperationGuard.begin('website-dashboard-core', userId);
   const client = await getBuilderPublicationSupabaseClient();
   if (!client) throw new Error('UNAVAILABLE');
   const auth = await client.auth.getUser();
@@ -8994,11 +9505,15 @@ async function loadWebsiteDashboardCore(request: { actingUserId: string }): Prom
   const websites = ((websitesResult.data ?? []) as Website[])
     .filter(item => typeof item.id === 'string' && item.id.length > 0 && item.user_id === userId);
   const websiteIds = websites.map(item => item.id);
+  const layoutHydration = websiteLayoutHydrator.hydrate(userId, websites);
   const [routesResult, funnelsResult, pagesResult] = await Promise.all([
     websiteIds.length ? client.from('website_routes').select('*').in('website_id', websiteIds).order('path', { ascending: true }) : Promise.resolve({ data: [], error: null }),
     client.from('funnels').select('*').eq('user_id', userId).order('created_at', { ascending: true }),
     client.from('pages').select('*').eq('user_id', userId).order('created_at', { ascending: true })
   ]);
+  const layoutState = await layoutHydration;
+  protectedAsyncOperationGuard.requireCurrent(hydrationToken, getActingUserId());
+  if (layoutState.status === 'error') throw new Error('UNAVAILABLE');
   if (routesResult.error || funnelsResult.error || pagesResult.error) throw new Error('UNAVAILABLE');
   const ownedWebsiteIds = new Set(websites.map(item => item.id));
   const routes = ((routesResult.data ?? []) as WebsiteRoute[])
@@ -9007,11 +9522,14 @@ async function loadWebsiteDashboardCore(request: { actingUserId: string }): Prom
     .filter(item => typeof item.id === 'string' && item.user_id === userId);
   const pages = ((pagesResult.data ?? []) as Page[])
     .filter(item => typeof item.id === 'string' && item.user_id === userId);
-  replaceOwnedDashboardRows(mockWebsites, websites, userId);
-  replaceOwnedDashboardRows(mockFunnels, funnels, userId);
-  replaceOwnedDashboardRows(mockPages, pages, userId);
-  for (let index = mockWebsiteRoutes.length - 1; index >= 0; index -= 1) if (ownedWebsiteIds.has(mockWebsiteRoutes[index].website_id)) mockWebsiteRoutes.splice(index, 1);
-  mockWebsiteRoutes.push(...routes.map(item => ({ ...item })));
+  const committed = protectedAsyncOperationGuard.commitIfCurrent(hydrationToken, getActingUserId(), () => {
+    replaceOwnedDashboardRows(mockWebsites, websites, userId);
+    replaceOwnedDashboardRows(mockFunnels, funnels, userId);
+    replaceOwnedDashboardRows(mockPages, pages, userId);
+    for (let index = mockWebsiteRoutes.length - 1; index >= 0; index -= 1) if (ownedWebsiteIds.has(mockWebsiteRoutes[index].website_id)) mockWebsiteRoutes.splice(index, 1);
+    mockWebsiteRoutes.push(...routes.map(item => ({ ...item })));
+  });
+  if (!committed) throw new SupersededOperationError();
   return { websites, routes, funnels, pages };
 }
 
@@ -9094,15 +9612,90 @@ function dashboardActionButton(model: WebsiteDashboardModel, action: BuilderNavi
   if (!state || (state.status !== 'ready' && state.status !== 'partial') || !state.model.currentPage) return;
   const pageId = requestedPageId ?? (action === 'edit' ? state.model.homepage.id : state.model.currentPage.id);
   if (!pageId) return;
+  if (action === 'preview') {
+    const page = mockPages.find(candidate => candidate.id === pageId);
+    const route = mockWebsiteRoutes.find(candidate => (
+      candidate.website_id === state.model.website.id
+      && candidate.funnel_id === page?.funnel_id
+    ));
+    const path = pageId === state.model.homepage.id
+      ? state.model.homepage.path || '/'
+      : route?.path || `/${page?.slug || ''}`;
+    window.history.pushState({}, '', buildAuthenticatedPreviewUrl({
+      websiteId: state.model.website.id,
+      pageId,
+      path
+    }));
+    void bootRouter();
+    return;
+  }
   const target = { websiteId: state.model.website.id, pageId, action };
   void (window as any).navigateTo('builder', undefined, { builderContext: target });
 };
 
 (window as any).selectDashboardWebsite = (websiteId: string) => {
   if (!websiteId) return;
+  websiteSettingsHydrator.clear();
+  activeBuilderWebsiteId = null;
   activeDashboardWebsiteId = websiteId;
   window.history.pushState({}, '', `#/website-dashboard?websiteId=${encodeURIComponent(websiteId)}`);
   void renderWebsiteDashboard();
+};
+
+(window as any).openWebsiteSettings = () => {
+  const userId = getActingUserId();
+  const preferredWebsiteId = currentView === 'website-settings'
+    ? activeSettingsWebsiteId
+    : currentView === 'website-dashboard'
+      ? activeDashboardWebsiteId
+      : currentView === 'builder'
+        ? activeBuilderWebsiteId
+        : activeSettingsWebsiteId || activeDashboardWebsiteId || activeBuilderWebsiteId;
+  const ownedWebsiteId = preferredWebsiteId && mockWebsites.some(site => site.id === preferredWebsiteId && site.user_id === userId)
+    ? preferredWebsiteId
+    : null;
+  const route: WebsiteSettingsRouteSelection = ownedWebsiteId
+    ? { status: 'valid', websiteId: ownedWebsiteId }
+    : { status: 'none' };
+  void (window as any).navigateTo('website-settings', undefined, { websiteSettingsRoute: route });
+};
+
+(window as any).selectWebsiteForSettings = (websiteId: string) => {
+  const route: WebsiteSettingsRouteSelection = websiteId
+    ? { status: 'valid', websiteId }
+    : { status: 'none' };
+  void (window as any).navigateTo('website-settings', undefined, { websiteSettingsRoute: route });
+};
+
+(window as any).openWebsiteManagementView = (view: WebsiteManagementView) => {
+  const userId = getActingUserId();
+
+  const preferredWebsiteId = currentView === 'website-settings'
+    ? activeSettingsWebsiteId
+    : currentView === 'website-dashboard'
+      ? activeDashboardWebsiteId
+      : currentView === 'builder'
+        ? activeBuilderWebsiteId
+        : activeSettingsWebsiteId || activeDashboardWebsiteId || activeBuilderWebsiteId;
+
+  const ownedWebsiteId = preferredWebsiteId && mockWebsites.some(site => site.id === preferredWebsiteId && site.user_id === userId)
+    ? preferredWebsiteId
+    : null;
+
+  const route: WebsiteSettingsRouteSelection = ownedWebsiteId
+    ? { status: 'valid', websiteId: ownedWebsiteId }
+    : { status: 'none' };
+
+  void (window as any).navigateTo(view, undefined, {
+    websiteManagementRoute: route
+  });
+};
+
+(window as any).selectWebsiteForManagement = (view: WebsiteManagementView, websiteId: string) => {
+  const route: WebsiteSettingsRouteSelection = websiteId
+    ? { status: 'valid', websiteId }
+    : { status: 'none' };
+  void (window as any).navigateTo(view, undefined, { websiteManagementRoute: route });
 };
 
 (window as any).refreshWebsiteDashboard = () => void renderWebsiteDashboard(true);
@@ -9149,9 +9742,15 @@ function renderFunnels(mode: 'website' | 'marketing' = 'website') {
   currentView = 'funnels';
   (window as any).funnelMode = mode;
   const userId = getActingUserId();
-  const website = mockWebsites.find(w => w.user_id === userId) || mockWebsites[0];
-  
-  const siteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
+  const ownedWebsiteIds = new Set(mockWebsites.filter(w => w.user_id === userId).map(w => w.id));
+  const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
+  if (mode === 'website' && !website) {
+    renderWebsiteRepositoryUnavailable('funnels');
+    return;
+  }
+  const siteRoutes = mode === 'website'
+    ? mockWebsiteRoutes.filter(r => r.website_id === website!.id)
+    : mockWebsiteRoutes.filter(r => ownedWebsiteIds.has(r.website_id));
   const routedFunnelIds = new Set(siteRoutes.map(r => r.funnel_id));
   
   const allFunnels = mockFunnels.filter(f => f.user_id === userId);
@@ -9195,11 +9794,12 @@ function renderFunnels(mode: 'website' | 'marketing' = 'website') {
         </div>
         <div style="display: flex; gap: 12px;">
           ${mode === 'website' 
-            ? `<button class="btn-primary" onclick="window.showAddPageModal('${website.id}')">+ New Website Page</button>`
+            ? `<button class="btn-primary" onclick="window.showAddPageModal('${website!.id}')">+ New Website Page</button>`
             : `<button class="btn-primary" style="background: #4f46e5; border: none;" onclick="window.openNewPageModal('template')">+ New Marketing Page</button>`
           }
         </div>
       </header>
+      ${mode === 'website' ? renderWebsiteManagementSwitcher('funnels') : ''}
       
       <div id="pages-list-container" style="padding: 20px;">
         <div class="card" style="padding: 0; overflow: hidden;">
@@ -9291,9 +9891,17 @@ async function renderFunnelDetail(funnelId: string) {
       ${index < steps.length - 1 ? `<div style="width: 2px; height: 30px; background: #e2e8f0; margin-left: 19px; margin-top: -24px; margin-bottom: 4px;"></div>` : ''}
     `).join('');
 
-    const website = mockWebsites[0]; // Assuming user has one website
-    const routes = mockWebsiteRoutes.filter(r => r.funnel_id === funnelId);
-    const siteUrlBase = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
+    const userId = getActingUserId();
+    const routes = mockWebsiteRoutes
+      .filter(route => route.funnel_id === funnelId)
+      .map(route => {
+        const website = mockWebsites.find(site => site.id === route.website_id && site.user_id === userId);
+        if (!website) return null;
+        const siteUrlBase = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
+        return { ...route, path: `${siteUrlBase}${route.path}` };
+      })
+      .filter((route): route is WebsiteRoute => Boolean(route));
+    const siteUrlBase = '';
 
     container.innerHTML = `
       <!-- Website Attachment Card (W6.7) -->
@@ -9482,6 +10090,7 @@ async function renderFunnelDetail(funnelId: string) {
 };
 
 (window as any).saveNewPage = async (websiteId: string) => {
+    if (blockUnsupportedProductionWebsiteMutation('Legacy page creation')) return;
     const nameInput = document.getElementById('new-page-name') as HTMLInputElement;
     if (!nameInput?.value) {
         alert('Please enter a page name.');
@@ -9542,6 +10151,7 @@ async function renderFunnelDetail(funnelId: string) {
 };
 
 (window as any).deletePage = (routeId: string, funnelId: string) => {
+    if (blockUnsupportedProductionWebsiteMutation('Page deletion')) return;
     if (!confirm('Are you sure? This will delete the page and its URL path.')) return;
 
     // 1. Remove Route
@@ -9556,6 +10166,40 @@ async function renderFunnelDetail(funnelId: string) {
     renderFunnels();
 };
 
+async function hydrateAuthenticatedPreviewSections(
+  pageId: string,
+  userId: string,
+  operation: ProtectedAsyncOperationToken
+): Promise<void> {
+  const client = await getBuilderPublicationSupabaseClient();
+  if (!client) throw new Error('UNAVAILABLE');
+  const sectionsResult = await client.from('page_sections')
+    .select('id,page_id,type,content,order_index,styles')
+    .eq('page_id', pageId)
+    .eq('user_id', userId)
+    .order('order_index', { ascending: true });
+  if (sectionsResult.error) throw new Error('UNAVAILABLE');
+  const sections = (sectionsResult.data ?? []).map((row: any): PageSection => {
+    const rawContent = row.content && typeof row.content === 'object' ? structuredClone(row.content) : {};
+    const variant = typeof rawContent.__builder_variant === 'string' ? rawContent.__builder_variant : undefined;
+    if ('__builder_variant' in rawContent) delete rawContent.__builder_variant;
+    return {
+      id: String(row.id),
+      page_id: String(row.page_id),
+      type: String(row.type),
+      content: rawContent,
+      order: Number(row.order_index),
+      styles: row.styles && typeof row.styles === 'object' ? structuredClone(row.styles) : {},
+      ...(variant ? { variant } : {})
+    };
+  });
+  protectedAsyncOperationGuard.requireCurrent(operation, getActingUserId());
+  for (let index = mockPageSections.length - 1; index >= 0; index -= 1) {
+    if (mockPageSections[index].page_id === pageId) mockPageSections.splice(index, 1);
+  }
+  mockPageSections.push(...sections);
+}
+
 async function initializeBuilderNavigation(context: BuilderContext | null): Promise<boolean> {
   builderRouteUnavailableReason = null;
   const parsedRoute = parseBuilderNavigationTarget(window.location.hash);
@@ -9565,6 +10209,7 @@ async function initializeBuilderNavigation(context: BuilderContext | null): Prom
   }
   if (!context?.websiteId || !context.pageId) return applyBuilderContext(context);
   const userId = typeof (window as any).currentUser === 'string' ? (window as any).currentUser.trim() : '';
+  const builderOperation = protectedAsyncOperationGuard.begin('builder-navigation', userId);
   try {
     if (dashboardUsesSupabase()) await loadWebsiteDashboardCore({ actingUserId: userId });
     const target = { websiteId: context.websiteId, pageId: context.pageId, action: context.action ?? 'edit' as BuilderNavigationAction };
@@ -9572,26 +10217,21 @@ async function initializeBuilderNavigation(context: BuilderContext | null): Prom
     if (resolution.status !== 'resolved') throw new Error('UNAVAILABLE');
     activeBuilderWebsiteId = resolution.website.id;
     if (dashboardUsesSupabase()) {
-      const client = await getBuilderPublicationSupabaseClient();
-      if (!client) throw new Error('UNAVAILABLE');
-      const sectionsResult = await client.from('page_sections').select('id,page_id,type,content,order_index,styles').eq('page_id', resolution.page.id).eq('user_id', userId).order('order_index', { ascending: true });
-      if (sectionsResult.error) throw new Error('UNAVAILABLE');
-      const sections = (sectionsResult.data ?? []).map((row: any): PageSection => {
-        const rawContent = row.content && typeof row.content === 'object' ? structuredClone(row.content) : {};
-        const variant = typeof rawContent.__builder_variant === 'string' ? rawContent.__builder_variant : undefined;
-        if ('__builder_variant' in rawContent) delete rawContent.__builder_variant;
-        return { id: String(row.id), page_id: String(row.page_id), type: String(row.type), content: rawContent, order: Number(row.order_index), styles: row.styles && typeof row.styles === 'object' ? structuredClone(row.styles) : {}, ...(variant ? { variant } : {}) };
-      });
-      for (let index = mockPageSections.length - 1; index >= 0; index -= 1) if (mockPageSections[index].page_id === resolution.page.id) mockPageSections.splice(index, 1);
-      mockPageSections.push(...sections);
+      const settingsState = await websiteSettingsHydrator.hydrate(userId, resolution.website);
+      if (settingsState.status === 'error') throw new Error('UNAVAILABLE');
+      protectedAsyncOperationGuard.requireCurrent(builderOperation, getActingUserId());
+      applyPrimaryColor(mockWebsiteSettings.primary_color);
+      await hydrateAuthenticatedPreviewSections(resolution.page.id, userId, builderOperation);
     }
+    protectedAsyncOperationGuard.requireCurrent(builderOperation, getActingUserId());
     applyBuilderContext(context);
     builderHistoryController = null;
     builderPageSettingsController = null;
     builderMediaController = null;
     builderMediaControllerIdentity = '';
     return true;
-  } catch {
+  } catch (error) {
+    if (isSupersededOperationError(error)) throw error;
     builderRouteUnavailableReason = 'The selected page is no longer available.';
     return false;
   }
@@ -9627,12 +10267,22 @@ const WEBSITE_DATA_VIEWS = new Set([
   'pages-seo', 'website-settings', 'website-navigation', 'seo-pages', 'website-structure'
 ]);
 
+const EXPLICIT_WEBSITE_MANAGEMENT_VIEWS = new Set<WebsiteManagementView>([
+  'funnels', 'website-navigation', 'website-structure', 'seo-pages'
+]);
+
+function isExplicitWebsiteManagementView(view: string): view is WebsiteManagementView {
+  return EXPLICIT_WEBSITE_MANAGEMENT_VIEWS.has(view as WebsiteManagementView);
+}
+
 function renderWebsiteRepositoryUnavailable(view: string): void {
   currentView = view;
   app.innerHTML = `${renderSidebar(view)}<main class="main-content"><header class="view-header"><h1>Website information could not be loaded.</h1></header><section class="card website-dashboard-state" role="alert"><p>Please try again.</p><button type="button" class="btn-outline" onclick="window.navigateTo('${escapeBuilderInspectorHtml(view)}')">Retry</button></section></main>`;
 }
 
 (window as any).navigateTo = async (view: string, id?: string, context?: any) => {
+  const navigationInvocation = protectedAsyncOperationGuard.beginUnbound('application-navigation');
+  let navigationOperation: ProtectedAsyncOperationToken;
   publicSiteRenderSequence += 1;
   if (view !== 'site') {
     publicSiteAbortController?.abort();
@@ -9640,11 +10290,16 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
   }
   if (view !== 'site') {
     const authState = await ensureApplicationAuth();
+    const boundNavigation = protectedAsyncOperationGuard.bindCurrent(navigationInvocation, getActingUserId());
+    if (!boundNavigation) return;
+    navigationOperation = boundNavigation;
     if (authState.status === 'initializing' || authState.status === 'unavailable') {
+      if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
       renderApplicationUnavailable();
       return;
     }
     if (view === 'login') {
+      if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
       const returnTo = getLoginReturnRoute(window.location.hash);
       if (authState.status === 'authenticated') {
         window.history.replaceState({}, '', returnTo ?? '#/dashboard');
@@ -9657,6 +10312,7 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
       return;
     }
     if (authState.status === 'unauthenticated') {
+      if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
       const currentHash = sanitizeApplicationReturnRoute(window.location.hash);
       const requestedHash = currentHash && currentHash.slice(2).split(/[/?]/, 1)[0] === view
         ? currentHash
@@ -9666,20 +10322,29 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
       renderApplicationLogin(requestedHash);
       return;
     }
+    await ensureProductionCrmData(authState.user.id, view);
+    if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
     if (editorUsesSupabase() && WEBSITE_DATA_VIEWS.has(view)) {
       try {
         const core = await loadWebsiteDashboardCore({ actingUserId: authState.user.id });
+        protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
         if (core.websites.length === 0) {
           window.history.replaceState({}, '', '#/website-dashboard');
           currentView = 'website-dashboard';
           await renderWebsiteDashboard(true);
           return;
         }
-      } catch {
+      } catch (error) {
+        if (isSupersededOperationError(error)
+          || !protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
         renderWebsiteRepositoryUnavailable(view);
         return;
       }
     }
+  } else {
+    const boundNavigation = protectedAsyncOperationGuard.bindCurrent(navigationInvocation, getActingUserId());
+    if (!boundNavigation) return;
+    navigationOperation = boundNavigation;
   }
   const previousView = currentView;
   currentView = view;
@@ -9700,14 +10365,37 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
         ${renderSkeleton(view as any)}
       </main>
     `;
-    setTimeout(() => executeNavigation(view, id, context), 350);
+    setTimeout(() => {
+      if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
+      void executeNavigation(view, id, context, navigationOperation).catch(error => {
+        if (!isSupersededOperationError(error)) console.error('[Navigation] Deferred render failed:', error);
+      });
+    }, 350);
   } else {
-    executeNavigation(view, id, context);
+    try {
+      await executeNavigation(view, id, context, navigationOperation);
+    } catch (error) {
+      if (isSupersededOperationError(error)
+        || !protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
+      throw error;
+    }
   }
+  if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
+  renderCrmHydrationNotice();
 
   // Update URL for standard CRM navigation (Hash based)
   if (!['site', 'preview'].includes(view)) {
     let newHash = id ? `#/${view}/${id}` : `#/${view}`;
+    if (view === 'website-settings' && activeSettingsWebsiteId) {
+      newHash = buildWebsiteSettingsRoute(activeSettingsWebsiteId);
+    } else if (view === 'website-settings' && window.location.hash.startsWith('#/website-settings?')) {
+      // Preserve an invalid deep link while the fail-closed selector is shown.
+      newHash = window.location.hash;
+    } else if (isExplicitWebsiteManagementView(view) && activeDashboardWebsiteId) {
+      newHash = buildWebsiteManagementRoute(view, activeDashboardWebsiteId);
+    } else if (isExplicitWebsiteManagementView(view) && window.location.hash.startsWith(`#/${view}?`)) {
+      newHash = window.location.hash;
+    }
     if (view === 'builder' && context?.builderContext?.pageId) {
       const builderContext = context.builderContext as BuilderContext;
       if (builderContext.websiteId && builderContext.action) {
@@ -9741,17 +10429,43 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
   }
 };
 
-async function executeNavigation(view: string, id?: string, context?: any) {
+async function executeNavigation(
+  view: string,
+  id?: string,
+  context?: any,
+  navigationOperation?: ProtectedAsyncOperationToken
+) {
+  if (navigationOperation) protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
+  if (isExplicitWebsiteManagementView(view)) {
+    const selection = resolveWebsiteSettingsSelection({
+      actingUserId: getActingUserId(),
+      websites: mockWebsites,
+      route: context?.websiteManagementRoute ?? parseWebsiteManagementRoute(window.location.hash, view)
+    });
+    if (selection.status === 'empty') {
+      window.history.replaceState({}, '', '#/website-dashboard');
+      currentView = 'website-dashboard';
+      await renderWebsiteDashboard(true);
+      return;
+    }
+    if (selection.status === 'selection-required' || selection.status === 'invalid') {
+      activeDashboardWebsiteId = null;
+      renderWebsiteManagementSelector(view, selection.ownedWebsites, selection.status === 'invalid');
+      return;
+    }
+    activeDashboardWebsiteId = selection.website.id;
+  }
   switch (view) {
     case 'dashboard': renderDashboard(); break;
-    case 'clients': renderClients(); break;
-    case 'contact-detail': if (id) renderContactDetail(id); break;
+    case 'clients': await renderClients(); break;
+    case 'contact-detail': if (id) await renderContactDetail(id); break;
     case 'opportunities': renderOpportunities(); break;
     case 'quotes': renderQuotes(); break;
     case 'new-quote': 
       (window as any).newQuoteContactId = id || '';
       (window as any).newQuoteOpportunityId = '';
       (window as any).newQuoteLineItems = [];
+      (window as any).newQuoteRequestKey = crypto.randomUUID();
       renderNewQuote(); 
       break;
     case 'invoices': renderInvoices(); break;
@@ -9765,6 +10479,7 @@ async function executeNavigation(view: string, id?: string, context?: any) {
     case 'builder': {
       const builderContext = (context?.builderContext ?? getBuilderContextFromHash()) as BuilderContext | null;
       await initializeBuilderNavigation(builderContext);
+      if (navigationOperation) protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
       const prepared = prepareBuilderInitialAction(builderContext);
       renderBuilder();
       await finishBuilderInitialAction(builderContext, prepared);
@@ -9773,17 +10488,41 @@ async function executeNavigation(view: string, id?: string, context?: any) {
     case 'templates': renderTemplates(); break;
     case 'pages-seo': renderPagesSeoLanding(); break;
     case 'components': app.innerHTML = `${renderSidebar('components')}<main class="main-content"><h2>Components Shelf</h2><div class="empty-state">Library of pre-built UI components coming soon.</div></main>`; break;
-    case 'website-settings':
+    case 'website-settings': {
+      const selection = resolveWebsiteSettingsSelection({
+        actingUserId: getActingUserId(),
+        websites: mockWebsites,
+        route: context?.websiteSettingsRoute ?? parseWebsiteSettingsRoute(window.location.hash)
+      });
+      if (selection.status === 'empty') {
+        window.history.replaceState({}, '', '#/website-dashboard');
+        currentView = 'website-dashboard';
+        await renderWebsiteDashboard(true);
+        return;
+      }
+      if (selection.status === 'selection-required' || selection.status === 'invalid') {
+        activeSettingsWebsiteId = null;
+        websiteSettingsHydrator.clear();
+        applyPrimaryColor(mockWebsiteSettings.primary_color);
+        renderWebsiteSettingsSelector(selection.ownedWebsites, selection.status === 'invalid');
+        break;
+      }
+      if (activeSettingsWebsiteId !== selection.website.id) {
+        websiteSettingsHydrator.clear();
+      }
+      activeSettingsWebsiteId = selection.website.id;
       try {
         const settingsRes = await fetch('/api/settings').then(r => r.json());
-        if (settingsRes.success && settingsRes.data) {
-          Object.assign(mockWebsiteSettings, settingsRes.data);
-        }
+        if (!settingsRes.success || !settingsRes.data) throw new Error('UNAVAILABLE');
       } catch (err) {
-        console.warn('Failed to load settings on navigation:', err);
+        if (navigationOperation && !protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
+        renderWebsiteRepositoryUnavailable('website-settings');
+        return;
       }
+      if (navigationOperation) protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
       renderWebsiteSettings();
       break;
+    }
     case 'website-navigation': renderWebsiteNavigation(); break;
     case 'seo-pages': (window as any).renderSeoPages(); break;
     case 'website-structure': renderWebsiteStructure(); break;
@@ -9848,6 +10587,7 @@ ${publishedPages.map(page => `  <url>
 };
 
 (window as any).selectQuoteTier = (quoteId: string, tier: 'basic' | 'standard' | 'premium') => {
+  if (editorUsesSupabase()) { (window as any).showToast('Quote option updates are temporarily unavailable.', 'error'); return; }
   const quote = mockQuotes.find(q => q.id === quoteId);
   if (quote) {
     quote.selected_tier = tier;
@@ -9895,8 +10635,8 @@ function renderQuotePreview(quoteId: string) {
           <ul style="list-style: none; padding: 0; margin: 0;">
             ${tierItems.map(item => `
               <li style="padding: 12px 0; border-bottom: 1px solid ${isSelected ? '#d0e5ff' : '#f8fafc'};">
-                <div style="font-weight: 600; font-size: 0.95rem; color: #1e293b; margin-bottom: 2px;">${item.service_name}</div>
-                <div style="font-size: 0.85rem; color: #64748b; line-height: 1.4;">${item.description}</div>
+                <div style="font-weight: 600; font-size: 0.95rem; color: #1e293b; margin-bottom: 2px;">${escapeHtmlText(item.service_name)}</div>
+                <div style="font-size: 0.85rem; color: #64748b; line-height: 1.4;">${escapeHtmlText(item.description)}</div>
                 <div style="text-align: right; font-weight: 700; color: #1e293b; margin-top: 8px; font-size: 0.95rem;">$${item.total.toLocaleString()}</div>
               </li>
             `).join('')}
@@ -9934,11 +10674,11 @@ function renderQuotePreview(quoteId: string) {
           <div style="display: flex; gap: 60px;">
             <div>
               <div style="text-transform: uppercase; color: #94a3b8; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; margin-bottom: 12px;">Client Details</div>
-              <div style="font-weight: 700; font-size: 1.25rem; color: #1e293b; margin-bottom: 8px;">${contact ? contact.name : 'Valued Customer'}</div>
+              <div style="font-weight: 700; font-size: 1.25rem; color: #1e293b; margin-bottom: 8px;">${escapeHtmlText(contact ? contact.name : 'Valued Customer')}</div>
               <div style="color: #64748b; line-height: 1.5;">
-                ${contact ? contact.address : ''}<br>
-                ${contact ? contact.email || '' : ''}<br>
-                ${contact ? contact.phone : ''}
+                ${escapeHtmlText(contact ? contact.address : '')}<br>
+                ${escapeHtmlText(contact ? contact.email || '' : '')}<br>
+                ${escapeHtmlText(contact ? formatContactPhone(contact.phone) : '')}
               </div>
             </div>
           </div>
@@ -9956,7 +10696,7 @@ function renderQuotePreview(quoteId: string) {
         ${quote.notes ? `
           <div style="margin-top: 40px; border-top: 1px solid #f1f5f9; padding-top: 40px;">
             <div style="text-transform: uppercase; color: #94a3b8; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; margin-bottom: 15px;">Additional Terms & Notes</div>
-            <div style="color: #475569; line-height: 1.8; font-size: 1rem; white-space: pre-wrap;">${quote.notes}</div>
+            <div style="color: #475569; line-height: 1.8; font-size: 1rem; white-space: pre-wrap;">${escapeHtmlText(quote.notes)}</div>
           </div>
         ` : ''}
 
@@ -9984,7 +10724,7 @@ async function loadTimeline(contactId: string) {
   if (timelineContainer) {
     timelineContainer.innerHTML = contactTimelineState.map(group => `
             <div style="margin-bottom: 25px;">
-                <div style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">${group.label}</div>
+                <div style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">${escapeHtmlText(group.label)}</div>
                 <div style="display: flex; flex-direction: column; gap: 4px;">
                     ${group.items.map((item: any) => {
       const isMissed = item.type === 'call_missed';
@@ -9993,8 +10733,8 @@ async function loadTimeline(contactId: string) {
 
       return `
                             <div style="background: #fff; border-radius: 8px; padding: 12px 15px; border-left: 3px solid ${borderColor}; margin-bottom: 4px;">
-                                <div style="font-size: 0.95rem; color: ${color}; font-weight: ${isMissed ? '600' : '500'}; margin-bottom: 4px;">${item.content}</div>
-                                <div style="font-size: 0.8rem; color: #64748b;">${item.created_at}</div>
+                                <div style="font-size: 0.95rem; color: ${color}; font-weight: ${isMissed ? '600' : '500'}; margin-bottom: 4px;">${escapeHtmlText(item.content)}</div>
+                                <div style="font-size: 0.8rem; color: #64748b;">${escapeHtmlText(item.created_at)}</div>
                             </div>
                         `;
     }).join('')}
@@ -10023,7 +10763,7 @@ async function renderContactDetail(contactId: string) {
 
   const response = await fetch(`/api/contacts/${contactId}`);
   const result = await response.json();
-  const contact = result.data || result;
+  const contact: Contact | null = result.data || result;
 
   if (!contact || response.status === 404) {
     (window as any).showToast('Contact not found.', 3000);
@@ -10033,6 +10773,7 @@ async function renderContactDetail(contactId: string) {
 
   const contactOpps = mockOpportunities.filter(opp => opp.contact_id === contactId);
   const contactQuotes = mockQuotes.filter(q => q.contact_id === contactId);
+  const telHref = safeTelHref(contact.phone);
   app.innerHTML = `
     ${renderSidebar('clients')}
     <main class="main-content" style="padding: 24px; max-width: 1100px; margin: 0 auto; background: #fff;">
@@ -10043,7 +10784,7 @@ async function renderContactDetail(contactId: string) {
             <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
             Back
           </button>
-          <h2 style="margin: 0; font-size: 1.6rem; font-weight: 800; color: #0f172a;">${contact.name}</h2>
+          <h2 style="margin: 0; font-size: 1.6rem; font-weight: 800; color: #0f172a;">${escapeHtmlText(contact.name)}</h2>
           <span class="badge badge-${contact.status}" style="font-size: 0.75rem; padding: 4px 10px;">${contact.status}</span>
         </div>
         <div style="display: flex; gap: 8px;">
@@ -10056,26 +10797,26 @@ async function renderContactDetail(contactId: string) {
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 20px;">
          <div>
            <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Phone</div>
-           <input type="text" value="${contact.phone}" onchange="window.updateContactField('${contactId}', 'phone', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
+           <input type="text" value="${escapeHtmlText(contact.phone ?? '')}" placeholder="Add phone..." onchange="window.updateContactField('${contactId}', 'phone', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
          </div>
          <div>
            <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Email</div>
-           <input type="email" value="${contact.email || ''}" placeholder="Add email..." onchange="window.updateContactField('${contactId}', 'email', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
+           <input type="email" value="${escapeHtmlText(contact.email || '')}" placeholder="Add email..." onchange="window.updateContactField('${contactId}', 'email', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
          </div>
          <div>
            <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Source</div>
-           <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${contact.source}</div>
+           <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${escapeHtmlText(contact.source)}</div>
          </div>
          <div>
            <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Address</div>
-           <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${contact.address}">${contact.address}</div>
+           <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtmlText(contact.address)}">${escapeHtmlText(contact.address)}</div>
          </div>
       </div>
 
       <!-- 2. Priority Quick Actions -->
       <div style="display: flex; gap: 12px; margin-bottom: 30px;">
-        ${contact.phone ? `
-          <a href="tel:${contact.phone}" class="btn-primary" style="background: #10b981; flex: 1; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
+        ${telHref ? `
+          <a href="${escapeHtmlText(telHref)}" class="btn-primary" style="background: #10b981; flex: 1; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
             📞 Call Lead Now
           </a>
           <button class="btn-primary" onclick="window.sendQuickSMS('${contact.id}')" style="background: #6366f1; flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);">
@@ -10115,7 +10856,7 @@ async function renderContactDetail(contactId: string) {
                 <div style="padding: 10px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center;">
                   <div>
                     <div style="font-weight: 700; color: #1e293b; font-size: 0.9rem;">$${opp.value.toLocaleString()}</div>
-                    <div style="font-size: 0.75rem; color: #64748b;">${opp.pipeline_stage}</div>
+                    <div style="font-size: 0.75rem; color: #64748b;">${escapeHtmlText(opp.pipeline_stage)}</div>
                   </div>
                   <span class="badge badge-${opp.status}" style="font-size: 0.65rem;">${opp.status}</span>
                 </div>
@@ -10138,6 +10879,7 @@ async function renderContactDetail(contactId: string) {
 }
 
 (window as any).logCall = (contactId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Activity creation is temporarily unavailable.', 'error'); return; }
   const note = prompt("Enter call summary:");
   if (note) {
     mockActivities.push({
@@ -10154,6 +10896,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).addNote = (contactId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Activity creation is temporarily unavailable.', 'error'); return; }
   const note = prompt("Enter your note:");
   if (note) {
     mockActivities.push({
@@ -10170,6 +10913,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).completeTask = (activityId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Activity updates are temporarily unavailable.', 'error'); return; }
   const activity = mockActivities.find(a => a.id === activityId);
   if (activity) {
     activity.completed = true;
@@ -10178,6 +10922,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).createOpportunity = (contactId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Opportunity creation is temporarily unavailable.', 'error'); return; }
   const valueInput = prompt("Enter Opportunity value (e.g. 500):", "0");
   const value = parseFloat(valueInput || "0");
 
@@ -10201,6 +10946,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).updateOpportunityField = (oppId: string, field: string, value: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Opportunity updates are temporarily unavailable.', 'error'); return; }
   const opp = mockOpportunities.find(o => o.id === oppId);
   if (opp) {
     if (field === 'value') {
@@ -10213,6 +10959,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).updateContactField = (contactId: string, field: string, value: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Contact updates are temporarily unavailable.', 'error'); return; }
   const contact = mockContacts.find(c => c.id === contactId);
   if (contact) {
     if (field === 'phone') {
@@ -10244,6 +10991,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).markAsPaid = (invoiceId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Invoice persistence is not available yet.', 'error'); return; }
   const invoice = mockInvoices.find(i => i.id === invoiceId);
   if (invoice) {
     invoice.status = 'paid';
@@ -10273,6 +11021,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).convertToInvoice = (quoteId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Invoice persistence is not available yet.', 'error'); return; }
   const quote = mockQuotes.find(q => q.id === quoteId);
   if (quote) {
     // Check for existing invoice
@@ -10287,6 +11036,7 @@ async function renderContactDetail(contactId: string) {
 
     mockInvoices.push({
       id: invoiceId,
+      user_id: getActingUserId(),
       contact_id: quote.contact_id,
       quote_id: quote.id,
       amount: quote.total_amount,
@@ -10311,6 +11061,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).approveQuote = (quoteId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Quote status updates are temporarily unavailable.', 'error'); return; }
   const quote = mockQuotes.find(q => q.id === quoteId);
   if (quote) {
     quote.status = 'approved';
@@ -10339,6 +11090,7 @@ async function renderContactDetail(contactId: string) {
 
       mockInvoices.push({
         id: invoiceId,
+        user_id: getActingUserId(),
         contact_id: quote.contact_id,
         quote_id: quote.id,
         amount: quote.total_amount,
@@ -10364,6 +11116,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).rejectQuote = (quoteId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Quote status updates are temporarily unavailable.', 'error'); return; }
   const quote = mockQuotes.find(q => q.id === quoteId);
   if (quote) {
     quote.status = 'rejected';
@@ -10388,6 +11141,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).sendQuote = (quoteId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Quote sending is temporarily unavailable.', 'error'); return; }
   const quote = mockQuotes.find(q => q.id === quoteId);
   if (quote) {
     quote.status = 'sent';
@@ -10422,6 +11176,7 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).createInvoice = (contactId: string) => {
+  if (editorUsesSupabase()) { (window as any).showToast('Invoice persistence is not available yet.', 'error'); return; }
   const contactQuotes = mockQuotes.filter(q => q.contact_id === contactId);
   if (contactQuotes.length === 0) {
     alert("Please create a Quote first.");
@@ -10442,6 +11197,7 @@ async function renderContactDetail(contactId: string) {
 
   mockInvoices.push({
     id: invoiceId,
+    user_id: getActingUserId(),
     contact_id: contactId,
     quote_id: latestQuote.id,
     amount: amount,
@@ -10679,42 +11435,95 @@ async function bootRouter() {
   publicSiteAbortController = null;
   const host = window.location.hostname;
   const rawPath = window.location.pathname;
-  const crmApplicationHost = isCrmApplicationHost(host);
+  const hostRoute = resolveApplicationHostRoute({ hostname: host, pathname: rawPath });
+  if (hostRoute.kind === 'public-site') {
+    await renderConfiguredPublicSite(hostRoute.pathname);
+    return;
+  }
   const targetPath = resolveWebsitePathFromBrowserPath(rawPath);
   const isPreviewRoute = rawPath === '/preview' || rawPath.startsWith('/preview/');
-  // Customer-facing /site routes and customer domains never initialize CRM auth.
+  // Explicit /site simulation remains public on CRM application hosts.
   if (targetPath && !isPreviewRoute) {
     await renderConfiguredPublicSite(targetPath);
     return;
   }
-  if ((rawPath === '/' || rawPath === '/index.html' || rawPath === '') && !crmApplicationHost) {
-    await renderConfiguredPublicSite('/');
-    return;
-  }
-  if (!crmApplicationHost) {
-    render404();
-    return;
-  }
 
+  const navigationInvocation = protectedAsyncOperationGuard.beginUnbound('application-navigation');
   const authState = await ensureApplicationAuth();
+  const navigationOperation = protectedAsyncOperationGuard.bindCurrent(navigationInvocation, getActingUserId());
+  if (!navigationOperation) return;
   const decision = resolveApplicationBootstrap({
     pathname: rawPath,
     hash: window.location.hash,
     authState
   });
   if (decision.action === 'unavailable') {
+    if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
     renderApplicationUnavailable();
     return;
   }
   if (decision.action === 'login') {
+    if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
     const loginHash = buildApplicationLoginHash(decision.returnTo);
     if (window.location.hash !== loginHash) window.history.replaceState({}, '', loginHash);
     renderApplicationLogin(decision.returnTo);
     return;
   }
   if (decision.action !== 'authenticated') return;
+  if (authState.status !== 'authenticated') return;
 
   if (isPreviewRoute && targetPath) {
+    if (dashboardUsesSupabase()) {
+      try {
+        const core = await loadWebsiteDashboardCore({ actingUserId: authState.user.id });
+        protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
+        const params = new URLSearchParams(window.location.search);
+        const resolution = resolveAuthenticatedPreview({
+          actingUserId: authState.user.id,
+          path: targetPath,
+          explicitWebsiteId: params.get('websiteId'),
+          explicitPageId: params.get('pageId'),
+          ...core
+        });
+        if (resolution.status !== 'resolved') {
+          protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
+          render404('Preview target not found.');
+          return;
+        }
+        const { target } = resolution;
+        const previewOperation = {
+          navigation: navigationOperation,
+          userId: authState.user.id,
+          websiteId: target.website.id,
+          pageId: target.page.id
+        };
+        const settingsState = await websiteSettingsHydrator.hydrate(authState.user.id, target.website);
+        if (settingsState.status === 'error') throw new Error('UNAVAILABLE');
+        protectedAsyncOperationGuard.requireCurrent(previewOperation.navigation, getActingUserId());
+        applyPrimaryColor(mockWebsiteSettings.primary_color);
+        await hydrateAuthenticatedPreviewSections(previewOperation.pageId, previewOperation.userId, previewOperation.navigation);
+        protectedAsyncOperationGuard.requireCurrent(previewOperation.navigation, getActingUserId());
+        await renderSitePage(target.funnel.id, {
+          ...target.website,
+          route: target.route,
+          route_id: target.route.id,
+          path: target.path,
+          slug: target.page.slug,
+          is_seo_page: target.path !== '/',
+          city: target.route.city || '',
+          service: target.route.service || '',
+          route_type: target.path === '/' ? 'homepage' : 'service',
+          funnel_id: target.funnel.id,
+          page_id: target.page.id
+        }, true, undefined, target.page);
+        return;
+      } catch (error) {
+        if (isSupersededOperationError(error)
+          || !protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
+        renderPublicPublicationUnavailable();
+        return;
+      }
+    }
     const result = await resolveWebsiteRequest(host, targetPath);
     if (result && result.funnel_id) {
        const resolvedRoutePath = normalizePreviewPath(result.route?.path || '/');
@@ -10743,8 +11552,12 @@ async function bootRouter() {
        const parts = routePart.split('/');
        const routeContext = parts[0] === 'builder' && query
          ? { builderContext: getBuilderContextFromHash() }
-         : undefined;
-       (window as any).navigateTo(parts[0], parts[1], routeContext);
+         : parts[0] === 'website-settings'
+           ? { websiteSettingsRoute: parseWebsiteSettingsRoute(decision.hash) }
+           : isExplicitWebsiteManagementView(parts[0])
+             ? { websiteManagementRoute: parseWebsiteManagementRoute(decision.hash, parts[0]) }
+           : undefined;
+       await (window as any).navigateTo(parts[0], parts[1], routeContext);
        return;
      }
   }
@@ -10788,7 +11601,7 @@ setInterval(() => {
     // If a new lead was detected, re-render the active view to show it immediately
     if (changeDetected) {
       if (currentView === 'clients') renderClients();
-      if (currentView === 'dashboard') (window as any).renderDashboard();
+      if (currentView === 'dashboard') renderDashboard();
     }
   }
 
@@ -11165,7 +11978,13 @@ let seoWizardState = {
 };
 
 (window as any).renderSeoPages = async () => {
-    const seoPages = mockWebsiteRoutes.filter(r => r.is_seo_page);
+    const userId = getActingUserId();
+    const website = mockWebsites.find(site => site.user_id === userId && site.id === activeDashboardWebsiteId);
+    if (!website) {
+        renderWebsiteRepositoryUnavailable('seo-pages');
+        return;
+    }
+    const seoPages = mockWebsiteRoutes.filter(r => r.website_id === website.id && r.is_seo_page);
     
     // Auto-switch to wizard if empty
     if (seoPages.length === 0 && seoWizardState.mode !== 'wizard') {
@@ -11190,6 +12009,7 @@ let seoWizardState = {
                     <button class="btn-primary" onclick="window.startSeoWizard()" style="background: #10b981; border: none; padding: 12px 24px;">+ Batch Generate Pages</button>
                 </div>
             </header>
+            ${renderWebsiteManagementSwitcher('seo-pages')}
 
             <div class="card" style="margin-bottom: 30px; padding: 24px; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border: 1px solid #bae6fd; border-radius: 16px;">
                 <div style="display: flex; gap: 24px; align-items: center;">
@@ -11327,6 +12147,7 @@ function renderSeoWizard() {
                     <div style="width: ${progress}%; height: 100%; background: var(--primary-color); transition: width 0.4s ease-out;"></div>
                 </div>
             </header>
+            ${renderWebsiteManagementSwitcher('seo-pages')}
             ${content}
         </main>
     `;
@@ -11386,7 +12207,7 @@ function renderPagesSeoLanding() {
         <!-- Card 1: Site Pages -->
         <div class="card"
              style="padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 12px;"
-             onclick="window.navigateTo('funnels')"
+             onclick="window.openWebsiteManagementView('funnels')"
              onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 15px -3px rgb(0 0 0 / 0.1)'; this.style.borderColor='var(--primary-color)'"
              onmouseout="this.style.transform='none'; this.style.boxShadow='none'; this.style.borderColor='#e2e8f0'">
           <div style="display: flex; align-items: center; gap: 12px;">
@@ -11404,7 +12225,7 @@ function renderPagesSeoLanding() {
         <!-- Card 2: Local Service Pages -->
         <div class="card"
              style="padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 12px;"
-             onclick="window.navigateTo('seo-pages')"
+             onclick="window.openWebsiteManagementView('seo-pages')"
              onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 15px -3px rgb(0 0 0 / 0.1)'; this.style.borderColor='var(--primary-color)'"
              onmouseout="this.style.transform='none'; this.style.boxShadow='none'; this.style.borderColor='#e2e8f0'">
           <div style="display: flex; align-items: center; gap: 12px;">
@@ -11422,7 +12243,7 @@ function renderPagesSeoLanding() {
         <!-- Card 3: Site Structure -->
         <div class="card"
              style="padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 12px;"
-             onclick="window.navigateTo('website-structure')"
+             onclick="window.openWebsiteManagementView('website-structure')"
              onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 15px -3px rgb(0 0 0 / 0.1)'; this.style.borderColor='var(--primary-color)'"
              onmouseout="this.style.transform='none'; this.style.boxShadow='none'; this.style.borderColor='#e2e8f0'">
           <div style="display: flex; align-items: center; gap: 12px;">
@@ -11440,7 +12261,7 @@ function renderPagesSeoLanding() {
         <!-- Card 4: Navigation -->
         <div class="card"
              style="padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: white; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 12px;"
-             onclick="window.navigateTo('website-navigation')"
+             onclick="window.openWebsiteManagementView('website-navigation')"
              onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 10px 15px -3px rgb(0 0 0 / 0.1)'; this.style.borderColor='var(--primary-color)'"
              onmouseout="this.style.transform='none'; this.style.boxShadow='none'; this.style.borderColor='#e2e8f0'">
           <div style="display: flex; align-items: center; gap: 12px;">

@@ -30,7 +30,7 @@ export async function getContactTimeline(contact_id: string, user?: User | strin
     getMessagesByContact(contact_id, user, limit),
     getEventLogsByContact(contact_id, user, limit),
     getActivitiesByContact(contact_id, user, limit),
-    getCallsForContact(contact_id, phone, user, limit)
+    getCallsForContact(contact_id, phone ?? undefined, user, limit)
   ]);
 
   // Check for failures

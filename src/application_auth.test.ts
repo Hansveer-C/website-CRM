@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   ApplicationAuthController,
+  classifyApplicationLoginError,
+  classifyApplicationSignupError,
   createApplicationSignupRedirect,
   normalizeApplicationSignupEmail,
   validateApplicationSignupInput,
@@ -11,10 +13,10 @@ function client(input: {
   user?: { id: string; email?: string } | null;
   getUserError?: { name?: string; code?: string } | null;
   loginUser?: { id: string; email?: string } | null;
-  loginError?: { code?: string } | null;
+  loginError?: { name?: string; code?: string; status?: number } | null;
   signupUser?: { id: string; email?: string } | null;
   signupSessionUser?: { id: string; email?: string } | null;
-  signupError?: { code?: string; status?: number } | null;
+  signupError?: { name?: string; code?: string; status?: number } | null;
 } = {}): ApplicationAuthClient {
   return {
     auth: {
@@ -80,6 +82,60 @@ describe('ApplicationAuthController', () => {
     expect(authClient.auth.signInWithPassword).toHaveBeenCalledWith({ email: 'owner@example.com', password });
     expect(email).toBe(' owner@example.com ');
     expect(password).toBe('not-logged');
+  });
+
+  it('uses the same stable credential rejection for an unknown email', async () => {
+    const controller = new ApplicationAuthController({
+      mode: 'supabase',
+      getSupabaseClient: async () => client({ loginError: { code: 'invalid_credentials', status: 400 } })
+    });
+    await controller.initialize();
+    expect(await controller.signIn('unknown@example.com', 'secret')).toEqual({
+      success: false, reason: 'invalid-credentials'
+    });
+  });
+
+  it.each([
+    [{ code: 'invalid_credentials', status: 400 }, 'invalid-credentials'],
+    [{ code: 'email_not_confirmed', status: 400 }, 'email-not-confirmed'],
+    [{ code: 'over_request_rate_limit', status: 429 }, 'unavailable'],
+    [{ status: 500 }, 'unavailable'],
+    [{ status: 502 }, 'unavailable'],
+    [{ status: 503 }, 'unavailable'],
+    [{ code: 'request_timeout', status: 400 }, 'unavailable'],
+    [{ code: 'future_server_code', status: 400 }, 'unavailable'],
+    [{}, 'unavailable']
+  ] as const)('classifies returned Auth errors without exposing raw messages: %j', (error, reason) => {
+    expect(classifyApplicationLoginError(error)).toBe(reason);
+  });
+
+  it('keeps transient returned and thrown failures unauthenticated', async () => {
+    const returned = new ApplicationAuthController({
+      mode: 'supabase',
+      getSupabaseClient: async () => client({ loginError: { code: 'over_request_rate_limit', status: 429 } })
+    });
+    await returned.initialize();
+    expect(await returned.signIn('owner@example.com', 'secret')).toEqual({ success: false, reason: 'unavailable' });
+    expect(returned.state).toEqual({ status: 'unauthenticated' });
+
+    const throwingClient = client();
+    throwingClient.auth.signInWithPassword = vi.fn(async () => { throw new TypeError('network down'); });
+    const thrown = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => throwingClient });
+    await thrown.initialize();
+    expect(await thrown.signIn('owner@example.com', 'secret')).toEqual({ success: false, reason: 'unavailable' });
+    expect(thrown.state).toEqual({ status: 'unauthenticated' });
+  });
+
+  it('allows a retry to succeed after a transient returned failure', async () => {
+    const authClient = client();
+    authClient.auth.signInWithPassword = vi.fn()
+      .mockResolvedValueOnce({ data: { user: null }, error: { code: 'unexpected_failure', status: 503 } })
+      .mockResolvedValueOnce({ data: { user: { id: 'user-retry' } }, error: null });
+    const controller = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => authClient });
+    await controller.initialize();
+    expect(await controller.signIn('owner@example.com', 'secret')).toEqual({ success: false, reason: 'unavailable' });
+    expect(await controller.signIn('owner@example.com', 'secret')).toMatchObject({ success: true });
+    expect(controller.state).toMatchObject({ status: 'authenticated', user: { id: 'user-retry' } });
   });
 
   it('establishes login and clears state on logout', async () => {
@@ -201,6 +257,77 @@ describe('ApplicationAuthController', () => {
     expect(result).toEqual({ success: false, reason: 'rejected' });
     expect(JSON.stringify(result)).not.toContain('known@example.com');
     expect(JSON.stringify(result)).not.toContain('do-not-return');
+  });
+
+  it.each([
+    [{ code: 'user_already_exists', status: 422 }, 'rejected'],
+    [{ code: 'email_exists', status: 422 }, 'rejected'],
+    [{ code: 'over_request_rate_limit', status: 429 }, 'unavailable'],
+    [{ code: 'over_email_send_rate_limit', status: 429 }, 'unavailable'],
+    [{ status: 500 }, 'unavailable'],
+    [{ status: 502 }, 'unavailable'],
+    [{ status: 503 }, 'unavailable'],
+    [{ code: 'request_timeout', status: 400 }, 'unavailable'],
+    [{ code: 'network_error', name: 'AuthRetryableFetchError' }, 'unavailable'],
+    [{ code: 'future_auth_code', status: 422 }, 'unavailable'],
+    [{}, 'unavailable'],
+    [null, 'unavailable']
+  ] as const)('classifies signup Auth failures from stable metadata: %j', (error, reason) => {
+    expect(classifyApplicationSignupError(error)).toBe(reason);
+  });
+
+  it.each([
+    { code: 'over_request_rate_limit', status: 429 },
+    { status: 500 },
+    { status: 502 },
+    { status: 503 },
+    { code: 'request_timeout', status: 400 },
+    { code: 'network_error' },
+    { code: 'unknown_returned_error', status: 422 },
+    {}
+  ])('keeps returned signup service failure unauthenticated and retryable: %j', async signupError => {
+    const authClient = client({ signupError });
+    const controller = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => authClient });
+    await controller.initialize();
+    const request = {
+      email: 'owner@example.com', password: 'secret', confirmPassword: 'secret',
+      emailRedirectTo: 'https://website-crm-hans-says-projects.vercel.app/#/login'
+    };
+    expect(await controller.signUp(request)).toEqual({ success: false, reason: 'unavailable' });
+    expect(controller.state).toEqual({ status: 'unauthenticated' });
+    expect(await controller.signUp(request)).toEqual({ success: false, reason: 'unavailable' });
+    expect(authClient.auth.signUp).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([429, 503])('resets signup in-flight and allows success after HTTP %s', async status => {
+    const authClient = client();
+    authClient.auth.signUp = vi.fn()
+      .mockResolvedValueOnce({ data: { user: null, session: null }, error: { status } })
+      .mockResolvedValueOnce({ data: { user: { id: 'retry-user' }, session: null }, error: null });
+    const controller = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => authClient });
+    await controller.initialize();
+    const request = {
+      email: 'owner@example.com', password: 'secret', confirmPassword: 'secret',
+      emailRedirectTo: 'https://website-crm-hans-says-projects.vercel.app/#/login'
+    };
+    expect(await controller.signUp(request)).toEqual({ success: false, reason: 'unavailable' });
+    expect(await controller.signUp(request)).toEqual({ success: true, status: 'awaiting-confirmation' });
+  });
+
+  it('handles a thrown signup network error as unavailable and permits retry', async () => {
+    const authClient = client();
+    authClient.auth.signUp = vi.fn()
+      .mockRejectedValueOnce(new TypeError('network down'))
+      .mockResolvedValueOnce({ data: { user: { id: 'retry-user' }, session: null }, error: null });
+    const controller = new ApplicationAuthController({ mode: 'supabase', getSupabaseClient: async () => authClient });
+    await controller.initialize();
+    const request = {
+      email: 'owner@example.com', password: 'secret', confirmPassword: 'secret',
+      emailRedirectTo: 'https://website-crm-hans-says-projects.vercel.app/#/login'
+    };
+    expect(await controller.signUp(request)).toEqual({ success: false, reason: 'unavailable' });
+    expect(controller.state).toEqual({ status: 'unauthenticated' });
+    expect(await controller.signUp(request)).toEqual({ success: true, status: 'awaiting-confirmation' });
   });
 
   it('derives only CRM-host signup redirects and validates project-compatible limits', () => {

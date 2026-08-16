@@ -78,7 +78,50 @@ export interface ApplicationAuthControllerOptions {
 
 export type ApplicationLoginResult =
   | { success: true; state: Extract<ApplicationAuthState, { status: 'authenticated' }> }
-  | { success: false; reason: 'invalid-credentials' | 'unavailable' };
+  | { success: false; reason: 'invalid-credentials' | 'email-not-confirmed' | 'unavailable' };
+
+export type ApplicationLoginFailureReason = Extract<ApplicationLoginResult, { success: false }>['reason'];
+export type ApplicationAuthErrorCategory =
+  | 'credential-rejection'
+  | 'email-not-confirmed'
+  | 'signup-rejection'
+  | 'unavailable';
+
+const CREDENTIAL_REJECTION_CODES = new Set(['invalid_credentials']);
+const EMAIL_NOT_CONFIRMED_CODES = new Set(['email_not_confirmed']);
+const SIGNUP_REJECTION_CODES = new Set(['user_already_exists', 'email_exists']);
+const TRANSIENT_AUTH_CODES = new Set([
+  'over_request_rate_limit',
+  'over_email_send_rate_limit',
+  'over_sms_send_rate_limit',
+  'request_timeout',
+  'hook_timeout',
+  'hook_timeout_after_retry',
+  'unexpected_failure'
+]);
+
+/** Classifies only stable SDK status/code fields; unknown failures fail closed. */
+export function classifyApplicationAuthError(error: ApplicationAuthError | null): ApplicationAuthErrorCategory {
+  if (!error) return 'unavailable';
+  const code = error.code?.trim().toLowerCase() ?? '';
+  if (EMAIL_NOT_CONFIRMED_CODES.has(code)) return 'email-not-confirmed';
+  if (CREDENTIAL_REJECTION_CODES.has(code)) return 'credential-rejection';
+  if (SIGNUP_REJECTION_CODES.has(code)) return 'signup-rejection';
+  if (error.status === 429 || (typeof error.status === 'number' && error.status >= 500)) return 'unavailable';
+  if (TRANSIENT_AUTH_CODES.has(code)) return 'unavailable';
+  return 'unavailable';
+}
+
+export function classifyApplicationLoginError(error: ApplicationAuthError | null): ApplicationLoginFailureReason {
+  const category = classifyApplicationAuthError(error);
+  if (category === 'credential-rejection') return 'invalid-credentials';
+  if (category === 'email-not-confirmed') return 'email-not-confirmed';
+  return 'unavailable';
+}
+
+export function classifyApplicationSignupError(error: ApplicationAuthError | null): 'rejected' | 'unavailable' {
+  return classifyApplicationAuthError(error) === 'signup-rejection' ? 'rejected' : 'unavailable';
+}
 
 const APPLICATION_EMAIL_MAX_LENGTH = 254;
 const APPLICATION_PASSWORD_MIN_LENGTH = 6;
@@ -201,7 +244,7 @@ export class ApplicationAuthController {
       const result = await this.client.auth.signInWithPassword({ email: email.trim(), password });
       if (!result.data.user?.id || result.error) {
         this.setState({ status: 'unauthenticated' });
-        return { success: false, reason: 'invalid-credentials' };
+        return { success: false, reason: classifyApplicationLoginError(result.error) };
       }
       const state = this.setState({
         status: 'authenticated',
@@ -210,6 +253,7 @@ export class ApplicationAuthController {
       }) as Extract<ApplicationAuthState, { status: 'authenticated' }>;
       return { success: true, state };
     } catch {
+      this.setState({ status: 'unauthenticated' });
       return { success: false, reason: 'unavailable' };
     }
   }
@@ -230,7 +274,7 @@ export class ApplicationAuthController {
       });
       if (result.error || !result.data.user?.id) {
         this.setState({ status: 'unauthenticated' });
-        return { success: false, reason: result.error?.status && result.error.status >= 500 ? 'unavailable' : 'rejected' };
+        return { success: false, reason: classifyApplicationSignupError(result.error) };
       }
       if (!result.data.session?.user?.id) {
         this.setState({ status: 'unauthenticated' });
@@ -243,6 +287,7 @@ export class ApplicationAuthController {
       }) as Extract<ApplicationAuthState, { status: 'authenticated' }>;
       return { success: true, status: 'authenticated', state };
     } catch {
+      this.setState({ status: 'unauthenticated' });
       return { success: false, reason: 'unavailable' };
     } finally {
       this.signupInFlight = false;
