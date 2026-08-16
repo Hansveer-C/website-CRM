@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { isPageSectionSaveResponse, validatePageSectionSaveRequest } from './page_section_save_contract';
+import {
+  PAGE_SECTION_SAVE_LEGACY_TYPES,
+  isPageSectionSaveResponse,
+  validatePageSectionSaveRequest
+} from './page_section_save_contract';
 
 const pageId = 'page-1';
 const section = (overrides: Record<string, unknown> = {}) => ({
@@ -16,6 +20,18 @@ describe('page section save contract', () => {
   it('rejects invalid expected revisions', () => expect(validatePageSectionSaveRequest(request(undefined, { expected_revision: -1 }), pageId).success).toBe(false));
   it('rejects a page mismatch', () => expect(validatePageSectionSaveRequest(request([section({ page_id: 'other' })]), pageId).success).toBe(false));
   it('rejects an unknown section type', () => expect(validatePageSectionSaveRequest(request([section({ type: 'script' })]), pageId).success).toBe(false));
+  it('accepts all six lossless legacy section types without coercing their documents', () => {
+    const sections = PAGE_SECTION_SAVE_LEGACY_TYPES.map((type, order) => section({
+      id: `legacy-${type}`,
+      type,
+      order,
+      content: { type, nested: { value: order } },
+      styles: { visible: false, custom: type }
+    }));
+    const value = request(sections);
+    const result = validatePageSectionSaveRequest(value, pageId);
+    expect(result).toEqual({ success: true, data: value });
+  });
   it('rejects duplicate section IDs', () => expect(validatePageSectionSaveRequest(request([section(), section({ order: 1 })]), pageId).success).toBe(false));
   it('rejects duplicate order values', () => expect(validatePageSectionSaveRequest(request([section(), section({ id: 'offer-1', type: 'offer' })]), pageId).success).toBe(false));
   it('rejects non-contiguous order values', () => expect(validatePageSectionSaveRequest(request([section({ order: 2 })]), pageId).success).toBe(false));

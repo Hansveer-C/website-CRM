@@ -8,6 +8,7 @@ const userA = '00000000-0000-0000-0000-00000000000a';
 const userB = '00000000-0000-0000-0000-00000000000b';
 const oldMigration = readFileSync(new URL('../migrations/20260810050518_save_page_sections_document.sql', import.meta.url), 'utf8');
 const hardeningMigration = readFileSync(new URL('../migrations/20260816030645_harden_page_section_save_conflict_ownership.sql', import.meta.url), 'utf8');
+const legacyCompatibilityMigration = readFileSync(new URL('../migrations/20260816051412_preserve_legacy_page_section_types.sql', import.meta.url), 'utf8');
 
 function section(id: string, pageId: string, marker: string, order = 0) {
   return { id, page_id: pageId, type: 'hero', content: { marker }, order, styles: { marker } };
@@ -54,6 +55,19 @@ async function row(id: string) {
   try {
     const result = await client.query('select id, user_id, page_id, type, content, order_index, styles from public.page_sections where id = $1', [id]);
     return result.rows[0] as Record<string, unknown> | undefined;
+  } finally {
+    await client.end();
+  }
+}
+
+async function rowsForPage(pageId: string) {
+  const client = await connect();
+  try {
+    const result = await client.query(
+      'select id, page_id, type, content, order_index, styles from public.page_sections where page_id = $1 order by order_index',
+      [pageId]
+    );
+    return result.rows as Array<Record<string, unknown>>;
   } finally {
     await client.end();
   }
@@ -118,10 +132,11 @@ describeDatabase('page section save conflict ownership on PostgreSQL 17', () => 
           ('same-owner-a', '${userA}'), ('same-owner-b', '${userA}'),
           ('cross-user-a', '${userA}'), ('cross-user-b', '${userB}'),
           ('foreign-a', '${userA}'), ('foreign-b', '${userB}'),
-          ('retry-b', '${userB}');
+          ('retry-b', '${userB}'), ('legacy-a', '${userA}');
       `);
       await client.query(oldMigration);
       await client.query(hardeningMigration);
+      await client.query(legacyCompatibilityMigration);
       await client.query(`
         create function public.test_page_section_insert_barrier() returns trigger
         language plpgsql set search_path = '' as $$
@@ -157,6 +172,38 @@ describeDatabase('page section save conflict ownership on PostgreSQL 17', () => 
     expect(result).toMatchObject({ revision: 1, saved_count: 1 });
     await expect(saveAs(userA, 'normal-a', [section('normal-section', 'normal-a', 'two')], 1)).resolves.toMatchObject({ revision: 2 });
     expect((await row('normal-section'))?.content).toEqual({ marker: 'two' });
+  });
+
+  it('losslessly saves and reloads a mixed canonical and six-type legacy document', async () => {
+    const types = ['hero', 'services', 'benefits', 'before_after', 'cta', 'contact_info', 'map'];
+    const sections = types.map((type, order) => ({
+      id: `mixed-${type}`,
+      page_id: 'legacy-a',
+      type,
+      content: { marker: type, nested: { values: [order, null, false] } },
+      order,
+      styles: { visible: order % 2 === 0, legacy: { token: type } }
+    }));
+
+    await expect(saveAs(userA, 'legacy-a', sections)).resolves.toMatchObject({ revision: 1, saved_count: 7 });
+    expect(await rowsForPage('legacy-a')).toEqual(sections.map(section => ({
+      id: section.id,
+      page_id: section.page_id,
+      type: section.type,
+      content: section.content,
+      order_index: section.order,
+      styles: section.styles
+    })));
+    await expect(saveAs(userA, 'legacy-a', sections, 1)).resolves.toMatchObject({ revision: 2, saved_count: 7 });
+    expect(await rowsForPage('legacy-a')).toHaveLength(7);
+  });
+
+  it('still rejects an arbitrary unsupported section type', async () => {
+    await expect(saveAs(userA, 'legacy-a', [{
+      ...section('unsupported', 'legacy-a', 'unsafe'),
+      type: 'script'
+    }], 2)).rejects.toMatchObject({ code: 'PT422' });
+    expect(await revision('legacy-a')).toBe(2);
   });
 
   it('preserves established expected-revision conflicts', async () => {

@@ -1,6 +1,11 @@
 import type { PageSection } from './types';
 
-export const PAGE_SECTION_SAVE_TYPES = ['hero', 'proof', 'offer', 'gallery', 'form', 'faq'] as const;
+export const PAGE_SECTION_SAVE_CANONICAL_TYPES = ['hero', 'proof', 'offer', 'gallery', 'form', 'faq'] as const;
+export const PAGE_SECTION_SAVE_LEGACY_TYPES = ['services', 'benefits', 'before_after', 'cta', 'contact_info', 'map'] as const;
+export const PAGE_SECTION_SAVE_TYPES = [
+  ...PAGE_SECTION_SAVE_CANONICAL_TYPES,
+  ...PAGE_SECTION_SAVE_LEGACY_TYPES
+] as const;
 export const PAGE_SECTION_SAVE_MAX_SECTIONS = 100;
 export const PAGE_SECTION_SAVE_MAX_JSON_BYTES = 256_000;
 

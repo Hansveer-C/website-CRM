@@ -30,6 +30,10 @@ export class BuilderSaveStateController {
     this.currentStatus = 'saved';
     this.latestGeneration = 0;
   }
+
+  requireReloadForConflict(): void {
+    this.currentStatus = 'conflict';
+  }
 }
 
 export function builderSaveStatusLabel(status: BuilderSaveStatus): string {

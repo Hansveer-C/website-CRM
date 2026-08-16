@@ -85,6 +85,21 @@ test('zero-website user creates once and refreshes into the exact site', async (
   await expect(page.locator('#sec-preview-section-form')).toHaveAttribute('aria-selected', 'true');
   await page.locator('#sec-preview-section-form').press('Enter');
   await expect(page.locator('.pb-inspector-header').getByRole('heading', { name: 'Form' })).toBeVisible();
+  await page.evaluate(() => {
+    const fixtureFetch = window.fetch;
+    (window as any).__builderObservedSectionRequests = [];
+    window.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      (window as any).__builderObservedSectionRequests.push({ url, method: init?.method ?? (input instanceof Request ? input.method : 'GET') });
+      return fixtureFetch(input, init);
+    };
+  });
+  const missingPageStatus = await page.evaluate(async () => (await window.fetch('/api/page-sections', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ generation: 1, expected_revision: 0, sections: [] })
+  })).status);
+  expect(missingPageStatus).toBe(400);
   await page.evaluate(() => { (window as any).__builderFixtureSaveFailureCount = 1; });
   await page.getByRole('button', { name: 'Select Hero section' }).click();
   const failedSaveHeading = page.locator('.pb-inspector-field').filter({ hasText: 'Heading' }).locator('input');
@@ -94,6 +109,11 @@ test('zero-website user creates once and refreshes into the exact site', async (
   await expect(page.locator('.pb-inspector-field').filter({ hasText: 'Heading' }).locator('input')).toHaveValue('Preserved through retry');
   await page.getByRole('button', { name: 'Retry' }).click();
   await expect(page.locator('#pb-autosave-indicator')).toContainText('Saved', { timeout: 10_000 });
+  const observedSectionRequests = await page.evaluate(() => (window as any).__builderObservedSectionRequests);
+  expect(observedSectionRequests).toEqual(expect.arrayContaining([
+    expect.objectContaining({ url: '/api/page-section-save-revision?pageId=page-1', method: 'GET' }),
+    expect.objectContaining({ url: '/api/page-sections?pageId=page-1', method: 'PUT' })
+  ]));
   const edits = [
     ['Hero', 'Verified Hero'],
     ['Offer', 'Verified Offer'],

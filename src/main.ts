@@ -21,6 +21,8 @@ import { SupabaseBuilderMediaRepository } from './builder_media_repository_supab
 import { createBuilderMediaRuntime } from './builder_media_runtime';
 import { builderDocumentToPageSections, createBuilderDocument, validateBuilderDocument } from './builder_document';
 import type { BuilderDocument } from './builder_document';
+import { resolveBuilderFixtureSectionRoute } from './builder_fixture_section_route';
+import { BuilderPageRevisionAuthority } from './builder_page_revision_authority';
 import {
   BuilderHistoryController,
   BuilderSerializedSaveQueue,
@@ -1151,7 +1153,7 @@ async function handleBuilderNewPageBrowserPost(
 const originalFetch = window.fetch;
 const browserCallSimulator = createBrowserCallSimulator();
 const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : (input as any).url;
+    const url = getBuilderSectionsRequestUrl(input) ?? '';
 
     if (isBuilderPublicationBrowserRequest(input)) {
         try {
@@ -1179,7 +1181,7 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
     if (builderNewPageResponse) return builderNewPageResponse;
     
     if (url.startsWith('/api/')) {
-        const method = init?.method || 'GET';
+        const method = getBuilderSectionsRequestMethod(input, init).toUpperCase();
         const bodyString = init?.body ? (init.body as string) : undefined;
         console.log(`[MOCK INTERCEPTOR] Intercepting ${method} ${url}`);
         
@@ -1473,8 +1475,13 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
         }
 
         // ── WB.3.5 Page Sections Auto-Save ──────────────────────────────────
-        if (url.match(/^\/api\/pages\/[^/]+\/(?:sections|section-save-revision)$/) && (method === 'PUT' || method === 'GET')) {
-            const pageId = url.split('/')[3];
+        const literalSectionRoute = resolveBuilderFixtureSectionRoute(url, method, window.location.origin);
+        const historicalSectionRoute = /^\/api\/pages\/([^/?]+)\/(sections|section-save-revision)(?:\?.*)?$/.exec(url);
+        if (literalSectionRoute || (historicalSectionRoute && (method === 'PUT' || method === 'GET'))) {
+            const pageId = literalSectionRoute?.pageId ?? historicalSectionRoute?.[1] ?? null;
+            if (!pageId) {
+                return builderSectionsJsonResponse({ success: false, error: { code: 'INVALID_INPUT', message: 'Page ID is required', request_id: 'fixture', status: 400 } }, 400);
+            }
             let body: any = {};
             try {
                 body = typeof reqContext.body === 'string'
@@ -1483,9 +1490,9 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
             } catch {}
             const sections: any[] = body.sections || [];
 
-            if (method === 'GET') {
+            if (literalSectionRoute?.kind === 'revision' || (!literalSectionRoute && method === 'GET')) {
                 const savedSections = mockPageSections.filter(section => section.page_id === pageId);
-                return builderSectionsJsonResponse({ success: true, data: { page_id: pageId, saved_count: savedSections.length, generation: 0, revision: builderPageSaveRevisions.get(pageId) ?? 0, document_hash: 'fixture-current', request_id: 'fixture' } }, 200);
+                return builderSectionsJsonResponse({ success: true, data: { page_id: pageId, saved_count: savedSections.length, generation: 0, revision: builderPageRevisionAuthority.get(pageId) ?? 0, document_hash: 'fixture-current', request_id: 'fixture' } }, 200);
             }
 
             const requestedFixtureFailures = Number((window as any).__builderFixtureSaveFailureCount ?? 0);
@@ -2661,7 +2668,7 @@ async function renderClients() {
 
 let autoSaveTimeout: any;
 const builderSaveState = new BuilderSaveStateController();
-const builderPageSaveRevisions = new Map<string, number>();
+const builderPageRevisionAuthority = new BuilderPageRevisionAuthority();
 const builderViewTransitions = new BuilderViewTransitionController();
 
 function renderBuilderAutosaveIndicator(): void {
@@ -2672,13 +2679,21 @@ function renderBuilderAutosaveIndicator(): void {
     : status === 'saving' ? '#fbbf24'
       : status === 'dirty' ? '#f97316'
         : '#ef4444';
-  const retry = status === 'failed' || status === 'conflict'
+  const recovery = status === 'failed'
     ? ` <button type="button" class="pb-autosave-retry" onclick="window.retryBuilderAutosave()">Retry</button>`
-    : '';
-  indicator.innerHTML = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};box-shadow:0 0 8px ${color};"></span> ${builderSaveStatusLabel(status)}${retry}`;
+    : status === 'conflict'
+      ? ` <button type="button" class="pb-autosave-retry" onclick="window.reloadBuilderAfterConflict()">Reload page</button>`
+      : '';
+  indicator.innerHTML = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};box-shadow:0 0 8px ${color};"></span> ${builderSaveStatusLabel(status)}${recovery}`;
 }
 
+(window as any).reloadBuilderAfterConflict = () => window.location.reload();
+
 (window as any).retryBuilderAutosave = () => {
+  if (builderPageRevisionAuthority.requiresReload(builderPageId)) {
+    (window as any).reloadBuilderAfterConflict();
+    return;
+  }
   builderSaveState.markDirty();
   (window as any).triggerAutoSave();
 };
@@ -2729,7 +2744,11 @@ function initializeBuilderHistory(pageId: string): BuilderHistoryController | nu
       selectedSectionId: builderSelectedSectionId,
       viewport: builderViewport
     });
-    builderSaveState.resetSaved();
+    if (builderPageRevisionAuthority.requiresReload(pageId)) {
+      builderSaveState.requireReloadForConflict();
+    } else {
+      builderSaveState.resetSaved();
+    }
     return builderHistoryController;
   } catch {
     console.error('[Builder] Current page data could not initialize undo history.');
@@ -3857,8 +3876,8 @@ function renderBuilderInspectorPanel(sections: PageSection[]): string {
     return `
       <aside class="pb-inspector-panel">
         <div class="pb-inspector-empty">
-          <h3>Custom section</h3>
-          <p>This section can still be edited using its existing on-page controls.</p>
+          <h3>Legacy section</h3>
+          <p>This section is preserved losslessly and is read-only in the current Builder.</p>
         </div>
       </aside>
     `;
@@ -5191,7 +5210,7 @@ function _renderBuilder() {
            <span id="pb-autosave-indicator" style="font-size: 0.75rem; color: #666; font-weight: 600; display: flex; align-items: center; gap: 8px;">
             <span style="width: 7px; height: 7px; border-radius: 50%; background: ${builderSaveState.status === 'saved' ? '#10b981' : builderSaveState.status === 'saving' ? '#fbbf24' : builderSaveState.status === 'dirty' ? '#f97316' : '#ef4444'};"></span>
             ${builderSaveStatusLabel(builderSaveState.status)}
-            ${builderSaveState.status === 'failed' || builderSaveState.status === 'conflict' ? `<button type="button" class="pb-autosave-retry" onclick="window.retryBuilderAutosave()">Retry</button>` : ''}
+            ${builderSaveState.status === 'failed' ? `<button type="button" class="pb-autosave-retry" onclick="window.retryBuilderAutosave()">Retry</button>` : builderSaveState.status === 'conflict' ? `<button type="button" class="pb-autosave-retry" onclick="window.reloadBuilderAfterConflict()">Reload page</button>` : ''}
           </span>
           ${builderMode === 'edit' ? `
           <div class="pb-publication-control">
@@ -5715,8 +5734,8 @@ function renderSectionPreviewContent(section: any) {
     }
     default:
       return `<div style="padding: 60px; background: #fff; border-radius: 20px; border: 2px dashed #eee; text-align: center; color: #999;">
-                <strong style="color: #666; font-size: 1.1rem;">LEGACY SECTION: ${section.type.toUpperCase()}</strong><br>
-                <p style="margin-top: 10px; font-size: 0.9rem;">This section will not appear on the live site.</p>
+                <strong style="color: #666; font-size: 1.1rem;">LEGACY SECTION: ${escapeBuilderInspectorHtml(String(section.type).toUpperCase())}</strong><br>
+                <p style="margin-top: 10px; font-size: 0.9rem;">This section is preserved and is read-only in the current Builder.</p>
               </div>`;
   }
 }
@@ -6219,9 +6238,15 @@ const fetchPageSectionRevision = createPageSectionRevisionClient({
   const queuedSave = builderSaveQueue.enqueue(async () => {
     if (!protectedAsyncOperationGuard.isCurrent(saveOperation, getActingUserId())) return false;
     const generation = saveSnapshot?.generation ?? 1;
+    if (builderPageRevisionAuthority.requiresReload(pageId)) {
+      if (history && saveSnapshot) history.acknowledgeSave(saveSnapshot.generation, false);
+      builderSaveState.requireReloadForConflict();
+      renderBuilderAutosaveIndicator();
+      return false;
+    }
     builderSaveState.begin(generation);
     renderBuilderAutosaveIndicator();
-    if (!builderPageSaveRevisions.has(pageId)) {
+    if (!builderPageRevisionAuthority.has(pageId)) {
       const revisionResult = await fetchPageSectionRevision(pageId);
       if (!protectedAsyncOperationGuard.isCurrent(saveOperation, getActingUserId())) return false;
       if (!revisionResult.success) {
@@ -6231,11 +6256,11 @@ const fetchPageSectionRevision = createPageSectionRevisionClient({
         renderBuilderAutosaveIndicator();
         return false;
       }
-      builderPageSaveRevisions.set(pageId, revisionResult.data.revision);
+      builderPageRevisionAuthority.accept(pageId, revisionResult.data.revision);
     }
     const result = await persistPageSectionDocument(pageId, {
       generation,
-      expected_revision: builderPageSaveRevisions.get(pageId) ?? null,
+      expected_revision: builderPageRevisionAuthority.get(pageId) ?? null,
       sections
     });
     const succeeded = result.success;
@@ -6255,9 +6280,10 @@ const fetchPageSectionRevision = createPageSectionRevisionClient({
       builderSaveState.complete(generation, result.success ? { success: true } : { success: false, code: result.error.code }, false);
     }
     if (result.success) {
-      builderPageSaveRevisions.set(pageId, result.data.revision);
+      builderPageRevisionAuthority.accept(pageId, result.data.revision);
       if (builderSaveState.status === 'saved') (window as any).showToast('Saved ✓', 'success');
     } else {
+      if (result.error.code === 'CONFLICT') builderPageRevisionAuthority.invalidateAfterConflict(pageId);
       console.warn(`[AutoSave] SECTION_SAVE_FAILED code=${result.error.code} status=${result.error.status} pageId=${pageId} requestId=${result.error.request_id}`);
     }
     renderBuilderAutosaveIndicator();

@@ -80,6 +80,24 @@ function cloneAndSortSections(
     .map(({ section }) => section);
 }
 
+/**
+ * Legacy generated pages used one-based contiguous section orders. Normalize
+ * only that exact persisted shape at the Builder boundary; all other order
+ * shapes remain untouched so validation/save errors cannot be hidden.
+ */
+export function normalizePersistedBuilderSections(
+  sections: readonly BuilderDocumentSection[]
+): BuilderDocumentSection[] {
+  const cloned = cloneAndSortSections(sections);
+  const isOneBasedContiguous = cloned.every(
+    (section, index) => section.order === index + 1
+  );
+
+  return isOneBasedContiguous
+    ? cloned.map((section, index) => ({ ...section, order: index }))
+    : cloned;
+}
+
 export function createBuilderDocument(
   page: Page,
   sections: PageSection[]
@@ -87,7 +105,7 @@ export function createBuilderDocument(
   return {
     schemaVersion: 1,
     page: deepClone(page),
-    sections: cloneAndSortSections(sections)
+    sections: normalizePersistedBuilderSections(sections)
   };
 }
 
