@@ -116,3 +116,146 @@ describe('PagesRepo.updatePageSettings local adapter', () => {
     expect(mockPages.find(page => page.id === 'settings-page-a')?.slug).toBe('a');
   });
 });
+
+describe('PagesRepo.duplicatePage local adapter', () => {
+  beforeEach(() => {
+    mockPageSections.push(
+      { id: 'sec-a-1', page_id: 'settings-page-a', user_id: 'settings-owner', type: 'hero', content: { title: 'Hero A' }, styles: {}, order: 0 } as any,
+      { id: 'sec-a-2', page_id: 'settings-page-a', user_id: 'settings-owner', type: 'services', content: { title: 'Services A' }, styles: {}, order: 1 } as any
+    );
+  });
+
+  it('duplicates source page and its sections with new IDs, draft status, and preserved content', async () => {
+    const result = await PagesRepo.duplicatePage({
+      sourcePageId: 'settings-page-a',
+      newPageId: 'settings-page-a-copy'
+    }, 'settings-owner');
+
+    expect(result.success).toBe(true);
+    expect(result.data?.page).toMatchObject({
+      id: 'settings-page-a-copy',
+      user_id: 'settings-owner',
+      name: 'A (Copy)',
+      slug: 'a-copy',
+      status: 'draft',
+      funnel_id: 'funnel-a'
+    });
+
+    expect(result.data?.sections).toHaveLength(2);
+    expect(result.data?.sections[0].page_id).toBe('settings-page-a-copy');
+    expect(result.data?.sections[0].id).not.toBe('sec-a-1');
+    expect(result.data?.sections[0].type).toBe('hero');
+    expect(result.data?.sections[1].type).toBe('services');
+
+    // Confirm stored in mock storage
+    expect(mockPages.some(p => p.id === 'settings-page-a-copy')).toBe(true);
+    expect(mockPageSections.some(s => s.page_id === 'settings-page-a-copy')).toBe(true);
+  });
+
+  it('rejects cross-tenant duplication attempt', async () => {
+    const result = await PagesRepo.duplicatePage({
+      sourcePageId: 'settings-page-a',
+      newPageId: 'new-id'
+    }, 'foreign-owner');
+
+    expect(result).toMatchObject({ success: false, code: 'NOT_FOUND' });
+  });
+
+  it('rejects duplicate newPageId conflict', async () => {
+    const result = await PagesRepo.duplicatePage({
+      sourcePageId: 'settings-page-a',
+      newPageId: 'settings-page-b'
+    }, 'settings-owner');
+
+    expect(result).toMatchObject({ success: false, code: 'ID_CONFLICT' });
+  });
+});
+
+describe('PagesRepo.duplicatePage Supabase adapter', () => {
+  it('calls duplicate_builder_page RPC and returns mapped page and sections', async () => {
+    let rpcCalledWith: { functionName: string; payload: Record<string, unknown> } | undefined;
+
+    const rpcResponse = {
+      page: {
+        id: 'dup-id',
+        user_id: 'trusted-owner',
+        name: 'Original (Copy)',
+        slug: 'original-copy',
+        status: 'draft',
+        seo_title: 'SEO Title',
+        seo_description: 'SEO Desc',
+        seo_keywords: ['a'],
+        created_at: '2026-08-17T05:00:00.000Z',
+        funnel_id: 'fnl-1',
+        step_order: 2
+      },
+      sections: [
+        {
+          id: 'new-sec-1',
+          user_id: 'trusted-owner',
+          page_id: 'dup-id',
+          funnel_id: 'fnl-1',
+          type: 'hero',
+          content: { heading: 'Hello' },
+          styles: { bg: '#fff' },
+          order: 0
+        }
+      ]
+    };
+
+    const client = {
+      rpc: (functionName: string, payload: Record<string, unknown>) => {
+        rpcCalledWith = { functionName, payload };
+        return Promise.resolve({ data: rpcResponse, error: null });
+      }
+    } as unknown as SupabaseClient;
+
+    const result = await PagesRepo.duplicatePage({
+      sourcePageId: 'src-id',
+      newPageId: 'dup-id'
+    }, 'trusted-owner', client);
+
+    expect(result.success).toBe(true);
+    expect(rpcCalledWith).toEqual({
+      functionName: 'duplicate_builder_page',
+      payload: {
+        p_page_id: 'src-id',
+        p_new_page_id: 'dup-id',
+        p_name: null,
+        p_slug: null,
+        p_destination_funnel_id: null
+      }
+    });
+    expect(result.data?.page).toMatchObject({
+      id: 'dup-id',
+      user_id: 'trusted-owner',
+      name: 'Original (Copy)',
+      slug: 'original-copy',
+      status: 'draft'
+    });
+    expect(result.data?.sections).toHaveLength(1);
+    expect(result.data?.sections[0].id).toBe('new-sec-1');
+  });
+
+  it('maps RPC error codes accurately', async () => {
+    const errorCases = [
+      { rpcError: { code: 'PT404', message: 'Page not found' }, expectedCode: 'NOT_FOUND' },
+      { rpcError: { code: 'PT401', message: 'Authentication required' }, expectedCode: 'UNAUTHORIZED' },
+      { rpcError: { code: 'PT403', message: 'Funnel ownership required' }, expectedCode: 'FORBIDDEN' },
+      { rpcError: { code: 'PT409', message: 'Another page in this account already uses this URL.' }, expectedCode: 'CONFLICT' }
+    ];
+
+    for (const { rpcError, expectedCode } of errorCases) {
+      const client = {
+        rpc: () => Promise.resolve({ data: null, error: rpcError })
+      } as unknown as SupabaseClient;
+
+      const result = await PagesRepo.duplicatePage({
+        sourcePageId: 'src-id',
+        newPageId: 'dup-id'
+      }, 'trusted-owner', client);
+
+      expect(result).toMatchObject({ success: false, code: expectedCode });
+    }
+  });
+});

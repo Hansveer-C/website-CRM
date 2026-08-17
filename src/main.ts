@@ -56,6 +56,10 @@ import {
   type BuilderNewPageContext,
   type BuilderNewPagePersistResult
 } from './builder_new_page_controller';
+import {
+  BuilderDuplicatePageController,
+  type BuilderDuplicatePagePersistResult
+} from './builder_duplicate_page_controller';
 import { PagesRepo } from './pages_repo_supabase';
 import {
   createBuilderPublishedRevision,
@@ -1150,6 +1154,72 @@ async function handleBuilderNewPageBrowserPost(
     return builderSectionsJsonResponse({ success: true, data: result.data }, 201);
 }
 
+async function handleBuilderDuplicatePageBrowserPost(
+    input: RequestInfo | URL,
+    init?: RequestInit
+): Promise<Response | null> {
+    const requestUrl = getBuilderSectionsRequestUrl(input);
+    if (!requestUrl) return null;
+    const parsedUrl = new URL(requestUrl, window.location.origin);
+    const match = parsedUrl.pathname.match(/^\/api\/pages\/([^/]+)\/duplicate$/);
+    if (!match || getBuilderSectionsRequestMethod(input, init).toUpperCase() !== 'POST') {
+        return null;
+    }
+    const sourcePageId = decodeURIComponent(match[1]);
+    let body: unknown;
+    try {
+        body = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
+    } catch {
+        return builderSectionsJsonResponse({ success: false, code: 'INVALID_INPUT', error: 'Invalid duplicate request' }, 400);
+    }
+    const request = (typeof body === 'object' && body !== null ? body : {}) as {
+        newPageId?: string;
+        name?: string;
+        slug?: string;
+        destinationFunnelId?: string;
+    };
+    const newPageId = typeof request.newPageId === 'string' && request.newPageId.trim()
+        ? request.newPageId.trim()
+        : crypto.randomUUID();
+
+    const userId = typeof (window as any).currentUser === 'string' ? (window as any).currentUser.trim() : '';
+    if (!userId) return builderSectionsJsonResponse({ success: false, code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+
+    let client: SupabaseClient | undefined;
+    if (editorUsesSupabase()) {
+        client = await getBuilderPublicationSupabaseClient() ?? undefined;
+        if (!client) return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Page duplication is unavailable' }, 503);
+        const authResult = await client.auth.getUser();
+        if (authResult.error || authResult.data.user?.id !== userId) {
+            return builderSectionsJsonResponse({ success: false, code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+        }
+    } else if (!editorUsesLocalData()) {
+        return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Page duplication is unavailable' }, 503);
+    }
+
+    const result = await PagesRepo.duplicatePage({
+        sourcePageId,
+        newPageId,
+        name: typeof request.name === 'string' ? request.name : undefined,
+        slug: typeof request.slug === 'string' ? request.slug : undefined,
+        destinationFunnelId: typeof request.destinationFunnelId === 'string' ? request.destinationFunnelId : undefined
+    }, userId, client);
+
+    if (!result.success || !result.data) {
+        const conflict = result.code === '23505' || result.code === 'CONFLICT';
+        const notFound = result.code === 'NOT_FOUND' || result.code === 'SOURCE_PAGE_NOT_FOUND';
+        return builderSectionsJsonResponse({
+            success: false,
+            code: conflict ? 'CONFLICT' : notFound ? 'NOT_FOUND' : 'UNAVAILABLE',
+            error: conflict
+                ? 'A page with that name or URL already exists.'
+                : notFound ? 'Source page not found' : 'The page could not be duplicated. Please try again.'
+        }, conflict ? 409 : notFound ? 404 : 503);
+    }
+
+    return builderSectionsJsonResponse({ success: true, data: result.data }, 201);
+}
+
 const originalFetch = window.fetch;
 const browserCallSimulator = createBrowserCallSimulator();
 const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1179,6 +1249,9 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
 
     const builderNewPageResponse = await handleBuilderNewPageBrowserPost(input, init);
     if (builderNewPageResponse) return builderNewPageResponse;
+
+    const builderDuplicatePageResponse = await handleBuilderDuplicatePageBrowserPost(input, init);
+    if (builderDuplicatePageResponse) return builderDuplicatePageResponse;
     
     if (url.startsWith('/api/')) {
         const method = getBuilderSectionsRequestMethod(input, init).toUpperCase();
@@ -1783,6 +1856,8 @@ let builderHistoryController: BuilderHistoryController | null = null;
 let builderPageSettingsController: BuilderPageSettingsController | null = null;
 let builderNewPageController: BuilderNewPageController | null = null;
 let builderNewPageControllerIdentity = '';
+let builderDuplicatePageController: BuilderDuplicatePageController | null = null;
+let builderDuplicatePageControllerIdentity = '';
 let builderMediaController: BuilderMediaController | null = null;
 let builderMediaControllerIdentity = '';
 let builderMediaSelectedAssetIds = new Set<string>();
@@ -4312,6 +4387,56 @@ function getBuilderNewPageController(): BuilderNewPageController {
   return builderNewPageController;
 }
 
+function getBuilderDuplicatePageController(): BuilderDuplicatePageController {
+  const context = getBuilderNewPageContext();
+  const identity = `${context.actingUserId}:${context.website?.id ?? ''}`;
+  if (builderDuplicatePageController && builderDuplicatePageControllerIdentity === identity) {
+    return builderDuplicatePageController;
+  }
+  builderDuplicatePageControllerIdentity = identity;
+  builderDuplicatePageController = new BuilderDuplicatePageController({
+    getContext: getBuilderNewPageContext,
+    persist: async request => {
+      if (!(await flushActiveBuilderBeforeNewPage())) {
+        return { success: false, code: 'UNAVAILABLE' };
+      }
+      try {
+        const response = await fetch(`/api/pages/${encodeURIComponent(request.sourcePageId)}/duplicate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request)
+        });
+        const payload = await response.json() as {
+          success?: boolean;
+          data?: { page: Page; sections: PageSection[] };
+          code?: BuilderDuplicatePagePersistResult['code'];
+          error?: string;
+        };
+        return response.ok && payload.success && payload.data
+          ? { success: true, data: payload.data }
+          : { success: false, code: payload.code ?? 'INVALID_RESPONSE', error: payload.error };
+      } catch {
+        return { success: false, code: 'AMBIGUOUS' };
+      }
+    },
+    onDuplicated: async (page, sections) => {
+      const existingIndex = mockPages.findIndex(item => item.id === page.id);
+      if (existingIndex >= 0) mockPages[existingIndex] = page;
+      else mockPages.push(page);
+
+      for (const section of sections) {
+        const sIndex = mockPageSections.findIndex(s => s.id === section.id);
+        if (sIndex >= 0) mockPageSections[sIndex] = section;
+        else mockPageSections.push(section as any);
+      }
+
+      builderPagesPanelView = 'list';
+      await (window as any).switchBuilderPage(page.id);
+    }
+  });
+  return builderDuplicatePageController;
+}
+
 function getBuilderWebsitePageEntries(): BuilderWebsitePageEntry[] {
   const website = getActiveBuilderWebsite();
   if (!website) return [];
@@ -4562,10 +4687,13 @@ function renderBuilderPageSettingsPanel(): string {
 function renderBuilderPagesPanel(): string {
   const entries = getBuilderWebsitePageEntries();
   const newPage = getBuilderNewPageController();
+  const duplicate = getBuilderDuplicatePageController();
   const canCreate = !!getActiveBuilderWebsite()
     && !!getBuilderNewPageContext().actingUserId
     && newPage.destinations.length > 0
     && !newPage.isCreating;
+  const isDuplicating = duplicate.isDuplicating;
+  const duplicatingPageId = duplicate.duplicatingPageId;
 
   return `
     <div class="pb-pages-panel">
@@ -4589,29 +4717,46 @@ function renderBuilderPagesPanel(): string {
           const name = page.name.trim() || 'Untitled page';
           const status = page.status || 'draft';
           const isCurrent = page.id === builderPageId;
+          const isThisDuplicating = isDuplicating && duplicatingPageId === page.id;
           const safeName = escapeBuilderInspectorHtml(name);
           const safePath = escapeBuilderInspectorHtml(path);
           const safeStatus = escapeBuilderInspectorHtml(status);
           const pageArg = builderInspectorJsArgument(page.id);
 
           return `
-            <button
-              type="button"
+            <div
               class="pb-page-row ${isCurrent ? 'active' : ''}"
-              onclick='window.switchBuilderPage(${pageArg})'
               ${isCurrent ? 'aria-current="page"' : ''}
-              aria-label="Open ${safeName} page"
             >
-              <span class="pb-page-row-topline">
-                <span class="pb-page-name">${safeName}</span>
-                ${isCurrent ? '<span class="pb-page-open">Open</span>' : ''}
-              </span>
-              <span class="pb-page-path">${safePath}</span>
-              <span class="pb-page-badges">
-                <span class="pb-page-status ${status === 'published' ? 'published' : 'draft'}">${safeStatus}</span>
-                ${isHomepage ? '<span class="pb-page-homepage">Homepage</span>' : ''}
-              </span>
-            </button>
+              <button
+                type="button"
+                class="pb-page-row-select"
+                onclick='window.switchBuilderPage(${pageArg})'
+                aria-label="Open ${safeName} page"
+              >
+                <span class="pb-page-row-topline">
+                  <span class="pb-page-name">${safeName}</span>
+                  ${isCurrent ? '<span class="pb-page-open">Open</span>' : ''}
+                </span>
+                <span class="pb-page-path">${safePath}</span>
+                <span class="pb-page-badges">
+                  <span class="pb-page-status ${status === 'published' ? 'published' : 'draft'}">${safeStatus}</span>
+                  ${isHomepage ? '<span class="pb-page-homepage">Homepage</span>' : ''}
+                </span>
+              </button>
+              <div class="pb-page-row-actions">
+                <button
+                  type="button"
+                  class="pb-page-duplicate-button"
+                  onclick='event.stopPropagation(); window.duplicateBuilderPage(${pageArg})'
+                  aria-label="Duplicate ${safeName} page"
+                  title="Duplicate page"
+                  ${isDuplicating ? 'disabled' : ''}
+                >
+                  ${isThisDuplicating ? 'Duplicating…' : 'Duplicate'}
+                </button>
+              </div>
+            </div>
           `;
         }).join('') : '<div class="pb-pages-empty"><h4>No pages found</h4><p>Create the first draft page for an existing destination.</p></div>'}
       </div>
@@ -4741,6 +4886,20 @@ function updateBuilderNewPageLiveFields(): void {
   }
   const firstIssue = controller.issues[0]?.field;
   setTimeout(() => document.getElementById(`pb-new-page-${firstIssue ?? 'name'}`)?.focus(), 0);
+};
+(window as any).duplicateBuilderPage = async (pageId: string) => {
+  const controller = getBuilderDuplicatePageController();
+  if (controller.isDuplicating) return;
+  const pending = controller.duplicate(pageId);
+  renderBuilder();
+  const succeeded = await pending;
+  renderBuilder();
+  if (succeeded) {
+    (window as any).showToast('Page duplicated', 'success');
+    setTimeout(() => document.querySelector<HTMLElement>('.pb-page-row[aria-current="page"]')?.focus(), 0);
+  } else if (controller.message) {
+    (window as any).showToast(controller.message, 'error');
+  }
 };
 
 function isBuilderInspectorPlainObject(

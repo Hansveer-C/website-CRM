@@ -1,6 +1,7 @@
-import { Page, RepoResponse, User } from './types';
-import { mockPages } from './db';
+import { Page, PageSection, RepoResponse, User } from './types';
+import { mockPages, mockPageSections } from './db';
 import type { BuilderPageSettingsPatch } from './builder_page_settings';
+import { createDuplicatePageDefaults } from './builder_page_lifecycle';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 async function getServerSupabaseClient(): Promise<SupabaseClient | null> {
@@ -32,6 +33,21 @@ export interface CreatePageRepositoryInput {
   slug: string;
   funnelId: string;
   stepOrder?: number;
+}
+
+export interface DuplicatePageRepositoryInput {
+  sourcePageId: string;
+  newPageId: string;
+  name?: string;
+  slug?: string;
+  destinationFunnelId?: string;
+  stepOrder?: number;
+  generateSectionId?: () => string;
+}
+
+export interface DuplicatePageRepositoryResult {
+  page: Page;
+  sections: PageSection[];
 }
 
 function localPagesStorageKey(userId: string): string {
@@ -302,5 +318,136 @@ export const PagesRepo = {
       .eq('id', id)
       .eq('user_id', userId)
     );
+  },
+
+  /**
+   * Duplicates a page and all of its sections atomically.
+   */
+  async duplicatePage(
+    input: DuplicatePageRepositoryInput,
+    user: User | string,
+    client?: SupabaseClient
+  ): Promise<RepoResponse<DuplicatePageRepositoryResult>> {
+    const userId = typeof user === 'string' ? user : user.id;
+    const db = client ?? await getServerSupabaseClient();
+    const useRemote = db !== null;
+
+    if (!useRemote) {
+      const sourcePage = mockPages.find(page => page.id === input.sourcePageId && page.user_id === userId);
+      if (!sourcePage) {
+        return { success: false, error: 'SOURCE_PAGE_NOT_FOUND', code: 'NOT_FOUND' };
+      }
+
+      if (mockPages.some(page => page.id === input.newPageId)) {
+        return { success: false, error: 'ID_CONFLICT', code: 'ID_CONFLICT' };
+      }
+
+      const sourceSections = mockPageSections.filter(s => s.page_id === input.sourcePageId && (s as any).user_id === userId);
+
+      const defaults = createDuplicatePageDefaults({
+        sourcePage,
+        sourceSections,
+        existingPages: mockPages.filter(p => p.user_id === userId),
+        actingUserId: userId,
+        newPageId: input.newPageId,
+        name: input.name,
+        slug: input.slug,
+        destinationFunnelId: input.destinationFunnelId,
+        generateSectionId: input.generateSectionId
+      });
+
+      if (mockPages.some(page => page.user_id === userId && page.slug === defaults.page.slug)) {
+        return { success: false, error: 'CONFLICT', code: '23505' };
+      }
+
+      mockPages.push(defaults.page);
+      const insertedSections = defaults.sections.map(s => ({ ...s, user_id: userId }));
+      mockPageSections.push(...(insertedSections as any));
+
+      if (!persistLocalPages(userId)) {
+        const pageIdx = mockPages.findIndex(p => p.id === defaults.page.id);
+        if (pageIdx >= 0) mockPages.splice(pageIdx, 1);
+        for (const s of defaults.sections) {
+          const sIdx = mockPageSections.findIndex(existing => existing.id === s.id);
+          if (sIdx >= 0) mockPageSections.splice(sIdx, 1);
+        }
+        return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
+      }
+
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          const storageKey = `mock_sections_${userId}:${defaults.page.id}`;
+          window.localStorage.setItem(storageKey, JSON.stringify(defaults.sections));
+        } catch {
+          // ignore
+        }
+      }
+
+      return {
+        success: true,
+        data: {
+          page: { ...defaults.page },
+          sections: defaults.sections.map(s => ({ ...s }))
+        }
+      };
+    }
+
+    try {
+      const rpcPayload = {
+        p_page_id: input.sourcePageId,
+        p_new_page_id: input.newPageId || null,
+        p_name: input.name || null,
+        p_slug: input.slug || null,
+        p_destination_funnel_id: input.destinationFunnelId || null
+      };
+
+      const rpcResult = await db.rpc('duplicate_builder_page', rpcPayload);
+      if (rpcResult.error) {
+        const code = rpcResult.error.code;
+        const message = rpcResult.error.message;
+        if (code === 'PT404' || message?.includes('Page not found')) {
+          return { success: false, error: 'SOURCE_PAGE_NOT_FOUND', code: 'NOT_FOUND' };
+        }
+        if (code === 'PT401' || message?.includes('Authentication required')) {
+          return { success: false, error: 'UNAUTHORIZED', code: 'UNAUTHORIZED' };
+        }
+        if (code === 'PT403') {
+          return { success: false, error: 'FORBIDDEN', code: 'FORBIDDEN' };
+        }
+        if (code === 'PT409' || code === '23505' || message?.includes('already exists')) {
+          return { success: false, error: 'CONFLICT', code: 'CONFLICT' };
+        }
+        return { success: false, error: message ?? 'DUPLICATE_FAILED', code: code ?? 'UNAVAILABLE' };
+      }
+
+      const data = rpcResult.data as { page?: Record<string, unknown>; sections?: Record<string, unknown>[] };
+      if (!data || !data.page) {
+        return { success: false, error: 'INVALID_RESPONSE', code: 'INVALID_RESPONSE' };
+      }
+
+      const mappedPage = mapCreatedPage(data.page);
+      const mappedSections: PageSection[] = Array.isArray(data.sections)
+        ? data.sections.map((row: any) => ({
+            id: String(row.id),
+            page_id: String(row.page_id),
+            ...(row.funnel_id ? { funnel_id: String(row.funnel_id) } : {}),
+            type: String(row.type),
+            content: typeof row.content === 'object' && row.content !== null ? row.content : {},
+            styles: typeof row.styles === 'object' && row.styles !== null ? row.styles : {},
+            order: typeof row.order === 'number' ? row.order : (typeof row.order_index === 'number' ? row.order_index : 0),
+            ...(row.variant ? { variant: String(row.variant) } : {})
+          }))
+        : [];
+
+      return {
+        success: true,
+        data: {
+          page: mappedPage,
+          sections: mappedSections
+        }
+      };
+    } catch {
+      return { success: false, error: 'UNAVAILABLE', code: 'UNAVAILABLE' };
+    }
   }
 };
