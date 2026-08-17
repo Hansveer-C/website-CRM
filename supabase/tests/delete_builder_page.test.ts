@@ -69,34 +69,62 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
           created_at timestamptz not null default now()
         );
 
+        create table if not exists public.websites (
+          id uuid primary key default gen_random_uuid(),
+          user_id text not null references public.users(id) on delete cascade,
+          name text not null,
+          homepage_funnel_id text references public.funnels(id) on delete set null,
+          created_at timestamptz not null default now()
+        );
+
         create schema if not exists private;
 
+        -- Exact production shape: private.page_section_save_revisions
         create table if not exists private.page_section_save_revisions (
-          id text primary key,
+          page_id text not null primary key references public.pages(id) on delete cascade,
           user_id text not null references public.users(id) on delete cascade,
-          page_id text not null references public.pages(id) on delete cascade,
-          created_at timestamptz not null default now()
+          revision bigint not null default 1,
+          document_hash text not null default 'hash',
+          updated_at timestamptz not null default now()
         );
 
-        create table if not exists public.builder_publication_targets (
-          id text primary key,
-          user_id text not null references public.users(id) on delete cascade,
-          page_id text not null references public.pages(id) on delete cascade,
-          created_at timestamptz not null default now()
-        );
-
+        -- Exact production shape: public.builder_published_revisions
         create table if not exists public.builder_published_revisions (
-          id text primary key,
-          user_id text not null references public.users(id) on delete cascade,
+          id uuid not null primary key default gen_random_uuid(),
+          website_id uuid not null references public.websites(id) on delete cascade,
           page_id text not null references public.pages(id) on delete cascade,
-          created_at timestamptz not null default now()
+          created_at timestamptz not null default now(),
+          created_by text,
+          schema_version smallint not null default 1,
+          document jsonb not null default '{}'::jsonb,
+          document_fingerprint text not null default 'fp'
         );
 
-        create table if not exists public.public_lead_intake_requests (
-          id text primary key,
-          user_id text not null references public.users(id) on delete cascade,
+        -- Exact production shape: public.builder_publication_targets
+        create table if not exists public.builder_publication_targets (
+          website_id uuid not null references public.websites(id) on delete cascade,
           page_id text not null references public.pages(id) on delete cascade,
-          created_at timestamptz not null default now()
+          published_revision_id uuid not null references public.builder_published_revisions(id) on delete cascade,
+          published_at timestamptz not null default now(),
+          published_by text,
+          primary key (website_id, page_id)
+        );
+
+        -- Exact production shape: public.public_lead_intake_requests
+        create table if not exists public.public_lead_intake_requests (
+          id uuid not null primary key default gen_random_uuid(),
+          website_id uuid not null references public.websites(id) on delete cascade,
+          page_id text not null references public.pages(id) on delete cascade,
+          form_section_id text not null default 'sec-1',
+          idempotency_key uuid not null default gen_random_uuid(),
+          request_fingerprint text not null default 'fp',
+          ip_hash text not null default 'ip',
+          contact_hash text,
+          contact_id text,
+          opportunity_id text,
+          status text not null default 'pending',
+          created_at timestamptz not null default now(),
+          completed_at timestamptz
         );
 
         create or replace function auth.uid() returns uuid as $$
@@ -125,17 +153,30 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
     }
   });
 
-  it('1. migration installs function delete_builder_page with SECURITY DEFINER and search_path empty', async () => {
+  it('1. migration installs delete_builder_page with SECURITY DEFINER, search_path empty, and grants execute only to authenticated', async () => {
     const client = await pool.connect();
     try {
-      const res = await client.query(`
-        select routine_name, security_type
-        from information_schema.routines
-        where routine_schema = 'public'
-          and routine_name = 'delete_builder_page';
+      // Assert prosecdef and proconfig (search_path='')
+      const procRes = await client.query(`
+        select prosecdef, proconfig
+        from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public'
+          and p.proname = 'delete_builder_page';
       `);
-      expect(res.rows.length).toBe(1);
-      expect(res.rows[0].security_type).toBe('DEFINER');
+      expect(procRes.rows.length).toBe(1);
+      expect(procRes.rows[0].prosecdef).toBe(true);
+      expect(procRes.rows[0].proconfig).toEqual(['search_path=']);
+
+      // Assert ACL execution privileges
+      const publicPriv = await client.query("select has_function_privilege('public', 'public.delete_builder_page(text)', 'execute') as has_priv");
+      expect(publicPriv.rows[0].has_priv).toBe(false);
+
+      const anonPriv = await client.query("select has_function_privilege('anon', 'public.delete_builder_page(text)', 'execute') as has_priv");
+      expect(anonPriv.rows[0].has_priv).toBe(false);
+
+      const authPriv = await client.query("select has_function_privilege('authenticated', 'public.delete_builder_page(text)', 'execute') as has_priv");
+      expect(authPriv.rows[0].has_priv).toBe(true);
     } finally {
       client.release();
     }
@@ -253,10 +294,14 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
     const client = await pool.connect();
     try {
       const u1 = '11111111-1111-4111-8111-111111111111';
+      const siteId = '10000000-0000-4000-8000-000000000001';
+      const revId = '20000000-0000-4000-8000-000000000001';
+
       await client.query('begin');
       await client.query(`
         insert into public.users(id, email) values ('${u1}', 'u1@test.com') on conflict do nothing;
         insert into public.funnels(id, user_id, name) values ('f-pub', '${u1}', 'Pub Funnel') on conflict do nothing;
+        insert into public.websites(id, user_id, name, homepage_funnel_id) values ('${siteId}', '${u1}', 'Pub Site', 'f-pub') on conflict do nothing;
         insert into public.pages(id, user_id, name, slug, status, funnel_id) values
           ('p-pub-status', '${u1}', 'Published Status Page', 'pub-status', 'published', 'f-pub'),
           ('p-pub-target', '${u1}', 'Pub Target Page', 'pub-target', 'draft', 'f-pub'),
@@ -264,8 +309,8 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
           ('p-pub-keep', '${u1}', 'Keep Page', 'pub-keep', 'draft', 'f-pub')
         on conflict do nothing;
 
-        insert into public.builder_publication_targets(id, user_id, page_id) values ('t1', '${u1}', 'p-pub-target') on conflict do nothing;
-        insert into public.builder_published_revisions(id, user_id, page_id) values ('r1', '${u1}', 'p-pub-rev') on conflict do nothing;
+        insert into public.builder_published_revisions(id, website_id, page_id) values ('${revId}', '${siteId}', 'p-pub-rev') on conflict do nothing;
+        insert into public.builder_publication_targets(website_id, page_id, published_revision_id) values ('${siteId}', 'p-pub-target', '${revId}') on conflict do nothing;
       `);
       await client.query('commit');
 
@@ -294,9 +339,9 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       await client.query('rollback');
 
       // Assert all publication rows remain untouched
-      const targetCheck = await pool.query("select * from public.builder_publication_targets where id = 't1'");
+      const targetCheck = await pool.query(`select * from public.builder_publication_targets where website_id = '${siteId}' and page_id = 'p-pub-target'`);
       expect(targetCheck.rows.length).toBe(1);
-      const revCheck = await pool.query("select * from public.builder_published_revisions where id = 'r1'");
+      const revCheck = await pool.query(`select * from public.builder_published_revisions where id = '${revId}'`);
       expect(revCheck.rows.length).toBe(1);
     } finally {
       await client.query('rollback').catch(() => {});
@@ -308,16 +353,20 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
     const client = await pool.connect();
     try {
       const u1 = '11111111-1111-4111-8111-111111111111';
+      const siteId = '10000000-0000-4000-8000-000000000002';
+      const leadId = '30000000-0000-4000-8000-000000000001';
+
       await client.query('begin');
       await client.query(`
         insert into public.users(id, email) values ('${u1}', 'u1@test.com') on conflict do nothing;
         insert into public.funnels(id, user_id, name) values ('f-lead', '${u1}', 'Lead Funnel') on conflict do nothing;
+        insert into public.websites(id, user_id, name, homepage_funnel_id) values ('${siteId}', '${u1}', 'Lead Site', 'f-lead') on conflict do nothing;
         insert into public.pages(id, user_id, name, slug, funnel_id) values
           ('p-lead-1', '${u1}', 'Lead Page 1', 'lead-1', 'f-lead'),
           ('p-lead-2', '${u1}', 'Lead Page 2', 'lead-2', 'f-lead')
         on conflict do nothing;
 
-        insert into public.public_lead_intake_requests(id, user_id, page_id) values ('lead-req-1', '${u1}', 'p-lead-1') on conflict do nothing;
+        insert into public.public_lead_intake_requests(id, website_id, page_id) values ('${leadId}', '${siteId}', 'p-lead-1') on conflict do nothing;
       `);
       await client.query('commit');
 
@@ -331,7 +380,7 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       // Verify page & lead request remain untouched
       const pageCheck = await pool.query("select * from public.pages where id = 'p-lead-1'");
       expect(pageCheck.rows.length).toBe(1);
-      const leadCheck = await pool.query("select * from public.public_lead_intake_requests where id = 'lead-req-1'");
+      const leadCheck = await pool.query(`select * from public.public_lead_intake_requests where id = '${leadId}'`);
       expect(leadCheck.rows.length).toBe(1);
     } finally {
       await client.query('rollback').catch(() => {});
@@ -360,8 +409,8 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
           ('sec-u2-1', '${u2}', 'p-u2-keep', 'hero', '{"heading":"U2 Hero"}'::jsonb, 0)
         on conflict do nothing;
 
-        insert into private.page_section_save_revisions(id, user_id, page_id) values
-          ('rev-del-1', '${u1}', 'p-del-1')
+        insert into private.page_section_save_revisions(page_id, user_id, revision) values
+          ('p-del-1', '${u1}', 1)
         on conflict do nothing;
       `);
 
@@ -380,7 +429,7 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       expect(secCheck.rows.length).toBe(0);
 
       // Verify private save revision deleted
-      const revCheck = await client.query("select * from private.page_section_save_revisions where id = 'rev-del-1'");
+      const revCheck = await client.query("select * from private.page_section_save_revisions where page_id = 'p-del-1'");
       expect(revCheck.rows.length).toBe(0);
 
       // Verify remaining page and section preserved
@@ -400,7 +449,7 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
     }
   });
 
-  it('10. REAL CONCURRENCY: SAME PAGE Delete/Delete serializes cleanly, first succeeds, second gets NOT_FOUND', async () => {
+  it('10. REAL CONCURRENCY: SAME PAGE Delete/Delete overlap proof (c2 starts while c1 open, c2 post-lock returns NOT_FOUND)', async () => {
     const c1 = await pool.connect();
     const c2 = await pool.connect();
     try {
@@ -416,25 +465,31 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       `);
       await c1.query('commit');
 
-      // c1 starts transaction and acquires lock during delete
+      // 1. Begin c1 and invoke delete_builder_page, leaving transaction open holding lock
       await c1.query('begin');
       await c1.query(`set local request.jwt.claim.sub = '${u1}'`);
-
-      await c2.query('begin');
-      await c2.query(`set local request.jwt.claim.sub = '${u1}'`);
-
-      // c1 deletes p-same-del
       const res1 = await c1.query("select public.delete_builder_page('p-same-del') as result");
       expect(res1.rows[0].result.deleted).toBe(true);
 
-      // c1 commits lock release
+      // 2. Begin c2 and start second delete_builder_page WITHOUT awaiting completion
+      await c2.query('begin');
+      await c2.query(`set local request.jwt.claim.sub = '${u1}'`);
+      const c2Promise = c2.query("select public.delete_builder_page('p-same-del')");
+
+      // 3. Confirm c2 is blocked waiting on c1 lock before c1 commits
+      await new Promise(resolve => setTimeout(resolve, 50));
+      const lockCheck = await pool.query(`
+        select count(*) from pg_locks l
+        join pg_stat_activity a on l.pid = a.pid
+        where a.query like '%delete_builder_page%' and l.granted = false
+      `);
+      expect(Number(lockCheck.rows[0].count)).toBeGreaterThanOrEqual(1);
+
+      // 4. Commit c1, releasing advisory lock
       await c1.query('commit');
 
-      // c2 tries deleting p-same-del (now deleted)
-      await expect(
-        c2.query("select public.delete_builder_page('p-same-del')")
-      ).rejects.toThrow(/Page not found/);
-
+      // 5. c2 unblocks and post-lock revalidation raises PT404 / Page not found
+      await expect(c2Promise).rejects.toThrow(/Page not found/);
       await c2.query('rollback');
     } finally {
       await c1.query('rollback').catch(() => {});
@@ -444,7 +499,7 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
     }
   });
 
-  it('11. REAL CONCURRENCY: DIFFERENT PAGES Delete/Delete SAME FUNNEL serializes cleanly with LAST_PAGE invariant enforced', async () => {
+  it('11. REAL CONCURRENCY: DIFFERENT PAGES Delete/Delete SAME FUNNEL overlap proof with LAST_PAGE invariant enforced', async () => {
     const c1 = await pool.connect();
     const c2 = await pool.connect();
     try {
@@ -461,27 +516,38 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       `);
       await c1.query('commit');
 
+      // 1. Begin c1 and start deleting p-diff-1, holding transaction open
       await c1.query('begin');
       await c1.query(`set local request.jwt.claim.sub = '${u1}'`);
       await c1.query("select public.delete_builder_page('p-diff-1')");
-      await c1.query('commit');
 
+      // 2. Begin c2 and start deleting p-diff-2 in flight while c1 is open
       await c2.query('begin');
       await c2.query(`set local request.jwt.claim.sub = '${u1}'`);
-      await c2.query("select public.delete_builder_page('p-diff-2')");
+      const c2Promise = c2.query("select public.delete_builder_page('p-diff-2')");
+
+      // 3. Verify c2 is blocked waiting on lock
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // 4. Commit c1
+      await c1.query('commit');
+
+      // 5. c2 unblocks and completes deletion of p-diff-2
+      const res2 = await c2Promise;
+      expect(res2.rows[0].select.deleted).toBe(true);
       await c2.query('commit');
 
-      // Attempting to delete final page p-diff-3 must fail under LAST_PAGE invariant
+      // 6. Final check: exactly p-diff-3 remains. Attempting to delete p-diff-3 fails under LAST_PAGE
+      const remainingCheck = await pool.query("select id from public.pages where funnel_id = 'f-diff-del'");
+      expect(remainingCheck.rows.length).toBe(1);
+      expect(remainingCheck.rows[0].id).toBe('p-diff-3');
+
       await c1.query('begin');
       await c1.query(`set local request.jwt.claim.sub = '${u1}'`);
       await expect(
         c1.query("select public.delete_builder_page('p-diff-3')")
       ).rejects.toThrow(/Cannot delete the only page in this destination/);
       await c1.query('rollback');
-
-      const check = await pool.query("select id from public.pages where funnel_id = 'f-diff-del'");
-      expect(check.rows.length).toBe(1);
-      expect(check.rows[0].id).toBe('p-diff-3');
     } finally {
       await c1.query('rollback').catch(() => {});
       await c2.query('rollback').catch(() => {});
@@ -490,7 +556,7 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
     }
   });
 
-  it('12. REAL CONCURRENCY: Delete/Create SAME FUNNEL serializes cleanly on shared advisory lock', async () => {
+  it('12. REAL CONCURRENCY: Delete/Create SAME FUNNEL overlap proof (Create waits for Delete transaction lock)', async () => {
     const c1 = await pool.connect();
     const c2 = await pool.connect();
     try {
@@ -506,16 +572,28 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       `);
       await c1.query('commit');
 
+      // 1. Begin c1 and delete p-dc-1, leaving transaction open
       await c1.query('begin');
       await c1.query(`set local request.jwt.claim.sub = '${u1}'`);
       await c1.query("select public.delete_builder_page('p-dc-1')");
-      await c1.query('commit');
 
+      // 2. Begin c2 and start create_builder_page while c1 is open
       await c2.query('begin');
       await c2.query(`set local request.jwt.claim.sub = '${u1}'`);
-      await c2.query("select public.create_builder_page('New DC Page', 'new-dc-page', 'f-del-create')");
+      const createPromise = c2.query("select public.create_builder_page('New DC Page', 'new-dc-page', 'f-del-create')");
+
+      // 3. Confirm c2 is waiting
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // 4. Commit c1
+      await c1.query('commit');
+
+      // 5. Create completes
+      const createRes = await createPromise;
+      expect(createRes.rows[0].create_builder_page.name).toBe('New DC Page');
       await c2.query('commit');
 
+      // Assert final state: p-dc-1 gone, p-dc-2 and new page present with valid step order
       const check = await pool.query("select id, step_order from public.pages where funnel_id = 'f-del-create' order by step_order");
       expect(check.rows.length).toBe(2);
       expect(check.rows.map(r => r.id)).not.toContain('p-dc-1');
@@ -527,7 +605,7 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
     }
   });
 
-  it('13. REAL CONCURRENCY: Delete/Duplicate SAME FUNNEL serializes cleanly on shared advisory lock', async () => {
+  it('13. REAL CONCURRENCY: Delete/Duplicate SAME FUNNEL overlap proof (Duplicate waits for Delete transaction lock)', async () => {
     const c1 = await pool.connect();
     const c2 = await pool.connect();
     try {
@@ -543,14 +621,25 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       `);
       await c1.query('commit');
 
+      // 1. Begin c1 and delete p-dd-1, leaving transaction open
       await c1.query('begin');
       await c1.query(`set local request.jwt.claim.sub = '${u1}'`);
       await c1.query("select public.delete_builder_page('p-dd-1')");
-      await c1.query('commit');
 
+      // 2. Begin c2 and start duplicate_builder_page while c1 open
       await c2.query('begin');
       await c2.query(`set local request.jwt.claim.sub = '${u1}'`);
-      await c2.query("select public.duplicate_builder_page('p-dd-2')");
+      const dupPromise = c2.query("select public.duplicate_builder_page('p-dd-2')");
+
+      // 3. Confirm c2 is waiting
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // 4. Commit c1
+      await c1.query('commit');
+
+      // 5. Duplicate completes
+      const dupRes = await dupPromise;
+      expect(dupRes.rows[0].duplicate_builder_page.page.name).toBe('DD 2 (Copy)');
       await c2.query('commit');
 
       const check = await pool.query("select id, step_order from public.pages where funnel_id = 'f-del-dup' order by step_order");
@@ -564,7 +653,59 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
     }
   });
 
-  it('14. injected trigger failure during deletion rolls back transaction completely', async () => {
+  it('14. POST-LOCK DESTINATION CHANGE RACE: page funnel_id changed concurrently while delete waiting for lock raises CONFLICT', async () => {
+    const c1 = await pool.connect();
+    const c2 = await pool.connect();
+    try {
+      const u1 = '11111111-1111-4111-8111-111111111111';
+      await c1.query('begin');
+      await c1.query(`
+        insert into public.users(id, email) values ('${u1}', 'u1@test.com') on conflict do nothing;
+        insert into public.funnels(id, user_id, name) values ('f-dest-A', '${u1}', 'Funnel A'), ('f-dest-B', '${u1}', 'Funnel B') on conflict do nothing;
+        insert into public.pages(id, user_id, name, slug, funnel_id) values
+          ('p-race-1', '${u1}', 'Race Page 1', 'race-1', 'f-dest-A'),
+          ('p-race-2', '${u1}', 'Race Page 2', 'race-2', 'f-dest-A'),
+          ('p-race-B1', '${u1}', 'Race Page B1', 'race-b1', 'f-dest-B')
+        on conflict do nothing;
+      `);
+      await c1.query('commit');
+
+      // 1. c1 acquires advisory lock on Funnel A manually to simulate holding lock
+      await c1.query('begin');
+      await c1.query(`
+        select pg_catalog.pg_advisory_xact_lock(
+          pg_catalog.hashtextextended('builder-page-lifecycle:${u1}:f-dest-A', 0)
+        );
+      `);
+
+      // 2. c2 starts delete_builder_page against Funnel A page (p-race-1). c2 initial load reads funnel_id='f-dest-A', then c2 blocks on lock
+      await c2.query('begin');
+      await c2.query(`set local request.jwt.claim.sub = '${u1}'`);
+      const deletePromise = c2.query("select public.delete_builder_page('p-race-1')");
+
+      // 3. Confirm c2 is blocked
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // 4. c1 updates p-race-1's funnel_id to Funnel B while holding lock
+      await c1.query("update public.pages set funnel_id = 'f-dest-B' where id = 'p-race-1'");
+      await c1.query('commit');
+
+      // 5. c2 unblocks, reloads p-race-1 post-lock, detects destination changed, and raises PT409 / CONFLICT
+      await expect(deletePromise).rejects.toThrow(/Page funnel destination changed concurrently/);
+      await c2.query('rollback');
+
+      // Verify page remains untouched in Funnel B
+      const check = await pool.query("select funnel_id from public.pages where id = 'p-race-1'");
+      expect(check.rows[0].funnel_id).toBe('f-dest-B');
+    } finally {
+      await c1.query('rollback').catch(() => {});
+      await c2.query('rollback').catch(() => {});
+      c1.release();
+      c2.release();
+    }
+  });
+
+  it('15. injected trigger failure during deletion rolls back transaction completely', async () => {
     const client = await pool.connect();
     try {
       const u1 = '11111111-1111-4111-8111-111111111111';
@@ -611,7 +752,7 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
     }
   });
 
-  it('15. retry on already-deleted page returns PT404 cleanly', async () => {
+  it('16. retry on already-deleted page returns PT404 cleanly', async () => {
     const client = await pool.connect();
     try {
       await client.query('begin');

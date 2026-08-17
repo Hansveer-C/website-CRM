@@ -322,6 +322,22 @@ export const PagesRepo = {
       const previousPages = structuredClone(mockPages);
       const previousSections = structuredClone(mockPageSections);
 
+      // Durable local storage backup
+      const pagesKey = localPagesStorageKey(userId);
+      const sectionKey = `mock_sections_${userId}:${id}`;
+      let priorPagesRaw: string | null = null;
+      let priorSectionRaw: string | null = null;
+      let hasLocalStorage = typeof window !== 'undefined' && Boolean(window.localStorage);
+
+      if (hasLocalStorage) {
+        try {
+          priorPagesRaw = window.localStorage.getItem(pagesKey);
+          priorSectionRaw = window.localStorage.getItem(sectionKey);
+        } catch {
+          // localStorage inaccessible
+        }
+      }
+
       // Snapshot memory & apply changes
       mockPages.splice(pageIndex, 1);
       const remainingSections = mockPageSections.filter(s => s.page_id !== id);
@@ -329,16 +345,36 @@ export const PagesRepo = {
 
       // Reversible local persistence
       let persistSuccess = true;
-      try {
-        persistSuccess = persistLocalPages(userId);
-        if (typeof window !== 'undefined' && window.localStorage) {
-          window.localStorage.removeItem(`mock_sections_${userId}:${id}`);
+      if (hasLocalStorage) {
+        try {
+          // Write updated pages
+          const owned = mockPages.filter(page => page.user_id === userId);
+          window.localStorage.setItem(pagesKey, JSON.stringify(owned));
+          // Remove target section storage key
+          window.localStorage.removeItem(sectionKey);
+        } catch {
+          persistSuccess = false;
         }
-      } catch {
-        persistSuccess = false;
       }
 
       if (!persistSuccess) {
+        // Full durable rollback: restore localStorage keys & in-memory arrays
+        if (hasLocalStorage) {
+          try {
+            if (priorPagesRaw !== null) {
+              window.localStorage.setItem(pagesKey, priorPagesRaw);
+            } else {
+              window.localStorage.removeItem(pagesKey);
+            }
+            if (priorSectionRaw !== null) {
+              window.localStorage.setItem(sectionKey, priorSectionRaw);
+            } else {
+              window.localStorage.removeItem(sectionKey);
+            }
+          } catch {
+            // rollback best-effort
+          }
+        }
         mockPages.splice(0, mockPages.length, ...previousPages);
         mockPageSections.splice(0, mockPageSections.length, ...previousSections);
         return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
@@ -364,18 +400,25 @@ export const PagesRepo = {
         if (code === 'PT423' || message?.includes('published')) {
           return { success: false, error: 'PUBLISHED_BLOCKED', code: 'PUBLISHED_BLOCKED' };
         }
-        if (code === 'PT409' || message?.includes('lead')) {
+        if (code === 'PT409' && message?.includes('lead')) {
           return { success: false, error: 'LEAD_HISTORY_BLOCKED', code: 'LEAD_HISTORY_BLOCKED' };
+        }
+        if (code === 'PT409' || message?.includes('destination changed')) {
+          return { success: false, error: 'CONFLICT', code: 'CONFLICT' };
         }
         if (code === 'PT422' || message?.includes('only page')) {
           return { success: false, error: 'LAST_PAGE', code: 'LAST_PAGE' };
         }
-        return { success: false, error: message ?? 'DELETE_FAILED', code: code ?? 'UNAVAILABLE' };
+        return { success: false, error: message ?? 'DELETE_FAILED', code: code ?? 'AMBIGUOUS' };
       }
 
       return { success: true, data: rpcResult.data };
     } catch {
-      return { success: false, error: 'UNAVAILABLE', code: 'UNAVAILABLE' };
+      return {
+        success: false,
+        error: 'The deletion result is uncertain. Please reload to check.',
+        code: 'AMBIGUOUS'
+      };
     }
   },
 

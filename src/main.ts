@@ -1252,19 +1252,25 @@ async function handleBuilderDeletePageBrowserDelete(input: RequestInfo | URL, in
         const lastPage = result.code === 'LAST_PAGE';
         const publishedBlocked = result.code === 'PUBLISHED_BLOCKED';
         const leadBlocked = result.code === 'LEAD_HISTORY_BLOCKED';
+        const conflict = result.code === 'CONFLICT';
+        const ambiguous = result.code === 'AMBIGUOUS';
         const notFound = result.code === 'NOT_FOUND';
         const forbidden = result.code === 'FORBIDDEN';
         return builderSectionsJsonResponse({
             success: false,
-            code: lastPage ? 'LAST_PAGE' : publishedBlocked ? 'PUBLISHED_BLOCKED' : leadBlocked ? 'LEAD_HISTORY_BLOCKED' : notFound ? 'NOT_FOUND' : forbidden ? 'FORBIDDEN' : 'UNAVAILABLE',
+            code: lastPage ? 'LAST_PAGE' : publishedBlocked ? 'PUBLISHED_BLOCKED' : leadBlocked ? 'LEAD_HISTORY_BLOCKED' : conflict ? 'CONFLICT' : ambiguous ? 'AMBIGUOUS' : notFound ? 'NOT_FOUND' : forbidden ? 'FORBIDDEN' : 'UNAVAILABLE',
             error: lastPage
                 ? 'Cannot delete the only page in this destination.'
                 : publishedBlocked
                   ? 'This page is published. Unpublish it before deleting it.'
                   : leadBlocked
                     ? 'This page has historical lead submissions and cannot be deleted.'
-                    : notFound ? 'Page not found' : 'The page could not be deleted. Please try again.'
-        }, lastPage ? 422 : publishedBlocked ? 423 : leadBlocked ? 409 : notFound ? 404 : forbidden ? 403 : 503);
+                    : conflict
+                      ? 'The page destination changed while deleting. Please try again.'
+                      : ambiguous
+                        ? 'The deletion result is uncertain. Please reload to check.'
+                        : notFound ? 'Page not found' : 'The page could not be deleted. Please try again.'
+        }, lastPage ? 422 : publishedBlocked ? 423 : (leadBlocked || conflict || ambiguous) ? 409 : notFound ? 404 : forbidden ? 403 : 503);
     }
 
     return builderSectionsJsonResponse({ success: true, data: result.data }, 200);

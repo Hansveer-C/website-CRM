@@ -1,5 +1,5 @@
 -- Transactionally atomic Page Deletion RPC for the Builder.
--- Guarantees single-transaction atomicity: page graph deletion, section cascade, data-retention checks, and concurrency safety.
+-- Guarantees single-transaction atomicity: page graph deletion, section cascade, data-retention checks, post-lock destination revalidation, and concurrency safety.
 
 create or replace function public.delete_builder_page(
   p_page_id text
@@ -64,13 +64,31 @@ begin
     );
   end if;
 
-  -- 6. POST-LOCK REVALIDATION: Re-load Page and verify it wasn't deleted while waiting for lock
+  -- 6. POST-LOCK REVALIDATION: Re-load Page and verify existence & ownership
   select * into v_target_page
   from public.pages
   where id = p_page_id;
 
   if not found or v_target_page.user_id <> v_user_id then
     raise sqlstate 'PT404' using message = 'Page not found';
+  end if;
+
+  -- 6b. POST-LOCK DESTINATION REVALIDATION: Ensure funnel_id was not changed concurrently
+  if (v_target_page.funnel_id is null and v_funnel_id is not null)
+     or (v_target_page.funnel_id is not null and v_funnel_id is null)
+     or (v_target_page.funnel_id <> v_funnel_id) then
+    raise sqlstate 'PT409' using message = 'Page funnel destination changed concurrently';
+  end if;
+
+  -- 6c. POST-LOCK FUNNEL OWNERSHIP REVALIDATION
+  if v_funnel_id is not null and v_funnel_id <> '' then
+    select user_id into v_funnel_owner
+    from public.funnels
+    where id = v_funnel_id;
+
+    if not found or v_funnel_owner <> v_user_id then
+      raise sqlstate 'PT403' using message = 'Corrupt or unowned funnel relationship';
+    end if;
   end if;
 
   -- 7. PUBLICATION BLOCKER: Check status = 'published', builder_publication_targets, or builder_published_revisions
@@ -139,4 +157,4 @@ revoke all on function public.delete_builder_page(text) from public, anon;
 grant execute on function public.delete_builder_page(text) to authenticated;
 
 comment on function public.delete_builder_page(text) is
-  'Transactionally deletes a builder page for the authenticated owner, protecting publication history, lead audit history, and minimum page count.';
+  'Transactionally deletes a builder page for the authenticated owner, protecting publication history, lead audit history, destination stability, and minimum page count.';

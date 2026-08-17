@@ -156,11 +156,13 @@ export class BuilderDeletePageController {
           ? 'This page is published. Unpublish it before deleting it.'
           : result.code === 'LEAD_HISTORY_BLOCKED'
             ? 'This page has historical lead submissions and cannot be deleted.'
-            : result.code === 'HOMEPAGE_BLOCKED'
-              ? 'Cannot delete the designated homepage.'
-              : result.code === 'AMBIGUOUS'
-                ? 'The deletion result is uncertain. Please reload to check.'
-                : 'The page could not be deleted. Please try again.';
+            : result.code === 'CONFLICT'
+              ? 'The page destination changed while deleting. Please try again.'
+              : result.code === 'HOMEPAGE_BLOCKED'
+                ? 'Cannot delete the designated homepage.'
+                : result.code === 'AMBIGUOUS'
+                  ? 'The deletion result is uncertain. Please reload to check.'
+                  : 'The page could not be deleted. Please try again.';
       return false;
     }
 

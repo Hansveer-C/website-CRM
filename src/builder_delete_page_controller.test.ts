@@ -225,4 +225,22 @@ describe('BuilderDeletePageController', () => {
     expect(controller.status).toBe('error');
     expect(controller.message).toBe('This page has historical lead submissions and cannot be deleted.');
   });
+
+  it('handles CONFLICT and AMBIGUOUS error codes without automatic retry', async () => {
+    const draft1: Page = { ...pageA, id: 'page-d1', status: 'draft' };
+    const draft2: Page = { ...pageB, id: 'page-d2', status: 'draft' };
+    const { controller, persist } = setup({ pages: [draft1, draft2] });
+
+    persist.mockResolvedValueOnce({ success: false, code: 'CONFLICT' });
+    controller.promptDelete('page-d1');
+    await controller.confirmDelete();
+    expect(controller.status).toBe('error');
+    expect(controller.message).toBe('The page destination changed while deleting. Please try again.');
+
+    persist.mockResolvedValueOnce({ success: false, code: 'AMBIGUOUS' });
+    controller.promptDelete('page-d2');
+    await controller.confirmDelete();
+    expect(controller.status).toBe('error');
+    expect(controller.message).toBe('The deletion result is uncertain. Please reload to check.');
+  });
 });
