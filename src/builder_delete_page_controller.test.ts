@@ -40,7 +40,7 @@ const pageA: Page = {
   user_id: 'owner-1',
   name: 'Driveway Cleaning',
   slug: 'driveway',
-  status: 'published',
+  status: 'draft',
   seo_title: 'Driveway',
   seo_description: '',
   seo_keywords: [],
@@ -121,7 +121,7 @@ describe('BuilderDeletePageController', () => {
     const result = controller.promptDelete('page-driveway');
     expect(result).toBe(false);
     expect(controller.status).toBe('error');
-    expect(controller.message).toBe('Cannot delete the only page in this website.');
+    expect(controller.message).toBe('Cannot delete the only page in this destination.');
   });
 
   it('cancels deletion prompt cleanly', () => {
@@ -159,7 +159,6 @@ describe('BuilderDeletePageController', () => {
     controller.promptDelete('page-driveway');
     const pending = controller.confirmDelete();
 
-    // User switches active page to Page B while request is pending
     setContext({
       actingUserId: 'owner-1',
       website,
@@ -198,5 +197,32 @@ describe('BuilderDeletePageController', () => {
 
     expect(await pending).toBe(false);
     expect(onDeleted).not.toHaveBeenCalled();
+  });
+
+  it('blocks prompt when page status is published', () => {
+    const publishedPage: Page = { ...pageA, id: 'page-pub', status: 'published' };
+    const { controller } = setup({ pages: [pageA, publishedPage] });
+    const result = controller.promptDelete('page-pub');
+    expect(result).toBe(false);
+    expect(controller.status).toBe('error');
+    expect(controller.message).toBe('This page is published. Unpublish it before deleting it.');
+  });
+
+  it('handles PUBLISHED_BLOCKED and LEAD_HISTORY_BLOCKED persistence error codes', async () => {
+    const draft1: Page = { ...pageA, id: 'page-d1', status: 'draft' };
+    const draft2: Page = { ...pageB, id: 'page-d2', status: 'draft' };
+    const { controller, persist } = setup({ pages: [draft1, draft2] });
+
+    persist.mockResolvedValueOnce({ success: false, code: 'PUBLISHED_BLOCKED' });
+    controller.promptDelete('page-d1');
+    await controller.confirmDelete();
+    expect(controller.status).toBe('error');
+    expect(controller.message).toBe('This page is published. Unpublish it before deleting it.');
+
+    persist.mockResolvedValueOnce({ success: false, code: 'LEAD_HISTORY_BLOCKED' });
+    controller.promptDelete('page-d2');
+    await controller.confirmDelete();
+    expect(controller.status).toBe('error');
+    expect(controller.message).toBe('This page has historical lead submissions and cannot be deleted.');
   });
 });

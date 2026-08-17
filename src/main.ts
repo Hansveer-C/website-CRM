@@ -1250,15 +1250,21 @@ async function handleBuilderDeletePageBrowserDelete(input: RequestInfo | URL, in
 
     if (!result.success || !result.data) {
         const lastPage = result.code === 'LAST_PAGE';
+        const publishedBlocked = result.code === 'PUBLISHED_BLOCKED';
+        const leadBlocked = result.code === 'LEAD_HISTORY_BLOCKED';
         const notFound = result.code === 'NOT_FOUND';
         const forbidden = result.code === 'FORBIDDEN';
         return builderSectionsJsonResponse({
             success: false,
-            code: lastPage ? 'LAST_PAGE' : notFound ? 'NOT_FOUND' : forbidden ? 'FORBIDDEN' : 'UNAVAILABLE',
+            code: lastPage ? 'LAST_PAGE' : publishedBlocked ? 'PUBLISHED_BLOCKED' : leadBlocked ? 'LEAD_HISTORY_BLOCKED' : notFound ? 'NOT_FOUND' : forbidden ? 'FORBIDDEN' : 'UNAVAILABLE',
             error: lastPage
-                ? 'Cannot delete the only page in this website.'
-                : notFound ? 'Page not found' : 'The page could not be deleted. Please try again.'
-        }, lastPage ? 422 : notFound ? 404 : forbidden ? 403 : 503);
+                ? 'Cannot delete the only page in this destination.'
+                : publishedBlocked
+                  ? 'This page is published. Unpublish it before deleting it.'
+                  : leadBlocked
+                    ? 'This page has historical lead submissions and cannot be deleted.'
+                    : notFound ? 'Page not found' : 'The page could not be deleted. Please try again.'
+        }, lastPage ? 422 : publishedBlocked ? 423 : leadBlocked ? 409 : notFound ? 404 : forbidden ? 403 : 503);
     }
 
     return builderSectionsJsonResponse({ success: true, data: result.data }, 200);
@@ -4859,6 +4865,15 @@ function renderBuilderPagesPanel(): string {
           const safePath = escapeBuilderInspectorHtml(path);
           const safeStatus = escapeBuilderInspectorHtml(status);
           const pageArg = builderInspectorJsArgument(page.id);
+          const funnelPageCount = entries.filter(e => e.page.funnel_id === page.funnel_id).length;
+          const isOnlyFunnelPage = funnelPageCount <= 1;
+          const isPublished = status === 'published';
+          const isDeleteDisabled = isDuplicating || isDeleting || isOnlyFunnelPage || isPublished;
+          const deleteTooltip = isPublished
+            ? 'This page is published. Unpublish it before deleting it.'
+            : isOnlyFunnelPage
+              ? 'Cannot delete the only page in this destination'
+              : 'Delete page';
 
           return `
             <div
@@ -4919,9 +4934,9 @@ function renderBuilderPagesPanel(): string {
                     class="pb-page-delete-button"
                     onclick='event.stopPropagation(); window.promptDeleteBuilderPage(${pageArg})'
                     aria-label="Delete ${safeName} page"
-                    title="${isOnlyPage ? 'Cannot delete the only page in this website' : 'Delete page'}"
+                    title="${escapeBuilderInspectorHtml(deleteTooltip)}"
                     style="color: #dc2626;"
-                    ${isDuplicating || isDeleting || isOnlyPage ? 'disabled' : ''}
+                    ${isDeleteDisabled ? 'disabled' : ''}
                   >
                     ${isThisDeleting ? 'Deleting…' : 'Delete'}
                   </button>

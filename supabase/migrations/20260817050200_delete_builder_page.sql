@@ -1,5 +1,5 @@
 -- Transactionally atomic Page Deletion RPC for the Builder.
--- Guarantees single-transaction atomicity: page graph deletion, section cascade, and last-page invariant protection.
+-- Guarantees single-transaction atomicity: page graph deletion, section cascade, data-retention checks, and concurrency safety.
 
 create or replace function public.delete_builder_page(
   p_page_id text
@@ -15,6 +15,10 @@ declare
   v_funnel_owner text;
   v_funnel_id text;
   v_page_count integer;
+  v_published_target_count integer;
+  v_published_rev_count integer;
+  v_lead_count integer;
+  v_deleted_id text;
   v_result jsonb;
 begin
   -- 1. Authenticated user verification
@@ -27,7 +31,7 @@ begin
     raise sqlstate 'PT404' using message = 'Page not found';
   end if;
 
-  -- 3. Load target Page and verify ownership
+  -- 3. Initial load of target Page & ownership check
   select * into v_target_page
   from public.pages
   where id = p_page_id;
@@ -60,25 +64,69 @@ begin
     );
   end if;
 
-  -- 6. Enforce LAST_PAGE invariant: check remaining pages in funnel
+  -- 6. POST-LOCK REVALIDATION: Re-load Page and verify it wasn't deleted while waiting for lock
+  select * into v_target_page
+  from public.pages
+  where id = p_page_id;
+
+  if not found or v_target_page.user_id <> v_user_id then
+    raise sqlstate 'PT404' using message = 'Page not found';
+  end if;
+
+  -- 7. PUBLICATION BLOCKER: Check status = 'published', builder_publication_targets, or builder_published_revisions
+  if v_target_page.status = 'published' then
+    raise sqlstate 'PT423' using message = 'Cannot delete page while it is published or has active publication records. Unpublish it first.';
+  end if;
+
+  select count(*) into v_published_target_count
+  from public.builder_publication_targets
+  where page_id = p_page_id;
+
+  if v_published_target_count > 0 then
+    raise sqlstate 'PT423' using message = 'Cannot delete page while it is published or has active publication records. Unpublish it first.';
+  end if;
+
+  select count(*) into v_published_rev_count
+  from public.builder_published_revisions
+  where page_id = p_page_id;
+
+  if v_published_rev_count > 0 then
+    raise sqlstate 'PT423' using message = 'Cannot delete page while it is published or has active publication records. Unpublish it first.';
+  end if;
+
+  -- 8. LEAD HISTORY BLOCKER: Check public_lead_intake_requests
+  select count(*) into v_lead_count
+  from public.public_lead_intake_requests
+  where page_id = p_page_id;
+
+  if v_lead_count > 0 then
+    raise sqlstate 'PT409' using message = 'Cannot delete page with historical lead intake records.';
+  end if;
+
+  -- 9. LAST_PAGE INVARIANT: Check remaining pages in funnel
   if v_funnel_id is not null and v_funnel_id <> '' then
     select count(*) into v_page_count
     from public.pages
     where user_id = v_user_id and funnel_id = v_funnel_id;
 
     if v_page_count <= 1 then
-      raise sqlstate 'PT422' using message = 'Cannot delete the only page in this website';
+      raise sqlstate 'PT422' using message = 'Cannot delete the only page in this destination.';
     end if;
   end if;
 
-  -- 7. Execute deletion (Cascading FKs handle page_sections, page_section_save_revisions, etc.)
+  -- 10. Execute deletion with RETURNING clause
   delete from public.pages
   where id = p_page_id
-    and user_id = v_user_id;
+    and user_id = v_user_id
+  returning id into v_deleted_id;
 
-  -- 8. Return canonical JSON result
+  if v_deleted_id is null then
+    raise sqlstate 'PT404' using message = 'Page not found';
+  end if;
+
+  -- 11. Return canonical JSON result
   select jsonb_build_object(
-    'id', p_page_id,
+    'id', v_deleted_id,
     'funnel_id', v_funnel_id,
     'deleted', true
   ) into v_result;
@@ -91,4 +139,4 @@ revoke all on function public.delete_builder_page(text) from public, anon;
 grant execute on function public.delete_builder_page(text) to authenticated;
 
 comment on function public.delete_builder_page(text) is
-  'Transactionally deletes a builder page and its owned section graph for the authenticated owner, enforcing minimum page count.';
+  'Transactionally deletes a builder page for the authenticated owner, protecting publication history, lead audit history, and minimum page count.';

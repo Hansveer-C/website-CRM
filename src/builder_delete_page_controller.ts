@@ -21,7 +21,7 @@ export interface BuilderDeletePagePersistResult {
     id: string;
     funnel_id?: string;
   };
-  code?: 'NOT_FOUND' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'LAST_PAGE' | 'HOMEPAGE_BLOCKED' | 'CONFLICT' | 'UNAVAILABLE' | 'INVALID_RESPONSE' | 'AMBIGUOUS';
+  code?: 'NOT_FOUND' | 'UNAUTHORIZED' | 'FORBIDDEN' | 'LAST_PAGE' | 'PUBLISHED_BLOCKED' | 'LEAD_HISTORY_BLOCKED' | 'HOMEPAGE_BLOCKED' | 'CONFLICT' | 'UNAVAILABLE' | 'INVALID_RESPONSE' | 'AMBIGUOUS';
   error?: string;
 }
 
@@ -70,10 +70,16 @@ export class BuilderDeletePageController {
       return false;
     }
 
+    if (page.status === 'published') {
+      this.status = 'error';
+      this.message = 'This page is published. Unpublish it before deleting it.';
+      return false;
+    }
+
     const funnelPages = context.pages.filter(p => p.user_id === context.actingUserId && p.funnel_id === page.funnel_id);
     if (funnelPages.length <= 1) {
       this.status = 'error';
-      this.message = 'Cannot delete the only page in this website.';
+      this.message = 'Cannot delete the only page in this destination.';
       return false;
     }
 
@@ -145,12 +151,16 @@ export class BuilderDeletePageController {
       this.status = 'error';
       this.deletingPageId = null;
       this.message = result.code === 'LAST_PAGE'
-        ? 'Cannot delete the only page in this website.'
-        : result.code === 'HOMEPAGE_BLOCKED'
-          ? 'Cannot delete the designated homepage.'
-          : result.code === 'AMBIGUOUS'
-            ? 'The deletion result is uncertain. Please reload to check.'
-            : 'The page could not be deleted. Please try again.';
+        ? 'Cannot delete the only page in this destination.'
+        : result.code === 'PUBLISHED_BLOCKED'
+          ? 'This page is published. Unpublish it before deleting it.'
+          : result.code === 'LEAD_HISTORY_BLOCKED'
+            ? 'This page has historical lead submissions and cannot be deleted.'
+            : result.code === 'HOMEPAGE_BLOCKED'
+              ? 'Cannot delete the designated homepage.'
+              : result.code === 'AMBIGUOUS'
+                ? 'The deletion result is uncertain. Please reload to check.'
+                : 'The page could not be deleted. Please try again.';
       return false;
     }
 

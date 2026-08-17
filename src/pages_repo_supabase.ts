@@ -310,6 +310,10 @@ export const PagesRepo = {
       }
 
       const targetPage = mockPages[pageIndex];
+      if (targetPage.status === 'published') {
+        return { success: false, error: 'PUBLISHED_BLOCKED', code: 'PUBLISHED_BLOCKED' };
+      }
+
       const funnelPages = mockPages.filter(p => p.user_id === userId && p.funnel_id === targetPage.funnel_id);
       if (funnelPages.length <= 1) {
         return { success: false, error: 'LAST_PAGE', code: 'LAST_PAGE' };
@@ -323,20 +327,21 @@ export const PagesRepo = {
       const remainingSections = mockPageSections.filter(s => s.page_id !== id);
       mockPageSections.splice(0, mockPageSections.length, ...remainingSections);
 
-      // Persist local pages
-      if (!persistLocalPages(userId)) {
+      // Reversible local persistence
+      let persistSuccess = true;
+      try {
+        persistSuccess = persistLocalPages(userId);
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.removeItem(`mock_sections_${userId}:${id}`);
+        }
+      } catch {
+        persistSuccess = false;
+      }
+
+      if (!persistSuccess) {
         mockPages.splice(0, mockPages.length, ...previousPages);
         mockPageSections.splice(0, mockPageSections.length, ...previousSections);
         return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
-      }
-
-      // Remove local section storage key if present
-      if (typeof window !== 'undefined' && window.localStorage) {
-        try {
-          window.localStorage.removeItem(`mock_sections_${userId}:${id}`);
-        } catch {
-          // ignore
-        }
       }
 
       return { success: true, data: { id, funnel_id: targetPage.funnel_id, deleted: true } };
@@ -355,6 +360,12 @@ export const PagesRepo = {
         }
         if (code === 'PT403') {
           return { success: false, error: 'FORBIDDEN', code: 'FORBIDDEN' };
+        }
+        if (code === 'PT423' || message?.includes('published')) {
+          return { success: false, error: 'PUBLISHED_BLOCKED', code: 'PUBLISHED_BLOCKED' };
+        }
+        if (code === 'PT409' || message?.includes('lead')) {
+          return { success: false, error: 'LEAD_HISTORY_BLOCKED', code: 'LEAD_HISTORY_BLOCKED' };
         }
         if (code === 'PT422' || message?.includes('only page')) {
           return { success: false, error: 'LAST_PAGE', code: 'LAST_PAGE' };
