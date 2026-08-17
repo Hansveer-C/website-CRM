@@ -1,10 +1,9 @@
-import type { Page, PageSection, RepoResponse, User } from './types';
+import { Page, PageSection, RepoResponse, User } from './types';
 import { mockPages, mockPageSections } from './db';
 import type { BuilderPageSettingsPatch } from './builder_page_settings';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  createDuplicatePageDefaults,
-  type CreateDuplicatePageDefaultsOptions
+  createDuplicatePageDefaults
 } from './builder_page_lifecycle';
 
 async function getServerSupabaseClient(): Promise<SupabaseClient | null> {
@@ -18,6 +17,18 @@ async function getServerSupabaseClient(): Promise<SupabaseClient | null> {
   return serverModule.supabase ?? null;
 }
 
+async function queryResult<T>(
+  promise: PromiseLike<{ data: T | null; error: { message?: string; code?: string } | null }>
+): Promise<RepoResponse<T>> {
+  try {
+    const { data, error } = await promise;
+    if (error) return { success: false, error: error.message ?? 'DATABASE_ERROR', code: error.code };
+    return { success: true, data: data as T };
+  } catch {
+    return { success: false, error: 'DATABASE_CRASH', code: 'INTERNAL_ERROR' };
+  }
+}
+
 export interface CreatePageRepositoryInput {
   id: string;
   name: string;
@@ -29,9 +40,6 @@ export interface CreatePageRepositoryInput {
 export interface DuplicatePageRepositoryInput {
   sourcePageId: string;
   newPageId?: string;
-  name?: string;
-  slug?: string;
-  destinationFunnelId?: string;
   generateSectionId?: () => string;
 }
 
@@ -68,7 +76,6 @@ function mapCreatedPage(row: Record<string, unknown>): Page {
       ? row.seo_keywords.filter((value): value is string => typeof value === 'string')
       : [],
     created_at: typeof row.created_at === 'string' ? row.created_at : new Date().toISOString(),
-    ...(typeof row.schema_markup === 'string' ? { schema_markup: row.schema_markup } : {}),
     ...(typeof row.funnel_id === 'string' ? { funnel_id: row.funnel_id } : {}),
     ...(typeof row.step_type === 'string' ? { step_type: row.step_type } : {}),
     ...(typeof row.step_order === 'number' && Number.isFinite(row.step_order) ? { step_order: row.step_order } : {})
@@ -82,18 +89,6 @@ function matchesCreateRequest(page: Page, input: CreatePageRepositoryInput, user
     && page.slug === input.slug
     && page.funnel_id === input.funnelId
     && page.status === 'draft';
-}
-
-async function queryResult<T>(
-  promise: PromiseLike<{ data: T | null; error: { message?: string; code?: string } | null }>
-): Promise<RepoResponse<T>> {
-  try {
-    const { data, error } = await promise;
-    if (error) return { success: false, error: error.message ?? 'DATABASE_ERROR', code: error.code };
-    return { success: true, data: data as T };
-  } catch {
-    return { success: false, error: 'DATABASE_CRASH', code: 'INTERNAL_ERROR' };
-  }
 }
 
 /**
@@ -221,109 +216,68 @@ export const PagesRepo = {
         mockPages[index] = previousPage;
         return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
       }
-      return { success: true, data: { ...nextPage } };
+      return { success: true, data: nextPage };
     }
-
-    try {
-      const payload: Record<string, unknown> = {};
-      if (patch.name !== undefined) payload.name = patch.name;
-      if (patch.slug !== undefined) payload.slug = patch.slug;
-      if (patch.seo_title !== undefined) payload.seo_title = patch.seo_title || null;
-      if (patch.seo_description !== undefined) payload.seo_description = patch.seo_description || null;
-
-      const result = await db
-        .from('pages')
-        .update(payload)
-        .eq('id', id)
-        .eq('user_id', userId)
-        .select('*')
-        .single();
-
-      if (result.error) {
-        return {
-          success: false,
-          error: result.error.message,
-          code: result.error.code === '23505' ? '23505' : result.error.code
-        };
-      }
-
-      return {
-        success: true,
-        data: mapCreatedPage(result.data as Record<string, unknown>)
-      };
-    } catch {
-      return { success: false, error: 'UNAVAILABLE', code: 'UNAVAILABLE' };
-    }
-  },
-
-  /**
-   * Persists a Page record to storage.
-   */
-  async persistPage(page: Page, user: User | string, client?: SupabaseClient): Promise<RepoResponse<Page>> {
-    const userId = typeof user === 'string' ? user : user.id;
-    const db = client ?? await getServerSupabaseClient();
-
-    if (!db) {
-      const idx = mockPages.findIndex(p => p.id === page.id && p.user_id === userId);
-      const existingSlug = mockPages.some(p => p.user_id === userId && p.slug === page.slug && p.id !== page.id);
-      if (existingSlug) {
-        return { success: false, error: 'CONFLICT', code: '23505' };
-      }
-      if (idx !== -1) {
-        mockPages[idx] = { ...page, user_id: userId };
-      } else {
-        mockPages.push({ ...page, user_id: userId });
-      }
-      persistLocalPages(userId);
-      return { success: true, data: page };
-    }
-
-    const payload = {
-      id: page.id,
-      user_id: userId,
-      name: page.name,
-      slug: page.slug,
-      status: page.status,
-      seo_title: page.seo_title || null,
-      seo_description: page.seo_description || null,
-      seo_keywords: page.seo_keywords || [],
-      schema_markup: page.schema_markup || null,
-      funnel_id: page.funnel_id,
-      step_type: page.step_type,
-      ...(page.step_order !== undefined ? { step_order: page.step_order } : {})
-    };
 
     return queryResult<Page>(db
       .from('pages')
-      .upsert(payload)
-      .select('*')
+      .update(patch)
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
       .single()
     );
   },
 
   /**
-   * Fetches a single page by ID.
+   * Persists a page to Supabase.
    */
-  async getPage(id: string, user: User | string, client?: SupabaseClient): Promise<RepoResponse<Page | null>> {
+  async persistPage(page: Page, user: User | string, client?: SupabaseClient): Promise<RepoResponse<Page>> {
+    const userId = typeof user === 'string' ? user : user.id;
+    const payload = { ...page, user_id: userId };
+    const db = client ?? await getServerSupabaseClient();
+
+    if (!db) {
+      const idx = mockPages.findIndex(p => p.id === page.id);
+      if (idx !== -1) {
+        mockPages[idx] = payload;
+      } else {
+        mockPages.push(payload);
+      }
+      return { success: true, data: payload };
+    }
+
+    return queryResult<Page>(db
+      .from('pages')
+      .upsert(payload)
+      .select()
+      .single()
+    );
+  },
+
+  /**
+   * Retrieves a single page by ID, scoped to the user.
+   */
+  async getPage(id: string, user: User | string, client?: SupabaseClient): Promise<RepoResponse<Page>> {
     const userId = typeof user === 'string' ? user : user.id;
     const db = client ?? await getServerSupabaseClient();
 
     if (!db) {
       const page = mockPages.find(p => p.id === id && p.user_id === userId);
-      return { success: true, data: page ? { ...page } : null };
+      return page ? { success: true, data: page } : { success: false, error: 'NOT_FOUND' };
     }
 
-    return queryResult<Page | null>(db
+    return queryResult<Page>(db
       .from('pages')
       .select('*')
       .eq('id', id)
       .eq('user_id', userId)
-      .maybeSingle()
+      .single()
     );
   },
 
   /**
-   * Fetches all pages owned by the user.
+   * Retrieves all pages for a user.
    */
   async getAllPages(user: User | string, client?: SupabaseClient): Promise<RepoResponse<Page[]>> {
     const userId = typeof user === 'string' ? user : user.id;
@@ -396,9 +350,6 @@ export const PagesRepo = {
         existingPages: mockPages.filter(p => p.user_id === userId),
         actingUserId: userId,
         newPageId,
-        name: input.name,
-        slug: input.slug,
-        destinationFunnelId: input.destinationFunnelId,
         generateSectionId: input.generateSectionId
       });
 

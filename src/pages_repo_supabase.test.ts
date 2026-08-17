@@ -72,7 +72,6 @@ describe('PagesRepo.createPage Supabase adapter', () => {
       seo_title: '',
       seo_description: '',
       seo_keywords: [],
-      schema_markup: '',
       created_at: '2026-08-17T05:00:00.000Z',
       funnel_id: 'funnel',
       step_order: 4
@@ -255,7 +254,6 @@ describe('PagesRepo.duplicatePage Supabase adapter', () => {
         seo_title: 'SEO Title',
         seo_description: 'SEO Desc',
         seo_keywords: ['a'],
-        schema_markup: '<script></script>',
         created_at: '2026-08-17T05:00:00.000Z',
         funnel_id: 'fnl-1',
         step_order: 2
@@ -297,8 +295,7 @@ describe('PagesRepo.duplicatePage Supabase adapter', () => {
       user_id: 'trusted-owner',
       name: 'Original (Copy)',
       slug: 'original-copy',
-      status: 'draft',
-      schema_markup: '<script></script>'
+      status: 'draft'
     });
     expect(result.data?.sections).toHaveLength(1);
     expect(result.data?.sections[0].id).toBe('new-sec-1');

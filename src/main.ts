@@ -1199,10 +1199,7 @@ async function handleBuilderDuplicatePageBrowserPost(
 
     const result = await PagesRepo.duplicatePage({
         sourcePageId,
-        newPageId,
-        name: typeof request.name === 'string' ? request.name : undefined,
-        slug: typeof request.slug === 'string' ? request.slug : undefined,
-        destinationFunnelId: typeof request.destinationFunnelId === 'string' ? request.destinationFunnelId : undefined
+        newPageId
     }, userId, client);
 
     if (!result.success || !result.data) {

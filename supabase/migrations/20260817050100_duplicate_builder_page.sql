@@ -105,7 +105,6 @@ begin
           'seo_title', coalesce(v_created_page.seo_title, ''),
           'seo_description', coalesce(v_created_page.seo_description, ''),
           'seo_keywords', coalesce(v_created_page.seo_keywords, '{}'::text[]),
-          'schema_markup', coalesce(v_created_page.schema_markup, ''),
           'created_at', to_char(v_created_page.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
           'funnel_id', v_created_page.funnel_id,
           'step_type', v_created_page.step_type,
@@ -133,7 +132,7 @@ begin
     v_step_order := 0;
   end if;
 
-  -- 9. Insert new draft Page
+  -- 9. Insert new draft Page (step_type defaults to null)
   insert into public.pages(
     id,
     user_id,
@@ -143,7 +142,6 @@ begin
     seo_title,
     seo_description,
     seo_keywords,
-    schema_markup,
     created_at,
     funnel_id,
     step_type,
@@ -157,10 +155,9 @@ begin
     null,
     null,
     '{}'::text[],
-    null,
     now(),
     p_funnel_id,
-    'page',
+    null,
     v_step_order
   )
   returning * into v_created_page;
@@ -175,7 +172,6 @@ begin
     'seo_title', coalesce(v_created_page.seo_title, ''),
     'seo_description', coalesce(v_created_page.seo_description, ''),
     'seo_keywords', coalesce(v_created_page.seo_keywords, '{}'::text[]),
-    'schema_markup', coalesce(v_created_page.schema_markup, ''),
     'created_at', to_char(v_created_page.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     'funnel_id', v_created_page.funnel_id,
     'step_type', v_created_page.step_type,
@@ -396,7 +392,6 @@ begin
     seo_title,
     seo_description,
     seo_keywords,
-    schema_markup,
     created_at,
     funnel_id,
     step_type,
@@ -410,7 +405,6 @@ begin
     v_source_page.seo_title,
     v_source_page.seo_description,
     coalesce(v_source_page.seo_keywords, '{}'::text[]),
-    v_source_page.schema_markup,
     now(),
     v_destination_funnel_id,
     v_source_page.step_type,
@@ -454,7 +448,6 @@ begin
       'seo_title', coalesce(v_created_page.seo_title, ''),
       'seo_description', coalesce(v_created_page.seo_description, ''),
       'seo_keywords', coalesce(v_created_page.seo_keywords, '{}'::text[]),
-      'schema_markup', coalesce(v_created_page.schema_markup, ''),
       'created_at', to_char(v_created_page.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
       'funnel_id', v_created_page.funnel_id,
       'step_type', v_created_page.step_type,

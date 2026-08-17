@@ -14,9 +14,6 @@ export interface BuilderDuplicatePageContext {
 export interface BuilderDuplicatePagePersistRequest {
   sourcePageId: string;
   newPageId: string;
-  name?: string;
-  slug?: string;
-  destinationFunnelId?: string;
 }
 
 export interface BuilderDuplicatePagePersistResult {
