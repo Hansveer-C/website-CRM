@@ -1,7 +1,10 @@
-import { Page, RepoResponse, User } from './types';
-import { mockPages } from './db';
+import { Page, PageSection, RepoResponse, User } from './types';
+import { mockPages, mockPageSections } from './db';
 import type { BuilderPageSettingsPatch } from './builder_page_settings';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  createDuplicatePageDefaults
+} from './builder_page_lifecycle';
 
 async function getServerSupabaseClient(): Promise<SupabaseClient | null> {
   if (typeof window !== 'undefined' || typeof process === 'undefined' || !process.env.SUPABASE_URL) {
@@ -34,6 +37,17 @@ export interface CreatePageRepositoryInput {
   stepOrder?: number;
 }
 
+export interface DuplicatePageRepositoryInput {
+  sourcePageId: string;
+  newPageId?: string;
+  generateSectionId?: () => string;
+}
+
+export interface DuplicatePageRepositoryResult {
+  page: Page;
+  sections: PageSection[];
+}
+
 function localPagesStorageKey(userId: string): string {
   return `mock_pages_${userId}`;
 }
@@ -41,10 +55,8 @@ function localPagesStorageKey(userId: string): string {
 function persistLocalPages(userId: string): boolean {
   if (typeof window === 'undefined' || !window.localStorage) return true;
   try {
-    window.localStorage.setItem(
-      localPagesStorageKey(userId),
-      JSON.stringify(mockPages.filter(page => page.user_id === userId))
-    );
+    const owned = mockPages.filter(page => page.user_id === userId);
+    window.localStorage.setItem(localPagesStorageKey(userId), JSON.stringify(owned));
     return true;
   } catch {
     return false;
@@ -146,31 +158,33 @@ export const PagesRepo = {
     }
 
     try {
-      const existing = await db.from('pages').select('*').eq('id', input.id).limit(1).maybeSingle();
-      if (existing.error) return { success: false, error: 'UNAVAILABLE', code: existing.error.code };
-      if (existing.data) {
-        const page = mapCreatedPage(existing.data as Record<string, unknown>);
-        return matchesCreateRequest(page, input, userId)
-          ? { success: true, data: page }
-          : { success: false, error: 'ID_CONFLICT', code: 'ID_CONFLICT' };
-      }
-      const payload = {
-        id: input.id,
-        user_id: userId,
-        name: input.name,
-        slug: input.slug,
-        status: 'draft',
-        seo_title: null,
-        seo_description: null,
-        seo_keywords: [],
-        funnel_id: input.funnelId,
-        ...(input.stepOrder !== undefined ? { step_order: input.stepOrder } : {})
+      const rpcPayload = {
+        p_name: input.name,
+        p_slug: input.slug,
+        p_funnel_id: input.funnelId,
+        p_id: input.id || null
       };
-      const inserted = await db.from('pages').insert(payload).select('*').single();
-      if (inserted.error || !inserted.data) {
-        return { success: false, error: 'CREATE_FAILED', code: inserted.error?.code };
+
+      const rpcResult = await db.rpc('create_builder_page', rpcPayload);
+      if (rpcResult.error) {
+        const code = rpcResult.error.code;
+        const message = rpcResult.error.message;
+        if (code === 'PT401') return { success: false, error: 'UNAUTHORIZED', code: 'UNAUTHORIZED' };
+        if (code === 'PT403') return { success: false, error: 'FORBIDDEN', code: 'FORBIDDEN' };
+        if (code === 'PT409' || code === '23505' || message?.includes('already uses this URL') || message?.includes('Page ID already exists')) {
+          const isIdConflict = message?.includes('Page ID already exists');
+          return { success: false, error: isIdConflict ? 'ID_CONFLICT' : 'CONFLICT', code: isIdConflict ? 'ID_CONFLICT' : '23505' };
+        }
+        if (code === 'PT422') return { success: false, error: 'INVALID_INPUT', code: 'INVALID_INPUT' };
+        return { success: false, error: message ?? 'CREATE_FAILED', code: code ?? 'UNAVAILABLE' };
       }
-      return { success: true, data: mapCreatedPage(inserted.data as Record<string, unknown>) };
+
+      const data = rpcResult.data as Record<string, unknown>;
+      if (!data || !data.id) {
+        return { success: false, error: 'INVALID_RESPONSE', code: 'INVALID_RESPONSE' };
+      }
+
+      return { success: true, data: mapCreatedPage(data) };
     } catch {
       return { success: false, error: 'UNAVAILABLE', code: 'UNAVAILABLE' };
     }
@@ -302,5 +316,151 @@ export const PagesRepo = {
       .eq('id', id)
       .eq('user_id', userId)
     );
+  },
+
+  /**
+   * Duplicates a page and all of its sections atomically.
+   */
+  async duplicatePage(
+    input: DuplicatePageRepositoryInput,
+    user: User | string,
+    client?: SupabaseClient
+  ): Promise<RepoResponse<DuplicatePageRepositoryResult>> {
+    const userId = typeof user === 'string' ? user : user.id;
+    const db = client ?? await getServerSupabaseClient();
+    const useRemote = db !== null;
+
+    if (!useRemote) {
+      const sourcePage = mockPages.find(page => page.id === input.sourcePageId && page.user_id === userId);
+      if (!sourcePage) {
+        return { success: false, error: 'SOURCE_PAGE_NOT_FOUND', code: 'NOT_FOUND' };
+      }
+
+      const newPageId = input.newPageId || crypto.randomUUID();
+      if (mockPages.some(page => page.id === newPageId)) {
+        return { success: false, error: 'ID_CONFLICT', code: 'ID_CONFLICT' };
+      }
+
+      // Real mock sections do NOT have user_id; scoped strictly through source page_id
+      const sourceSections = mockPageSections.filter(s => s.page_id === input.sourcePageId);
+
+      const defaults = createDuplicatePageDefaults({
+        sourcePage,
+        sourceSections,
+        existingPages: mockPages.filter(p => p.user_id === userId),
+        actingUserId: userId,
+        newPageId,
+        generateSectionId: input.generateSectionId
+      });
+
+      if (mockPages.some(page => page.user_id === userId && page.slug === defaults.page.slug)) {
+        return { success: false, error: 'CONFLICT', code: '23505' };
+      }
+
+      const previousPages = structuredClone(mockPages);
+      const previousSections = structuredClone(mockPageSections);
+
+      // 1. Snapshot memory & apply tentative changes
+      mockPages.push(defaults.page);
+      mockPageSections.push(...defaults.sections);
+
+      // 2. Write new duplicate Sections key first
+      let sectionsWriteOk = true;
+      const sectionStorageKey = `mock_sections_${userId}:${defaults.page.id}`;
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          window.localStorage.setItem(sectionStorageKey, JSON.stringify(defaults.sections));
+        } catch {
+          sectionsWriteOk = false;
+        }
+      }
+
+      if (!sectionsWriteOk) {
+        // Rollback memory
+        mockPages.splice(0, mockPages.length, ...previousPages);
+        mockPageSections.splice(0, mockPageSections.length, ...previousSections);
+        return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
+      }
+
+      // 3. Persist Page collection second
+      const pageWriteOk = persistLocalPages(userId);
+      if (!pageWriteOk) {
+        // Rollback memory
+        mockPages.splice(0, mockPages.length, ...previousPages);
+        mockPageSections.splice(0, mockPageSections.length, ...previousSections);
+        // Remove newly created Sections key
+        if (typeof window !== 'undefined' && window.localStorage) {
+          try {
+            window.localStorage.removeItem(sectionStorageKey);
+          } catch {
+            // ignore
+          }
+        }
+        return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
+      }
+
+      // 5. Commit success only after both durable writes succeed
+      return {
+        success: true,
+        data: {
+          page: { ...defaults.page },
+          sections: defaults.sections.map(s => ({ ...s }))
+        }
+      };
+    }
+
+    try {
+      const rpcPayload = {
+        p_page_id: input.sourcePageId,
+        p_new_page_id: input.newPageId || null
+      };
+
+      const rpcResult = await db.rpc('duplicate_builder_page', rpcPayload);
+      if (rpcResult.error) {
+        const code = rpcResult.error.code;
+        const message = rpcResult.error.message;
+        if (code === 'PT404' || message?.includes('Page not found')) {
+          return { success: false, error: 'SOURCE_PAGE_NOT_FOUND', code: 'NOT_FOUND' };
+        }
+        if (code === 'PT401' || message?.includes('Authentication required')) {
+          return { success: false, error: 'UNAUTHORIZED', code: 'UNAUTHORIZED' };
+        }
+        if (code === 'PT403') {
+          return { success: false, error: 'FORBIDDEN', code: 'FORBIDDEN' };
+        }
+        if (code === 'PT409' || code === '23505' || message?.includes('already exists') || message?.includes('already uses this URL')) {
+          return { success: false, error: 'CONFLICT', code: 'CONFLICT' };
+        }
+        return { success: false, error: message ?? 'DUPLICATE_FAILED', code: code ?? 'UNAVAILABLE' };
+      }
+
+      const data = rpcResult.data as { page?: Record<string, unknown>; sections?: Record<string, unknown>[] };
+      if (!data || !data.page) {
+        return { success: false, error: 'INVALID_RESPONSE', code: 'INVALID_RESPONSE' };
+      }
+
+      const mappedPage = mapCreatedPage(data.page);
+      const mappedSections: PageSection[] = Array.isArray(data.sections)
+        ? data.sections.map((row: any) => ({
+            id: String(row.id),
+            page_id: String(row.page_id),
+            type: String(row.type),
+            content: typeof row.content === 'object' && row.content !== null ? row.content : {},
+            styles: typeof row.styles === 'object' && row.styles !== null ? row.styles : {},
+            order: typeof row.order === 'number' ? row.order : (typeof row.order_index === 'number' ? row.order_index : 0),
+            ...(row.variant ? { variant: String(row.variant) } : {})
+          }))
+        : [];
+
+      return {
+        success: true,
+        data: {
+          page: mappedPage,
+          sections: mappedSections
+        }
+      };
+    } catch {
+      return { success: false, error: 'UNAVAILABLE', code: 'UNAVAILABLE' };
+    }
   }
 };
