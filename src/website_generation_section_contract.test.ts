@@ -9,7 +9,7 @@ import { getBuilderInspectorSchema } from './builder_inspector_schema';
 
 const root = new URL('../', import.meta.url);
 const migration = readFileSync(
-  new URL('supabase/migrations/20260801044852_align_initial_website_section_types.sql', root),
+  new URL('supabase/migrations/20260801052529_align_initial_website_section_types.sql', root),
   'utf8'
 );
 const main = readFileSync(new URL('src/main.ts', root), 'utf8');

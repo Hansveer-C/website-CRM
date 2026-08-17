@@ -6,9 +6,9 @@ const databaseUrl = process.env.PAGE_SECTION_RACE_DATABASE_URL;
 const describeDatabase = databaseUrl ? describe : describe.skip;
 const userA = '00000000-0000-0000-0000-00000000000a';
 const userB = '00000000-0000-0000-0000-00000000000b';
-const oldMigration = readFileSync(new URL('../migrations/20260810050518_save_page_sections_document.sql', import.meta.url), 'utf8');
-const hardeningMigration = readFileSync(new URL('../migrations/20260816030645_harden_page_section_save_conflict_ownership.sql', import.meta.url), 'utf8');
-const legacyCompatibilityMigration = readFileSync(new URL('../migrations/20260816051412_preserve_legacy_page_section_types.sql', import.meta.url), 'utf8');
+const oldMigration = readFileSync(new URL('../migrations/20260810134911_save_page_sections_document.sql', import.meta.url), 'utf8');
+const hardeningMigration = readFileSync(new URL('../migrations/20260816032601_harden_page_section_save_conflict_ownership.sql', import.meta.url), 'utf8');
+const legacyCompatibilityMigration = readFileSync(new URL('../migrations/20260816053507_preserve_legacy_page_section_types.sql', import.meta.url), 'utf8');
 
 function section(id: string, pageId: string, marker: string, order = 0) {
   return { id, page_id: pageId, type: 'hero', content: { marker }, order, styles: { marker } };

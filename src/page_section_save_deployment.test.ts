@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-const migration = readFileSync(new URL('../supabase/migrations/20260810050518_save_page_sections_document.sql', import.meta.url), 'utf8').toLowerCase();
-const hardeningMigration = readFileSync(new URL('../supabase/migrations/20260816030645_harden_page_section_save_conflict_ownership.sql', import.meta.url), 'utf8').toLowerCase();
+const migration = readFileSync(new URL('../supabase/migrations/20260810134911_save_page_sections_document.sql', import.meta.url), 'utf8').toLowerCase();
+const hardeningMigration = readFileSync(new URL('../supabase/migrations/20260816032601_harden_page_section_save_conflict_ownership.sql', import.meta.url), 'utf8').toLowerCase();
 const saveRoute = readFileSync(new URL('../api/page-sections.ts', import.meta.url), 'utf8');
 const revisionRoute = readFileSync(new URL('../api/page-section-save-revision.ts', import.meta.url), 'utf8');
 const vercel = readFileSync(new URL('../vercel.json', import.meta.url), 'utf8');
