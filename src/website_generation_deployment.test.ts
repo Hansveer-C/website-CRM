@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 
 const root = new URL('../', import.meta.url);
 const vercel = JSON.parse(readFileSync(new URL('vercel.json', root), 'utf8')) as { routes: Array<Record<string, string>> };
-const initialMigration = readFileSync(new URL('supabase/migrations/20260730210000_create_initial_website_graph.sql', root), 'utf8');
-const alignmentMigration = readFileSync(new URL('supabase/migrations/20260801044852_align_initial_website_section_types.sql', root), 'utf8');
+const initialMigration = readFileSync(new URL('supabase/migrations/20260730230741_create_initial_website_graph.sql', root), 'utf8');
+const alignmentMigration = readFileSync(new URL('supabase/migrations/20260801052529_align_initial_website_section_types.sql', root), 'utf8');
 const main = readFileSync(new URL('src/main.ts', root), 'utf8');
 
 function resolveConfiguredPath(path: string, files: Set<string>): string {

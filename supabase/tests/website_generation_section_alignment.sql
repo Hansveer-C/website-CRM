@@ -93,9 +93,9 @@ create table public.page_sections (
   created_at timestamptz not null
 );
 
-\ir ../migrations/20260730210000_create_initial_website_graph.sql
-\ir ../migrations/20260730233000_drop_redundant_phase0_index.sql
-\ir ../migrations/20260801044852_align_initial_website_section_types.sql
+\ir ../migrations/20260730230741_create_initial_website_graph.sql
+\ir ../migrations/20260730230827_drop_redundant_phase0_index.sql
+\ir ../migrations/20260801052529_align_initial_website_section_types.sql
 
 create or replace function public.test_assert(condition boolean, message text)
 returns void
