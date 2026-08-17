@@ -296,26 +296,76 @@ export const PagesRepo = {
   },
 
   /**
-   * Deletes a page and all its sections (cascading).
+   * Deletes a page and all its sections atomically.
    */
   async deletePage(id: string, user: User | string, client?: SupabaseClient): Promise<RepoResponse<any>> {
     const userId = typeof user === 'string' ? user : user.id;
     const db = client ?? await getServerSupabaseClient();
+    const useRemote = db !== null;
 
-    if (!db) {
-      const idx = mockPages.findIndex(p => p.id === id && p.user_id === userId);
-      if (idx !== -1) {
-        mockPages.splice(idx, 1);
+    if (!useRemote) {
+      const pageIndex = mockPages.findIndex(p => p.id === id && p.user_id === userId);
+      if (pageIndex === -1) {
+        return { success: false, error: 'NOT_FOUND', code: 'NOT_FOUND' };
       }
-      return { success: true, data: { id } };
+
+      const targetPage = mockPages[pageIndex];
+      const funnelPages = mockPages.filter(p => p.user_id === userId && p.funnel_id === targetPage.funnel_id);
+      if (funnelPages.length <= 1) {
+        return { success: false, error: 'LAST_PAGE', code: 'LAST_PAGE' };
+      }
+
+      const previousPages = structuredClone(mockPages);
+      const previousSections = structuredClone(mockPageSections);
+
+      // Snapshot memory & apply changes
+      mockPages.splice(pageIndex, 1);
+      const remainingSections = mockPageSections.filter(s => s.page_id !== id);
+      mockPageSections.splice(0, mockPageSections.length, ...remainingSections);
+
+      // Persist local pages
+      if (!persistLocalPages(userId)) {
+        mockPages.splice(0, mockPages.length, ...previousPages);
+        mockPageSections.splice(0, mockPageSections.length, ...previousSections);
+        return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
+      }
+
+      // Remove local section storage key if present
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          window.localStorage.removeItem(`mock_sections_${userId}:${id}`);
+        } catch {
+          // ignore
+        }
+      }
+
+      return { success: true, data: { id, funnel_id: targetPage.funnel_id, deleted: true } };
     }
 
-    return queryResult(db
-      .from('pages')
-      .delete()
-      .eq('id', id)
-      .eq('user_id', userId)
-    );
+    try {
+      const rpcResult = await db.rpc('delete_builder_page', { p_page_id: id });
+      if (rpcResult.error) {
+        const code = rpcResult.error.code;
+        const message = rpcResult.error.message;
+        if (code === 'PT404' || message?.includes('Page not found')) {
+          return { success: false, error: 'NOT_FOUND', code: 'NOT_FOUND' };
+        }
+        if (code === 'PT401' || message?.includes('Authentication required')) {
+          return { success: false, error: 'UNAUTHORIZED', code: 'UNAUTHORIZED' };
+        }
+        if (code === 'PT403') {
+          return { success: false, error: 'FORBIDDEN', code: 'FORBIDDEN' };
+        }
+        if (code === 'PT422' || message?.includes('only page')) {
+          return { success: false, error: 'LAST_PAGE', code: 'LAST_PAGE' };
+        }
+        return { success: false, error: message ?? 'DELETE_FAILED', code: code ?? 'UNAVAILABLE' };
+      }
+
+      return { success: true, data: rpcResult.data };
+    } catch {
+      return { success: false, error: 'UNAVAILABLE', code: 'UNAVAILABLE' };
+    }
   },
 
   /**
