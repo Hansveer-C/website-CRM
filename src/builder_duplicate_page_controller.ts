@@ -29,10 +29,14 @@ export interface BuilderDuplicatePagePersistResult {
   error?: string;
 }
 
+export interface BuilderDuplicatePageOnDuplicatedMeta {
+  shouldNavigate: boolean;
+}
+
 export interface BuilderDuplicatePageControllerOptions {
   getContext: () => BuilderDuplicatePageContext;
   persist: (request: BuilderDuplicatePagePersistRequest) => Promise<BuilderDuplicatePagePersistResult>;
-  onDuplicated: (page: Page, sections: PageSection[]) => void | Promise<void>;
+  onDuplicated: (page: Page, sections: PageSection[], meta: BuilderDuplicatePageOnDuplicatedMeta) => void | Promise<void>;
   generateId?: () => string;
 }
 
@@ -123,11 +127,13 @@ export class BuilderDuplicatePageController {
       return false;
     }
 
+    const shouldNavigate = currentContext.activePageId === initialContext.activePageId;
+
     this.status = 'idle';
     this.duplicatingPageId = null;
     this.message = '';
 
-    await this.onDuplicated(createdPage, result.data.sections ?? []);
+    await this.onDuplicated(createdPage, result.data.sections ?? [], { shouldNavigate });
     return true;
   }
 

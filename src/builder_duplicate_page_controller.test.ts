@@ -136,7 +136,8 @@ describe('BuilderDuplicatePageController', () => {
       }),
       expect.arrayContaining([
         expect.objectContaining({ id: 'new-sec-1' })
-      ])
+      ]),
+      { shouldNavigate: true }
     );
     expect(controller.status).toBe('idle');
   });
@@ -232,6 +233,50 @@ describe('BuilderDuplicatePageController', () => {
 
     expect(await pending).toBe(false);
     expect(onDuplicated).not.toHaveBeenCalled();
+  });
+
+  it('guards against stale navigation if user switches activePageId while duplication is in flight', async () => {
+    let resolvePersist!: (value: any) => void;
+    const { controller, persist, onDuplicated, setContext } = setup();
+    persist.mockImplementation(() => new Promise(resolve => { resolvePersist = resolve; }));
+
+    const pending = controller.duplicate('page-driveway');
+
+    // User navigates away to another page during duplication
+    setContext({
+      actingUserId: 'owner-1',
+      website,
+      websiteRoutes: [route],
+      funnels: [funnel],
+      pages: [sourcePage, { ...sourcePage, id: 'page-about', name: 'About' }],
+      activePageId: 'page-about' // Switched from page-driveway to page-about
+    });
+
+    resolvePersist({
+      success: true,
+      data: {
+        page: {
+          id: 'generated-new-page-id',
+          user_id: 'owner-1',
+          name: 'Driveway Cleaning (Copy)',
+          slug: 'driveway-copy',
+          status: 'draft',
+          seo_title: '',
+          seo_description: '',
+          seo_keywords: [],
+          created_at: '',
+          funnel_id: 'funnel-1'
+        },
+        sections: []
+      }
+    });
+
+    expect(await pending).toBe(true);
+    expect(onDuplicated).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'generated-new-page-id' }),
+      [],
+      { shouldNavigate: false }
+    );
   });
 
   it('resets status cleanly', () => {

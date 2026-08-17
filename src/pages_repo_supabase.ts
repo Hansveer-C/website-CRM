@@ -1,8 +1,11 @@
-import { Page, PageSection, RepoResponse, User } from './types';
+import type { Page, PageSection, RepoResponse, User } from './types';
 import { mockPages, mockPageSections } from './db';
 import type { BuilderPageSettingsPatch } from './builder_page_settings';
-import { createDuplicatePageDefaults } from './builder_page_lifecycle';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  createDuplicatePageDefaults,
+  type CreateDuplicatePageDefaultsOptions
+} from './builder_page_lifecycle';
 
 async function getServerSupabaseClient(): Promise<SupabaseClient | null> {
   if (typeof window !== 'undefined' || typeof process === 'undefined' || !process.env.SUPABASE_URL) {
@@ -15,18 +18,6 @@ async function getServerSupabaseClient(): Promise<SupabaseClient | null> {
   return serverModule.supabase ?? null;
 }
 
-async function queryResult<T>(
-  promise: PromiseLike<{ data: T | null; error: { message?: string; code?: string } | null }>
-): Promise<RepoResponse<T>> {
-  try {
-    const { data, error } = await promise;
-    if (error) return { success: false, error: error.message ?? 'DATABASE_ERROR', code: error.code };
-    return { success: true, data: data as T };
-  } catch {
-    return { success: false, error: 'DATABASE_CRASH', code: 'INTERNAL_ERROR' };
-  }
-}
-
 export interface CreatePageRepositoryInput {
   id: string;
   name: string;
@@ -37,11 +28,10 @@ export interface CreatePageRepositoryInput {
 
 export interface DuplicatePageRepositoryInput {
   sourcePageId: string;
-  newPageId: string;
+  newPageId?: string;
   name?: string;
   slug?: string;
   destinationFunnelId?: string;
-  stepOrder?: number;
   generateSectionId?: () => string;
 }
 
@@ -57,10 +47,8 @@ function localPagesStorageKey(userId: string): string {
 function persistLocalPages(userId: string): boolean {
   if (typeof window === 'undefined' || !window.localStorage) return true;
   try {
-    window.localStorage.setItem(
-      localPagesStorageKey(userId),
-      JSON.stringify(mockPages.filter(page => page.user_id === userId))
-    );
+    const owned = mockPages.filter(page => page.user_id === userId);
+    window.localStorage.setItem(localPagesStorageKey(userId), JSON.stringify(owned));
     return true;
   } catch {
     return false;
@@ -94,6 +82,18 @@ function matchesCreateRequest(page: Page, input: CreatePageRepositoryInput, user
     && page.slug === input.slug
     && page.funnel_id === input.funnelId
     && page.status === 'draft';
+}
+
+async function queryResult<T>(
+  promise: PromiseLike<{ data: T | null; error: { message?: string; code?: string } | null }>
+): Promise<RepoResponse<T>> {
+  try {
+    const { data, error } = await promise;
+    if (error) return { success: false, error: error.message ?? 'DATABASE_ERROR', code: error.code };
+    return { success: true, data: data as T };
+  } catch {
+    return { success: false, error: 'DATABASE_CRASH', code: 'INTERNAL_ERROR' };
+  }
 }
 
 /**
@@ -164,15 +164,10 @@ export const PagesRepo = {
 
     try {
       const rpcPayload = {
-        p_id: input.id || null,
         p_name: input.name,
         p_slug: input.slug,
         p_funnel_id: input.funnelId,
-        p_step_order: input.stepOrder !== undefined ? input.stepOrder : null,
-        p_seo_title: null,
-        p_seo_description: null,
-        p_seo_keywords: [],
-        p_schema_markup: null
+        p_id: input.id || null
       };
 
       const rpcResult = await db.rpc('create_builder_page', rpcPayload);
@@ -411,29 +406,41 @@ export const PagesRepo = {
         return { success: false, error: 'CONFLICT', code: '23505' };
       }
 
-      const previousPages = [...mockPages];
-      const previousSections = [...mockPageSections];
+      const previousPages = structuredClone(mockPages);
+      const previousSections = structuredClone(mockPageSections);
 
+      // 1. Snapshot memory & apply tentative changes
       mockPages.push(defaults.page);
       mockPageSections.push(...defaults.sections);
 
-      let persistOk = persistLocalPages(userId);
-      if (persistOk && typeof window !== 'undefined' && window.localStorage) {
+      // 2. Write new duplicate Sections key first
+      let sectionsWriteOk = true;
+      const sectionStorageKey = `mock_sections_${userId}:${defaults.page.id}`;
+      if (typeof window !== 'undefined' && window.localStorage) {
         try {
-          const storageKey = `mock_sections_${userId}:${defaults.page.id}`;
-          window.localStorage.setItem(storageKey, JSON.stringify(defaults.sections));
+          window.localStorage.setItem(sectionStorageKey, JSON.stringify(defaults.sections));
         } catch {
-          persistOk = false;
+          sectionsWriteOk = false;
         }
       }
 
-      if (!persistOk) {
+      if (!sectionsWriteOk) {
+        // Rollback memory
         mockPages.splice(0, mockPages.length, ...previousPages);
         mockPageSections.splice(0, mockPageSections.length, ...previousSections);
-        persistLocalPages(userId);
+        return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
+      }
+
+      // 3. Persist Page collection second
+      const pageWriteOk = persistLocalPages(userId);
+      if (!pageWriteOk) {
+        // Rollback memory
+        mockPages.splice(0, mockPages.length, ...previousPages);
+        mockPageSections.splice(0, mockPageSections.length, ...previousSections);
+        // Remove newly created Sections key
         if (typeof window !== 'undefined' && window.localStorage) {
           try {
-            window.localStorage.removeItem(`mock_sections_${userId}:${defaults.page.id}`);
+            window.localStorage.removeItem(sectionStorageKey);
           } catch {
             // ignore
           }
@@ -441,6 +448,7 @@ export const PagesRepo = {
         return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
       }
 
+      // 5. Commit success only after both durable writes succeed
       return {
         success: true,
         data: {

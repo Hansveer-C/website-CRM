@@ -4419,7 +4419,7 @@ function getBuilderDuplicatePageController(): BuilderDuplicatePageController {
         return { success: false, code: 'AMBIGUOUS' };
       }
     },
-    onDuplicated: async (page, sections) => {
+    onDuplicated: async (page, sections, meta) => {
       const existingIndex = mockPages.findIndex(item => item.id === page.id);
       if (existingIndex >= 0) mockPages[existingIndex] = page;
       else mockPages.push(page);
@@ -4431,7 +4431,11 @@ function getBuilderDuplicatePageController(): BuilderDuplicatePageController {
       }
 
       builderPagesPanelView = 'list';
-      await (window as any).switchBuilderPage(page.id);
+      if (meta?.shouldNavigate) {
+        await (window as any).switchBuilderPage(page.id);
+      } else {
+        renderBuilderPagesPanel();
+      }
     }
   });
   return builderDuplicatePageController;

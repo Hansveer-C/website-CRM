@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { Client } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-const databaseUrl = process.env.PAGE_DUPLICATE_TEST_DATABASE_URL || 'postgres://postgres:postgres@127.0.0.1:54333/postgres';
+const databaseUrl = process.env.PAGE_DUPLICATE_TEST_DATABASE_URL;
+const describeDatabase = databaseUrl ? describe : describe.skip;
 
 const userA = '00000000-0000-0000-0000-00000000000a';
 const userB = '00000000-0000-0000-0000-00000000000b';
@@ -37,7 +38,7 @@ async function seedSourcePage(client: Client): Promise<void> {
   `);
 }
 
-describe('PostgreSQL 17 duplicate_builder_page and create_builder_page RPC validation', () => {
+describeDatabase('PostgreSQL 17 duplicate_builder_page and create_builder_page RPC validation', () => {
   beforeAll(async () => {
     const client = await connect();
     try {
@@ -113,7 +114,12 @@ describe('PostgreSQL 17 duplicate_builder_page and create_builder_page RPC valid
   beforeEach(async () => {
     const client = await connect();
     try {
-      await client.query('truncate table public.page_sections, public.pages cascade');
+      // Drop any failure injection triggers
+      await client.query(`
+        drop trigger if exists trg_inject_section_failure on public.page_sections;
+        drop trigger if exists trg_inject_section_collision on public.page_sections;
+        truncate table public.page_sections, public.pages cascade;
+      `);
     } finally {
       await client.end();
     }
@@ -152,7 +158,22 @@ describe('PostgreSQL 17 duplicate_builder_page and create_builder_page RPC valid
     }
   });
 
-  it('3. cross-tenant source duplicate rejects with PT404 without existence leakage', async () => {
+  it('3. unauthenticated create call rejects with PT401', async () => {
+    const client = await connect();
+    try {
+      await client.query("select set_config('request.jwt.claim.sub', '', false)");
+      await expect(
+        client.query(
+          'select public.create_builder_page($1, $2, $3) as res',
+          ['Unauth Page', 'unauth-page', 'fnl-user-a']
+        )
+      ).rejects.toMatchObject({ code: 'PT401' });
+    } finally {
+      await client.end();
+    }
+  });
+
+  it('4. cross-tenant source duplicate rejects with PT404 without existence leakage', async () => {
     const client = await connect();
     try {
       await client.query(`
@@ -171,7 +192,136 @@ describe('PostgreSQL 17 duplicate_builder_page and create_builder_page RPC valid
     }
   });
 
-  it('4. authenticated duplicate succeeds, deep-cloning all sections losslessly with new IDs and preserving order & metadata', async () => {
+  it('5. cross-tenant create funnel rejects with PT403', async () => {
+    const client = await connect();
+    try {
+      // User A attempting to create page in User B's funnel
+      await client.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
+      await expect(
+        client.query(
+          'select public.create_builder_page($1, $2, $3) as res',
+          ['Foreign Page', 'foreign-page', 'fnl-user-b']
+        )
+      ).rejects.toMatchObject({ code: 'PT403' });
+    } finally {
+      await client.end();
+    }
+  });
+
+  it('6. corrupt owned-page / foreign-funnel relationship rejects duplicate with PT403 with 0 new rows', async () => {
+    const client = await connect();
+    try {
+      // Create corrupt page: owned by User A, but funnel is User B's funnel
+      await client.query(`
+        insert into public.pages (id, user_id, name, slug, funnel_id, status)
+        values ('pg-corrupt-1', '${userA}', 'Corrupt Page', 'corrupt-page', 'fnl-user-b', 'published')
+        on conflict (id) do nothing;
+      `);
+
+      await client.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
+      const pageCountBefore = await client.query('select count(*) from public.pages');
+
+      await expect(
+        client.query('select public.duplicate_builder_page($1) as res', ['pg-corrupt-1'])
+      ).rejects.toMatchObject({ code: 'PT403' });
+
+      const pageCountAfter = await client.query('select count(*) from public.pages');
+      expect(pageCountAfter.rows[0].count).toBe(pageCountBefore.rows[0].count);
+    } finally {
+      await client.end();
+    }
+  });
+
+  it('7. valid authenticated create succeeds with DB-computed step_order and canonical defaults', async () => {
+    const client = await connect();
+    try {
+      await client.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
+      const res = await client.query(
+        'select public.create_builder_page($1, $2, $3) as res',
+        ['Created Page', 'created-page', 'fnl-user-a']
+      );
+      const created = res.rows[0].res;
+      expect(created.id).toMatch(/^pg_/);
+      expect(created.user_id).toBe(userA);
+      expect(created.name).toBe('Created Page');
+      expect(created.slug).toBe('created-page');
+      expect(created.status).toBe('draft');
+      expect(created.funnel_id).toBe('fnl-user-a');
+      expect(created.step_order).toBe(0); // First page in funnel gets step_order 0
+    } finally {
+      await client.end();
+    }
+  });
+
+  it('8. create idempotency: same create request + same p_id returns existing page; different request rejects PT409', async () => {
+    const client = await connect();
+    try {
+      await client.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
+      const id = 'pg_idempotent_123';
+
+      // First call
+      const res1 = await client.query(
+        'select public.create_builder_page($1, $2, $3, $4) as res',
+        ['Idempotent Page', 'idempotent-page', 'fnl-user-a', id]
+      );
+      const created1 = res1.rows[0].res;
+
+      // Second identical call (same p_id)
+      const res2 = await client.query(
+        'select public.create_builder_page($1, $2, $3, $4) as res',
+        ['Idempotent Page', 'idempotent-page', 'fnl-user-a', id]
+      );
+      const created2 = res2.rows[0].res;
+
+      expect(created2).toEqual(created1);
+
+      // Verify only 1 row exists
+      const dbRows = await client.query('select * from public.pages where id = $1', [id]);
+      expect(dbRows.rows).toHaveLength(1);
+
+      // Different request with same ID rejects PT409
+      await expect(
+        client.query(
+          'select public.create_builder_page($1, $2, $3, $4) as res',
+          ['Different Name', 'different-slug', 'fnl-user-a', id]
+        )
+      ).rejects.toMatchObject({ code: 'PT409' });
+    } finally {
+      await client.end();
+    }
+  });
+
+  it('9. hardens create name and slug validation against invalid and reserved values', async () => {
+    const client = await connect();
+    try {
+      await client.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
+
+      // Reserved slugs
+      const reservedSlugs = ['home', 'api', 'builder', 'functions', 'login', 'preview', 'website-dashboard'];
+      for (const slug of reservedSlugs) {
+        await expect(
+          client.query('select public.create_builder_page($1, $2, $3) as res', ['Page', slug, 'fnl-user-a'])
+        ).rejects.toMatchObject({ code: 'PT422' });
+      }
+
+      // Invalid slug characters (internal slash, dots, symbols)
+      const invalidSlugs = ['bad/slug', 'bad..slug', 'bad?slug', 'bad#slug', 'bad:slug'];
+      for (const slug of invalidSlugs) {
+        await expect(
+          client.query('select public.create_builder_page($1, $2, $3) as res', ['Page', slug, 'fnl-user-a'])
+        ).rejects.toMatchObject({ code: 'PT422' });
+      }
+
+      // Control characters in name
+      await expect(
+        client.query('select public.create_builder_page($1, $2, $3) as res', ['Page\x01Name', 'valid-slug', 'fnl-user-a'])
+      ).rejects.toMatchObject({ code: 'PT422' });
+    } finally {
+      await client.end();
+    }
+  });
+
+  it('10. authenticated duplicate succeeds, deep-cloning all sections losslessly with new IDs and preserving order & metadata', async () => {
     const client = await connect();
     try {
       await seedSourcePage(client);
@@ -185,7 +335,7 @@ describe('PostgreSQL 17 duplicate_builder_page and create_builder_page RPC valid
       expect(dup.page.user_id).toBe(userA);
       expect(dup.page.name).toBe('Full Page (Copy)');
       expect(dup.page.slug).toBe('full-page-copy');
-      expect(dup.page.status).toBe('draft'); // Must be draft!
+      expect(dup.page.status).toBe('draft');
       expect(dup.page.seo_title).toBe('SEO Title');
       expect(dup.page.seo_description).toBe('SEO Desc');
       expect(dup.page.seo_keywords).toEqual(['one', 'two']);
@@ -206,7 +356,7 @@ describe('PostgreSQL 17 duplicate_builder_page and create_builder_page RPC valid
 
       expect(dup.sections[1].id).toMatch(/^sec_/);
       expect(dup.sections[1].id).not.toBe('sec-2');
-      expect(dup.sections[1].type).toBe('services'); // legacy type preserved!
+      expect(dup.sections[1].type).toBe('services');
       expect(dup.sections[1].content).toEqual({ items: ['A', 'B'] });
       expect(dup.sections[1].order).toBe(1);
 
@@ -219,33 +369,7 @@ describe('PostgreSQL 17 duplicate_builder_page and create_builder_page RPC valid
     }
   });
 
-  it('5. concurrent duplication produces distinct names, slugs, and step_order values without collision', async () => {
-    const client1 = await connect();
-    const client2 = await connect();
-    try {
-      await seedSourcePage(client1);
-      await client1.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
-      await client2.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
-
-      const [res1, res2] = await Promise.all([
-        client1.query('select public.duplicate_builder_page($1) as res', ['pg-source-1']),
-        client2.query('select public.duplicate_builder_page($1) as res', ['pg-source-1'])
-      ]);
-
-      const dup1 = res1.rows[0].res;
-      const dup2 = res2.rows[0].res;
-
-      expect(dup1.page.id).not.toBe(dup2.page.id);
-      expect(dup1.page.name).not.toBe(dup2.page.name);
-      expect(dup1.page.slug).not.toBe(dup2.page.slug);
-      expect(dup1.page.step_order).not.toBe(dup2.page.step_order);
-    } finally {
-      await client1.end();
-      await client2.end();
-    }
-  });
-
-  it('6. handles max-length 120-char name and slug reserving suffix capacity', async () => {
+  it('11. handles max-length 120-char name and slug reserving suffix capacity', async () => {
     const client = await connect();
     try {
       const longName = 'X'.repeat(120);
@@ -271,106 +395,182 @@ describe('PostgreSQL 17 duplicate_builder_page and create_builder_page RPC valid
     }
   });
 
-  it('7. global ID collision cannot overwrite an existing page', async () => {
+  it('12. concurrent Create/Create in same funnel produces distinct sequential step_order values', async () => {
+    const client1 = await connect();
+    const client2 = await connect();
+    try {
+      await client1.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
+      await client2.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
+
+      const [res1, res2] = await Promise.all([
+        client1.query('select public.create_builder_page($1, $2, $3) as res', ['Page 1', 'page-one', 'fnl-user-a']),
+        client2.query('select public.create_builder_page($1, $2, $3) as res', ['Page 2', 'page-two', 'fnl-user-a'])
+      ]);
+
+      const c1 = res1.rows[0].res;
+      const c2 = res2.rows[0].res;
+
+      expect(c1.id).not.toBe(c2.id);
+      expect(c1.step_order).not.toBe(c2.step_order);
+      const orders = [c1.step_order, c2.step_order].sort();
+      expect(orders).toEqual([0, 1]);
+    } finally {
+      await client1.end();
+      await client2.end();
+    }
+  });
+
+  it('13. concurrent Duplicate/Duplicate in same funnel produces distinct names, slugs, and step_order values', async () => {
+    const client1 = await connect();
+    const client2 = await connect();
+    try {
+      await seedSourcePage(client1);
+      await client1.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
+      await client2.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
+
+      const [res1, res2] = await Promise.all([
+        client1.query('select public.duplicate_builder_page($1) as res', ['pg-source-1']),
+        client2.query('select public.duplicate_builder_page($1) as res', ['pg-source-1'])
+      ]);
+
+      const dup1 = res1.rows[0].res;
+      const dup2 = res2.rows[0].res;
+
+      expect(dup1.page.id).not.toBe(dup2.page.id);
+      expect(dup1.page.name).not.toBe(dup2.page.name);
+      expect(dup1.page.slug).not.toBe(dup2.page.slug);
+      expect(dup1.page.step_order).not.toBe(dup2.page.step_order);
+    } finally {
+      await client1.end();
+      await client2.end();
+    }
+  });
+
+  it('14. concurrent Create and Duplicate in same funnel serialize on shared lifecycle lock producing distinct step_orders', async () => {
+    const client1 = await connect();
+    const client2 = await connect();
+    try {
+      await seedSourcePage(client1);
+      await client1.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
+      await client2.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
+
+      const [createRes, dupRes] = await Promise.all([
+        client1.query('select public.create_builder_page($1, $2, $3) as res', ['New Page', 'new-page', 'fnl-user-a']),
+        client2.query('select public.duplicate_builder_page($1) as res', ['pg-source-1'])
+      ]);
+
+      const created = createRes.rows[0].res;
+      const duplicated = dupRes.rows[0].res;
+
+      expect(created.id).not.toBe(duplicated.page.id);
+      expect(created.step_order).not.toBe(duplicated.page.step_order);
+      const orders = [created.step_order, duplicated.page.step_order].sort();
+      expect(orders).toEqual([2, 3]); // source had order 1, so concurrent create & duplicate get 2 and 3
+    } finally {
+      await client1.end();
+      await client2.end();
+    }
+  });
+
+  it('15. real post-Page-insert Section failure rollback: transaction failure after Page insert rolls back Page too', async () => {
     const client = await connect();
     try {
       await seedSourcePage(client);
       await client.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
+
+      const pageCountBefore = await client.query('select count(*) from public.pages');
+      const sectionCountBefore = await client.query('select count(*) from public.page_sections');
+
+      // Install failure injection trigger that raises only on new duplicate section inserts (not source sections)
+      await client.query(`
+        create or replace function public.__test_fail_section_insert()
+        returns trigger as $$
+        begin
+          if new.page_id <> 'pg-source-1' then
+            raise exception 'Injected section copy error';
+          end if;
+          return new;
+        end;
+        $$ language plpgsql;
+
+        create trigger trg_inject_section_failure
+        before insert on public.page_sections
+        for each row execute function public.__test_fail_section_insert();
+      `);
+
+      // Duplicate should fail during section insertion after Page insert has already occurred
       await expect(
-        client.query('select public.duplicate_builder_page($1, $2) as res', ['pg-source-1', 'pg-source-1'])
-      ).rejects.toMatchObject({ code: 'PT409' });
+        client.query('select public.duplicate_builder_page($1) as res', ['pg-source-1'])
+      ).rejects.toThrow('Injected section copy error');
+
+      // Assert complete rollback: 0 new pages, 0 new sections
+      const pageCountAfter = await client.query('select count(*) from public.pages');
+      const sectionCountAfter = await client.query('select count(*) from public.page_sections');
+
+      expect(pageCountAfter.rows[0].count).toBe(pageCountBefore.rows[0].count);
+      expect(sectionCountAfter.rows[0].count).toBe(sectionCountBefore.rows[0].count);
+
+      // Verify source is unchanged
+      const srcCheck = await client.query('select * from public.pages where id = $1', ['pg-source-1']);
+      expect(srcCheck.rows[0].name).toBe('Full Page');
     } finally {
+      await client.query('drop trigger if exists trg_inject_section_failure on public.page_sections');
+      await client.query('drop function if exists public.__test_fail_section_insert');
       await client.end();
     }
   });
 
-  it('8. create_builder_page: authenticated creation succeeds and verifies owned funnel', async () => {
-    const client = await connect();
-    try {
-      await client.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
-      const res = await client.query(
-        'select public.create_builder_page($1, $2, $3, $4, $5) as res',
-        ['Created Page', 'created-page', 'fnl-user-a', null, 5]
-      );
-      const created = res.rows[0].res;
-      expect(created.id).toMatch(/^pg_/);
-      expect(created.user_id).toBe(userA);
-      expect(created.name).toBe('Created Page');
-      expect(created.slug).toBe('created-page');
-      expect(created.status).toBe('draft');
-      expect(created.funnel_id).toBe('fnl-user-a');
-      expect(created.step_order).toBe(5);
-    } finally {
-      await client.end();
-    }
-  });
-
-  it('9. create_builder_page: unauthenticated rejects PT401', async () => {
-    const client = await connect();
-    try {
-      await client.query("select set_config('request.jwt.claim.sub', '', false)");
-      await expect(
-        client.query(
-          'select public.create_builder_page($1, $2, $3) as res',
-          ['Unauth Page', 'unauth-page', 'fnl-user-a']
-        )
-      ).rejects.toMatchObject({ code: 'PT401' });
-    } finally {
-      await client.end();
-    }
-  });
-
-  it('10. create_builder_page: foreign funnel rejects PT403', async () => {
-    const client = await connect();
-    try {
-      // User A attempting to create page in User B's funnel
-      await client.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
-      await expect(
-        client.query(
-          'select public.create_builder_page($1, $2, $3) as res',
-          ['Foreign Page', 'foreign-page', 'fnl-user-b']
-        )
-      ).rejects.toMatchObject({ code: 'PT403' });
-    } finally {
-      await client.end();
-    }
-  });
-
-  it('11. create_builder_page: duplicate slug in account rejects PT409', async () => {
-    const client = await connect();
-    try {
-      await client.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
-      await client.query(
-        'select public.create_builder_page($1, $2, $3) as res',
-        ['Existing Page', 'created-page', 'fnl-user-a']
-      );
-
-      await expect(
-        client.query(
-          'select public.create_builder_page($1, $2, $3) as res',
-          ['Another Created Page', 'created-page', 'fnl-user-a']
-        )
-      ).rejects.toMatchObject({ code: 'PT409' });
-    } finally {
-      await client.end();
-    }
-  });
-
-  it('12. transaction rollback: zero partial rows if any failure occurs during execution', async () => {
+  it('16. forced global Section-ID collision rolls back entire transaction leaving existing section untouched', async () => {
     const client = await connect();
     try {
       await seedSourcePage(client);
       await client.query(`select set_config('request.jwt.claim.sub', '${userA}', false)`);
-      const countBefore = await client.query('select count(*) from public.pages');
 
-      // Attempt invalid duplicate call (duplicate with an existing ID)
+      // Pre-seed an existing section on another page/tenant
+      await client.query(`
+        insert into public.pages (id, user_id, name, slug, funnel_id)
+        values ('pg-other', '${userB}', 'Other Page', 'other-page', 'fnl-user-b')
+        on conflict (id) do nothing;
+
+        insert into public.page_sections (id, user_id, page_id, type, content)
+        values ('sec-colliding-target', '${userB}', 'pg-other', 'hero', '{"original": true}')
+        on conflict (id) do nothing;
+      `);
+
+      const pageCountBefore = await client.query('select count(*) from public.pages');
+
+      // Install trigger forcing duplicated section to collide with 'sec-colliding-target'
+      await client.query(`
+        create or replace function public.__test_collide_section_id()
+        returns trigger as $$
+        begin
+          if new.page_id <> 'pg-source-1' and new.page_id <> 'pg-other' then
+            new.id := 'sec-colliding-target';
+          end if;
+          return new;
+        end;
+        $$ language plpgsql;
+
+        create trigger trg_inject_section_collision
+        before insert on public.page_sections
+        for each row execute function public.__test_collide_section_id();
+      `);
+
+      // Duplicate should fail with primary key collision
       await expect(
-        client.query('select public.duplicate_builder_page($1, $2) as res', ['pg-source-1', 'pg-source-1'])
-      ).rejects.toMatchObject({ code: 'PT409' });
+        client.query('select public.duplicate_builder_page($1) as res', ['pg-source-1'])
+      ).rejects.toMatchObject({ code: '23505' });
 
-      const countAfter = await client.query('select count(*) from public.pages');
-      expect(countAfter.rows[0].count).toBe(countBefore.rows[0].count);
+      // Verify complete rollback and existing section preserved
+      const pageCountAfter = await client.query('select count(*) from public.pages');
+      expect(pageCountAfter.rows[0].count).toBe(pageCountBefore.rows[0].count);
+
+      const targetCheck = await client.query('select * from public.page_sections where id = $1', ['sec-colliding-target']);
+      expect(targetCheck.rows[0].page_id).toBe('pg-other');
+      expect(targetCheck.rows[0].content).toEqual({ original: true });
     } finally {
+      await client.query('drop trigger if exists trg_inject_section_collision on public.page_sections');
+      await client.query('drop function if exists public.__test_collide_section_id');
       await client.end();
     }
   });

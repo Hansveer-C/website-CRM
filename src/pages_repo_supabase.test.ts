@@ -60,7 +60,7 @@ describe('PagesRepo.createPage local adapter', () => {
 });
 
 describe('PagesRepo.createPage Supabase adapter', () => {
-  it('calls create_builder_page RPC and returns the created draft page', async () => {
+  it('calls create_builder_page RPC with reduced surface and returns the created draft page', async () => {
     let rpcCalledWith: { functionName: string; payload: Record<string, unknown> } | undefined;
 
     const rpcResponse = {
@@ -86,7 +86,7 @@ describe('PagesRepo.createPage Supabase adapter', () => {
     } as unknown as SupabaseClient;
 
     const result = await PagesRepo.createPage({
-      id: 'remote-id', name: 'Remote', slug: 'remote', funnelId: 'funnel', stepOrder: 4
+      id: 'remote-id', name: 'Remote', slug: 'remote', funnelId: 'funnel'
     }, 'trusted-owner', client);
 
     expect(rpcCalledWith).toEqual({
@@ -95,12 +95,7 @@ describe('PagesRepo.createPage Supabase adapter', () => {
         p_id: 'remote-id',
         p_name: 'Remote',
         p_slug: 'remote',
-        p_funnel_id: 'funnel',
-        p_step_order: 4,
-        p_seo_title: null,
-        p_seo_description: null,
-        p_seo_keywords: [],
-        p_schema_markup: null
+        p_funnel_id: 'funnel'
       }
     });
     expect(result).toMatchObject({ success: true, data: { id: 'remote-id', user_id: 'trusted-owner', status: 'draft', funnel_id: 'funnel', step_order: 4 } });
@@ -137,7 +132,6 @@ describe('PagesRepo.updatePageSettings local adapter', () => {
 
 describe('PagesRepo.duplicatePage local adapter', () => {
   beforeEach(() => {
-    // REAL mock section structure has NO user_id property
     mockPageSections.push(
       { id: 'sec-a-1', page_id: 'settings-page-a', type: 'hero', content: { title: 'Hero A' }, styles: {}, order: 0 },
       { id: 'sec-a-2', page_id: 'settings-page-a', type: 'services', content: { title: 'Services A' }, styles: {}, order: 1 }
@@ -195,7 +189,7 @@ describe('PagesRepo.duplicatePage local adapter', () => {
         getItem: () => null,
         setItem: (key: string) => {
           if (key.startsWith('mock_sections_')) {
-            throw new Error('Disk full');
+            throw new Error('Disk full on sections');
           }
         },
         removeItem: () => {}
@@ -207,13 +201,43 @@ describe('PagesRepo.duplicatePage local adapter', () => {
 
     const result = await PagesRepo.duplicatePage({
       sourcePageId: 'settings-page-a',
-      newPageId: 'settings-page-rollback'
+      newPageId: 'settings-page-rollback-1'
     }, 'settings-owner');
 
     expect(result).toMatchObject({ success: false, code: 'PERSISTENCE_ERROR' });
     expect(mockPages).toHaveLength(pageCountBefore);
     expect(mockPageSections).toHaveLength(sectionCountBefore);
-    expect(mockPages.some(p => p.id === 'settings-page-rollback')).toBe(false);
+    expect(mockPages.some(p => p.id === 'settings-page-rollback-1')).toBe(false);
+  });
+
+  it('rolls back sections key from localStorage if page persistence fails after section write', async () => {
+    const removedKeys: string[] = [];
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: () => null,
+        setItem: (key: string) => {
+          if (key.startsWith('mock_pages_')) {
+            throw new Error('Disk full on pages');
+          }
+        },
+        removeItem: (key: string) => {
+          removedKeys.push(key);
+        }
+      }
+    });
+
+    const pageCountBefore = mockPages.length;
+    const sectionCountBefore = mockPageSections.length;
+
+    const result = await PagesRepo.duplicatePage({
+      sourcePageId: 'settings-page-a',
+      newPageId: 'settings-page-rollback-2'
+    }, 'settings-owner');
+
+    expect(result).toMatchObject({ success: false, code: 'PERSISTENCE_ERROR' });
+    expect(mockPages).toHaveLength(pageCountBefore);
+    expect(mockPageSections).toHaveLength(sectionCountBefore);
+    expect(removedKeys).toContain('mock_sections_settings-owner:settings-page-rollback-2');
   });
 });
 
