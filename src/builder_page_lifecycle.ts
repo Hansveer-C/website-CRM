@@ -14,14 +14,15 @@ export interface BuilderLifecyclePage extends Page {}
  * Operation inputs & outputs for canonical Page lifecycle.
  */
 export interface CreatePageInput {
-  id: string;
   name: string;
   slug: string;
   funnelId: string;
+  id?: string;
   stepOrder?: number;
   seo_title?: string;
   seo_description?: string;
   seo_keywords?: string[];
+  schema_markup?: string;
 }
 
 export interface CreatePageResult {
@@ -30,11 +31,7 @@ export interface CreatePageResult {
 
 export interface DuplicatePageInput {
   sourcePageId: string;
-  newPageId: string;
-  name?: string;
-  slug?: string;
-  destinationFunnelId?: string;
-  stepOrder?: number;
+  newPageId?: string;
 }
 
 export interface DuplicatePageResult {
@@ -97,8 +94,8 @@ export interface PageLifecycleContract {
 }
 
 /**
- * Generates a deterministic unique duplicate name given existing page names.
- * Example: "About" -> "About (Copy)", "About (Copy)" -> "About (Copy 2)".
+ * Generates a deterministic unique duplicate name reserving suffix capacity.
+ * Example: 120-char name -> truncated-base + " (Copy)"
  */
 export function generateDuplicatePageName(
   sourceName: string,
@@ -107,34 +104,39 @@ export function generateDuplicatePageName(
   const baseTrimmed = sourceName.trim() || 'Untitled page';
   const existingSet = new Set(existingNames.map(name => name.trim().toLowerCase()));
 
-  // Check if sourceName already ends in (Copy) or (Copy N)
   const copyMatch = baseTrimmed.match(/^(.*?)(?:\s+\(Copy(?:\s+(\d+))?\))?$/i);
   const isCopy = copyMatch && copyMatch[0] !== copyMatch[1];
   const rootName = copyMatch && copyMatch[1] ? copyMatch[1].trim() : baseTrimmed;
   const currentCopyNum = copyMatch && copyMatch[2] ? parseInt(copyMatch[2], 10) : (isCopy ? 1 : undefined);
 
   if (currentCopyNum === undefined) {
-    const firstCandidate = `${rootName} (Copy)`;
+    const suffix = ' (Copy)';
+    const maxBaseLen = BUILDER_PAGE_NAME_MAX_LENGTH - suffix.length;
+    const firstCandidate = `${rootName.slice(0, maxBaseLen)}${suffix}`;
     if (!existingSet.has(firstCandidate.toLowerCase())) {
-      return firstCandidate.slice(0, BUILDER_PAGE_NAME_MAX_LENGTH);
+      return firstCandidate;
     }
   }
 
   let index = (currentCopyNum ?? 1) + 1;
   while (index < 1000) {
-    const candidate = `${rootName} (Copy ${index})`;
+    const suffix = ` (Copy ${index})`;
+    const maxBaseLen = BUILDER_PAGE_NAME_MAX_LENGTH - suffix.length;
+    const candidate = `${rootName.slice(0, maxBaseLen)}${suffix}`;
     if (!existingSet.has(candidate.toLowerCase())) {
-      return candidate.slice(0, BUILDER_PAGE_NAME_MAX_LENGTH);
+      return candidate;
     }
     index += 1;
   }
 
-  return `${rootName} (Copy ${Date.now()})`.slice(0, BUILDER_PAGE_NAME_MAX_LENGTH);
+  const fallbackSuffix = ` (Copy ${Date.now()})`;
+  const maxBaseLen = BUILDER_PAGE_NAME_MAX_LENGTH - fallbackSuffix.length;
+  return `${rootName.slice(0, maxBaseLen)}${fallbackSuffix}`;
 }
 
 /**
- * Generates a deterministic unique duplicate slug given existing page slugs.
- * Example: "about" -> "about-copy", "about-copy" -> "about-copy-2".
+ * Generates a deterministic unique duplicate slug reserving suffix capacity.
+ * Example: 120-char slug -> truncated-base + "-copy"
  */
 export function generateDuplicatePageSlug(
   sourceSlug: string,
@@ -143,29 +145,34 @@ export function generateDuplicatePageSlug(
   const normalizedSource = normalizeBuilderPageSlug(sourceSlug) || 'page';
   const existingSet = new Set(existingSlugs.map(slug => normalizeBuilderPageSlug(slug)));
 
-  // Check if sourceSlug already ends in -copy or -copy-N
   const copyMatch = normalizedSource.match(/^(.*?)(?:-copy(?:-(\d+))?)?$/);
   const isCopy = copyMatch && copyMatch[0] !== copyMatch[1];
   const rootSlug = copyMatch && copyMatch[1] ? copyMatch[1] : normalizedSource;
   const currentCopyNum = copyMatch && copyMatch[2] ? parseInt(copyMatch[2], 10) : (isCopy ? 1 : undefined);
 
   if (currentCopyNum === undefined) {
-    const firstCandidate = `${rootSlug}-copy`;
+    const suffix = '-copy';
+    const maxBaseLen = BUILDER_PAGE_SLUG_MAX_LENGTH - suffix.length;
+    const firstCandidate = `${rootSlug.slice(0, maxBaseLen)}${suffix}`;
     if (!existingSet.has(firstCandidate)) {
-      return firstCandidate.slice(0, BUILDER_PAGE_SLUG_MAX_LENGTH);
+      return firstCandidate;
     }
   }
 
   let index = (currentCopyNum ?? 1) + 1;
   while (index < 1000) {
-    const candidate = `${rootSlug}-copy-${index}`;
+    const suffix = `-copy-${index}`;
+    const maxBaseLen = BUILDER_PAGE_SLUG_MAX_LENGTH - suffix.length;
+    const candidate = `${rootSlug.slice(0, maxBaseLen)}${suffix}`;
     if (!existingSet.has(candidate)) {
-      return candidate.slice(0, BUILDER_PAGE_SLUG_MAX_LENGTH);
+      return candidate;
     }
     index += 1;
   }
 
-  return `${rootSlug}-copy-${Date.now()}`.slice(0, BUILDER_PAGE_SLUG_MAX_LENGTH);
+  const fallbackSuffix = `-copy-${Date.now()}`;
+  const maxBaseLen = BUILDER_PAGE_SLUG_MAX_LENGTH - fallbackSuffix.length;
+  return `${rootSlug.slice(0, maxBaseLen)}${fallbackSuffix}`;
 }
 
 export interface CreateDuplicatePageDefaultsOptions {
@@ -195,10 +202,12 @@ export function createDuplicatePageDefaults(
   const existingNames = userPages.map(page => page.name);
   const existingSlugs = userPages.map(page => page.slug);
 
-  const name = (options.name?.trim() || generateDuplicatePageName(options.sourcePage.name, existingNames))
-    .slice(0, BUILDER_PAGE_NAME_MAX_LENGTH);
-  const slug = (options.slug ? normalizeBuilderPageSlug(options.slug) : generateDuplicatePageSlug(options.sourcePage.slug, existingSlugs))
-    .slice(0, BUILDER_PAGE_SLUG_MAX_LENGTH);
+  const name = options.name?.trim()
+    ? options.name.trim().slice(0, BUILDER_PAGE_NAME_MAX_LENGTH)
+    : generateDuplicatePageName(options.sourcePage.name, existingNames);
+  const slug = options.slug
+    ? normalizeBuilderPageSlug(options.slug).slice(0, BUILDER_PAGE_SLUG_MAX_LENGTH)
+    : generateDuplicatePageSlug(options.sourcePage.slug, existingSlugs);
 
   // Determine step order in target funnel
   const funnelPages = userPages.filter(page => page.funnel_id === destinationFunnelId);
@@ -223,17 +232,17 @@ export function createDuplicatePageDefaults(
     created_at: now(),
     ...(destinationFunnelId ? { funnel_id: destinationFunnelId } : {}),
     ...(typeof options.sourcePage.step_type === 'string' ? { step_type: options.sourcePage.step_type } : {}),
+    ...(typeof options.sourcePage.schema_markup === 'string' ? { schema_markup: options.sourcePage.schema_markup } : {}),
     ...(stepOrder !== undefined ? { step_order: stepOrder } : {})
   };
 
   // Sort source sections by order
   const sortedSourceSections = [...options.sourceSections].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
-  // Deep clone all sections with fresh collision-resistant IDs and normalized 0-based contiguous order
+  // Deep clone all sections with fresh collision-resistant IDs (NO funnel_id on PageSection!)
   const duplicatedSections: PageSection[] = sortedSourceSections.map((sourceSection, index) => ({
     id: generateSectionId(),
     page_id: options.newPageId,
-    ...(destinationFunnelId ? { funnel_id: destinationFunnelId } : {}),
     type: sourceSection.type,
     content: structuredClone(sourceSection.content ?? {}),
     styles: structuredClone(sourceSection.styles ?? {}),

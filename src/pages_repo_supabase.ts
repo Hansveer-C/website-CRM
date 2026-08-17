@@ -80,6 +80,7 @@ function mapCreatedPage(row: Record<string, unknown>): Page {
       ? row.seo_keywords.filter((value): value is string => typeof value === 'string')
       : [],
     created_at: typeof row.created_at === 'string' ? row.created_at : new Date().toISOString(),
+    ...(typeof row.schema_markup === 'string' ? { schema_markup: row.schema_markup } : {}),
     ...(typeof row.funnel_id === 'string' ? { funnel_id: row.funnel_id } : {}),
     ...(typeof row.step_type === 'string' ? { step_type: row.step_type } : {}),
     ...(typeof row.step_order === 'number' && Number.isFinite(row.step_order) ? { step_order: row.step_order } : {})
@@ -162,31 +163,38 @@ export const PagesRepo = {
     }
 
     try {
-      const existing = await db.from('pages').select('*').eq('id', input.id).limit(1).maybeSingle();
-      if (existing.error) return { success: false, error: 'UNAVAILABLE', code: existing.error.code };
-      if (existing.data) {
-        const page = mapCreatedPage(existing.data as Record<string, unknown>);
-        return matchesCreateRequest(page, input, userId)
-          ? { success: true, data: page }
-          : { success: false, error: 'ID_CONFLICT', code: 'ID_CONFLICT' };
-      }
-      const payload = {
-        id: input.id,
-        user_id: userId,
-        name: input.name,
-        slug: input.slug,
-        status: 'draft',
-        seo_title: null,
-        seo_description: null,
-        seo_keywords: [],
-        funnel_id: input.funnelId,
-        ...(input.stepOrder !== undefined ? { step_order: input.stepOrder } : {})
+      const rpcPayload = {
+        p_id: input.id || null,
+        p_name: input.name,
+        p_slug: input.slug,
+        p_funnel_id: input.funnelId,
+        p_step_order: input.stepOrder !== undefined ? input.stepOrder : null,
+        p_seo_title: null,
+        p_seo_description: null,
+        p_seo_keywords: [],
+        p_schema_markup: null
       };
-      const inserted = await db.from('pages').insert(payload).select('*').single();
-      if (inserted.error || !inserted.data) {
-        return { success: false, error: 'CREATE_FAILED', code: inserted.error?.code };
+
+      const rpcResult = await db.rpc('create_builder_page', rpcPayload);
+      if (rpcResult.error) {
+        const code = rpcResult.error.code;
+        const message = rpcResult.error.message;
+        if (code === 'PT401') return { success: false, error: 'UNAUTHORIZED', code: 'UNAUTHORIZED' };
+        if (code === 'PT403') return { success: false, error: 'FORBIDDEN', code: 'FORBIDDEN' };
+        if (code === 'PT409' || code === '23505' || message?.includes('already uses this URL') || message?.includes('Page ID already exists')) {
+          const isIdConflict = message?.includes('Page ID already exists');
+          return { success: false, error: isIdConflict ? 'ID_CONFLICT' : 'CONFLICT', code: isIdConflict ? 'ID_CONFLICT' : '23505' };
+        }
+        if (code === 'PT422') return { success: false, error: 'INVALID_INPUT', code: 'INVALID_INPUT' };
+        return { success: false, error: message ?? 'CREATE_FAILED', code: code ?? 'UNAVAILABLE' };
       }
-      return { success: true, data: mapCreatedPage(inserted.data as Record<string, unknown>) };
+
+      const data = rpcResult.data as Record<string, unknown>;
+      if (!data || !data.id) {
+        return { success: false, error: 'INVALID_RESPONSE', code: 'INVALID_RESPONSE' };
+      }
+
+      return { success: true, data: mapCreatedPage(data) };
     } catch {
       return { success: false, error: 'UNAVAILABLE', code: 'UNAVAILABLE' };
     }
@@ -218,68 +226,109 @@ export const PagesRepo = {
         mockPages[index] = previousPage;
         return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
       }
-      return { success: true, data: nextPage };
+      return { success: true, data: { ...nextPage } };
     }
 
-    return queryResult<Page>(db
-      .from('pages')
-      .update(patch)
-      .eq('id', id)
-      .eq('user_id', userId)
-      .select()
-      .single()
-    );
+    try {
+      const payload: Record<string, unknown> = {};
+      if (patch.name !== undefined) payload.name = patch.name;
+      if (patch.slug !== undefined) payload.slug = patch.slug;
+      if (patch.seo_title !== undefined) payload.seo_title = patch.seo_title || null;
+      if (patch.seo_description !== undefined) payload.seo_description = patch.seo_description || null;
+
+      const result = await db
+        .from('pages')
+        .update(payload)
+        .eq('id', id)
+        .eq('user_id', userId)
+        .select('*')
+        .single();
+
+      if (result.error) {
+        return {
+          success: false,
+          error: result.error.message,
+          code: result.error.code === '23505' ? '23505' : result.error.code
+        };
+      }
+
+      return {
+        success: true,
+        data: mapCreatedPage(result.data as Record<string, unknown>)
+      };
+    } catch {
+      return { success: false, error: 'UNAVAILABLE', code: 'UNAVAILABLE' };
+    }
   },
 
   /**
-   * Persists a page to Supabase.
+   * Persists a Page record to storage.
    */
   async persistPage(page: Page, user: User | string, client?: SupabaseClient): Promise<RepoResponse<Page>> {
     const userId = typeof user === 'string' ? user : user.id;
-    const payload = { ...page, user_id: userId };
     const db = client ?? await getServerSupabaseClient();
 
     if (!db) {
-      const idx = mockPages.findIndex(p => p.id === page.id);
-      if (idx !== -1) {
-        mockPages[idx] = payload;
-      } else {
-        mockPages.push(payload);
+      const idx = mockPages.findIndex(p => p.id === page.id && p.user_id === userId);
+      const existingSlug = mockPages.some(p => p.user_id === userId && p.slug === page.slug && p.id !== page.id);
+      if (existingSlug) {
+        return { success: false, error: 'CONFLICT', code: '23505' };
       }
-      return { success: true, data: payload };
+      if (idx !== -1) {
+        mockPages[idx] = { ...page, user_id: userId };
+      } else {
+        mockPages.push({ ...page, user_id: userId });
+      }
+      persistLocalPages(userId);
+      return { success: true, data: page };
     }
+
+    const payload = {
+      id: page.id,
+      user_id: userId,
+      name: page.name,
+      slug: page.slug,
+      status: page.status,
+      seo_title: page.seo_title || null,
+      seo_description: page.seo_description || null,
+      seo_keywords: page.seo_keywords || [],
+      schema_markup: page.schema_markup || null,
+      funnel_id: page.funnel_id,
+      step_type: page.step_type,
+      ...(page.step_order !== undefined ? { step_order: page.step_order } : {})
+    };
 
     return queryResult<Page>(db
       .from('pages')
       .upsert(payload)
-      .select()
+      .select('*')
       .single()
     );
   },
 
   /**
-   * Retrieves a single page by ID, scoped to the user.
+   * Fetches a single page by ID.
    */
-  async getPage(id: string, user: User | string, client?: SupabaseClient): Promise<RepoResponse<Page>> {
+  async getPage(id: string, user: User | string, client?: SupabaseClient): Promise<RepoResponse<Page | null>> {
     const userId = typeof user === 'string' ? user : user.id;
     const db = client ?? await getServerSupabaseClient();
 
     if (!db) {
       const page = mockPages.find(p => p.id === id && p.user_id === userId);
-      return page ? { success: true, data: page } : { success: false, error: 'NOT_FOUND' };
+      return { success: true, data: page ? { ...page } : null };
     }
 
-    return queryResult<Page>(db
+    return queryResult<Page | null>(db
       .from('pages')
       .select('*')
       .eq('id', id)
       .eq('user_id', userId)
-      .single()
+      .maybeSingle()
     );
   },
 
   /**
-   * Retrieves all pages for a user.
+   * Fetches all pages owned by the user.
    */
   async getAllPages(user: User | string, client?: SupabaseClient): Promise<RepoResponse<Page[]>> {
     const userId = typeof user === 'string' ? user : user.id;
@@ -338,18 +387,20 @@ export const PagesRepo = {
         return { success: false, error: 'SOURCE_PAGE_NOT_FOUND', code: 'NOT_FOUND' };
       }
 
-      if (mockPages.some(page => page.id === input.newPageId)) {
+      const newPageId = input.newPageId || crypto.randomUUID();
+      if (mockPages.some(page => page.id === newPageId)) {
         return { success: false, error: 'ID_CONFLICT', code: 'ID_CONFLICT' };
       }
 
-      const sourceSections = mockPageSections.filter(s => s.page_id === input.sourcePageId && (s as any).user_id === userId);
+      // Real mock sections do NOT have user_id; scoped strictly through source page_id
+      const sourceSections = mockPageSections.filter(s => s.page_id === input.sourcePageId);
 
       const defaults = createDuplicatePageDefaults({
         sourcePage,
         sourceSections,
         existingPages: mockPages.filter(p => p.user_id === userId),
         actingUserId: userId,
-        newPageId: input.newPageId,
+        newPageId,
         name: input.name,
         slug: input.slug,
         destinationFunnelId: input.destinationFunnelId,
@@ -360,27 +411,34 @@ export const PagesRepo = {
         return { success: false, error: 'CONFLICT', code: '23505' };
       }
 
+      const previousPages = [...mockPages];
+      const previousSections = [...mockPageSections];
+
       mockPages.push(defaults.page);
-      const insertedSections = defaults.sections.map(s => ({ ...s, user_id: userId }));
-      mockPageSections.push(...(insertedSections as any));
+      mockPageSections.push(...defaults.sections);
 
-      if (!persistLocalPages(userId)) {
-        const pageIdx = mockPages.findIndex(p => p.id === defaults.page.id);
-        if (pageIdx >= 0) mockPages.splice(pageIdx, 1);
-        for (const s of defaults.sections) {
-          const sIdx = mockPageSections.findIndex(existing => existing.id === s.id);
-          if (sIdx >= 0) mockPageSections.splice(sIdx, 1);
-        }
-        return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
-      }
-
-      if (typeof window !== 'undefined' && window.localStorage) {
+      let persistOk = persistLocalPages(userId);
+      if (persistOk && typeof window !== 'undefined' && window.localStorage) {
         try {
           const storageKey = `mock_sections_${userId}:${defaults.page.id}`;
           window.localStorage.setItem(storageKey, JSON.stringify(defaults.sections));
         } catch {
-          // ignore
+          persistOk = false;
         }
+      }
+
+      if (!persistOk) {
+        mockPages.splice(0, mockPages.length, ...previousPages);
+        mockPageSections.splice(0, mockPageSections.length, ...previousSections);
+        persistLocalPages(userId);
+        if (typeof window !== 'undefined' && window.localStorage) {
+          try {
+            window.localStorage.removeItem(`mock_sections_${userId}:${defaults.page.id}`);
+          } catch {
+            // ignore
+          }
+        }
+        return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
       }
 
       return {
@@ -395,10 +453,7 @@ export const PagesRepo = {
     try {
       const rpcPayload = {
         p_page_id: input.sourcePageId,
-        p_new_page_id: input.newPageId || null,
-        p_name: input.name || null,
-        p_slug: input.slug || null,
-        p_destination_funnel_id: input.destinationFunnelId || null
+        p_new_page_id: input.newPageId || null
       };
 
       const rpcResult = await db.rpc('duplicate_builder_page', rpcPayload);
@@ -414,7 +469,7 @@ export const PagesRepo = {
         if (code === 'PT403') {
           return { success: false, error: 'FORBIDDEN', code: 'FORBIDDEN' };
         }
-        if (code === 'PT409' || code === '23505' || message?.includes('already exists')) {
+        if (code === 'PT409' || code === '23505' || message?.includes('already exists') || message?.includes('already uses this URL')) {
           return { success: false, error: 'CONFLICT', code: 'CONFLICT' };
         }
         return { success: false, error: message ?? 'DUPLICATE_FAILED', code: code ?? 'UNAVAILABLE' };
@@ -430,7 +485,6 @@ export const PagesRepo = {
         ? data.sections.map((row: any) => ({
             id: String(row.id),
             page_id: String(row.page_id),
-            ...(row.funnel_id ? { funnel_id: String(row.funnel_id) } : {}),
             type: String(row.type),
             content: typeof row.content === 'object' && row.content !== null ? row.content : {},
             styles: typeof row.styles === 'object' && row.styles !== null ? row.styles : {},

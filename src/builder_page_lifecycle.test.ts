@@ -26,6 +26,17 @@ describe('generateDuplicatePageName', () => {
   it('handles blank or untitled source name', () => {
     expect(generateDuplicatePageName('', [])).toBe('Untitled page (Copy)');
   });
+
+  it('reserves suffix capacity for max-length 120-char name', () => {
+    const longName = 'A'.repeat(120);
+    const copy1 = generateDuplicatePageName(longName, []);
+    expect(copy1.length).toBe(120);
+    expect(copy1).toBe(`${'A'.repeat(113)} (Copy)`);
+
+    const copy2 = generateDuplicatePageName(longName, [copy1]);
+    expect(copy2.length).toBe(120);
+    expect(copy2).toBe(`${'A'.repeat(111)} (Copy 2)`);
+  });
 });
 
 describe('generateDuplicatePageSlug', () => {
@@ -47,6 +58,17 @@ describe('generateDuplicatePageSlug', () => {
   it('normalizes uppercase or untrimmed slugs', () => {
     expect(generateDuplicatePageSlug('/SERVICES///', [])).toBe('services-copy');
   });
+
+  it('reserves suffix capacity for max-length 120-char slug', () => {
+    const longSlug = 'b'.repeat(120);
+    const copy1 = generateDuplicatePageSlug(longSlug, []);
+    expect(copy1.length).toBe(120);
+    expect(copy1).toBe(`${'b'.repeat(115)}-copy`);
+
+    const copy2 = generateDuplicatePageSlug(longSlug, [copy1]);
+    expect(copy2.length).toBe(120);
+    expect(copy2).toBe(`${'b'.repeat(113)}-copy-2`);
+  });
 });
 
 describe('createDuplicatePageDefaults', () => {
@@ -59,6 +81,7 @@ describe('createDuplicatePageDefaults', () => {
     seo_title: 'Driveway Cleaning in Seattle',
     seo_description: 'Top rated driveway washing.',
     seo_keywords: ['driveway', 'pressure washing'],
+    schema_markup: '<script type="application/ld+json">{}</script>',
     created_at: '2026-01-01T00:00:00.000Z',
     funnel_id: 'funnel-1',
     step_type: 'landing',
@@ -69,7 +92,6 @@ describe('createDuplicatePageDefaults', () => {
     {
       id: 'sec-hero',
       page_id: 'source-page-id',
-      funnel_id: 'funnel-1',
       type: 'hero',
       content: { heading: 'Clean Driveways', sub: 'Best in town' },
       styles: { background: '#ffffff', visible: true },
@@ -79,7 +101,6 @@ describe('createDuplicatePageDefaults', () => {
     {
       id: 'sec-services',
       page_id: 'source-page-id',
-      funnel_id: 'funnel-1',
       type: 'services', // legacy type
       content: { items: ['Wash', 'Seal'] },
       styles: { padding: '20px' },
@@ -87,7 +108,7 @@ describe('createDuplicatePageDefaults', () => {
     }
   ];
 
-  it('duplicates page with fresh ID, draft status, and preserved metadata', () => {
+  it('duplicates page with fresh ID, draft status, and preserved metadata including schema_markup', () => {
     const result = createDuplicatePageDefaults({
       sourcePage,
       sourceSections,
@@ -106,6 +127,7 @@ describe('createDuplicatePageDefaults', () => {
       seo_title: 'Driveway Cleaning in Seattle',
       seo_description: 'Top rated driveway washing.',
       seo_keywords: ['driveway', 'pressure washing'],
+      schema_markup: '<script type="application/ld+json">{}</script>',
       created_at: '2026-08-16T12:00:00.000Z',
       funnel_id: 'funnel-1',
       step_type: 'landing',
@@ -113,7 +135,7 @@ describe('createDuplicatePageDefaults', () => {
     });
   });
 
-  it('deep clones every section with new unique IDs and preserves relative order/content/styles', () => {
+  it('deep clones every section with new unique IDs and preserves relative order/content/styles without funnel_id', () => {
     let generatedIdCount = 0;
     const generateSectionId = () => `new-sec-${++generatedIdCount}`;
 
@@ -131,7 +153,6 @@ describe('createDuplicatePageDefaults', () => {
     expect(result.sections[0]).toEqual({
       id: 'new-sec-1',
       page_id: 'new-page-uuid',
-      funnel_id: 'funnel-1',
       type: 'hero',
       content: { heading: 'Clean Driveways', sub: 'Best in town' },
       styles: { background: '#ffffff', visible: true },
@@ -142,7 +163,6 @@ describe('createDuplicatePageDefaults', () => {
     expect(result.sections[1]).toEqual({
       id: 'new-sec-2',
       page_id: 'new-page-uuid',
-      funnel_id: 'funnel-1',
       type: 'services',
       content: { items: ['Wash', 'Seal'] },
       styles: { padding: '20px' },

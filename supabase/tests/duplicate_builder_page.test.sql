@@ -1,4 +1,4 @@
--- Disposable PostgreSQL test suite for public.duplicate_builder_page RPC.
+-- Disposable PostgreSQL test suite for public.duplicate_builder_page and public.create_builder_page RPCs.
 -- Verifies transaction atomicity, ownership enforcement, duplicate naming/slugging, and section cloning.
 
 begin;
@@ -19,7 +19,7 @@ on conflict (id) do nothing;
 
 -- Create source test page with sections
 insert into public.pages (
-  id, user_id, name, slug, status, seo_title, seo_description, seo_keywords, funnel_id, step_order
+  id, user_id, name, slug, status, seo_title, seo_description, seo_keywords, schema_markup, funnel_id, step_order
 ) values (
   'pg-src-1',
   '00000000-0000-0000-0000-000000000001',
@@ -29,17 +29,19 @@ insert into public.pages (
   'Driveway Cleaning SEO',
   'Description',
   array['driveway', 'wash'],
+  '<script>ld+json</script>',
   'fnl-user1',
   1
 );
 
+-- Note: page_sections has NO funnel_id
 insert into public.page_sections (
-  id, user_id, page_id, funnel_id, type, content, styles, order_index
+  id, user_id, page_id, type, content, styles, order_index
 ) values
-  ('sec-src-1', '00000000-0000-0000-0000-000000000001', 'pg-src-1', 'fnl-user1', 'hero', '{"title": "Hero"}'::jsonb, '{"bg": "blue"}'::jsonb, 0),
-  ('sec-src-2', '00000000-0000-0000-0000-000000000001', 'pg-src-1', 'fnl-user1', 'services', '{"items": [1, 2]}'::jsonb, '{}'::jsonb, 1);
+  ('sec-src-1', '00000000-0000-0000-0000-000000000001', 'pg-src-1', 'hero', '{"title": "Hero"}'::jsonb, '{"bg": "blue"}'::jsonb, 0),
+  ('sec-src-2', '00000000-0000-0000-0000-000000000001', 'pg-src-1', 'services', '{"items": [1, 2]}'::jsonb, '{}'::jsonb, 1);
 
--- 1. Test unauthenticated call rejects
+-- 1. Test unauthenticated duplicate call rejects
 set local role anon;
 do $$
 begin
@@ -49,7 +51,7 @@ exception when sqlstate 'PT401' then
   -- Expected
 end $$;
 
--- 2. Test cross-tenant call rejects without leaking existence
+-- 2. Test cross-tenant duplicate call rejects without leaking existence
 set local role authenticated;
 perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
 do $$
@@ -87,6 +89,10 @@ begin
     raise exception 'Duplicated page status must be draft: %', v_dup_page.status;
   end if;
 
+  if v_dup_page.schema_markup <> '<script>ld+json</script>' then
+    raise exception 'Duplicated page schema_markup not preserved';
+  end if;
+
   if v_dup_page.step_order <> 2 then
     raise exception 'Duplicated page step_order must be 2: %', v_dup_page.step_order;
   end if;
@@ -119,6 +125,18 @@ begin
   if v_dup_page2.slug <> 'driveway-cleaning-copy-2' then
     raise exception 'Duplicated page slug mismatch: %', v_dup_page2.slug;
   end if;
+end $$;
+
+-- 6. Test create_builder_page
+select public.create_builder_page('New Test Page', 'new-test-page', 'fnl-user1') as create_result;
+
+-- 7. Test create_builder_page foreign funnel rejects
+do $$
+begin
+  perform public.create_builder_page('Foreign Funnel Page', 'foreign-page', 'fnl-user2');
+  raise exception 'Expected foreign funnel create to fail';
+exception when sqlstate 'PT403' then
+  -- Expected
 end $$;
 
 rollback;
