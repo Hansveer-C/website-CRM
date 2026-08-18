@@ -100,6 +100,33 @@ export const PagesRepo = {
     if (remoteConfigured || typeof window === 'undefined' || !window.localStorage) return;
     const userId = typeof user === 'string' ? user : user.id;
     try {
+      // Check recovery journal for incomplete local delete operations
+      const journalKey = `mock_journal_${userId}`;
+      const journalRaw = window.localStorage.getItem(journalKey);
+      if (journalRaw) {
+        try {
+          const journal = JSON.parse(journalRaw) as { pageId?: string; priorPagesRaw?: string | null; priorSectionRaw?: string | null };
+          if (journal && typeof journal.pageId === 'string') {
+            const pagesKey = localPagesStorageKey(userId);
+            const sectionKey = `mock_sections_${userId}:${journal.pageId}`;
+            if (journal.priorPagesRaw !== undefined && journal.priorPagesRaw !== null) {
+              window.localStorage.setItem(pagesKey, journal.priorPagesRaw);
+            } else {
+              window.localStorage.removeItem(pagesKey);
+            }
+            if (journal.priorSectionRaw !== undefined && journal.priorSectionRaw !== null) {
+              window.localStorage.setItem(sectionKey, journal.priorSectionRaw);
+            } else {
+              window.localStorage.removeItem(sectionKey);
+            }
+          }
+        } catch {
+          // ignore
+        } finally {
+          window.localStorage.removeItem(journalKey);
+        }
+      }
+
       const raw = window.localStorage.getItem(localPagesStorageKey(userId));
       if (!raw) return;
       const pages = JSON.parse(raw) as unknown;
@@ -325,6 +352,7 @@ export const PagesRepo = {
       // Durable local storage backup
       const pagesKey = localPagesStorageKey(userId);
       const sectionKey = `mock_sections_${userId}:${id}`;
+      const journalKey = `mock_journal_${userId}`;
       let priorPagesRaw: string | null = null;
       let priorSectionRaw: string | null = null;
       let hasLocalStorage = typeof window !== 'undefined' && Boolean(window.localStorage);
@@ -334,7 +362,21 @@ export const PagesRepo = {
           priorPagesRaw = window.localStorage.getItem(pagesKey);
           priorSectionRaw = window.localStorage.getItem(sectionKey);
         } catch {
-          // localStorage inaccessible
+          // Backup read failed! Zero memory mutation, zero storage mutation.
+          return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
+        }
+
+        try {
+          // Write recovery journal BEFORE destructive writes
+          window.localStorage.setItem(journalKey, JSON.stringify({
+            pageId: id,
+            priorPagesRaw,
+            priorSectionRaw,
+            timestamp: Date.now()
+          }));
+        } catch {
+          // Journal write failed! Zero memory mutation, zero storage mutation.
+          return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
         }
       }
 
@@ -372,12 +414,21 @@ export const PagesRepo = {
               window.localStorage.removeItem(sectionKey);
             }
           } catch {
-            // rollback best-effort
+            // rollback best-effort (journal will restore on fresh reload/hydration)
           }
         }
         mockPages.splice(0, mockPages.length, ...previousPages);
         mockPageSections.splice(0, mockPageSections.length, ...previousSections);
         return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
+      }
+
+      // Clear recovery journal on committed success
+      if (hasLocalStorage) {
+        try {
+          window.localStorage.removeItem(journalKey);
+        } catch {
+          // ignore
+        }
       }
 
       return { success: true, data: { id, funnel_id: targetPage.funnel_id, deleted: true } };

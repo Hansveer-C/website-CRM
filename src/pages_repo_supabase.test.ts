@@ -415,6 +415,75 @@ describe('PagesRepo.deletePage durability and transport error handling', () => {
     expect(storage.has(sectionKeyB)).toBe(true);
   });
 
+  it('zero memory mutation when backup read throws', async () => {
+    const userId = 'settings-owner';
+    const pagesKey = `mock_pages_${userId}`;
+    const sectionKey = `mock_sections_${userId}:settings-page-a`;
+
+    const storage = new Map<string, string>();
+    storage.set(pagesKey, JSON.stringify(mockPages.filter(p => p.user_id === userId)));
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => {
+          if (k === pagesKey) throw new Error('BackupReadFailed');
+          return storage.get(k) ?? null;
+        },
+        setItem: (k: string, v: string) => storage.set(k, v),
+        removeItem: (k: string) => storage.delete(k)
+      }
+    });
+
+    const beforePageCount = mockPages.length;
+    const result = await PagesRepo.deletePage('settings-page-a', userId);
+
+    expect(result).toMatchObject({ success: false, code: 'PERSISTENCE_ERROR' });
+    expect(mockPages.length).toBe(beforePageCount);
+    expect(mockPages.some(p => p.id === 'settings-page-a')).toBe(true);
+  });
+
+  it('restores original Page and Sections on fresh reload/hydration if rollback write fails but journal was created', async () => {
+    const userId = 'settings-owner';
+    const pagesKey = `mock_pages_${userId}`;
+    const sectionKey = `mock_sections_${userId}:settings-page-a`;
+    const journalKey = `mock_journal_${userId}`;
+
+    const storage = new Map<string, string>();
+    const originalOwnedPages = mockPages.filter(p => p.user_id === userId);
+    storage.set(pagesKey, JSON.stringify(originalOwnedPages));
+    storage.set(sectionKey, JSON.stringify([{ id: 'sec-a-1', page_id: 'settings-page-a' }]));
+
+    let failRollbackWrites = false;
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => storage.get(k) ?? null,
+        setItem: (k: string, v: string) => {
+          if (failRollbackWrites && k === pagesKey) throw new Error('DiskFull');
+          storage.set(k, v);
+        },
+        removeItem: (k: string) => {
+          if (k === sectionKey) {
+            failRollbackWrites = true; // Trigger failure during Section delete
+            throw new Error('RemoveFailed');
+          }
+          storage.delete(k);
+        }
+      }
+    });
+
+    const result = await PagesRepo.deletePage('settings-page-a', userId);
+    expect(result).toMatchObject({ success: false, code: 'PERSISTENCE_ERROR' });
+
+    // Simulate fresh application startup / reload: hydrateLocalPages reads journal & restores original state
+    failRollbackWrites = false;
+    mockPages.splice(0, mockPages.length); // clear memory to simulate cold restart
+    PagesRepo.hydrateLocalPages(userId);
+
+    expect(mockPages.some(p => p.id === 'settings-page-a')).toBe(true);
+    expect(storage.get(journalKey)).toBeUndefined(); // Journal cleared after recovery
+  });
+
   it('returns AMBIGUOUS when remote Supabase transport throws uncaught exception', async () => {
     const client = {
       rpc: () => Promise.reject(new Error('Network error: Failed to fetch'))

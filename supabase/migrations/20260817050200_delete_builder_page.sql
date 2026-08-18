@@ -1,5 +1,5 @@
 -- Transactionally atomic Page Deletion RPC for the Builder.
--- Guarantees single-transaction atomicity: page graph deletion, section cascade, data-retention checks, post-lock destination revalidation, and concurrency safety.
+-- Guarantees single-transaction atomicity: page row FOR UPDATE lock, section cascade, data-retention checks, post-lock destination revalidation, and concurrency safety.
 
 create or replace function public.delete_builder_page(
   p_page_id text
@@ -64,10 +64,11 @@ begin
     );
   end if;
 
-  -- 6. POST-LOCK REVALIDATION: Re-load Page and verify existence & ownership
+  -- 6. POST-LOCK REVALIDATION & ROW LOCKING: Re-load Page with FOR UPDATE to lock the row against concurrent retention/publication queries
   select * into v_target_page
   from public.pages
-  where id = p_page_id;
+  where id = p_page_id
+  for update;
 
   if not found or v_target_page.user_id <> v_user_id then
     raise sqlstate 'PT404' using message = 'Page not found';
@@ -157,4 +158,4 @@ revoke all on function public.delete_builder_page(text) from public, anon;
 grant execute on function public.delete_builder_page(text) to authenticated;
 
 comment on function public.delete_builder_page(text) is
-  'Transactionally deletes a builder page for the authenticated owner, protecting publication history, lead audit history, destination stability, and minimum page count.';
+  'Transactionally deletes a builder page for the authenticated owner, protecting publication history, lead audit history, destination stability, and minimum page count using row FOR UPDATE locking.';
