@@ -98,6 +98,17 @@ describeDatabase('set_builder_homepage Option B RPC Integration Tests (PostgreSQ
           created_at timestamptz not null default now()
         );
 
+        create table if not exists public.builder_published_revisions (
+          id uuid primary key default gen_random_uuid(),
+          website_id uuid not null references public.websites(id) on delete cascade,
+          page_id text not null references public.pages(id) on delete cascade,
+          user_id text not null,
+          schema_version integer not null default 1,
+          document_snapshot jsonb not null default '{}'::jsonb,
+          published_at timestamptz not null default now(),
+          unique (website_id, page_id, id)
+        );
+
         create table if not exists public.builder_publication_targets (
           website_id uuid not null references public.websites(id) on delete cascade,
           page_id text not null references public.pages(id) on delete cascade,
@@ -162,9 +173,15 @@ describeDatabase('set_builder_homepage Option B RPC Integration Tests (PostgreSQ
       );
       const websiteId = websiteRes.rows[0].id;
 
-      // Add published revision targets
+      // Add published revisions and targets
       const rev1 = randomUUID();
       const rev2 = randomUUID();
+      await client.query(
+        `insert into public.builder_published_revisions (id, website_id, page_id, user_id, document_snapshot)
+         values ($1, $2, $3, $4, '{}'::jsonb), ($5, $2, $6, $4, '{}'::jsonb)
+         on conflict do nothing`,
+        [rev1, websiteId, page1, userId, rev2, page2]
+      );
       await client.query(
         `insert into public.builder_publication_targets (website_id, page_id, published_revision_id)
          values ($1, $2, $3), ($1, $4, $5)`,
