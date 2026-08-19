@@ -26,6 +26,7 @@ create index if not exists idx_builder_route_drafts_path on public.builder_route
 alter table public.builder_route_drafts enable row level security;
 
 -- RLS Policies for builder_route_drafts
+drop policy if exists "Users can select route drafts of their websites" on public.builder_route_drafts;
 create policy "Users can select route drafts of their websites"
   on public.builder_route_drafts
   for select
@@ -37,6 +38,7 @@ create policy "Users can select route drafts of their websites"
     )
   );
 
+drop policy if exists "Users can insert route drafts of their websites" on public.builder_route_drafts;
 create policy "Users can insert route drafts of their websites"
   on public.builder_route_drafts
   for insert
@@ -48,6 +50,7 @@ create policy "Users can insert route drafts of their websites"
     )
   );
 
+drop policy if exists "Users can update route drafts of their websites" on public.builder_route_drafts;
 create policy "Users can update route drafts of their websites"
   on public.builder_route_drafts
   for update
@@ -59,6 +62,7 @@ create policy "Users can update route drafts of their websites"
     )
   );
 
+drop policy if exists "Users can delete route drafts of their websites" on public.builder_route_drafts;
 create policy "Users can delete route drafts of their websites"
   on public.builder_route_drafts
   for delete
