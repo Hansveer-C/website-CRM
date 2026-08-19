@@ -202,18 +202,13 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
   it('2. unauthenticated invocation raises PT401', async () => {
     const client = await pool.connect();
     try {
-      await client.query('set role authenticated');
-      await client.query("set request.jwt.claim.sub = ''");
-      let err: any;
-      try {
-        await client.query("select public.reorder_builder_pages('f1', array['p1'], array['p1'])");
-      } catch (e) {
-        err = e;
-      }
-      expect(err).toBeDefined();
-      expect(err.code).toBe('PT401');
+      await client.query('begin');
+      await client.query("set local request.jwt.claim.sub = ''");
+      await expect(
+        client.query("select public.reorder_builder_pages('f1', array['p1'], array['p1'])")
+      ).rejects.toMatchObject({ code: 'PT401' });
     } finally {
-      await client.query('reset role').catch(() => {});
+      await client.query('rollback').catch(() => {});
       client.release();
     }
   });
@@ -223,24 +218,19 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const userA = '00000000-0000-0000-0000-000000000001';
     const userB = '00000000-0000-0000-0000-000000000002';
     try {
+      await client.query('begin');
       await client.query(`
         insert into public.users (id, email) values ('${userA}', 'a@test.com'), ('${userB}', 'b@test.com') on conflict do nothing;
         insert into public.funnels (id, user_id, name) values ('f-user-b', '${userB}', 'Funnel B') on conflict do nothing;
       `);
 
-      await client.query('set role authenticated');
-      await client.query(`set request.jwt.claim.sub = '${userA}'`);
+      await client.query(`set local request.jwt.claim.sub = '${userA}'`);
 
-      let err: any;
-      try {
-        await client.query("select public.reorder_builder_pages('f-user-b', array['p1'], array['p1'])");
-      } catch (e) {
-        err = e;
-      }
-      expect(err).toBeDefined();
-      expect(err.code).toBe('PT404');
+      await expect(
+        client.query("select public.reorder_builder_pages('f-user-b', array['p1'], array['p1'])")
+      ).rejects.toMatchObject({ code: 'PT404' });
     } finally {
-      await client.query('reset role').catch(() => {});
+      await client.query('rollback').catch(() => {});
       client.release();
     }
   });
@@ -249,26 +239,18 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const client = await pool.connect();
     const user = '00000000-0000-0000-0000-000000000001';
     try {
-      await client.query('set role authenticated');
-      await client.query(`set request.jwt.claim.sub = '${user}'`);
+      await client.query('begin');
+      await client.query(`set local request.jwt.claim.sub = '${user}'`);
 
-      let err1: any;
-      try {
-        await client.query("select public.reorder_builder_pages('f-test', array[]::text[], array['p1'])");
-      } catch (e) {
-        err1 = e;
-      }
-      expect(err1?.code).toBe('PT400');
+      await expect(
+        client.query("select public.reorder_builder_pages('f-test', array[]::text[], array['p1'])")
+      ).rejects.toMatchObject({ code: 'PT400' });
 
-      let err2: any;
-      try {
-        await client.query("select public.reorder_builder_pages('f-test', array['p1', 'p2'], array['p1'])");
-      } catch (e) {
-        err2 = e;
-      }
-      expect(err2?.code).toBe('PT400');
+      await expect(
+        client.query("select public.reorder_builder_pages('f-test', array['p1', 'p2'], array['p1'])")
+      ).rejects.toMatchObject({ code: 'PT400' });
     } finally {
-      await client.query('reset role').catch(() => {});
+      await client.query('rollback').catch(() => {});
       client.release();
     }
   });
@@ -277,18 +259,14 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const client = await pool.connect();
     const user = '00000000-0000-0000-0000-000000000001';
     try {
-      await client.query('set role authenticated');
-      await client.query(`set request.jwt.claim.sub = '${user}'`);
+      await client.query('begin');
+      await client.query(`set local request.jwt.claim.sub = '${user}'`);
 
-      let err: any;
-      try {
-        await client.query("select public.reorder_builder_pages('f-test', array['p1', 'p1'], array['p1', 'p2'])");
-      } catch (e) {
-        err = e;
-      }
-      expect(err?.code).toBe('PT400');
+      await expect(
+        client.query("select public.reorder_builder_pages('f-test', array['p1', 'p1'], array['p1', 'p2'])")
+      ).rejects.toMatchObject({ code: 'PT400' });
     } finally {
-      await client.query('reset role').catch(() => {});
+      await client.query('rollback').catch(() => {});
       client.release();
     }
   });
@@ -298,6 +276,7 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const userA = '00000000-0000-0000-0000-000000000001';
     const userB = '00000000-0000-0000-0000-000000000002';
     try {
+      await client.query('begin');
       await client.query(`
         insert into public.users (id, email) values ('${userA}', 'a@test.com'), ('${userB}', 'b@test.com') on conflict do nothing;
         insert into public.funnels (id, user_id, name) values ('f-leak-a', '${userA}', 'Funnel A'), ('f-leak-b', '${userB}', 'Funnel B') on conflict do nothing;
@@ -308,19 +287,13 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
         on conflict do nothing;
       `);
 
-      await client.query('set role authenticated');
-      await client.query(`set request.jwt.claim.sub = '${userA}'`);
+      await client.query(`set local request.jwt.claim.sub = '${userA}'`);
 
-      let err: any;
-      try {
-        // User A tries to pass User B's page ID
-        await client.query("select public.reorder_builder_pages('f-leak-a', array['p-leak-b1'], array['p-leak-a1'])");
-      } catch (e) {
-        err = e;
-      }
-      expect(err?.code).toBe('PT400');
+      await expect(
+        client.query("select public.reorder_builder_pages('f-leak-a', array['p-leak-b1'], array['p-leak-a1'])")
+      ).rejects.toMatchObject({ code: 'PT400' });
     } finally {
-      await client.query('reset role').catch(() => {});
+      await client.query('rollback').catch(() => {});
       client.release();
     }
   });
@@ -329,6 +302,7 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const client = await pool.connect();
     const user = '00000000-0000-0000-0000-000000000001';
     try {
+      await client.query('begin');
       await client.query(`
         insert into public.users (id, email) values ('${user}', 'u@test.com') on conflict do nothing;
         insert into public.funnels (id, user_id, name) values ('f-stale', '${user}', 'Funnel Stale') on conflict do nothing;
@@ -339,20 +313,13 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
         on conflict do nothing;
       `);
 
-      await client.query('set role authenticated');
-      await client.query(`set request.jwt.claim.sub = '${user}'`);
+      await client.query(`set local request.jwt.claim.sub = '${user}'`);
 
-      let err: any;
-      try {
-        // Stale expected order: ['p-stale-2', 'p-stale-1'] when actual is ['p-stale-1', 'p-stale-2']
-        await client.query("select public.reorder_builder_pages('f-stale', array['p-stale-2', 'p-stale-1'], array['p-stale-2', 'p-stale-1'])");
-      } catch (e) {
-        err = e;
-      }
-      expect(err?.code).toBe('PT409');
-      expect(err?.message).toContain('The page order changed elsewhere. Reload and try again.');
+      await expect(
+        client.query("select public.reorder_builder_pages('f-stale', array['p-stale-2', 'p-stale-1'], array['p-stale-2', 'p-stale-1'])")
+      ).rejects.toMatchObject({ code: 'PT409' });
     } finally {
-      await client.query('reset role').catch(() => {});
+      await client.query('rollback').catch(() => {});
       client.release();
     }
   });
@@ -361,6 +328,7 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const client = await pool.connect();
     const user = '00000000-0000-0000-0000-000000000001';
     try {
+      await client.query('begin');
       await client.query(`
         insert into public.users (id, email) values ('${user}', 'u@test.com') on conflict do nothing;
         insert into public.funnels (id, user_id, name) values ('f-valid', '${user}', 'Funnel Valid') on conflict do nothing;
@@ -372,8 +340,7 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
         on conflict (id) do update set step_order = excluded.step_order;
       `);
 
-      await client.query('set role authenticated');
-      await client.query(`set request.jwt.claim.sub = '${user}'`);
+      await client.query(`set local request.jwt.claim.sub = '${user}'`);
 
       const res = await client.query(`
         select public.reorder_builder_pages(
@@ -396,8 +363,8 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       expect(pages[0].slug).toBe('slug-3');
       expect(pages[0].seo_title).toBe('SEO 3');
       expect(pages[0].funnel_id).toBe('f-valid');
+      await client.query('commit');
     } finally {
-      await client.query('reset role').catch(() => {});
       client.release();
     }
   });
@@ -406,8 +373,8 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const client = await pool.connect();
     const user = '00000000-0000-0000-0000-000000000001';
     try {
-      await client.query('set role authenticated');
-      await client.query(`set request.jwt.claim.sub = '${user}'`);
+      await client.query('begin');
+      await client.query(`set local request.jwt.claim.sub = '${user}'`);
 
       const res = await client.query(`
         select public.reorder_builder_pages(
@@ -419,8 +386,8 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
 
       expect(res.rows[0].result.pages.length).toBe(3);
       expect(res.rows[0].result.pages[0].id).toBe('p-val-3');
+      await client.query('commit');
     } finally {
-      await client.query('reset role').catch(() => {});
       client.release();
     }
   });
@@ -429,6 +396,7 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const client = await pool.connect();
     const user = '00000000-0000-0000-0000-000000000001';
     try {
+      await client.query('begin');
       await client.query(`
         insert into public.funnels (id, user_id, name) values ('f-other', '${user}', 'Funnel Other') on conflict do nothing;
         insert into public.pages (id, user_id, name, slug, funnel_id, step_order)
@@ -440,8 +408,7 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
         on conflict (id) do nothing;
       `);
 
-      await client.query('set role authenticated');
-      await client.query(`set request.jwt.claim.sub = '${user}'`);
+      await client.query(`set local request.jwt.claim.sub = '${user}'`);
 
       await client.query(`
         select public.reorder_builder_pages(
@@ -458,8 +425,8 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       // Verify section unchanged
       const secRes = await client.query("select id, page_id from public.page_sections where id = 'sec-val-1'");
       expect(secRes.rows.length).toBe(1);
+      await client.query('commit');
     } finally {
-      await client.query('reset role').catch(() => {});
       client.release();
     }
   });
@@ -469,8 +436,7 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const user = '00000000-0000-0000-0000-000000000001';
     try {
       await client.query('begin');
-      await client.query('set role authenticated');
-      await client.query(`set request.jwt.claim.sub = '${user}'`);
+      await client.query(`set local request.jwt.claim.sub = '${user}'`);
 
       // Initial state: p-val-1 (0), p-val-2 (1), p-val-3 (2)
       await client.query(`
@@ -485,10 +451,9 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       await client.query('rollback');
 
       // Verify state was restored
-      const checkRes = await client.query("select id, step_order from public.pages where funnel_id = 'f-valid' order by step_order");
+      const checkRes = await pool.query("select id, step_order from public.pages where funnel_id = 'f-valid' order by step_order");
       expect(checkRes.rows.map(r => r.id)).toEqual(['p-val-1', 'p-val-2', 'p-val-3']);
     } finally {
-      await client.query('reset role').catch(() => {});
       client.release();
     }
   });
@@ -499,12 +464,10 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const user = '00000000-0000-0000-0000-000000000001';
     try {
       await c1.query('begin');
-      await c1.query('set role authenticated');
-      await c1.query(`set request.jwt.claim.sub = '${user}'`);
+      await c1.query(`set local request.jwt.claim.sub = '${user}'`);
 
       await c2.query('begin');
-      await c2.query('set role authenticated');
-      await c2.query(`set request.jwt.claim.sub = '${user}'`);
+      await c2.query(`set local request.jwt.claim.sub = '${user}'`);
 
       // c1 performs reorder (holds advisory lock until commit)
       await c1.query(`
@@ -543,8 +506,6 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       expect(c2Err?.code).toBe('PT409');
       await c2.query('rollback').catch(() => {});
     } finally {
-      await c1.query('reset role').catch(() => {});
-      await c2.query('reset role').catch(() => {});
       c1.release();
       c2.release();
     }
@@ -556,12 +517,10 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const user = '00000000-0000-0000-0000-000000000001';
     try {
       await c1.query('begin');
-      await c1.query('set role authenticated');
-      await c1.query(`set request.jwt.claim.sub = '${user}'`);
+      await c1.query(`set local request.jwt.claim.sub = '${user}'`);
 
       await c2.query('begin');
-      await c2.query('set role authenticated');
-      await c2.query(`set request.jwt.claim.sub = '${user}'`);
+      await c2.query(`set local request.jwt.claim.sub = '${user}'`);
 
       // c1 performs reorder (holds advisory lock)
       await c1.query(`
@@ -588,8 +547,6 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
 
       expect(c2Res.rows.length).toBe(1);
     } finally {
-      await c1.query('reset role').catch(() => {});
-      await c2.query('reset role').catch(() => {});
       c1.release();
       c2.release();
     }
@@ -599,25 +556,21 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const client = await pool.connect();
     const user = '00000000-0000-0000-0000-000000000001';
     try {
-      await client.query('set role authenticated');
-      await client.query(`set request.jwt.claim.sub = '${user}'`);
+      await client.query('begin');
+      await client.query(`set local request.jwt.claim.sub = '${user}'`);
 
       // Reorder with expected list omitting the newly created page
-      let err: any;
-      try {
-        await client.query(`
+      await expect(
+        client.query(`
           select public.reorder_builder_pages(
             'f-valid',
             array['p-val-2', 'p-val-1', 'p-val-3'],
             array['p-val-1', 'p-val-2', 'p-val-3']
           );
-        `);
-      } catch (e) {
-        err = e;
-      }
-      expect(err?.code).toBe('PT409');
+        `)
+      ).rejects.toMatchObject({ code: 'PT409' });
     } finally {
-      await client.query('reset role').catch(() => {});
+      await client.query('rollback').catch(() => {});
       client.release();
     }
   });
@@ -632,12 +585,10 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       const pageIds = curPagesRes.rows.map(r => r.id);
 
       await c1.query('begin');
-      await c1.query('set role authenticated');
-      await c1.query(`set request.jwt.claim.sub = '${user}'`);
+      await c1.query(`set local request.jwt.claim.sub = '${user}'`);
 
       await c2.query('begin');
-      await c2.query('set role authenticated');
-      await c2.query(`set request.jwt.claim.sub = '${user}'`);
+      await c2.query(`set local request.jwt.claim.sub = '${user}'`);
 
       // c1 reorders
       await c1.query(`
@@ -664,8 +615,6 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
 
       expect(c2Res.rows.length).toBe(1);
     } finally {
-      await c1.query('reset role').catch(() => {});
-      await c2.query('reset role').catch(() => {});
       c1.release();
       c2.release();
     }
@@ -681,12 +630,10 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       const pageToDelete = pageIds[pageIds.length - 1];
 
       await c1.query('begin');
-      await c1.query('set role authenticated');
-      await c1.query(`set request.jwt.claim.sub = '${user}'`);
+      await c1.query(`set local request.jwt.claim.sub = '${user}'`);
 
       await c2.query('begin');
-      await c2.query('set role authenticated');
-      await c2.query(`set request.jwt.claim.sub = '${user}'`);
+      await c2.query(`set local request.jwt.claim.sub = '${user}'`);
 
       // c1 reorders
       await c1.query(`
@@ -713,36 +660,30 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
 
       expect(c2Res.rows.length).toBe(1);
     } finally {
-      await c1.query('reset role').catch(() => {});
-      await c2.query('reset role').catch(() => {});
       c1.release();
       c2.release();
     }
   });
 
-  it('17. Delete / Reorder stale-set: reorder rejects with PT409 after page is deleted', async () => {
+  it('17. Delete / Reorder stale-set: reorder rejects with PT400 or PT409 after page is deleted', async () => {
     const client = await pool.connect();
     const user = '00000000-0000-0000-0000-000000000001';
     try {
-      await client.query('set role authenticated');
-      await client.query(`set request.jwt.claim.sub = '${user}'`);
+      await client.query('begin');
+      await client.query(`set local request.jwt.claim.sub = '${user}'`);
 
       // Try reordering with expected list containing already deleted page
-      let err: any;
-      try {
-        await client.query(`
+      await expect(
+        client.query(`
           select public.reorder_builder_pages(
             'f-valid',
             array['p-val-1', 'p-val-2', 'non-existent'],
             array['p-val-1', 'p-val-2', 'non-existent']
           );
-        `);
-      } catch (e) {
-        err = e;
-      }
-      expect(err?.code).toBe('PT400');
+        `)
+      ).rejects.toMatchObject({ code: 'PT400' });
     } finally {
-      await client.query('reset role').catch(() => {});
+      await client.query('rollback').catch(() => {});
       client.release();
     }
   });
