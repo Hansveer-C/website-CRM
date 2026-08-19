@@ -25,20 +25,288 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Extract and apply reviewed transformation
+      - name: Apply reviewed remediation
         shell: bash
         run: |
-          python3 <<'PY'
+          cat > /tmp/reorder_remediate.py <<'PY'
           from pathlib import Path
-          source = Path('.github/workflows/reorder-remediation-runner.yml').read_text()
-          marker = "          python3 <<'PY'\n"
-          start = source.index(marker) + len(marker)
-          end = source.index("\n          PY\n", start)
-          lines = source[start:end].splitlines()
-          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
-          Path('/tmp/reorder-remediate.py').write_text(script)
+          import re
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one literal target, found {count}: {old[:80]!r}')
+              p.write_text(text.replace(old, new, 1))
+
+          def regex_once(path: str, pattern: str, replacement: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one regex target, found {count}: {pattern[:100]!r}')
+              p.write_text(updated)
+
+          migration = 'supabase/migrations/20260817050300_reorder_builder_pages.sql'
+          replace_once(
+              migration,
+              '  v_unique_ordered_count integer;\n  v_is_noop boolean := true;',
+              '  v_unique_ordered_count integer;\n  v_unique_expected_count integer;\n  v_is_noop boolean := true;'
+          )
+          regex_once(
+              migration,
+              r"  -- Check for null or empty elements in ordered IDs\n.*?(?=  -- 3\. Verify Funnel ownership)",
+              """  -- Validate every element in BOTH the desired order and optimistic expected snapshot.\n  for i in 1..v_ordered_count loop\n    if p_ordered_page_ids[i] is null or length(trim(p_ordered_page_ids[i])) = 0 then\n      raise sqlstate 'PT400' using message = 'Invalid page ID in ordered list';\n    end if;\n    if p_expected_page_ids[i] is null or length(trim(p_expected_page_ids[i])) = 0 then\n      raise sqlstate 'PT400' using message = 'Invalid page ID in expected list';\n    end if;\n  end loop;\n\n  -- Duplicate IDs are invalid in either complete-order array.\n  select count(distinct id) into v_unique_ordered_count\n  from unnest(p_ordered_page_ids) as id;\n\n  if v_unique_ordered_count <> v_ordered_count then\n    raise sqlstate 'PT400' using message = 'Duplicate page IDs in ordered list';\n  end if;\n\n  select count(distinct id) into v_unique_expected_count\n  from unnest(p_expected_page_ids) as id;\n\n  if v_unique_expected_count <> v_expected_count then\n    raise sqlstate 'PT400' using message = 'Duplicate page IDs in expected list';\n  end if;\n\n"""
+          )
+          replace_once(
+              migration,
+              '    if v_current_page_ids[i] <> p_expected_page_ids[i] then',
+              '    if v_current_page_ids[i] is distinct from p_expected_page_ids[i] then'
+          )
+
+          controller = 'src/builder_reorder_pages_controller.ts'
+          replace_once(
+              controller,
+              "export type BuilderReorderStatus = 'idle' | 'reordering' | 'error' | 'success';",
+              """export interface BuilderReorderPagesLiveContextProviderOptions {\n  getIdentityContext: () => { actingUserId?: string; website?: { id: string } | null };\n  getPages: () => readonly Page[];\n  getClient?: () => SupabaseClient | undefined;\n  onPagesReordered?: (pages: Page[]) => void;\n  onConflict?: () => void;\n}\n\n/**\n * Produces a context provider that resolves identity and Website scope on every call.\n * Pending operations therefore never rely on the controller-construction snapshot.\n */\nexport function createBuilderReorderPagesLiveContextProvider(\n  options: BuilderReorderPagesLiveContextProviderOptions\n): () => BuilderReorderPagesContext {\n  return () => {\n    const current = options.getIdentityContext();\n    return {\n      actingUserId: current.actingUserId,\n      websiteId: current.website?.id,\n      pages: options.getPages(),\n      client: options.getClient?.(),\n      onPagesReordered: options.onPagesReordered,\n      onConflict: options.onConflict\n    };\n  };\n}\n\nexport function mapBuilderReorderPagesBrowserFailure(\n  code?: string,\n  error?: string\n): { status: number; code: string; error: string } {\n  if (code === 'CONFLICT') {\n    return { status: 409, code: 'CONFLICT', error: 'The page order changed elsewhere. Reload and try again.' };\n  }\n  if (code === 'NOT_FOUND') {\n    return { status: 404, code: 'NOT_FOUND', error: 'Funnel not found' };\n  }\n  if (code === 'FORBIDDEN') {\n    return { status: 403, code: 'FORBIDDEN', error: error || 'Forbidden' };\n  }\n  if (code === 'UNAUTHORIZED') {\n    return { status: 401, code: 'UNAUTHORIZED', error: 'Unauthorized' };\n  }\n  if (code === 'INVALID_INPUT' || code === 'INVALID_PAYLOAD' || code === 'INVALID_PAGE_SET') {\n    return { status: 400, code: 'INVALID_INPUT', error: error || 'Invalid page order payload' };\n  }\n  if (code === 'AMBIGUOUS') {\n    return { status: 500, code: 'AMBIGUOUS', error: 'The reorder result is uncertain. Please reload to check.' };\n  }\n  return { status: 503, code: 'UNAVAILABLE', error: error || 'The page order could not be updated. Please try again.' };\n}\n\nexport type BuilderReorderStatus = 'idle' | 'reordering' | 'error' | 'success';"""
+          )
+
+          main = 'src/main.ts'
+          replace_once(
+              main,
+              "import { BuilderReorderPagesController } from './builder_reorder_pages_controller';",
+              "import { BuilderReorderPagesController, createBuilderReorderPagesLiveContextProvider, mapBuilderReorderPagesBrowserFailure } from './builder_reorder_pages_controller';"
+          )
+          regex_once(
+              main,
+              r"    if \(!result\.success \|\| !result\.data\) \{\n        const conflict = result\.code === 'CONFLICT';\n        const notFound = result\.code === 'NOT_FOUND';\n        const forbidden = result\.code === 'FORBIDDEN';\n.*?\n    \}\n\n    return builderSectionsJsonResponse\(\{ success: true, data: result\.data \}, 200\);",
+              """    if (!result.success || !result.data) {\n        const failure = mapBuilderReorderPagesBrowserFailure(result.code, result.error);\n        return builderSectionsJsonResponse({\n            success: false,\n            code: failure.code,\n            error: failure.error\n        }, failure.status);\n    }\n\n    return builderSectionsJsonResponse({ success: true, data: result.data }, 200);"""
+          )
+          regex_once(
+              main,
+              r"  builderReorderPagesControllerIdentity = identity;\n  builderReorderPagesController = new BuilderReorderPagesController\(\(\) => \(\{\n.*?\n  \}\)\);\n  return builderReorderPagesController;",
+              """  builderReorderPagesControllerIdentity = identity;\n  builderReorderPagesController = new BuilderReorderPagesController(\n    createBuilderReorderPagesLiveContextProvider({\n      getIdentityContext: getBuilderNewPageContext,\n      getPages: () => mockPages,\n      getClient: () => (window as any).supabaseClient ?? undefined,\n      onPagesReordered: (updatedPages) => {\n        updatedPages.forEach(up => {\n          const idx = mockPages.findIndex(p => p.id === up.id);\n          if (idx >= 0) {\n            mockPages[idx].step_order = up.step_order;\n          }\n        });\n        renderBuilderPagesPanel();\n      },\n      onConflict: () => {\n        renderBuilderPagesPanel();\n      }\n    })\n  );\n  return builderReorderPagesController;"""
+          )
+
+          controller_test = 'src/builder_reorder_pages_controller.test.ts'
+          replace_once(
+              controller_test,
+              "import { BuilderReorderPagesController } from './builder_reorder_pages_controller';",
+              "import { BuilderReorderPagesController, createBuilderReorderPagesLiveContextProvider, mapBuilderReorderPagesBrowserFailure } from './builder_reorder_pages_controller';"
+          )
+          p = Path(controller_test)
+          text = p.read_text()
+          if not text.endswith('});\n'):
+              raise SystemExit('controller test: unexpected file ending')
+          additions = r'''
+
+  it('live context provider resolves user and Website identity freshly without controller reconstruction', () => {
+    let actingUserId = 'u1';
+    let websiteId = 'w1';
+    const provider = createBuilderReorderPagesLiveContextProvider({
+      getIdentityContext: () => ({ actingUserId, website: { id: websiteId } }),
+      getPages: () => samplePages
+    });
+    expect(provider()).toMatchObject({ actingUserId: 'u1', websiteId: 'w1' });
+    actingUserId = '';
+    websiteId = 'w2';
+    expect(provider()).toMatchObject({ actingUserId: '', websiteId: 'w2' });
+  });
+
+  it('stale async guard: logout while RPC is in flight suppresses protected state mutation', async () => {
+    let actingUserId = 'u1';
+    let reorderedInvoked = false;
+    let resolveRpc: (val: any) => void;
+    const rpcPromise = new Promise(resolve => { resolveRpc = resolve; });
+    const reorderSpy = vi.spyOn(PagesRepo, 'reorderPages').mockImplementation(() => rpcPromise as any);
+    const controller = new BuilderReorderPagesController(createBuilderReorderPagesLiveContextProvider({
+      getIdentityContext: () => ({ actingUserId, website: { id: 'w1' } }),
+      getPages: () => samplePages,
+      onPagesReordered: () => { reorderedInvoked = true; }
+    }));
+    const pending = controller.movePageDown('p1');
+    actingUserId = '';
+    resolveRpc!({ success: true, data: { funnel_id: 'f1', pages: samplePages } });
+    expect(await pending).toBe(false);
+    expect(reorderedInvoked).toBe(false);
+    reorderSpy.mockRestore();
+  });
+
+  it('same-Website active Page switch is not hijacked by reorder completion', async () => {
+    let activePageId = 'p1';
+    let reorderedInvoked = false;
+    let resolveRpc: (val: any) => void;
+    const rpcPromise = new Promise(resolve => { resolveRpc = resolve; });
+    const reorderSpy = vi.spyOn(PagesRepo, 'reorderPages').mockImplementation(() => rpcPromise as any);
+    const controller = new BuilderReorderPagesController(createBuilderReorderPagesLiveContextProvider({
+      getIdentityContext: () => ({ actingUserId: 'u1', website: { id: 'w1' } }),
+      getPages: () => samplePages,
+      onPagesReordered: () => { reorderedInvoked = true; }
+    }));
+    const pending = controller.movePageDown('p1');
+    activePageId = 'p3';
+    resolveRpc!({ success: true, data: { funnel_id: 'f1', pages: samplePages } });
+    expect(await pending).toBe(true);
+    expect(reorderedInvoked).toBe(true);
+    expect(activePageId).toBe('p3');
+    reorderSpy.mockRestore();
+  });
+
+  it('older completion cannot overwrite a newer authoritative controller lifecycle', async () => {
+    let websiteId = 'w1';
+    let oldApplied = false;
+    let newApplied = false;
+    let resolveOld: (val: any) => void;
+    const oldPromise = new Promise(resolve => { resolveOld = resolve; });
+    let rpcCalls = 0;
+    const reorderSpy = vi.spyOn(PagesRepo, 'reorderPages').mockImplementation(() => {
+      rpcCalls += 1;
+      if (rpcCalls === 1) return oldPromise as any;
+      return Promise.resolve({ success: true, data: { funnel_id: 'f1', pages: samplePages } }) as any;
+    });
+    const oldController = new BuilderReorderPagesController(createBuilderReorderPagesLiveContextProvider({
+      getIdentityContext: () => ({ actingUserId: 'u1', website: { id: websiteId } }),
+      getPages: () => samplePages,
+      onPagesReordered: () => { oldApplied = true; }
+    }));
+    const older = oldController.movePageDown('p1');
+    websiteId = 'w2';
+    const newController = new BuilderReorderPagesController(createBuilderReorderPagesLiveContextProvider({
+      getIdentityContext: () => ({ actingUserId: 'u1', website: { id: websiteId } }),
+      getPages: () => samplePages,
+      onPagesReordered: () => { newApplied = true; }
+    }));
+    expect(await newController.movePageDown('p1')).toBe(true);
+    expect(newApplied).toBe(true);
+    resolveOld!({ success: true, data: { funnel_id: 'f1', pages: samplePages } });
+    expect(await older).toBe(false);
+    expect(oldApplied).toBe(false);
+    expect(newApplied).toBe(true);
+    reorderSpy.mockRestore();
+  });
+
+  it('browser failure mapping preserves AMBIGUOUS and deterministic domain codes', () => {
+    expect(mapBuilderReorderPagesBrowserFailure('AMBIGUOUS')).toEqual({
+      status: 500,
+      code: 'AMBIGUOUS',
+      error: 'The reorder result is uncertain. Please reload to check.'
+    });
+    expect(mapBuilderReorderPagesBrowserFailure('CONFLICT')).toMatchObject({ status: 409, code: 'CONFLICT' });
+    expect(mapBuilderReorderPagesBrowserFailure('UNAUTHORIZED')).toMatchObject({ status: 401, code: 'UNAUTHORIZED' });
+    expect(mapBuilderReorderPagesBrowserFailure('FORBIDDEN')).toMatchObject({ status: 403, code: 'FORBIDDEN' });
+    expect(mapBuilderReorderPagesBrowserFailure('NOT_FOUND')).toMatchObject({ status: 404, code: 'NOT_FOUND' });
+    expect(mapBuilderReorderPagesBrowserFailure('INVALID_PAGE_SET')).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
+  });
+'''
+          p.write_text(text[:-4] + additions + '\n});\n')
+
+          db_test = 'supabase/tests/reorder_builder_pages.test.ts'
+          p = Path(db_test)
+          text = p.read_text()
+          anchor = "  it('5. duplicate IDs in ordered array raises PT400', async () => {"
+          if text.count(anchor) != 1:
+              raise SystemExit('reorder DB test: first insertion anchor mismatch')
+          inserted = r'''  it('4b. null elements in either complete-order array raise PT400', async () => {
+    const client = await pool.connect();
+    const user = '00000000-0000-0000-0000-000000000001';
+    const queries = [
+      "select public.reorder_builder_pages('f-test', array[null::text, 'p2'], array['p1', 'p2'])",
+      "select public.reorder_builder_pages('f-test', array['p1', 'p2'], array[null::text, 'p2'])"
+    ];
+    try {
+      for (const query of queries) {
+        await client.query('begin');
+        await client.query(`set local request.jwt.claim.sub = '${user}'`);
+        await expect(client.query(query)).rejects.toMatchObject({ code: 'PT400' });
+        await client.query('rollback');
+      }
+    } finally {
+      await client.query('rollback').catch(() => {});
+      client.release();
+    }
+  });
+
+  it('4c. empty and whitespace-only IDs in either array raise PT400', async () => {
+    const client = await pool.connect();
+    const user = '00000000-0000-0000-0000-000000000001';
+    const queries = [
+      "select public.reorder_builder_pages('f-test', array['', 'p2'], array['p1', 'p2'])",
+      "select public.reorder_builder_pages('f-test', array['   ', 'p2'], array['p1', 'p2'])",
+      "select public.reorder_builder_pages('f-test', array['p1', 'p2'], array['', 'p2'])",
+      "select public.reorder_builder_pages('f-test', array['p1', 'p2'], array['   ', 'p2'])"
+    ];
+    try {
+      for (const query of queries) {
+        await client.query('begin');
+        await client.query(`set local request.jwt.claim.sub = '${user}'`);
+        await expect(client.query(query)).rejects.toMatchObject({ code: 'PT400' });
+        await client.query('rollback');
+      }
+    } finally {
+      await client.query('rollback').catch(() => {});
+      client.release();
+    }
+  });
+
+'''
+          text = text.replace(anchor, inserted + anchor, 1)
+          anchor2 = "  it('6. cross-tenant or missing page ID does not leak existence and raises PT400', async () => {"
+          if text.count(anchor2) != 1:
+              raise SystemExit('reorder DB test: second insertion anchor mismatch')
+          inserted2 = r'''  it('5b. duplicate IDs in expected array raise PT400', async () => {
+    const client = await pool.connect();
+    const user = '00000000-0000-0000-0000-000000000001';
+    try {
+      await client.query('begin');
+      await client.query(`set local request.jwt.claim.sub = '${user}'`);
+      await expect(
+        client.query("select public.reorder_builder_pages('f-test', array['p1', 'p2'], array['p1', 'p1'])")
+      ).rejects.toMatchObject({ code: 'PT400' });
+    } finally {
+      await client.query('rollback').catch(() => {});
+      client.release();
+    }
+  });
+
+'''
+          text = text.replace(anchor2, inserted2 + anchor2, 1)
+          anchor3 = "  it('7. stale expected order raises PT409 CONFLICT', async () => {"
+          if text.count(anchor3) != 1:
+              raise SystemExit('reorder DB test: third insertion anchor mismatch')
+          inserted3 = r'''  it('6b. malformed expected NULL cannot bypass optimistic concurrency and causes zero writes', async () => {
+    const user = '00000000-0000-0000-0000-000000000001';
+    await pool.query(`
+      insert into public.users (id, email) values ('${user}', 'u@test.com') on conflict do nothing;
+      insert into public.funnels (id, user_id, name) values ('f-null-expected', '${user}', 'Null Expected') on conflict do nothing;
+      insert into public.pages (id, user_id, name, slug, funnel_id, step_order)
+      values
+        ('p-null-exp-1', '${user}', 'P1', 'null-exp-1', 'f-null-expected', 0),
+        ('p-null-exp-2', '${user}', 'P2', 'null-exp-2', 'f-null-expected', 1)
+      on conflict (id) do update set step_order = excluded.step_order;
+    `);
+    const before = await pool.query("select id, step_order from public.pages where funnel_id = 'f-null-expected' order by id");
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query(`set local request.jwt.claim.sub = '${user}'`);
+      await expect(
+        client.query("select public.reorder_builder_pages('f-null-expected', array['p-null-exp-2', 'p-null-exp-1'], array[null::text, 'p-null-exp-2'])")
+      ).rejects.toMatchObject({ code: 'PT400' });
+      await client.query('rollback');
+    } finally {
+      await client.query('rollback').catch(() => {});
+      client.release();
+    }
+    const after = await pool.query("select id, step_order from public.pages where funnel_id = 'f-null-expected' order by id");
+    expect(after.rows).toEqual(before.rows);
+  });
+
+'''
+          text = text.replace(anchor3, inserted3 + anchor3, 1)
+          p.write_text(text)
           PY
-          python3 /tmp/reorder-remediate.py
+          python3 /tmp/reorder_remediate.py
 
       - name: Install dependencies
         run: npm ci
@@ -72,6 +340,7 @@ jobs:
         run: |
           git restore -- dist/index.html || true
           git diff --check
+          git status --short
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/reorder-remediation-runner.yml .github/workflows/reorder-remediation-pr-runner.yml
