@@ -70,14 +70,17 @@ begin
   end if;
 
   -- 6. Verify desired Funnel is an associated destination for this website
-  select exists (
-    select 1
-    from public.website_routes
-    where website_id = p_website_id and funnel_id = p_funnel_id
-  ) or (v_current_live_homepage_funnel_id = p_funnel_id) or (v_current_draft_homepage_funnel_id = p_funnel_id)
-  into v_is_associated;
+  select (
+    exists (
+      select 1
+      from public.website_routes
+      where website_id = p_website_id and funnel_id = p_funnel_id
+    )
+    or coalesce(v_current_live_homepage_funnel_id = p_funnel_id, false)
+    or coalesce(v_current_draft_homepage_funnel_id = p_funnel_id, false)
+  ) into v_is_associated;
 
-  if not v_is_associated then
+  if coalesce(v_is_associated, false) is not true then
     raise sqlstate 'PT400' using message = 'Funnel is not an associated destination for this website';
   end if;
 
@@ -241,15 +244,17 @@ begin
 
   -- 8. Verify the resolved root page is published
   -- Check builder_publication_targets or legacy published status
-  select exists (
-    select 1 from public.builder_publication_targets
-    where website_id = p_website_id and page_id = v_target_page_id
-  ) or exists (
-    select 1 from public.pages
-    where id = v_target_page_id and status = 'published'
+  select (
+    exists (
+      select 1 from public.builder_publication_targets
+      where website_id = p_website_id and page_id = v_target_page_id
+    ) or exists (
+      select 1 from public.pages
+      where id = v_target_page_id and status = 'published'
+    )
   ) into v_target_is_published;
 
-  if not v_target_is_published then
+  if coalesce(v_target_is_published, false) is not true then
     raise sqlstate 'PT400' using message = 'The selected homepage is not published yet. Publish that page before making it live.';
   end if;
 

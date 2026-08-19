@@ -411,29 +411,38 @@ describeDatabase('set_builder_homepage Option B RPC Integration Tests (PostgreSQ
   it('publish_builder_homepage rejects when destination root page is unpublished with PT400', async () => {
     const client = await pool.connect();
     const userId = randomUUID();
+    let siteId = '';
+    let funnel1 = '';
+    let funnel2 = '';
     try {
-      const { websiteId, fnl1, fnl2, page2 } = await createTestFixture(userId);
+      const fixture = await createTestFixture(userId);
+      siteId = fixture.websiteId;
+      funnel1 = fixture.fnl1;
+      funnel2 = fixture.fnl2;
+      const page2 = fixture.page2;
 
       // Delete publication target and set page status to draft for page2
-      await client.query(`delete from public.builder_publication_targets where website_id = $1 and page_id = $2`, [websiteId, page2]);
+      await client.query(`delete from public.builder_publication_targets where website_id = $1 and page_id = $2`, [siteId, page2]);
       await client.query(`update public.pages set status = 'draft' where id = $1`, [page2]);
 
       await setAuthUser(client, userId);
 
       // Stage fnl2 as draft
-      await client.query(`select public.set_builder_draft_homepage($1, $2, null)`, [websiteId, fnl2]);
+      await client.query(`select public.set_builder_draft_homepage($1, $2, null)`, [siteId, funnel2]);
 
       // Attempt to publish
-      await client.query(`select public.publish_builder_homepage($1, $2, $3)`, [websiteId, fnl2, fnl1]);
+      await client.query(`select public.publish_builder_homepage($1, $2, $3)`, [siteId, funnel2, funnel1]);
       expect.unreachable('Should have failed publication');
     } catch (err: any) {
       expect(err.code).toBe('PT400');
       expect(err.message).toContain('The selected homepage is not published yet');
 
       // Verify zero live writes occurred
-      const dbWebsite = await client.query(`select * from public.websites where id = $1`, [websiteId]);
-      expect(dbWebsite.rows[0].homepage_funnel_id).toBe(fnl1); // Live unchanged
-      expect(dbWebsite.rows[0].draft_homepage_funnel_id).toBe(fnl2); // Draft preserved
+      if (siteId) {
+        const dbWebsite = await client.query(`select * from public.websites where id = $1`, [siteId]);
+        expect(dbWebsite.rows[0].homepage_funnel_id).toBe(funnel1); // Live unchanged
+        expect(dbWebsite.rows[0].draft_homepage_funnel_id).toBe(funnel2); // Draft preserved
+      }
     } finally {
       client.release();
     }
