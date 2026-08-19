@@ -106,15 +106,17 @@ export class BuilderSetHomepageController {
       return false;
     }
 
-    // If this funnel is already the current homepage, it is a no-op success
-    const currentHomepage = website.homepage_funnel_id ?? null;
-    if (currentHomepage === funnelId) {
+    // If this funnel is already the effective homepage, it is a no-op success
+    const currentDraft = website.draft_homepage_funnel_id ?? null;
+    const currentLive = website.homepage_funnel_id ?? null;
+    const currentEffective = currentDraft ?? currentLive;
+    if (currentEffective === funnelId) {
       this._status = 'idle';
       this._error = undefined;
       return true;
     }
 
-    const expectedHomepageFunnelId = currentHomepage;
+    const expectedDraftHomepageFunnelId = currentDraft;
     const requestId = ++this._activeRequestId;
     this._status = 'updating';
     this._error = undefined;
@@ -124,7 +126,7 @@ export class BuilderSetHomepageController {
       const result = await setBuilderHomepage(
         websiteId,
         funnelId,
-        expectedHomepageFunnelId,
+        expectedDraftHomepageFunnelId,
         actingUserId,
         client
       );
@@ -144,7 +146,7 @@ export class BuilderSetHomepageController {
       if (!result.success || !result.data) {
         this._status = 'error';
         if (result.code === 'CONFLICT') {
-          this._error = 'The homepage changed elsewhere. Reload and try again.';
+          this._error = 'The draft homepage changed elsewhere. Reload and try again.';
           if (onConflict) onConflict();
         } else if (result.code === 'AMBIGUOUS') {
           this._error = 'The homepage update result is uncertain. Please reload to check.';

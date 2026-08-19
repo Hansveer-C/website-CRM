@@ -4374,6 +4374,8 @@ type BuilderWebsitePageEntry = {
   page: Page;
   path: string;
   isHomepage: boolean;
+  isLiveHomepage?: boolean;
+  isDraftHomepage?: boolean;
   routeOrder?: number;
   stepOrder?: number;
   originalIndex: number;
@@ -4674,6 +4676,7 @@ export function getBuilderSetHomepageController(): BuilderSetHomepageController 
         const activeSite = getActiveBuilderWebsite();
         if (activeSite && activeSite.id === updatedWebsite.id) {
           activeSite.homepage_funnel_id = updatedWebsite.homepage_funnel_id;
+          activeSite.draft_homepage_funnel_id = updatedWebsite.draft_homepage_funnel_id;
         }
         renderBuilder();
       },
@@ -4690,7 +4693,7 @@ export function getBuilderSetHomepageController(): BuilderSetHomepageController 
   const success = await controller.setHomepage(funnelId);
   renderBuilder();
   if (success) {
-    (window as any).showToast('Homepage updated', 'success');
+    (window as any).showToast('Draft homepage updated', 'success');
   } else if (controller.error) {
     (window as any).showToast(controller.error, 'error');
   }
@@ -4713,6 +4716,8 @@ function getBuilderWebsitePageEntries(): BuilderWebsitePageEntry[] {
     })
     .map(({ page, originalIndex }): BuilderWebsitePageEntry => {
       const isHomepage = page.id === homepagePage?.id;
+      const isLiveHomepage = page.funnel_id === website.homepage_funnel_id;
+      const isDraftHomepage = !!website.draft_homepage_funnel_id && page.funnel_id === website.draft_homepage_funnel_id;
       const slugPath = page.slug ? normalizePreviewPath(`/${page.slug}`) : '/';
       const exactRoute = websiteRoutes.find(route =>
         route.slug === page.slug
@@ -4733,6 +4738,8 @@ function getBuilderWebsitePageEntries(): BuilderWebsitePageEntry[] {
         page,
         path: isHomepage ? '/' : route?.path || slugPath,
         isHomepage,
+        isLiveHomepage,
+        isDraftHomepage,
         routeOrder: typeof rawRouteOrder === 'number' && Number.isFinite(rawRouteOrder)
           ? rawRouteOrder
           : undefined,
@@ -4944,6 +4951,7 @@ function renderBuilderPageSettingsPanel(): string {
 };
 
 function renderBuilderPagesPanel(): string {
+  const website = getActiveBuilderWebsite();
   const entries = getBuilderWebsitePageEntries();
   const newPage = getBuilderNewPageController();
   const duplicate = getBuilderDuplicatePageController();
@@ -4999,7 +5007,7 @@ function renderBuilderPagesPanel(): string {
         ${newPage.destinations.length === 0 ? '<p>This website does not have an available page destination.</p>' : ''}
       </div>
       <div class="pb-page-list">
-        ${entries.length ? entries.map(({ page, path, isHomepage }) => {
+        ${entries.length ? entries.map(({ page, path, isHomepage, isLiveHomepage, isDraftHomepage }) => {
           const name = page.name.trim() || 'Untitled page';
           const status = page.status || 'draft';
           const isCurrent = page.id === builderPageId;
@@ -5044,7 +5052,7 @@ function renderBuilderPagesPanel(): string {
                 <span class="pb-page-path">${safePath}</span>
                 <span class="pb-page-badges">
                   <span class="pb-page-status ${status === 'published' ? 'published' : 'draft'}">${safeStatus}</span>
-                  ${isHomepage ? '<span class="pb-page-homepage">Homepage</span>' : ''}
+                  ${isDraftHomepage ? '<span class="pb-page-homepage-draft" style="background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">Home (Unpublished)</span>' : isLiveHomepage ? '<span class="pb-page-homepage-live" style="background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">Home (Live)</span>' : isHomepage ? '<span class="pb-page-homepage">Homepage</span>' : ''}
                 </span>
               </button>
               <div class="pb-page-row-actions">
@@ -5070,7 +5078,7 @@ function renderBuilderPagesPanel(): string {
                     </button>
                   </div>
                 ` : `
-                  ${isHomepage || !page.funnel_id ? '' : `
+                  ${isDraftHomepage || (!website?.draft_homepage_funnel_id && isLiveHomepage) || !page.funnel_id ? '' : `
                     <button
                       type="button"
                       class="pb-page-set-homepage-button"
@@ -5079,7 +5087,7 @@ function renderBuilderPagesPanel(): string {
                       title="Set as homepage"
                       ${isHomepageUpdating || isDuplicating || isDeleting || isReordering ? 'disabled' : ''}
                     >
-                      ${isHomepageUpdating && updatingHomepageFunnelId === page.funnel_id ? 'Setting…' : 'Set home'}
+                      ${isHomepageUpdating && updatingHomepageFunnelId === page.funnel_id ? 'Setting…' : 'Set as homepage'}
                     </button>
                   `}
                   <button

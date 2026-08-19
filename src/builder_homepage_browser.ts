@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { setBuilderHomepage } from './builder_homepage_repository';
+import { publishBuilderHomepage, setBuilderHomepage } from './builder_homepage_repository';
 
 export interface BuilderHomepageBrowserPostContext {
   getCurrentUser?: () => string;
@@ -42,7 +42,10 @@ export async function handleBuilderSetHomepageBrowserPost(
     return null;
   }
 
-  if (pathname !== '/api/websites/homepage' || getMethod(input, init).toUpperCase() !== 'POST') {
+  const isSetHomepage = pathname === '/api/websites/homepage';
+  const isPublishHomepage = pathname === '/api/websites/homepage/publish';
+
+  if ((!isSetHomepage && !isPublishHomepage) || getMethod(input, init).toUpperCase() !== 'POST') {
     return null;
   }
 
@@ -58,14 +61,20 @@ export async function handleBuilderSetHomepageBrowserPost(
     return jsonResponse({ success: false, code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
   }
 
-  let payload: { website_id?: string; funnel_id?: string; expected_homepage_funnel_id?: string | null } | undefined;
+  let payload: {
+    website_id?: string;
+    funnel_id?: string;
+    expected_draft_homepage_funnel_id?: string | null;
+    expected_homepage_funnel_id?: string | null;
+  } | undefined;
+
   try {
     payload = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
   } catch {
     return jsonResponse({ success: false, code: 'INVALID_INPUT', error: 'Invalid homepage selection payload' }, 400);
   }
 
-  if (!payload?.website_id || !payload?.funnel_id) {
+  if (!payload?.website_id || (isSetHomepage && !payload?.funnel_id)) {
     return jsonResponse({ success: false, code: 'INVALID_INPUT', error: 'Website ID and Funnel ID are required' }, 400);
   }
 
@@ -75,22 +84,30 @@ export async function handleBuilderSetHomepageBrowserPost(
 
   if (usesSupabase) {
     client = context?.getSupabaseClient ? await context.getSupabaseClient() : undefined;
-    if (!client) return jsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Homepage selection is unavailable' }, 503);
+    if (!client) return jsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Homepage operation is unavailable' }, 503);
     const authResult = await client.auth.getUser();
     if (authResult.error || authResult.data.user?.id !== userId) {
       return jsonResponse({ success: false, code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
     }
   } else if (!usesLocal) {
-    return jsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Homepage selection is unavailable' }, 503);
+    return jsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Homepage operation is unavailable' }, 503);
   }
 
-  const result = await setBuilderHomepage(
-    payload.website_id,
-    payload.funnel_id,
-    payload.expected_homepage_funnel_id,
-    userId,
-    client
-  );
+  const result = isPublishHomepage
+    ? await publishBuilderHomepage(
+        payload.website_id,
+        payload.expected_draft_homepage_funnel_id,
+        payload.expected_homepage_funnel_id,
+        userId,
+        client
+      )
+    : await setBuilderHomepage(
+        payload.website_id,
+        payload.funnel_id!,
+        payload.expected_draft_homepage_funnel_id ?? payload.expected_homepage_funnel_id,
+        userId,
+        client
+      );
 
   if (!result.success || !result.data) {
     const unauthorized = result.code === 'UNAUTHORIZED';
@@ -125,10 +142,10 @@ export async function handleBuilderSetHomepageBrowserPost(
           : invalidInput
             ? result.error || 'Invalid homepage selection payload'
             : conflict
-              ? 'The homepage changed elsewhere. Reload and try again.'
+              ? result.error || 'The homepage changed elsewhere. Reload and try again.'
               : ambiguous
-                ? 'The homepage update result is uncertain. Please reload to check.'
-                : 'The homepage could not be updated. Please try again.';
+                ? 'The homepage operation result is uncertain. Please reload to check.'
+                : 'The homepage operation could not be completed. Please try again.';
 
     return jsonResponse({ success: false, code, error }, status);
   }

@@ -42,6 +42,25 @@ describe('homepage and page scope', () => {
     expect(resolveWebsiteHomepage({ ...base, pages: [page('z', 'f-home', { step_order: 2 }), page('b', 'f-home', { step_order: 1 }), page('a', 'f-home', { step_order: 1 })] })).toMatchObject({ status: 'resolved', page: { id: 'a' } });
   });
 
+  it('resolves draft_homepage_funnel_id when present', () => {
+    const websiteWithDraft: Website = {
+      ...site('one', 'u1', 'f-home'),
+      draft_homepage_funnel_id: 'f-services'
+    };
+    const res = resolveWebsiteHomepage({
+      actingUserId: 'u1',
+      website: websiteWithDraft,
+      routes: [route('one', 'f-home', '/'), route('one', 'f-services', '/services')],
+      funnels: [funnel('f-home'), funnel('f-services')],
+      pages: [page('p-home', 'f-home'), page('p-service', 'f-services')]
+    });
+    expect(res).toMatchObject({
+      status: 'resolved',
+      funnel: { id: 'f-services' },
+      page: { id: 'p-service' }
+    });
+  });
+
   it('scopes and deduplicates pages through owned website funnels only', () => {
     const pages = [page('home'), page('service', 'f-service'), page('other', 'f-other'), page('foreign', 'f-home', { user_id: 'u2' })];
     const scoped = getWebsiteScopedPages({ actingUserId: 'u1', website: site('one'), routes: [route('one', 'f-service'), route('other-site', 'f-other')], funnels: [funnel('f-home'), funnel('f-service'), funnel('f-other')], pages });

@@ -25,7 +25,7 @@ async function assertBackendWaiting(pool: pg.Pool, pid: number): Promise<void> {
   expect(waiting).toBe(true);
 }
 
-describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', () => {
+describeDatabase('set_builder_homepage Option B RPC Integration Tests (PostgreSQL 17)', () => {
   let pool: pg.Pool;
 
   beforeAll(async () => {
@@ -65,6 +65,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
           domain text unique,
           subdomain text,
           homepage_funnel_id text,
+          draft_homepage_funnel_id text,
           created_at timestamptz not null default now(),
           updated_at timestamptz not null default now()
         );
@@ -72,6 +73,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
         alter table public.websites add column if not exists domain text;
         alter table public.websites add column if not exists subdomain text;
         alter table public.websites add column if not exists homepage_funnel_id text;
+        alter table public.websites add column if not exists draft_homepage_funnel_id text;
         alter table public.websites add column if not exists updated_at timestamptz not null default now();
         alter table public.websites add column if not exists created_at timestamptz not null default now();
 
@@ -94,6 +96,14 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
           step_type text,
           step_order integer,
           created_at timestamptz not null default now()
+        );
+
+        create table if not exists public.builder_publication_targets (
+          website_id uuid not null references public.websites(id) on delete cascade,
+          page_id text not null references public.pages(id) on delete cascade,
+          published_revision_id uuid not null default gen_random_uuid(),
+          published_at timestamptz not null default now(),
+          primary key (website_id, page_id)
         );
 
         create or replace function auth.uid() returns uuid as $$
@@ -134,6 +144,16 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
         [fnl1, userId, fnl2]
       );
 
+      const page1 = `page-1-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const page2 = `page-2-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+      await client.query(
+        `insert into public.pages (id, user_id, name, slug, status, funnel_id, step_order)
+         values ($1, $2, 'Home Page', 'home', 'published', $3, 0),
+                ($4, $2, 'Service Page', 'services', 'published', $5, 0)`,
+        [page1, userId, fnl1, page2, userId, fnl2]
+      );
+
       const websiteRes = await client.query(
         `insert into public.websites (user_id, name, subdomain, homepage_funnel_id)
          values ($1, 'Test Site', $2, $3)
@@ -142,14 +162,21 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
       );
       const websiteId = websiteRes.rows[0].id;
 
+      // Add published revision targets
+      await client.query(
+        `insert into public.builder_publication_targets (website_id, page_id)
+         values ($1, $2), ($1, $3)`,
+        [websiteId, page1, page2]
+      );
+
       // Add routes so both funnels are associated destinations for this website
       await client.query(
         `insert into public.website_routes (website_id, path, funnel_id)
-         values ($1, '/home', $2), ($1, '/services', $3)`,
+         values ($1, '/', $2), ($1, '/services', $3)`,
         [websiteId, fnl1, fnl2]
       );
 
-      return { websiteId, fnl1, fnl2 };
+      return { websiteId, fnl1, fnl2, page1, page2 };
     } finally {
       client.release();
     }
@@ -162,213 +189,6 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
       await client.query(`set "request.jwt.claim.sub" = '${userId}'`);
     }
   }
-
-  it('rejects unauthenticated calls with PT401', async () => {
-    const client = await pool.connect();
-    try {
-      await setAuthUser(client, null);
-      await client.query(`select public.set_builder_homepage('00000000-0000-0000-0000-000000000000'::uuid, 'fnl-1', 'fnl-1')`);
-      expect.unreachable('Should have failed');
-    } catch (err: any) {
-      expect(err.code).toBe('PT401');
-      expect(err.message).toContain('Authentication required');
-    } finally {
-      client.release();
-    }
-  });
-
-  it('rejects null website_id with PT400', async () => {
-    const client = await pool.connect();
-    const userId = randomUUID();
-    try {
-      await setAuthUser(client, userId);
-      await client.query(`select public.set_builder_homepage(null, 'fnl-1', 'fnl-1')`);
-      expect.unreachable('Should have failed');
-    } catch (err: any) {
-      expect(err.code).toBe('PT400');
-      expect(err.message).toContain('Website ID is required');
-    } finally {
-      client.release();
-    }
-  });
-
-  it('rejects blank funnel_id with PT400', async () => {
-    const client = await pool.connect();
-    const userId = randomUUID();
-    try {
-      await setAuthUser(client, userId);
-      await client.query(`select public.set_builder_homepage('00000000-0000-0000-0000-000000000000'::uuid, '   ', 'fnl-1')`);
-      expect.unreachable('Should have failed');
-    } catch (err: any) {
-      expect(err.code).toBe('PT400');
-      expect(err.message).toContain('Invalid funnel ID');
-    } finally {
-      client.release();
-    }
-  });
-
-  it('rejects foreign website with PT404', async () => {
-    const client = await pool.connect();
-    const ownerId = randomUUID();
-    const attackerId = randomUUID();
-    try {
-      const { websiteId } = await createTestFixture(ownerId);
-      await setAuthUser(client, attackerId);
-      await client.query(`select public.set_builder_homepage($1, 'fnl-1', 'fnl-1')`, [websiteId]);
-      expect.unreachable('Should have failed');
-    } catch (err: any) {
-      expect(err.code).toBe('PT404');
-      expect(err.message).toContain('Website not found');
-    } finally {
-      client.release();
-    }
-  });
-
-  it('rejects foreign funnel with PT404', async () => {
-    const client = await pool.connect();
-    const userAlpha = randomUUID();
-    const userBeta = randomUUID();
-    try {
-      const { websiteId } = await createTestFixture(userAlpha);
-      const { fnl1: foreignFunnel } = await createTestFixture(userBeta);
-
-      await setAuthUser(client, userAlpha);
-      await client.query(`select public.set_builder_homepage($1, $2, null)`, [websiteId, foreignFunnel]);
-      expect.unreachable('Should have failed');
-    } catch (err: any) {
-      expect(err.code).toBe('PT404');
-      expect(err.message).toContain('Funnel not found');
-    } finally {
-      client.release();
-    }
-  });
-
-  it('rejects unassociated funnel with PT400', async () => {
-    const client = await pool.connect();
-    const userId = randomUUID();
-    try {
-      const { websiteId } = await createTestFixture(userId);
-
-      // Create an unassociated funnel for the same user (not in website_routes and not currently homepage)
-      const unassocFunnel = `fnl-unassoc-${Date.now()}`;
-      await client.query(`insert into public.funnels (id, user_id, name) values ($1, $2, 'Unrelated Funnel')`, [
-        unassocFunnel,
-        userId
-      ]);
-
-      await setAuthUser(client, userId);
-      await client.query(`select public.set_builder_homepage($1, $2, null)`, [websiteId, unassocFunnel]);
-      expect.unreachable('Should have failed');
-    } catch (err: any) {
-      expect(err.code).toBe('PT400');
-      expect(err.message).toContain('Funnel is not an associated destination');
-    } finally {
-      client.release();
-    }
-  });
-
-  it('rejects optimistic concurrency mismatch with PT409', async () => {
-    const client = await pool.connect();
-    const userId = randomUUID();
-    try {
-      const { websiteId, fnl1, fnl2 } = await createTestFixture(userId);
-
-      await setAuthUser(client, userId);
-      // Provide wrong expected homepage ('fnl-wrong' instead of fnl1)
-      await client.query(`select public.set_builder_homepage($1, $2, 'fnl-wrong')`, [websiteId, fnl2]);
-      expect.unreachable('Should have failed');
-    } catch (err: any) {
-      expect(err.code).toBe('PT409');
-      expect(err.message).toContain('The homepage changed elsewhere');
-    } finally {
-      client.release();
-    }
-  });
-
-  it('successfully updates homepage and synchronizes root route', async () => {
-    const client = await pool.connect();
-    const userId = randomUUID();
-    try {
-      const { websiteId, fnl1, fnl2 } = await createTestFixture(userId);
-
-      await setAuthUser(client, userId);
-
-      const res = await client.query(`select public.set_builder_homepage($1, $2, $3) as result`, [
-        websiteId,
-        fnl2,
-        fnl1
-      ]);
-
-      const data = res.rows[0].result;
-      expect(data.website.id).toBe(websiteId);
-      expect(data.website.homepage_funnel_id).toBe(fnl2);
-
-      // Verify DB state
-      const dbWebsite = await client.query(`select * from public.websites where id = $1`, [websiteId]);
-      expect(dbWebsite.rows[0].homepage_funnel_id).toBe(fnl2);
-
-      const dbRoute = await client.query(`select * from public.website_routes where website_id = $1 and path = '/'`, [websiteId]);
-      expect(dbRoute.rows[0].funnel_id).toBe(fnl2);
-    } finally {
-      client.release();
-    }
-  });
-
-  it('returns current state as no-op when already homepage', async () => {
-    const client = await pool.connect();
-    const userId = randomUUID();
-    try {
-      const { websiteId, fnl1 } = await createTestFixture(userId);
-
-      await setAuthUser(client, userId);
-
-      const res = await client.query(`select public.set_builder_homepage($1, $2, $3) as result`, [
-        websiteId,
-        fnl1,
-        fnl1
-      ]);
-
-      const data = res.rows[0].result;
-      expect(data.website.homepage_funnel_id).toBe(fnl1);
-    } finally {
-      client.release();
-    }
-  });
-
-  it('serializes concurrent homepage updates using website lifecycle advisory lock', async () => {
-    const userId = randomUUID();
-    const { websiteId, fnl1, fnl2 } = await createTestFixture(userId);
-
-    const client1 = await pool.connect();
-    const client2 = await pool.connect();
-
-    try {
-      await setAuthUser(client1, userId);
-      await setAuthUser(client2, userId);
-
-      // Client 1 begins transaction and holds lock
-      await client1.query('begin');
-      await client1.query(`select public.set_builder_homepage($1, $2, $3)`, [websiteId, fnl2, fnl1]);
-
-      // Client 2 attempts update concurrently on same website
-      const c2PidRes = await client2.query('select pg_backend_pid() as pid');
-      const c2Pid = c2PidRes.rows[0].pid;
-
-      const client2Promise = client2.query(`select public.set_builder_homepage($1, $2, $3)`, [websiteId, fnl1, fnl2]);
-
-      await assertBackendWaiting(pool, c2Pid);
-
-      // Client 1 commits
-      await client1.query('commit');
-
-      // Client 2 should proceed now
-      const c2Res = await client2Promise;
-      expect(c2Res.rows[0].set_builder_homepage.website.homepage_funnel_id).toBe(fnl1);
-    } finally {
-      client1.release();
-      client2.release();
-    }
-  });
 
   it('strictly conforms to the production schema contract for website_routes.id data type (uuid)', async () => {
     const client = await pool.connect();
@@ -388,49 +208,248 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
     }
   });
 
-  it('correctly creates a missing root route with a valid UUID when setting homepage', async () => {
+  it('proves websites.draft_homepage_funnel_id column exists in schema', async () => {
+    const client = await pool.connect();
+    try {
+      const res = await client.query(`
+        select data_type
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'websites'
+          and column_name = 'draft_homepage_funnel_id'
+      `);
+      expect(res.rows.length).toBe(1);
+      expect(res.rows[0].data_type).toBe('text');
+    } finally {
+      client.release();
+    }
+  });
+
+  it('rejects unauthenticated calls to set_builder_draft_homepage with PT401', async () => {
+    const client = await pool.connect();
+    try {
+      await setAuthUser(client, null);
+      await client.query(`select public.set_builder_draft_homepage('00000000-0000-0000-0000-000000000000'::uuid, 'fnl-1', null)`);
+      expect.unreachable('Should have failed');
+    } catch (err: any) {
+      expect(err.code).toBe('PT401');
+      expect(err.message).toContain('Authentication required');
+    } finally {
+      client.release();
+    }
+  });
+
+  it('rejects null website_id with PT400', async () => {
     const client = await pool.connect();
     const userId = randomUUID();
     try {
-      await client.query('insert into public.users (id, email) values ($1, $2) on conflict (id) do nothing', [
-        userId,
-        `${userId}@example.com`
+      await setAuthUser(client, userId);
+      await client.query(`select public.set_builder_draft_homepage(null, 'fnl-1', null)`);
+      expect.unreachable('Should have failed');
+    } catch (err: any) {
+      expect(err.code).toBe('PT400');
+      expect(err.message).toContain('Website ID is required');
+    } finally {
+      client.release();
+    }
+  });
+
+  it('rejects blank funnel_id with PT400', async () => {
+    const client = await pool.connect();
+    const userId = randomUUID();
+    try {
+      await setAuthUser(client, userId);
+      await client.query(`select public.set_builder_draft_homepage('00000000-0000-0000-0000-000000000000'::uuid, '   ', null)`);
+      expect.unreachable('Should have failed');
+    } catch (err: any) {
+      expect(err.code).toBe('PT400');
+      expect(err.message).toContain('Invalid funnel ID');
+    } finally {
+      client.release();
+    }
+  });
+
+  it('rejects foreign website with PT404', async () => {
+    const client = await pool.connect();
+    const ownerId = randomUUID();
+    const attackerId = randomUUID();
+    try {
+      const { websiteId } = await createTestFixture(ownerId);
+      await setAuthUser(client, attackerId);
+      await client.query(`select public.set_builder_draft_homepage($1, 'fnl-1', null)`, [websiteId]);
+      expect.unreachable('Should have failed');
+    } catch (err: any) {
+      expect(err.code).toBe('PT404');
+      expect(err.message).toContain('Website not found');
+    } finally {
+      client.release();
+    }
+  });
+
+  it('rejects foreign funnel with PT404', async () => {
+    const client = await pool.connect();
+    const userAlpha = randomUUID();
+    const userBeta = randomUUID();
+    try {
+      const { websiteId } = await createTestFixture(userAlpha);
+      const { fnl1: foreignFunnel } = await createTestFixture(userBeta);
+
+      await setAuthUser(client, userAlpha);
+      await client.query(`select public.set_builder_draft_homepage($1, $2, null)`, [websiteId, foreignFunnel]);
+      expect.unreachable('Should have failed');
+    } catch (err: any) {
+      expect(err.code).toBe('PT404');
+      expect(err.message).toContain('Funnel not found');
+    } finally {
+      client.release();
+    }
+  });
+
+  it('rejects unassociated funnel with PT400', async () => {
+    const client = await pool.connect();
+    const userId = randomUUID();
+    try {
+      const { websiteId } = await createTestFixture(userId);
+
+      const unassocFunnel = `fnl-unassoc-${Date.now()}`;
+      await client.query(`insert into public.funnels (id, user_id, name) values ($1, $2, 'Unrelated Funnel')`, [
+        unassocFunnel,
+        userId
       ]);
 
-      const fnl1 = `fnl-1-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      const fnl2 = `fnl-2-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      await setAuthUser(client, userId);
+      await client.query(`select public.set_builder_draft_homepage($1, $2, null)`, [websiteId, unassocFunnel]);
+      expect.unreachable('Should have failed');
+    } catch (err: any) {
+      expect(err.code).toBe('PT400');
+      expect(err.message).toContain('Funnel is not an associated destination');
+    } finally {
+      client.release();
+    }
+  });
 
-      await client.query(
-        `insert into public.funnels (id, user_id, name) values ($1, $2, 'Home Funnel'), ($3, $2, 'Service Funnel')`,
-        [fnl1, userId, fnl2]
-      );
+  it('rejects optimistic draft concurrency mismatch with PT409', async () => {
+    const client = await pool.connect();
+    const userId = randomUUID();
+    try {
+      const { websiteId, fnl2 } = await createTestFixture(userId);
 
-      const websiteRes = await client.query(
-        `insert into public.websites (user_id, name, subdomain, homepage_funnel_id)
-         values ($1, 'Test Site Missing Root', $2, $3)
-         returning id`,
-        [userId, `sub-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`, fnl1]
-      );
-      const websiteId = websiteRes.rows[0].id;
+      await setAuthUser(client, userId);
+      // Expected draft is 'fnl-wrong' while actual draft is null
+      await client.query(`select public.set_builder_draft_homepage($1, $2, 'fnl-wrong')`, [websiteId, fnl2]);
+      expect.unreachable('Should have failed');
+    } catch (err: any) {
+      expect(err.code).toBe('PT409');
+      expect(err.message).toContain('The draft homepage changed elsewhere');
+    } finally {
+      client.release();
+    }
+  });
 
-      // Add a route for fnl2 but NO route for '/'
-      await client.query(
-        `insert into public.website_routes (website_id, path, funnel_id)
-         values ($1, '/services', $2)`,
-        [websiteId, fnl2]
-      );
-
-      // Verify no '/' route exists before the call
-      const preCheck = await client.query(
-        `select * from public.website_routes where website_id = $1 and path = '/'`,
-        [websiteId]
-      );
-      expect(preCheck.rows.length).toBe(0);
+  it('Option B: set_builder_draft_homepage updates draft state WITHOUT mutating live homepage or root route', async () => {
+    const client = await pool.connect();
+    const userId = randomUUID();
+    try {
+      const { websiteId, fnl1, fnl2 } = await createTestFixture(userId);
 
       await setAuthUser(client, userId);
 
-      // Change homepage to fnl2
-      const res = await client.query(`select public.set_builder_homepage($1, $2, $3) as result`, [
+      const res = await client.query(`select public.set_builder_draft_homepage($1, $2, null) as result`, [
+        websiteId,
+        fnl2
+      ]);
+
+      const data = res.rows[0].result;
+      expect(data.website.id).toBe(websiteId);
+      expect(data.website.homepage_funnel_id).toBe(fnl1); // Live remains fnl1!
+      expect(data.website.draft_homepage_funnel_id).toBe(fnl2); // Draft becomes fnl2!
+
+      // Verify DB state
+      const dbWebsite = await client.query(`select * from public.websites where id = $1`, [websiteId]);
+      expect(dbWebsite.rows[0].homepage_funnel_id).toBe(fnl1); // Live unchanged
+      expect(dbWebsite.rows[0].draft_homepage_funnel_id).toBe(fnl2); // Draft set
+
+      // Root route MUST remain fnl1!
+      const dbRoute = await client.query(`select * from public.website_routes where website_id = $1 and path = '/'`, [websiteId]);
+      expect(dbRoute.rows[0].funnel_id).toBe(fnl1);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('Option B: selecting currently live homepage clears draft_homepage_funnel_id to NULL', async () => {
+    const client = await pool.connect();
+    const userId = randomUUID();
+    try {
+      const { websiteId, fnl1, fnl2 } = await createTestFixture(userId);
+
+      await setAuthUser(client, userId);
+
+      // Stage fnl2
+      await client.query(`select public.set_builder_draft_homepage($1, $2, null)`, [websiteId, fnl2]);
+
+      // Stage fnl1 (live homepage) again
+      const res = await client.query(`select public.set_builder_draft_homepage($1, $2, $3) as result`, [
+        websiteId,
+        fnl1,
+        fnl2
+      ]);
+
+      const data = res.rows[0].result;
+      expect(data.website.homepage_funnel_id).toBe(fnl1);
+      expect(data.website.draft_homepage_funnel_id).toBeNull(); // Cleared to null!
+
+      const dbWebsite = await client.query(`select * from public.websites where id = $1`, [websiteId]);
+      expect(dbWebsite.rows[0].draft_homepage_funnel_id).toBeNull();
+    } finally {
+      client.release();
+    }
+  });
+
+  it('publish_builder_homepage rejects when destination root page is unpublished with PT400', async () => {
+    const client = await pool.connect();
+    const userId = randomUUID();
+    try {
+      const { websiteId, fnl1, fnl2, page2 } = await createTestFixture(userId);
+
+      // Delete publication target and set page status to draft for page2
+      await client.query(`delete from public.builder_publication_targets where website_id = $1 and page_id = $2`, [websiteId, page2]);
+      await client.query(`update public.pages set status = 'draft' where id = $1`, [page2]);
+
+      await setAuthUser(client, userId);
+
+      // Stage fnl2 as draft
+      await client.query(`select public.set_builder_draft_homepage($1, $2, null)`, [websiteId, fnl2]);
+
+      // Attempt to publish
+      await client.query(`select public.publish_builder_homepage($1, $2, $3)`, [websiteId, fnl2, fnl1]);
+      expect.unreachable('Should have failed publication');
+    } catch (err: any) {
+      expect(err.code).toBe('PT400');
+      expect(err.message).toContain('The selected homepage is not published yet');
+
+      // Verify zero live writes occurred
+      const dbWebsite = await client.query(`select * from public.websites where id = $1`, [websiteId]);
+      expect(dbWebsite.rows[0].homepage_funnel_id).toBe(fnl1); // Live unchanged
+      expect(dbWebsite.rows[0].draft_homepage_funnel_id).toBe(fnl2); // Draft preserved
+    } finally {
+      client.release();
+    }
+  });
+
+  it('publish_builder_homepage atomically promotes draft to live and updates root route with valid UUID', async () => {
+    const client = await pool.connect();
+    const userId = randomUUID();
+    try {
+      const { websiteId, fnl1, fnl2 } = await createTestFixture(userId);
+
+      await setAuthUser(client, userId);
+
+      // Stage fnl2 as draft
+      await client.query(`select public.set_builder_draft_homepage($1, $2, null)`, [websiteId, fnl2]);
+
+      // Publish
+      const res = await client.query(`select public.publish_builder_homepage($1, $2, $3) as result`, [
         websiteId,
         fnl2,
         fnl1
@@ -438,29 +457,85 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
 
       const data = res.rows[0].result;
       expect(data.website.homepage_funnel_id).toBe(fnl2);
+      expect(data.website.draft_homepage_funnel_id).toBeNull();
 
-      // Verify exactly one '/' route exists now
-      const postRoutes = await client.query(
-        `select * from public.website_routes where website_id = $1 order by path`,
-        [websiteId]
-      );
-      expect(postRoutes.rows.length).toBe(2);
+      // Verify DB state
+      const dbWebsite = await client.query(`select * from public.websites where id = $1`, [websiteId]);
+      expect(dbWebsite.rows[0].homepage_funnel_id).toBe(fnl2);
+      expect(dbWebsite.rows[0].draft_homepage_funnel_id).toBeNull();
 
-      const rootRoute = postRoutes.rows.find(r => r.path === '/');
-      expect(rootRoute).toBeDefined();
-      expect(rootRoute.website_id).toBe(websiteId);
-      expect(rootRoute.funnel_id).toBe(fnl2);
-
-      // Verify route.id is a valid UUID
+      const dbRoute = await client.query(`select * from public.website_routes where website_id = $1 and path = '/'`, [websiteId]);
+      expect(dbRoute.rows[0].funnel_id).toBe(fnl2);
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      expect(rootRoute.id).toMatch(uuidRegex);
-
-      // Verify unrelated '/services' route remains untouched
-      const servicesRoute = postRoutes.rows.find(r => r.path === '/services');
-      expect(servicesRoute).toBeDefined();
-      expect(servicesRoute.funnel_id).toBe(fnl2);
+      expect(dbRoute.rows[0].id).toMatch(uuidRegex);
     } finally {
       client.release();
+    }
+  });
+
+  it('publish_builder_homepage creates missing root route with valid UUID if no root route existed', async () => {
+    const client = await pool.connect();
+    const userId = randomUUID();
+    try {
+      const { websiteId, fnl1, fnl2 } = await createTestFixture(userId);
+
+      // Remove '/' route
+      await client.query(`delete from public.website_routes where website_id = $1 and path = '/'`, [websiteId]);
+
+      await setAuthUser(client, userId);
+
+      // Stage fnl2
+      await client.query(`select public.set_builder_draft_homepage($1, $2, null)`, [websiteId, fnl2]);
+
+      // Publish
+      await client.query(`select public.publish_builder_homepage($1, $2, $3)`, [websiteId, fnl2, fnl1]);
+
+      const dbRoute = await client.query(`select * from public.website_routes where website_id = $1 and path = '/'`, [websiteId]);
+      expect(dbRoute.rows.length).toBe(1);
+      expect(dbRoute.rows[0].funnel_id).toBe(fnl2);
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      expect(dbRoute.rows[0].id).toMatch(uuidRegex);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('serializes concurrent draft updates using website lifecycle advisory lock', async () => {
+    const userId = randomUUID();
+    const { websiteId, fnl1, fnl2 } = await createTestFixture(userId);
+
+    const client1 = await pool.connect();
+    const client2 = await pool.connect();
+
+    try {
+      await setAuthUser(client1, userId);
+      await setAuthUser(client2, userId);
+
+      // Client 1 begins transaction and holds lock
+      await client1.query('begin');
+      await client1.query(`select public.set_builder_draft_homepage($1, $2, null)`, [websiteId, fnl2]);
+
+      // Client 2 attempts update concurrently on same website
+      const c2PidRes = await client2.query('select pg_backend_pid() as pid');
+      const c2Pid = c2PidRes.rows[0].pid;
+
+      const client2Promise = client2.query(`select public.set_builder_draft_homepage($1, $2, null)`, [websiteId, fnl1]);
+
+      await assertBackendWaiting(pool, c2Pid);
+
+      // Client 1 commits
+      await client1.query('commit');
+
+      // Client 2 should proceed now (and fail with PT409 conflict since draft is now fnl2)
+      try {
+        await client2Promise;
+        expect.unreachable('Should have conflicted');
+      } catch (err: any) {
+        expect(err.code).toBe('PT409');
+      }
+    } finally {
+      client1.release();
+      client2.release();
     }
   });
 });

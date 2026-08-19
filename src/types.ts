@@ -282,6 +282,7 @@ export interface Website {
   domain: string | null;
   subdomain: string;
   homepage_funnel_id: string | null;
+  draft_homepage_funnel_id?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -96,7 +96,7 @@ export function resolveWebsiteHomepage(input: {
   pages: readonly Page[];
 }): WebsiteHomepageResolution {
   if (input.website.user_id !== input.actingUserId) return { status: 'ownership-mismatch' };
-  const funnelId = clean(input.website.homepage_funnel_id);
+  const funnelId = clean(input.website.draft_homepage_funnel_id ?? input.website.homepage_funnel_id);
   if (!funnelId) return { status: 'missing-homepage-funnel' };
   const funnel = input.funnels.find(item => item.id === funnelId);
   if (!funnel) return { status: 'missing-funnel' };
@@ -122,6 +122,7 @@ export function getWebsiteScopedPages(input: {
   if (input.website.user_id !== input.actingUserId) return [];
   const associated = new Set<string>();
   if (clean(input.website.homepage_funnel_id)) associated.add(input.website.homepage_funnel_id!);
+  if (clean(input.website.draft_homepage_funnel_id)) associated.add(input.website.draft_homepage_funnel_id!);
   input.routes.filter(route => route.website_id === input.website.id && clean(route.funnel_id))
     .forEach(route => associated.add(route.funnel_id));
   const owned = new Set(input.funnels

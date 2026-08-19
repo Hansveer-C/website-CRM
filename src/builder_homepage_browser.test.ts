@@ -92,4 +92,27 @@ describe('handleBuilderSetHomepageBrowserPost', () => {
 
     spy.mockRestore();
   });
+
+  it('handles /api/websites/homepage/publish successfully', async () => {
+    const spy = vi.spyOn(homepageRepo, 'publishBuilderHomepage').mockResolvedValueOnce({
+      success: true,
+      code: 'SUCCESS',
+      data: { website: { ...website, homepage_funnel_id: 'fnl-2', draft_homepage_funnel_id: null } }
+    });
+
+    const res = await handleBuilderSetHomepageBrowserPost('/api/websites/homepage/publish', {
+      method: 'POST',
+      body: JSON.stringify({ website_id: 'ws-1', expected_draft_homepage_funnel_id: 'fnl-2' })
+    }, {
+      getCurrentUser: () => 'user-1'
+    });
+
+    expect(res?.status).toBe(200);
+    const json = await res?.json();
+    expect(json.success).toBe(true);
+    expect(json.data.website.homepage_funnel_id).toBe('fnl-2');
+    expect(json.data.website.draft_homepage_funnel_id).toBeNull();
+
+    spy.mockRestore();
+  });
 });

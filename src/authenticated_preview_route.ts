@@ -52,8 +52,12 @@ export function resolveAuthenticatedPreview(input: {
   ));
   if (!route) return { status: 'not-found' };
 
+  const targetFunnelId = (path === '/' && website.draft_homepage_funnel_id)
+    ? website.draft_homepage_funnel_id
+    : route.funnel_id;
+
   const funnel = input.funnels.find(candidate => (
-    candidate.id === route.funnel_id
+    candidate.id === targetFunnelId
     && candidate.user_id === input.actingUserId
   ));
   if (!funnel) return { status: 'not-found' };

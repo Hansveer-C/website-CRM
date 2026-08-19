@@ -41,12 +41,12 @@ describe('BuilderSetHomepageController', () => {
     expect(controller.status).toBe('success');
     expect(controller.error).toBeUndefined();
     expect(onHomepageSet).toHaveBeenCalledWith(updatedWebsite);
-    expect(spy).toHaveBeenCalledWith('ws-1', 'fnl-2', 'fnl-1', 'user-1', undefined);
+    expect(spy).toHaveBeenCalledWith('ws-1', 'fnl-2', null, 'user-1', undefined);
 
     spy.mockRestore();
   });
 
-  it('treats setting the current homepage as an immediate no-op success', async () => {
+  it('treats setting the current effective homepage as an immediate no-op success', async () => {
     const spy = vi.spyOn(homepageRepo, 'setBuilderHomepage');
     const onHomepageSet = vi.fn();
     const controller = new BuilderSetHomepageController(() => ({
@@ -65,11 +65,11 @@ describe('BuilderSetHomepageController', () => {
     spy.mockRestore();
   });
 
-  it('handles CONFLICT error when expected homepage does not match server state', async () => {
+  it('handles CONFLICT error when expected draft homepage does not match server state', async () => {
     const spy = vi.spyOn(homepageRepo, 'setBuilderHomepage').mockResolvedValueOnce({
       success: false,
       code: 'CONFLICT',
-      error: 'The homepage changed elsewhere. Reload and try again.'
+      error: 'The draft homepage changed elsewhere. Reload and try again.'
     });
 
     const onConflict = vi.fn();
@@ -83,7 +83,7 @@ describe('BuilderSetHomepageController', () => {
     const result = await controller.setHomepage('fnl-2');
     expect(result).toBe(false);
     expect(controller.status).toBe('error');
-    expect(controller.error).toBe('The homepage changed elsewhere. Reload and try again.');
+    expect(controller.error).toBe('The draft homepage changed elsewhere. Reload and try again.');
     expect(onConflict).toHaveBeenCalled();
 
     spy.mockRestore();
