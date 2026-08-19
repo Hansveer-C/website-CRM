@@ -131,10 +131,10 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
       );
       const websiteId = websiteRes.rows[0].id;
 
-      // Add routes
+      // Add routes so both funnels are associated destinations for this website
       await client.query(
         `insert into public.website_routes (id, website_id, path, funnel_id)
-         values ($1, $2, '/', $3), ($4, $5, '/services', $6)`,
+         values ($1, $2, '/home', $3), ($4, $5, '/services', $6)`,
         [`r1-${Date.now()}`, websiteId, fnl1, `r2-${Date.now()}`, websiteId, fnl2]
       );
 
