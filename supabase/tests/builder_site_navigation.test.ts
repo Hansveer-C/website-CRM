@@ -55,11 +55,8 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation RPC Integration Tests (P
           updated_at timestamptz not null default now()
         );
 
-        create or replace function auth.uid() returns text as $$
-          select coalesce(
-            current_setting('request.jwt.claim.sub', true),
-            (current_setting('request.jwt.claims', true)::jsonb ->> 'sub')
-          );
+        create or replace function auth.uid() returns uuid as $$
+          select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
         $$ language sql stable;
       `);
 
@@ -109,8 +106,8 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation RPC Integration Tests (P
 
   it('isolates tenants and rejects cross-tenant navigation operations', async () => {
     const client = await pool.connect();
-    const userA = `user-a-${randomUUID()}`;
-    const userB = `user-b-${randomUUID()}`;
+    const userA = randomUUID();
+    const userB = randomUUID();
     const siteA = randomUUID();
     const fnlA = `fnl-a-${randomUUID()}`;
 
@@ -168,7 +165,7 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation RPC Integration Tests (P
 
   it('stages, reorders, hides, and reverts draft navigation lifecycle', async () => {
     const client = await pool.connect();
-    const userId = `user-nav-${randomUUID()}`;
+    const userId = randomUUID();
     const siteId = randomUUID();
     const fnl1 = `fnl-1-${randomUUID()}`;
     const fnl2 = `fnl-2-${randomUUID()}`;
@@ -220,7 +217,7 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation RPC Integration Tests (P
 
   it('enforces optimistic concurrency and rejects stale base revisions', async () => {
     const client = await pool.connect();
-    const userId = `user-concur-${randomUUID()}`;
+    const userId = randomUUID();
     const siteId = randomUUID();
     const fnl1 = `fnl-c-${randomUUID()}`;
 
