@@ -149,10 +149,19 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
     }
   }
 
+  async function setAuthUser(client: any, userId: string | null): Promise<void> {
+    await client.query(`drop function if exists auth.uid() cascade;`);
+    if (userId === null) {
+      await client.query(`create or replace function auth.uid() returns text language sql as $$ select null::text $$;`);
+    } else {
+      await client.query(`create or replace function auth.uid() returns text language sql as $$ select '${userId}'::text $$;`);
+    }
+  }
+
   it('rejects unauthenticated calls with PT401', async () => {
     const client = await pool.connect();
     try {
-      await client.query(`create or replace function auth.uid() returns text language sql as $$ select null::text $$`);
+      await setAuthUser(client, null);
       await client.query(`select public.set_builder_homepage('00000000-0000-0000-0000-000000000000'::uuid, 'fnl-1', 'fnl-1')`);
       expect.unreachable('Should have failed');
     } catch (err: any) {
@@ -166,7 +175,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
   it('rejects null website_id with PT400', async () => {
     const client = await pool.connect();
     try {
-      await client.query(`create or replace function auth.uid() returns text language sql as $$ select 'user-test-1'::text $$`);
+      await setAuthUser(client, 'user-test-1');
       await client.query(`select public.set_builder_homepage(null, 'fnl-1', 'fnl-1')`);
       expect.unreachable('Should have failed');
     } catch (err: any) {
@@ -180,7 +189,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
   it('rejects blank funnel_id with PT400', async () => {
     const client = await pool.connect();
     try {
-      await client.query(`create or replace function auth.uid() returns text language sql as $$ select 'user-test-1'::text $$`);
+      await setAuthUser(client, 'user-test-1');
       await client.query(`select public.set_builder_homepage('00000000-0000-0000-0000-000000000000'::uuid, '   ', 'fnl-1')`);
       expect.unreachable('Should have failed');
     } catch (err: any) {
@@ -195,7 +204,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
     const client = await pool.connect();
     try {
       const { websiteId } = await createTestFixture('owner-user');
-      await client.query(`create or replace function auth.uid() returns text language sql as $$ select 'attacker-user'::text $$`);
+      await setAuthUser(client, 'attacker-user');
       await client.query(`select public.set_builder_homepage($1, 'fnl-1', 'fnl-1')`, [websiteId]);
       expect.unreachable('Should have failed');
     } catch (err: any) {
@@ -212,7 +221,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
       const { websiteId } = await createTestFixture('user-alpha');
       const { fnl1: foreignFunnel } = await createTestFixture('user-beta');
 
-      await client.query(`create or replace function auth.uid() returns text language sql as $$ select 'user-alpha'::text $$`);
+      await setAuthUser(client, 'user-alpha');
       await client.query(`select public.set_builder_homepage($1, $2, null)`, [websiteId, foreignFunnel]);
       expect.unreachable('Should have failed');
     } catch (err: any) {
@@ -236,7 +245,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
         userId
       ]);
 
-      await client.query(`create or replace function auth.uid() returns text language sql as $$ select '${userId}'::text $$`);
+      await setAuthUser(client, userId);
       await client.query(`select public.set_builder_homepage($1, $2, null)`, [websiteId, unassocFunnel]);
       expect.unreachable('Should have failed');
     } catch (err: any) {
@@ -253,7 +262,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
       const userId = `user-conflict-${Date.now()}`;
       const { websiteId, fnl1, fnl2 } = await createTestFixture(userId);
 
-      await client.query(`create or replace function auth.uid() returns text language sql as $$ select '${userId}'::text $$`);
+      await setAuthUser(client, userId);
       // Provide wrong expected homepage ('fnl-wrong' instead of fnl1)
       await client.query(`select public.set_builder_homepage($1, $2, 'fnl-wrong')`, [websiteId, fnl2]);
       expect.unreachable('Should have failed');
@@ -271,7 +280,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
       const userId = `user-success-${Date.now()}`;
       const { websiteId, fnl1, fnl2 } = await createTestFixture(userId);
 
-      await client.query(`create or replace function auth.uid() returns text language sql as $$ select '${userId}'::text $$`);
+      await setAuthUser(client, userId);
 
       const res = await client.query(`select public.set_builder_homepage($1, $2, $3) as result`, [
         websiteId,
@@ -300,7 +309,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
       const userId = `user-noop-${Date.now()}`;
       const { websiteId, fnl1 } = await createTestFixture(userId);
 
-      await client.query(`create or replace function auth.uid() returns text language sql as $$ select '${userId}'::text $$`);
+      await setAuthUser(client, userId);
 
       const res = await client.query(`select public.set_builder_homepage($1, $2, $3) as result`, [
         websiteId,
@@ -323,8 +332,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
     const client2 = await pool.connect();
 
     try {
-      await client1.query(`create or replace function auth.uid() returns text language sql as $$ select '${userId}'::text $$`);
-      await client2.query(`create or replace function auth.uid() returns text language sql as $$ select '${userId}'::text $$`);
+      await setAuthUser(client1, userId);
 
       // Client 1 begins transaction and holds lock
       await client1.query('begin');
