@@ -65,6 +65,7 @@ import {
   type BuilderDeletePagePersistResult
 } from './builder_delete_page_controller';
 import { BuilderReorderPagesController } from './builder_reorder_pages_controller';
+import { handleBuilderReorderPagesBrowserPost as handleBuilderReorderPagesBrowserPostImpl } from './builder_reorder_browser';
 import { PagesRepo } from './pages_repo_supabase';
 import {
   createBuilderPublishedRevision,
@@ -1277,56 +1278,13 @@ async function handleBuilderDeletePageBrowserDelete(input: RequestInfo | URL, in
     return builderSectionsJsonResponse({ success: true, data: result.data }, 200);
 }
 
-async function handleBuilderReorderPagesBrowserPost(input: RequestInfo | URL, init?: RequestInit): Promise<Response | null> {
-    const requestUrl = getBuilderSectionsRequestUrl(input);
-    if (!requestUrl) return null;
-    const parsedUrl = new URL(requestUrl, window.location.origin);
-    if (parsedUrl.pathname !== '/api/pages/reorder' || getBuilderSectionsRequestMethod(input, init).toUpperCase() !== 'POST') {
-        return null;
-    }
-
-    const userId = typeof (window as any).currentUser === 'string' ? (window as any).currentUser.trim() : '';
-    if (!userId) return builderSectionsJsonResponse({ success: false, code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
-
-    let payload: { funnel_id?: string; ordered_page_ids?: string[]; expected_page_ids?: string[] } | undefined;
-    try {
-        payload = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
-    } catch {
-        return builderSectionsJsonResponse({ success: false, code: 'INVALID_PAYLOAD', error: 'Invalid page order payload' }, 400);
-    }
-
-    if (!payload?.funnel_id || !Array.isArray(payload.ordered_page_ids) || !Array.isArray(payload.expected_page_ids)) {
-        return builderSectionsJsonResponse({ success: false, code: 'INVALID_PAYLOAD', error: 'Invalid page order payload' }, 400);
-    }
-
-    let client: SupabaseClient | undefined;
-    if (editorUsesSupabase()) {
-        client = await getBuilderPublicationSupabaseClient() ?? undefined;
-        if (!client) return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Page reordering is unavailable' }, 503);
-        const authResult = await client.auth.getUser();
-        if (authResult.error || authResult.data.user?.id !== userId) {
-            return builderSectionsJsonResponse({ success: false, code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
-        }
-    } else if (!editorUsesLocalData()) {
-        return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Page reordering is unavailable' }, 503);
-    }
-
-    const result = await PagesRepo.reorderPages(payload.funnel_id, payload.ordered_page_ids, payload.expected_page_ids, userId, client);
-
-    if (!result.success || !result.data) {
-        const conflict = result.code === 'CONFLICT';
-        const notFound = result.code === 'NOT_FOUND';
-        const forbidden = result.code === 'FORBIDDEN';
-        return builderSectionsJsonResponse({
-            success: false,
-            code: conflict ? 'CONFLICT' : notFound ? 'NOT_FOUND' : forbidden ? 'FORBIDDEN' : 'UNAVAILABLE',
-            error: conflict
-                ? 'The page order changed elsewhere. Reload and try again.'
-                : notFound ? 'Funnel not found' : 'The page order could not be updated. Please try again.'
-        }, conflict ? 409 : notFound ? 404 : forbidden ? 403 : 503);
-    }
-
-    return builderSectionsJsonResponse({ success: true, data: result.data }, 200);
+export async function handleBuilderReorderPagesBrowserPost(input: RequestInfo | URL, init?: RequestInit): Promise<Response | null> {
+    return handleBuilderReorderPagesBrowserPostImpl(input, init, {
+        getCurrentUser: () => (typeof (window as any).currentUser === 'string' ? (window as any).currentUser.trim() : ''),
+        editorUsesSupabase: () => editorUsesSupabase(),
+        editorUsesLocalData: () => editorUsesLocalData(),
+        getSupabaseClient: () => getBuilderPublicationSupabaseClient().then(c => c ?? undefined)
+    });
 }
 
 const originalFetch = window.fetch;
@@ -4632,31 +4590,35 @@ function getBuilderDeletePageController(): BuilderDeletePageController {
 let builderReorderPagesController: BuilderReorderPagesController | null = null;
 let builderReorderPagesControllerIdentity = '';
 
-function getBuilderReorderPagesController(): BuilderReorderPagesController {
+export function getBuilderReorderPagesController(): BuilderReorderPagesController {
   const context = getBuilderNewPageContext();
   const identity = `${context.actingUserId}:${context.website?.id ?? ''}`;
   if (builderReorderPagesController && builderReorderPagesControllerIdentity === identity) {
     return builderReorderPagesController;
   }
   builderReorderPagesControllerIdentity = identity;
-  builderReorderPagesController = new BuilderReorderPagesController(() => ({
-    actingUserId: context.actingUserId,
-    websiteId: context.website?.id,
-    pages: mockPages,
-    client: (window as any).supabaseClient ?? undefined,
-    onPagesReordered: (updatedPages) => {
-      updatedPages.forEach(up => {
-        const idx = mockPages.findIndex(p => p.id === up.id);
-        if (idx >= 0) {
-          mockPages[idx].step_order = up.step_order;
-        }
-      });
-      renderBuilderPagesPanel();
-    },
-    onConflict: () => {
-      renderBuilderPagesPanel();
-    }
-  }));
+  builderReorderPagesController = new BuilderReorderPagesController(() => {
+    const current = getBuilderNewPageContext();
+
+    return {
+      actingUserId: current.actingUserId,
+      websiteId: current.website?.id,
+      pages: mockPages,
+      client: (window as any).supabaseClient ?? undefined,
+      onPagesReordered: (updatedPages) => {
+        updatedPages.forEach(up => {
+          const idx = mockPages.findIndex(p => p.id === up.id);
+          if (idx >= 0) {
+            mockPages[idx].step_order = up.step_order;
+          }
+        });
+        renderBuilderPagesPanel();
+      },
+      onConflict: () => {
+        renderBuilderPagesPanel();
+      }
+    };
+  });
   return builderReorderPagesController;
 }
 

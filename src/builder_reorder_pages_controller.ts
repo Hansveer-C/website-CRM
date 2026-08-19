@@ -176,6 +176,8 @@ export class BuilderReorderPagesController {
         if (result.code === 'CONFLICT') {
           this._error = 'The page order changed elsewhere. Reload and try again.';
           if (onConflict) onConflict();
+        } else if (result.code === 'AMBIGUOUS') {
+          this._error = 'The reorder result is uncertain. Please reload to check.';
         } else {
           this._error = result.error || 'Failed to reorder pages';
         }

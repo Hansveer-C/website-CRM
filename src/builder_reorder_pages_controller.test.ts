@@ -148,8 +148,52 @@ describe('BuilderReorderPagesController', () => {
     expect(conflictTriggered).toBe(true);
   });
 
-  it('stale async guard: switching website while RPC is in flight suppresses state mutation', async () => {
-    let website = 'w1';
+  it('handles AMBIGUOUS error code with uncertain-result user message and does not mutate pages', async () => {
+    let reorderedInvoked = false;
+    vi.spyOn(PagesRepo, 'reorderPages').mockResolvedValue({
+      success: false,
+      code: 'AMBIGUOUS',
+      error: 'The reorder result is uncertain. Please reload to check.'
+    });
+
+    const controller = new BuilderReorderPagesController(() => ({
+      actingUserId: 'u1',
+      websiteId: 'w1',
+      pages: samplePages,
+      onPagesReordered: () => {
+        reorderedInvoked = true;
+      }
+    }));
+
+    const result = await controller.movePageDown('p1');
+    expect(result).toBe(false);
+    expect(controller.status).toBe('error');
+    expect(controller.error).toBe('The reorder result is uncertain. Please reload to check.');
+    expect(reorderedInvoked).toBe(false);
+  });
+
+  it('handles network throw with AMBIGUOUS uncertain-result message', async () => {
+    let reorderedInvoked = false;
+    vi.spyOn(PagesRepo, 'reorderPages').mockRejectedValue(new Error('Network disconnected'));
+
+    const controller = new BuilderReorderPagesController(() => ({
+      actingUserId: 'u1',
+      websiteId: 'w1',
+      pages: samplePages,
+      onPagesReordered: () => {
+        reorderedInvoked = true;
+      }
+    }));
+
+    const result = await controller.movePageDown('p1');
+    expect(result).toBe(false);
+    expect(controller.status).toBe('error');
+    expect(controller.error).toBe('The reorder result is uncertain. Please reload to check.');
+    expect(reorderedInvoked).toBe(false);
+  });
+
+  it('A. Website switch: start reorder on Website A, switch to B, old completion does NOT mutate state', async () => {
+    let website = 'site-a';
     let reorderedInvoked = false;
     let resolveRpc: (val: any) => void;
     const rpcPromise = new Promise(resolve => {
@@ -167,7 +211,7 @@ describe('BuilderReorderPagesController', () => {
     }));
 
     const reorderPromise = controller.movePageDown('p1');
-    website = 'w2';
+    website = 'site-b';
     resolveRpc!({ success: true, data: { funnel_id: 'f1', pages: samplePages } });
 
     expect(await reorderPromise).toBe(false);
@@ -202,6 +246,32 @@ describe('BuilderReorderPagesController', () => {
     expect(reorderedInvoked).toBe(false);
   });
 
+  it('B. Logout: start reorder as user A, log out / clear acting user, old completion does NOT mutate state', async () => {
+    let currentUser: string | undefined = 'u1';
+    let reorderedInvoked = false;
+    let resolveRpc: (val: any) => void;
+    const rpcPromise = new Promise(resolve => {
+      resolveRpc = resolve;
+    });
+    vi.spyOn(PagesRepo, 'reorderPages').mockImplementation(() => rpcPromise as any);
+
+    const controller = new BuilderReorderPagesController(() => ({
+      actingUserId: currentUser,
+      websiteId: 'w1',
+      pages: samplePages,
+      onPagesReordered: () => {
+        reorderedInvoked = true;
+      }
+    }));
+
+    const reorderPromise = controller.movePageDown('p1');
+    currentUser = undefined;
+    resolveRpc!({ success: true, data: { funnel_id: 'f1', pages: samplePages } });
+
+    expect(await reorderPromise).toBe(false);
+    expect(reorderedInvoked).toBe(false);
+  });
+
   it('re-resolves live authentication so logout suppresses stale completion with frozen caller context', async () => {
     const fakeWindow = {
       currentUser: 'u1',
@@ -227,6 +297,44 @@ describe('BuilderReorderPagesController', () => {
 
     expect(await pending).toBe(false);
     expect(reorderedInvoked).toBe(false);
+  });
+
+  it('C. Same Website active Page switch: start reorder on Page A, switch active page to Page B, completion preserves Page B', async () => {
+    let activePageId = 'p1';
+    let reorderedPages: Page[] | undefined;
+    let resolveRpc: (val: any) => void;
+    const rpcPromise = new Promise(resolve => {
+      resolveRpc = resolve;
+    });
+    vi.spyOn(PagesRepo, 'reorderPages').mockImplementation(() => rpcPromise as any);
+
+    const controller = new BuilderReorderPagesController(() => ({
+      actingUserId: 'u1',
+      websiteId: 'w1',
+      activePageId,
+      pages: samplePages,
+      onPagesReordered: (pages) => {
+        reorderedPages = pages;
+      }
+    }));
+
+    const reorderPromise = controller.movePageDown('p1');
+    activePageId = 'p2';
+    resolveRpc!({
+      success: true,
+      data: {
+        funnel_id: 'f1',
+        pages: [
+          { ...samplePages[1], step_order: 0 },
+          { ...samplePages[0], step_order: 1 },
+          { ...samplePages[2], step_order: 2 }
+        ]
+      }
+    });
+
+    expect(await reorderPromise).toBe(true);
+    expect(reorderedPages?.length).toBe(3);
+    expect(activePageId).toBe('p2');
   });
 
   it('same-Website active Page switch does not hijack the new selection', async () => {
@@ -255,6 +363,60 @@ describe('BuilderReorderPagesController', () => {
     expect(await pending).toBe(true);
     expect(reorderedInvoked).toBe(true);
     expect(fakeWindow.location.hash).toContain('pageId=p3');
+  });
+
+  it('D. Older completion versus newer authority: older completion does not overwrite newer reorder', async () => {
+    let reorderedPages: Page[] | undefined;
+    let resolveRpc1: (val: any) => void;
+    const rpcPromise1 = new Promise(resolve => {
+      resolveRpc1 = resolve;
+    });
+
+    vi.spyOn(PagesRepo, 'reorderPages')
+      .mockImplementationOnce(() => rpcPromise1 as any)
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          funnel_id: 'f1',
+          pages: [
+            { ...samplePages[0], step_order: 0 },
+            { ...samplePages[2], step_order: 1 },
+            { ...samplePages[1], step_order: 2 }
+          ]
+        }
+      });
+
+    const controller = new BuilderReorderPagesController(() => ({
+      actingUserId: 'u1',
+      websiteId: 'w1',
+      pages: samplePages,
+      onPagesReordered: (pages) => {
+        reorderedPages = pages;
+      }
+    }));
+
+    const promise1 = controller.movePageDown('p1');
+    (controller as any)._activeRequestId++;
+    (controller as any)._status = 'idle';
+
+    const promise2 = controller.movePageUp('p3');
+    await promise2;
+    expect(reorderedPages?.map(p => p.id)).toEqual(['p1', 'p3', 'p2']);
+
+    resolveRpc1!({
+      success: true,
+      data: {
+        funnel_id: 'f1',
+        pages: [
+          { ...samplePages[1], step_order: 0 },
+          { ...samplePages[0], step_order: 1 },
+          { ...samplePages[2], step_order: 2 }
+        ]
+      }
+    });
+
+    expect(await promise1).toBe(false);
+    expect(reorderedPages?.map(p => p.id)).toEqual(['p1', 'p3', 'p2']);
   });
 
   it('older completion cannot overwrite a newer authoritative Website lifecycle', async () => {
@@ -303,5 +465,32 @@ describe('BuilderReorderPagesController', () => {
 
     expect(resolveBuilderReorderLiveContext({ actingUserId: 'stale-user', websiteId: 'stale-site', pages: samplePages }))
       .toMatchObject({ actingUserId: 'live-user', websiteId: 'live-site' });
+  });
+
+  it('Live Context Provider: dynamic callback resolves fresh authority without controller reconstruction', async () => {
+    let currentUserId = 'u1';
+    let currentWebsiteId = 'w1';
+
+    const getLiveContext = () => ({
+      actingUserId: currentUserId,
+      websiteId: currentWebsiteId,
+      pages: samplePages
+    });
+
+    const controller = new BuilderReorderPagesController(getLiveContext);
+
+    const reorderSpy = vi.spyOn(PagesRepo, 'reorderPages').mockResolvedValue({
+      success: true,
+      data: { funnel_id: 'f1', pages: samplePages }
+    });
+
+    await controller.movePageDown('p1');
+    expect(reorderSpy).toHaveBeenLastCalledWith('f1', ['p2', 'p1', 'p3'], ['p1', 'p2', 'p3'], 'u1', undefined);
+
+    currentUserId = 'u2';
+    currentWebsiteId = 'w2';
+
+    await controller.movePageDown('p1');
+    expect(reorderSpy).toHaveBeenLastCalledWith('f1', ['p2', 'p1', 'p3'], ['p1', 'p2', 'p3'], 'u2', undefined);
   });
 });

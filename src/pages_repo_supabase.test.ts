@@ -678,5 +678,36 @@ describe('PagesRepo.deletePage durability and transport error handling', () => {
         error: 'The page order changed elsewhere. Reload and try again.'
       });
     });
+
+    it('maps remote RPC PT401, PT403, PT404, PT400 codes to deterministic codes', async () => {
+      const makeClient = (code: string, message: string) => ({
+        rpc: () => Promise.resolve({ error: { code, message }, data: null })
+      }) as unknown as SupabaseClient;
+
+      const res401 = await PagesRepo.reorderPages(reorderFunnel, ['p2', 'p1'], ['p1', 'p2'], reorderUser, makeClient('PT401', 'Auth required'));
+      expect(res401.code).toBe('UNAUTHORIZED');
+
+      const res403 = await PagesRepo.reorderPages(reorderFunnel, ['p2', 'p1'], ['p1', 'p2'], reorderUser, makeClient('PT403', 'Forbidden'));
+      expect(res403.code).toBe('FORBIDDEN');
+
+      const res404 = await PagesRepo.reorderPages(reorderFunnel, ['p2', 'p1'], ['p1', 'p2'], reorderUser, makeClient('PT404', 'Not found'));
+      expect(res404.code).toBe('NOT_FOUND');
+
+      const res400 = await PagesRepo.reorderPages(reorderFunnel, ['p2', 'p1'], ['p1', 'p2'], reorderUser, makeClient('PT400', 'Invalid page order payload'));
+      expect(res400.code).toBe('INVALID_INPUT');
+    });
+
+    it('maps RPC network failure / unhandled throw to AMBIGUOUS with uncertain-result message', async () => {
+      const client = {
+        rpc: () => Promise.reject(new Error('Connection terminated'))
+      } as unknown as SupabaseClient;
+
+      const result = await PagesRepo.reorderPages(reorderFunnel, ['p2', 'p1'], ['p1', 'p2'], reorderUser, client);
+      expect(result).toMatchObject({
+        success: false,
+        code: 'AMBIGUOUS',
+        error: 'The reorder result is uncertain. Please reload to check.'
+      });
+    });
   });
 });
