@@ -7,298 +7,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  remediate-reorder:
-    name: Apply Reviewed Reorder Remediation
-    if: github.head_ref == 'codex/builder-phase-1-reorder-pages'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout source branch
-        uses: actions/checkout@v4
-        with:
-          ref: codex/builder-phase-1-reorder-pages
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Apply reviewed remediation
-        shell: bash
-        run: |
-          cat > /tmp/reorder_remediate.py <<'PY'
-          from pathlib import Path
-          import re
-
-          def replace_once(path: str, old: str, new: str) -> None:
-              p = Path(path)
-              text = p.read_text()
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{path}: expected one literal target, found {count}: {old[:80]!r}')
-              p.write_text(text.replace(old, new, 1))
-
-          def regex_once(path: str, pattern: str, replacement: str) -> None:
-              p = Path(path)
-              text = p.read_text()
-              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
-              if count != 1:
-                  raise SystemExit(f'{path}: expected one regex target, found {count}: {pattern[:100]!r}')
-              p.write_text(updated)
-
-          migration = 'supabase/migrations/20260817050300_reorder_builder_pages.sql'
-          replace_once(migration, '  v_unique_ordered_count integer;\n  v_is_noop boolean := true;', '  v_unique_ordered_count integer;\n  v_unique_expected_count integer;\n  v_is_noop boolean := true;')
-          regex_once(
-              migration,
-              r"  -- Check for null or empty elements in ordered IDs\n.*?(?=  -- 3\. Verify Funnel ownership)",
-              """  -- Validate every element in BOTH the desired order and optimistic expected snapshot.\n  for i in 1..v_ordered_count loop\n    if p_ordered_page_ids[i] is null or length(trim(p_ordered_page_ids[i])) = 0 then\n      raise sqlstate 'PT400' using message = 'Invalid page ID in ordered list';\n    end if;\n    if p_expected_page_ids[i] is null or length(trim(p_expected_page_ids[i])) = 0 then\n      raise sqlstate 'PT400' using message = 'Invalid page ID in expected list';\n    end if;\n  end loop;\n\n  -- Duplicate IDs are invalid in either complete-order array.\n  select count(distinct id) into v_unique_ordered_count\n  from unnest(p_ordered_page_ids) as id;\n\n  if v_unique_ordered_count <> v_ordered_count then\n    raise sqlstate 'PT400' using message = 'Duplicate page IDs in ordered list';\n  end if;\n\n  select count(distinct id) into v_unique_expected_count\n  from unnest(p_expected_page_ids) as id;\n\n  if v_unique_expected_count <> v_expected_count then\n    raise sqlstate 'PT400' using message = 'Duplicate page IDs in expected list';\n  end if;\n\n"""
-          )
-          replace_once(migration, '    if v_current_page_ids[i] <> p_expected_page_ids[i] then', '    if v_current_page_ids[i] is distinct from p_expected_page_ids[i] then')
-
-          controller = 'src/builder_reorder_pages_controller.ts'
-          replace_once(
-              controller,
-              "export type BuilderReorderStatus = 'idle' | 'reordering' | 'error' | 'success';",
-              """export interface BuilderReorderPagesLiveContextProviderOptions {\n  getIdentityContext: () => { actingUserId?: string; website?: { id: string } | null };\n  getPages: () => readonly Page[];\n  getClient?: () => SupabaseClient | undefined;\n  onPagesReordered?: (pages: Page[]) => void;\n  onConflict?: () => void;\n}\n\nexport function createBuilderReorderPagesLiveContextProvider(\n  options: BuilderReorderPagesLiveContextProviderOptions\n): () => BuilderReorderPagesContext {\n  return () => {\n    const current = options.getIdentityContext();\n    return {\n      actingUserId: current.actingUserId,\n      websiteId: current.website?.id,\n      pages: options.getPages(),\n      client: options.getClient?.(),\n      onPagesReordered: options.onPagesReordered,\n      onConflict: options.onConflict\n    };\n  };\n}\n\nexport function mapBuilderReorderPagesBrowserFailure(\n  code?: string,\n  error?: string\n): { status: number; code: string; error: string } {\n  if (code === 'CONFLICT') return { status: 409, code: 'CONFLICT', error: 'The page order changed elsewhere. Reload and try again.' };\n  if (code === 'NOT_FOUND') return { status: 404, code: 'NOT_FOUND', error: 'Funnel not found' };\n  if (code === 'FORBIDDEN') return { status: 403, code: 'FORBIDDEN', error: error || 'Forbidden' };\n  if (code === 'UNAUTHORIZED') return { status: 401, code: 'UNAUTHORIZED', error: 'Unauthorized' };\n  if (code === 'INVALID_INPUT' || code === 'INVALID_PAYLOAD' || code === 'INVALID_PAGE_SET') return { status: 400, code: 'INVALID_INPUT', error: error || 'Invalid page order payload' };\n  if (code === 'AMBIGUOUS') return { status: 500, code: 'AMBIGUOUS', error: 'The reorder result is uncertain. Please reload to check.' };\n  return { status: 503, code: 'UNAVAILABLE', error: error || 'The page order could not be updated. Please try again.' };\n}\n\nexport type BuilderReorderStatus = 'idle' | 'reordering' | 'error' | 'success';"""
-          )
-
-          main = 'src/main.ts'
-          replace_once(main, "import { BuilderReorderPagesController } from './builder_reorder_pages_controller';", "import { BuilderReorderPagesController, createBuilderReorderPagesLiveContextProvider, mapBuilderReorderPagesBrowserFailure } from './builder_reorder_pages_controller';")
-          regex_once(
-              main,
-              r"    if \(!result\.success \|\| !result\.data\) \{\n        const conflict = result\.code === 'CONFLICT';\n        const notFound = result\.code === 'NOT_FOUND';\n        const forbidden = result\.code === 'FORBIDDEN';\n.*?\n    \}\n\n    return builderSectionsJsonResponse\(\{ success: true, data: result\.data \}, 200\);",
-              """    if (!result.success || !result.data) {\n        const failure = mapBuilderReorderPagesBrowserFailure(result.code, result.error);\n        return builderSectionsJsonResponse({ success: false, code: failure.code, error: failure.error }, failure.status);\n    }\n\n    return builderSectionsJsonResponse({ success: true, data: result.data }, 200);"""
-          )
-          regex_once(
-              main,
-              r"  builderReorderPagesControllerIdentity = identity;\n  builderReorderPagesController = new BuilderReorderPagesController\(\(\) => \(\{\n.*?\n  \}\)\);\n  return builderReorderPagesController;",
-              """  builderReorderPagesControllerIdentity = identity;\n  builderReorderPagesController = new BuilderReorderPagesController(\n    createBuilderReorderPagesLiveContextProvider({\n      getIdentityContext: getBuilderNewPageContext,\n      getPages: () => mockPages,\n      getClient: () => (window as any).supabaseClient ?? undefined,\n      onPagesReordered: (updatedPages) => {\n        updatedPages.forEach(up => {\n          const idx = mockPages.findIndex(p => p.id === up.id);\n          if (idx >= 0) mockPages[idx].step_order = up.step_order;\n        });\n        renderBuilderPagesPanel();\n      },\n      onConflict: () => renderBuilderPagesPanel()\n    })\n  );\n  return builderReorderPagesController;"""
-          )
-
-          controller_test = 'src/builder_reorder_pages_controller.test.ts'
-          replace_once(controller_test, "import { BuilderReorderPagesController } from './builder_reorder_pages_controller';", "import { BuilderReorderPagesController, createBuilderReorderPagesLiveContextProvider, mapBuilderReorderPagesBrowserFailure } from './builder_reorder_pages_controller';")
-          p = Path(controller_test)
-          text = p.read_text()
-          if not text.endswith('});\n'):
-              raise SystemExit('controller test: unexpected ending')
-          additions = r'''
-
-  it('live context provider resolves identity freshly without controller reconstruction', () => {
-    let actingUserId = 'u1';
-    let websiteId = 'w1';
-    const provider = createBuilderReorderPagesLiveContextProvider({
-      getIdentityContext: () => ({ actingUserId, website: { id: websiteId } }),
-      getPages: () => samplePages
-    });
-    expect(provider()).toMatchObject({ actingUserId: 'u1', websiteId: 'w1' });
-    actingUserId = '';
-    websiteId = 'w2';
-    expect(provider()).toMatchObject({ actingUserId: '', websiteId: 'w2' });
-  });
-
-  it('logout while RPC is in flight suppresses protected state mutation', async () => {
-    let actingUserId = 'u1';
-    let applied = false;
-    let resolveRpc: (value: any) => void;
-    const rpcPromise = new Promise(resolve => { resolveRpc = resolve; });
-    const spy = vi.spyOn(PagesRepo, 'reorderPages').mockImplementation(() => rpcPromise as any);
-    const controller = new BuilderReorderPagesController(createBuilderReorderPagesLiveContextProvider({
-      getIdentityContext: () => ({ actingUserId, website: { id: 'w1' } }),
-      getPages: () => samplePages,
-      onPagesReordered: () => { applied = true; }
-    }));
-    const pending = controller.movePageDown('p1');
-    actingUserId = '';
-    resolveRpc!({ success: true, data: { funnel_id: 'f1', pages: samplePages } });
-    expect(await pending).toBe(false);
-    expect(applied).toBe(false);
-    spy.mockRestore();
-  });
-
-  it('same-Website active Page switch remains selected after reorder completion', async () => {
-    let activePageId = 'p1';
-    let resolveRpc: (value: any) => void;
-    const rpcPromise = new Promise(resolve => { resolveRpc = resolve; });
-    const spy = vi.spyOn(PagesRepo, 'reorderPages').mockImplementation(() => rpcPromise as any);
-    const controller = new BuilderReorderPagesController(createBuilderReorderPagesLiveContextProvider({
-      getIdentityContext: () => ({ actingUserId: 'u1', website: { id: 'w1' } }),
-      getPages: () => samplePages
-    }));
-    const pending = controller.movePageDown('p1');
-    activePageId = 'p3';
-    resolveRpc!({ success: true, data: { funnel_id: 'f1', pages: samplePages } });
-    expect(await pending).toBe(true);
-    expect(activePageId).toBe('p3');
-    spy.mockRestore();
-  });
-
-  it('older completion cannot overwrite a newer authoritative controller lifecycle', async () => {
-    let websiteId = 'w1';
-    let oldApplied = false;
-    let newApplied = false;
-    let resolveOld: (value: any) => void;
-    const oldPromise = new Promise(resolve => { resolveOld = resolve; });
-    let calls = 0;
-    const spy = vi.spyOn(PagesRepo, 'reorderPages').mockImplementation(() => {
-      calls += 1;
-      return calls === 1 ? oldPromise as any : Promise.resolve({ success: true, data: { funnel_id: 'f1', pages: samplePages } }) as any;
-    });
-    const oldController = new BuilderReorderPagesController(createBuilderReorderPagesLiveContextProvider({
-      getIdentityContext: () => ({ actingUserId: 'u1', website: { id: websiteId } }),
-      getPages: () => samplePages,
-      onPagesReordered: () => { oldApplied = true; }
-    }));
-    const oldPending = oldController.movePageDown('p1');
-    websiteId = 'w2';
-    const newController = new BuilderReorderPagesController(createBuilderReorderPagesLiveContextProvider({
-      getIdentityContext: () => ({ actingUserId: 'u1', website: { id: websiteId } }),
-      getPages: () => samplePages,
-      onPagesReordered: () => { newApplied = true; }
-    }));
-    expect(await newController.movePageDown('p1')).toBe(true);
-    resolveOld!({ success: true, data: { funnel_id: 'f1', pages: samplePages } });
-    expect(await oldPending).toBe(false);
-    expect(oldApplied).toBe(false);
-    expect(newApplied).toBe(true);
-    spy.mockRestore();
-  });
-
-  it('browser failure mapping preserves AMBIGUOUS and deterministic domain codes', () => {
-    expect(mapBuilderReorderPagesBrowserFailure('AMBIGUOUS')).toEqual({ status: 500, code: 'AMBIGUOUS', error: 'The reorder result is uncertain. Please reload to check.' });
-    expect(mapBuilderReorderPagesBrowserFailure('CONFLICT')).toMatchObject({ status: 409, code: 'CONFLICT' });
-    expect(mapBuilderReorderPagesBrowserFailure('UNAUTHORIZED')).toMatchObject({ status: 401, code: 'UNAUTHORIZED' });
-    expect(mapBuilderReorderPagesBrowserFailure('FORBIDDEN')).toMatchObject({ status: 403, code: 'FORBIDDEN' });
-    expect(mapBuilderReorderPagesBrowserFailure('NOT_FOUND')).toMatchObject({ status: 404, code: 'NOT_FOUND' });
-    expect(mapBuilderReorderPagesBrowserFailure('INVALID_PAGE_SET')).toMatchObject({ status: 400, code: 'INVALID_INPUT' });
-  });
-'''
-          p.write_text(text[:-4] + additions + '\n});\n')
-
-          db_test = 'supabase/tests/reorder_builder_pages.test.ts'
-          p = Path(db_test)
-          text = p.read_text()
-          anchor = "  it('5. duplicate IDs in ordered array raises PT400', async () => {"
-          inserted = r'''  it('4b. null elements in either complete-order array raise PT400', async () => {
-    const client = await pool.connect();
-    const user = '00000000-0000-0000-0000-000000000001';
-    const queries = [
-      "select public.reorder_builder_pages('f-test', array[null::text, 'p2'], array['p1', 'p2'])",
-      "select public.reorder_builder_pages('f-test', array['p1', 'p2'], array[null::text, 'p2'])"
-    ];
-    try {
-      for (const query of queries) {
-        await client.query('begin');
-        await client.query(`set local request.jwt.claim.sub = '${user}'`);
-        await expect(client.query(query)).rejects.toMatchObject({ code: 'PT400' });
-        await client.query('rollback');
-      }
-    } finally { await client.query('rollback').catch(() => {}); client.release(); }
-  });
-
-  it('4c. empty and whitespace-only IDs in either array raise PT400', async () => {
-    const client = await pool.connect();
-    const user = '00000000-0000-0000-0000-000000000001';
-    const queries = [
-      "select public.reorder_builder_pages('f-test', array['', 'p2'], array['p1', 'p2'])",
-      "select public.reorder_builder_pages('f-test', array['   ', 'p2'], array['p1', 'p2'])",
-      "select public.reorder_builder_pages('f-test', array['p1', 'p2'], array['', 'p2'])",
-      "select public.reorder_builder_pages('f-test', array['p1', 'p2'], array['   ', 'p2'])"
-    ];
-    try {
-      for (const query of queries) {
-        await client.query('begin');
-        await client.query(`set local request.jwt.claim.sub = '${user}'`);
-        await expect(client.query(query)).rejects.toMatchObject({ code: 'PT400' });
-        await client.query('rollback');
-      }
-    } finally { await client.query('rollback').catch(() => {}); client.release(); }
-  });
-
-'''
-          if text.count(anchor) != 1: raise SystemExit('DB test anchor 1 mismatch')
-          text = text.replace(anchor, inserted + anchor, 1)
-          anchor2 = "  it('6. cross-tenant or missing page ID does not leak existence and raises PT400', async () => {"
-          inserted2 = r'''  it('5b. duplicate IDs in expected array raise PT400', async () => {
-    const client = await pool.connect();
-    const user = '00000000-0000-0000-0000-000000000001';
-    try {
-      await client.query('begin');
-      await client.query(`set local request.jwt.claim.sub = '${user}'`);
-      await expect(client.query("select public.reorder_builder_pages('f-test', array['p1', 'p2'], array['p1', 'p1'])")).rejects.toMatchObject({ code: 'PT400' });
-    } finally { await client.query('rollback').catch(() => {}); client.release(); }
-  });
-
-'''
-          if text.count(anchor2) != 1: raise SystemExit('DB test anchor 2 mismatch')
-          text = text.replace(anchor2, inserted2 + anchor2, 1)
-          anchor3 = "  it('7. stale expected order raises PT409 CONFLICT', async () => {"
-          inserted3 = r'''  it('6b. malformed expected NULL cannot bypass optimistic concurrency and causes zero writes', async () => {
-    const user = '00000000-0000-0000-0000-000000000001';
-    await pool.query(`
-      insert into public.users (id, email) values ('${user}', 'u@test.com') on conflict do nothing;
-      insert into public.funnels (id, user_id, name) values ('f-null-expected', '${user}', 'Null Expected') on conflict do nothing;
-      insert into public.pages (id, user_id, name, slug, funnel_id, step_order)
-      values ('p-null-exp-1', '${user}', 'P1', 'null-exp-1', 'f-null-expected', 0), ('p-null-exp-2', '${user}', 'P2', 'null-exp-2', 'f-null-expected', 1)
-      on conflict (id) do update set step_order = excluded.step_order;
-    `);
-    const before = await pool.query("select id, step_order from public.pages where funnel_id = 'f-null-expected' order by id");
-    const client = await pool.connect();
-    try {
-      await client.query('begin');
-      await client.query(`set local request.jwt.claim.sub = '${user}'`);
-      await expect(client.query("select public.reorder_builder_pages('f-null-expected', array['p-null-exp-2', 'p-null-exp-1'], array[null::text, 'p-null-exp-2'])")).rejects.toMatchObject({ code: 'PT400' });
-      await client.query('rollback');
-    } finally { await client.query('rollback').catch(() => {}); client.release(); }
-    const after = await pool.query("select id, step_order from public.pages where funnel_id = 'f-null-expected' order by id");
-    expect(after.rows).toEqual(before.rows);
-  });
-
-'''
-          if text.count(anchor3) != 1: raise SystemExit('DB test anchor 3 mismatch')
-          text = text.replace(anchor3, inserted3 + anchor3, 1)
-          p.write_text(text)
-          PY
-          python3 /tmp/reorder_remediate.py
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run focused lifecycle tests
-        run: npx vitest run src/builder_page_lifecycle.test.ts src/builder_duplicate_page_controller.test.ts src/builder_delete_page_controller.test.ts src/builder_reorder_pages_controller.test.ts src/pages_repo_supabase.test.ts
-
-      - name: Run Phase 0 tests
-        run: npm run test:phase0
-
-      - name: Run safe broad suite
-        run: npx vitest run --exclude "**/verify_sms_backend.test.ts"
-
-      - name: Typecheck app
-        run: npm run typecheck:app
-
-      - name: Typecheck API
-        run: npm run typecheck:api
-
-      - name: Build
-        run: npm run build
-
-      - name: Validate and commit remediation
-        shell: bash
-        run: |
-          git restore -- dist/index.html || true
-          git diff --check
-          git status --short
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout HEAD^ -- .github/workflows/builder-db-integration.yml
-          git rm .github/workflows/reorder-remediation-runner.yml .github/workflows/reorder-remediation-pr-runner.yml .github/workflows/reorder-remediation-pr-runner-v2.yml
-          git add .github/workflows/builder-db-integration.yml src/builder_reorder_pages_controller.ts src/builder_reorder_pages_controller.test.ts src/main.ts supabase/migrations/20260817050300_reorder_builder_pages.sql supabase/tests/reorder_builder_pages.test.ts
-          git commit -m "fix(builder): harden reorder expected order and stale identity"
-          git push origin HEAD:codex/builder-phase-1-reorder-pages
-
   standalone-delete-db-integration:
     name: Standalone Delete DB Integration (PostgreSQL 17)
     runs-on: ubuntu-latest
@@ -321,15 +32,19 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
+
       - name: Install Dependencies
         run: npm ci
+
       - name: Run Standalone Delete DB Tests
-        run: PAGE_DELETE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run supabase/tests/delete_builder_page.test.ts
+        run: |
+          PAGE_DELETE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run supabase/tests/delete_builder_page.test.ts
 
   standalone-reorder-db-integration:
     name: Standalone Reorder DB Integration (PostgreSQL 17)
@@ -353,15 +68,19 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
+
       - name: Install Dependencies
         run: npm ci
+
       - name: Run Standalone Reorder DB Tests
-        run: PAGE_REORDER_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run supabase/tests/reorder_builder_pages.test.ts
+        run: |
+          PAGE_REORDER_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run supabase/tests/reorder_builder_pages.test.ts
 
   combined-db-integration:
     name: Combined Duplicate + Delete + Reorder DB Integration (PostgreSQL 17)
@@ -385,12 +104,16 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
+
       - name: Install Dependencies
         run: npm ci
+
       - name: Run Combined DB Regression Tests
-        run: PAGE_DUPLICATE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" PAGE_DELETE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" PAGE_REORDER_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run --no-file-parallelism supabase/tests/duplicate_builder_page.test.ts supabase/tests/delete_builder_page.test.ts supabase/tests/reorder_builder_pages.test.ts
+        run: |
+          PAGE_DUPLICATE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" PAGE_DELETE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" PAGE_REORDER_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run --no-file-parallelism supabase/tests/duplicate_builder_page.test.ts supabase/tests/delete_builder_page.test.ts supabase/tests/reorder_builder_pages.test.ts
