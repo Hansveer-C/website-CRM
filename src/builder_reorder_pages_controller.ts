@@ -1,5 +1,6 @@
 import type { Page } from './types';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { parseBuilderNavigationTarget } from './builder_navigation';
 import { PagesRepo } from './pages_repo_supabase';
 
 export interface BuilderReorderPagesContext {
@@ -9,6 +10,37 @@ export interface BuilderReorderPagesContext {
   client?: SupabaseClient;
   onPagesReordered?: (pages: Page[]) => void;
   onConflict?: () => void;
+}
+
+/**
+ * Overlay the supplied controller context with browser identity/navigation authority.
+ * This is deliberately resolved for every controller context read so stale async
+ * completion safety does not depend on the caller reconstructing the controller.
+ */
+export function resolveBuilderReorderLiveContext(
+  context: BuilderReorderPagesContext
+): BuilderReorderPagesContext {
+  if (typeof window === 'undefined') return context;
+
+  let actingUserId = context.actingUserId;
+  let websiteId = context.websiteId;
+
+  if (Object.prototype.hasOwnProperty.call(window, 'currentUser')) {
+    actingUserId = typeof window.currentUser === 'string'
+      ? window.currentUser.trim()
+      : undefined;
+  }
+
+  const parsedNavigation = parseBuilderNavigationTarget(window.location?.hash ?? '');
+  if (parsedNavigation.status === 'valid') {
+    websiteId = parsedNavigation.target.websiteId;
+  }
+
+  return {
+    ...context,
+    actingUserId,
+    websiteId
+  };
 }
 
 export type BuilderReorderStatus = 'idle' | 'reordering' | 'error' | 'success';
@@ -21,6 +53,10 @@ export class BuilderReorderPagesController {
   private _activeRequestId = 0;
 
   constructor(private readonly getContext: () => BuilderReorderPagesContext) {}
+
+  private getLiveContext(): BuilderReorderPagesContext {
+    return resolveBuilderReorderLiveContext(this.getContext());
+  }
 
   get status(): BuilderReorderStatus {
     return this._status;
@@ -62,7 +98,7 @@ export class BuilderReorderPagesController {
       return false;
     }
 
-    const context = this.getContext();
+    const context = this.getLiveContext();
     const { actingUserId, websiteId, pages, client, onPagesReordered, onConflict } = context;
 
     if (!actingUserId) {
@@ -125,8 +161,8 @@ export class BuilderReorderPagesController {
         client
       );
 
-      // Stale async guard: check if context / active request changed
-      const currentContext = this.getContext();
+      // Stale async guard: re-resolve live user/Website authority at completion.
+      const currentContext = this.getLiveContext();
       if (
         requestId !== this._activeRequestId ||
         currentContext.actingUserId !== actingUserId ||
@@ -153,7 +189,7 @@ export class BuilderReorderPagesController {
       }
       return true;
     } catch {
-      const currentContext = this.getContext();
+      const currentContext = this.getLiveContext();
       if (
         requestId !== this._activeRequestId ||
         currentContext.actingUserId !== actingUserId ||
