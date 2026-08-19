@@ -7,160 +7,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  final-reorder-remediation:
-    name: Final Reorder Bridge Remediation
-    if: github.head_ref == 'codex/builder-phase-1-reorder-pages'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout source branch
-        uses: actions/checkout@v4
-        with:
-          ref: codex/builder-phase-1-reorder-pages
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Patch main reorder wiring
-        shell: bash
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-
-          path = Path('src/main.ts')
-          text = path.read_text()
-
-          old_failure = '''    if (!result.success || !result.data) {
-        const conflict = result.code === 'CONFLICT';
-        const notFound = result.code === 'NOT_FOUND';
-        const forbidden = result.code === 'FORBIDDEN';
-        return builderSectionsJsonResponse({
-            success: false,
-            code: conflict ? 'CONFLICT' : notFound ? 'NOT_FOUND' : forbidden ? 'FORBIDDEN' : 'UNAVAILABLE',
-            error: conflict
-                ? 'The page order changed elsewhere. Reload and try again.'
-                : notFound ? 'Funnel not found' : 'The page order could not be updated. Please try again.'
-        }, conflict ? 409 : notFound ? 404 : forbidden ? 403 : 503);
-    }
-'''
-          new_failure = '''    if (!result.success || !result.data) {
-        const code = result.code ?? 'UNAVAILABLE';
-        if (code === 'CONFLICT') {
-            return builderSectionsJsonResponse({ success: false, code, error: 'The page order changed elsewhere. Reload and try again.' }, 409);
-        }
-        if (code === 'NOT_FOUND') {
-            return builderSectionsJsonResponse({ success: false, code, error: 'Funnel not found' }, 404);
-        }
-        if (code === 'FORBIDDEN') {
-            return builderSectionsJsonResponse({ success: false, code, error: result.error || 'Forbidden' }, 403);
-        }
-        if (code === 'UNAUTHORIZED') {
-            return builderSectionsJsonResponse({ success: false, code, error: 'Unauthorized' }, 401);
-        }
-        if (code === 'INVALID_INPUT' || code === 'INVALID_PAYLOAD' || code === 'INVALID_PAGE_SET') {
-            return builderSectionsJsonResponse({ success: false, code: 'INVALID_INPUT', error: result.error || 'Invalid page order payload' }, 400);
-        }
-        if (code === 'AMBIGUOUS') {
-            return builderSectionsJsonResponse({ success: false, code, error: 'The reorder result is uncertain. Please reload to check.' }, 500);
-        }
-        return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: result.error || 'The page order could not be updated. Please try again.' }, 503);
-    }
-'''
-          if text.count(old_failure) != 1:
-              raise SystemExit(f'expected one reorder bridge failure block, found {text.count(old_failure)}')
-          text = text.replace(old_failure, new_failure, 1)
-
-          old_context = '''  builderReorderPagesControllerIdentity = identity;
-  builderReorderPagesController = new BuilderReorderPagesController(() => ({
-    actingUserId: context.actingUserId,
-    websiteId: context.website?.id,
-    pages: mockPages,
-    client: (window as any).supabaseClient ?? undefined,
-    onPagesReordered: (updatedPages) => {
-      updatedPages.forEach(up => {
-        const idx = mockPages.findIndex(p => p.id === up.id);
-        if (idx >= 0) {
-          mockPages[idx].step_order = up.step_order;
-        }
-      });
-      renderBuilderPagesPanel();
-    },
-    onConflict: () => {
-      renderBuilderPagesPanel();
-    }
-  }));
-'''
-          new_context = '''  builderReorderPagesControllerIdentity = identity;
-  builderReorderPagesController = new BuilderReorderPagesController(() => {
-    const current = getBuilderNewPageContext();
-    return {
-      actingUserId: current.actingUserId,
-      websiteId: current.website?.id,
-      pages: mockPages,
-      client: (window as any).supabaseClient ?? undefined,
-      onPagesReordered: (updatedPages) => {
-        updatedPages.forEach(up => {
-          const idx = mockPages.findIndex(p => p.id === up.id);
-          if (idx >= 0) {
-            mockPages[idx].step_order = up.step_order;
-          }
-        });
-        renderBuilderPagesPanel();
-      },
-      onConflict: () => {
-        renderBuilderPagesPanel();
-      }
-    };
-  });
-'''
-          if text.count(old_context) != 1:
-              raise SystemExit(f'expected one frozen reorder context block, found {text.count(old_context)}')
-          text = text.replace(old_context, new_context, 1)
-          path.write_text(text)
-          PY
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run focused lifecycle tests
-        run: npx vitest run src/builder_page_lifecycle.test.ts src/builder_duplicate_page_controller.test.ts src/builder_delete_page_controller.test.ts src/builder_reorder_pages_controller.test.ts src/pages_repo_supabase.test.ts
-
-      - name: Run Phase 0 tests
-        run: npm run test:phase0
-
-      - name: Run safe broad suite
-        run: npx vitest run --exclude "**/verify_sms_backend.test.ts"
-
-      - name: Typecheck app
-        run: npm run typecheck:app
-
-      - name: Typecheck API
-        run: npm run typecheck:api
-
-      - name: Build
-        run: npm run build
-
-      - name: Validate and push remediation
-        shell: bash
-        run: |
-          git restore -- dist/index.html || true
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout HEAD^ -- .github/workflows/builder-db-integration.yml
-          git add src/main.ts .github/workflows/builder-db-integration.yml
-          git commit -m "fix(builder): refresh reorder context and preserve ambiguous outcome"
-          git push origin HEAD:codex/builder-phase-1-reorder-pages
-
   standalone-delete-db-integration:
     name: Standalone Delete DB Integration (PostgreSQL 17)
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:17
@@ -175,22 +28,28 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+          cache: 'npm'
+
       - name: Install Dependencies
         run: npm ci
+
       - name: Run Standalone Delete DB Tests
-        run: PAGE_DELETE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run supabase/tests/delete_builder_page.test.ts
+        run: |
+          PAGE_DELETE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run supabase/tests/delete_builder_page.test.ts
 
   standalone-reorder-db-integration:
     name: Standalone Reorder DB Integration (PostgreSQL 17)
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:17
@@ -205,22 +64,28 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+          cache: 'npm'
+
       - name: Install Dependencies
         run: npm ci
+
       - name: Run Standalone Reorder DB Tests
-        run: PAGE_REORDER_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run --no-file-parallelism supabase/tests/reorder_builder_pages.test.ts supabase/tests/reorder_builder_pages_validation.test.ts
+        run: |
+          PAGE_REORDER_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run --no-file-parallelism supabase/tests/reorder_builder_pages.test.ts supabase/tests/reorder_builder_pages_validation.test.ts
 
   combined-db-integration:
     name: Combined Duplicate + Delete + Reorder DB Integration (PostgreSQL 17)
     runs-on: ubuntu-latest
+
     services:
       postgres:
         image: postgres:17
@@ -235,15 +100,20 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+          cache: 'npm'
+
       - name: Install Dependencies
         run: npm ci
+
       - name: Run Combined DB Regression Tests
-        run: PAGE_DUPLICATE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" PAGE_DELETE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" PAGE_REORDER_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run --no-file-parallelism supabase/tests/duplicate_builder_page.test.ts supabase/tests/delete_builder_page.test.ts supabase/tests/reorder_builder_pages.test.ts supabase/tests/reorder_builder_pages_validation.test.ts
+        run: |
+          PAGE_DUPLICATE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" PAGE_DELETE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" PAGE_REORDER_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run --no-file-parallelism supabase/tests/duplicate_builder_page.test.ts supabase/tests/delete_builder_page.test.ts supabase/tests/reorder_builder_pages.test.ts supabase/tests/reorder_builder_pages_validation.test.ts
