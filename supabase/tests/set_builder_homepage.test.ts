@@ -62,11 +62,16 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
           user_id text not null references public.users(id) on delete cascade,
           name text not null,
           domain text unique,
-          subdomain text unique not null,
+          subdomain text,
           homepage_funnel_id text,
           created_at timestamptz not null default now(),
           updated_at timestamptz not null default now()
         );
+
+        alter table public.websites add column if not exists subdomain text;
+        alter table public.websites add column if not exists homepage_funnel_id text;
+        alter table public.websites add column if not exists updated_at timestamptz not null default now();
+        alter table public.websites add column if not exists created_at timestamptz not null default now();
 
         create table if not exists public.website_routes (
           id text primary key,
