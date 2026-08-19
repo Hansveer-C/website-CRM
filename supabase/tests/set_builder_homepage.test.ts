@@ -68,6 +68,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
           updated_at timestamptz not null default now()
         );
 
+        alter table public.websites add column if not exists domain text;
         alter table public.websites add column if not exists subdomain text;
         alter table public.websites add column if not exists homepage_funnel_id text;
         alter table public.websites add column if not exists updated_at timestamptz not null default now();
