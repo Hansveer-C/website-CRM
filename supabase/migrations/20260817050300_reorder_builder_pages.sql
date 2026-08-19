@@ -19,6 +19,7 @@ declare
   v_ordered_count integer;
   v_expected_count integer;
   v_unique_ordered_count integer;
+  v_unique_expected_count integer;
   v_is_noop boolean := true;
   v_result jsonb;
   i integer;
@@ -44,19 +45,29 @@ begin
     raise sqlstate 'PT400' using message = 'Invalid page order array length';
   end if;
 
-  -- Check for null or empty elements in ordered IDs
+  -- Validate every element in BOTH the desired order and optimistic expected snapshot.
   for i in 1..v_ordered_count loop
     if p_ordered_page_ids[i] is null or length(trim(p_ordered_page_ids[i])) = 0 then
       raise sqlstate 'PT400' using message = 'Invalid page ID in ordered list';
     end if;
+    if p_expected_page_ids[i] is null or length(trim(p_expected_page_ids[i])) = 0 then
+      raise sqlstate 'PT400' using message = 'Invalid page ID in expected list';
+    end if;
   end loop;
 
-  -- Check for duplicate IDs in ordered list
+  -- Duplicate IDs are invalid in either complete-order array.
   select count(distinct id) into v_unique_ordered_count
   from unnest(p_ordered_page_ids) as id;
 
   if v_unique_ordered_count <> v_ordered_count then
     raise sqlstate 'PT400' using message = 'Duplicate page IDs in ordered list';
+  end if;
+
+  select count(distinct id) into v_unique_expected_count
+  from unnest(p_expected_page_ids) as id;
+
+  if v_unique_expected_count <> v_expected_count then
+    raise sqlstate 'PT400' using message = 'Duplicate page IDs in expected list';
   end if;
 
   -- 3. Verify Funnel ownership
@@ -98,7 +109,7 @@ begin
   end if;
 
   for i in 1..v_page_count loop
-    if v_current_page_ids[i] <> p_expected_page_ids[i] then
+    if v_current_page_ids[i] is distinct from p_expected_page_ids[i] then
       raise sqlstate 'PT409' using message = 'The page order changed elsewhere. Reload and try again.';
     end if;
   end loop;
