@@ -1,0 +1,80 @@
+name: Reorder Remediation PR Runner
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  remediate:
+    if: github.head_ref == 'codex/builder-phase-1-reorder-pages'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/builder-phase-1-reorder-pages
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Extract and apply reviewed transformation
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/reorder-remediation-runner.yml').read_text()
+          marker = "          python3 <<'PY'\n"
+          start = source.index(marker) + len(marker)
+          end = source.index("\n          PY\n", start)
+          lines = source[start:end].splitlines()
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
+          Path('/tmp/reorder-remediate.py').write_text(script)
+          PY
+          python3 /tmp/reorder-remediate.py
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run focused lifecycle tests
+        run: >-
+          npx vitest run
+          src/builder_page_lifecycle.test.ts
+          src/builder_duplicate_page_controller.test.ts
+          src/builder_delete_page_controller.test.ts
+          src/builder_reorder_pages_controller.test.ts
+          src/pages_repo_supabase.test.ts
+
+      - name: Run Phase 0 tests
+        run: npm run test:phase0
+
+      - name: Run safe broad suite
+        run: npx vitest run --exclude "**/verify_sms_backend.test.ts"
+
+      - name: Typecheck app
+        run: npm run typecheck:app
+
+      - name: Typecheck API
+        run: npm run typecheck:api
+
+      - name: Build
+        run: npm run build
+
+      - name: Validate and commit remediation
+        shell: bash
+        run: |
+          git restore -- dist/index.html || true
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/reorder-remediation-runner.yml .github/workflows/reorder-remediation-pr-runner.yml
+          git add src/builder_reorder_pages_controller.ts src/builder_reorder_pages_controller.test.ts src/main.ts supabase/migrations/20260817050300_reorder_builder_pages.sql supabase/tests/reorder_builder_pages.test.ts
+          git commit -m "fix(builder): harden reorder expected order and stale identity"
+          git push origin HEAD:codex/builder-phase-1-reorder-pages
