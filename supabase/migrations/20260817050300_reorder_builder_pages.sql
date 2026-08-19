@@ -74,12 +74,16 @@ begin
   );
 
   -- 5. Post-lock load and row FOR UPDATE lock of all pages in the funnel
+  perform 1
+  from public.pages
+  where user_id = v_user_id and funnel_id = p_funnel_id
+  for update;
+
   -- Deterministic order fallback: step_order nulls last, created_at, id
   select coalesce(array_agg(id order by step_order nulls last, created_at, id), array[]::text[])
   into v_current_page_ids
   from public.pages
-  where user_id = v_user_id and funnel_id = p_funnel_id
-  for update;
+  where user_id = v_user_id and funnel_id = p_funnel_id;
 
   v_page_count := coalesce(array_length(v_current_page_ids, 1), 0);
 
