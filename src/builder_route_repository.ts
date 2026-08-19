@@ -392,6 +392,7 @@ export async function getBuilderEffectiveRoutes(
           funnel_id: live.funnel_id,
           live_path: live.path,
           draft_path: null,
+          draft_id: draft.id,
           is_draft_override: false,
           is_staged_delete: true,
           is_new_draft: false
@@ -404,6 +405,7 @@ export async function getBuilderEffectiveRoutes(
           funnel_id: live.funnel_id,
           live_path: live.path,
           draft_path: draft.path,
+          draft_id: draft.id,
           is_draft_override: true,
           is_staged_delete: false,
           is_new_draft: false
@@ -416,6 +418,7 @@ export async function getBuilderEffectiveRoutes(
           funnel_id: live.funnel_id,
           live_path: live.path,
           draft_path: null,
+          draft_id: null,
           is_draft_override: false,
           is_staged_delete: false,
           is_new_draft: false
@@ -431,6 +434,7 @@ export async function getBuilderEffectiveRoutes(
         funnel_id: draft.funnel_id,
         live_path: null,
         draft_path: draft.path,
+        draft_id: draft.id,
         is_draft_override: true,
         is_staged_delete: false,
         is_new_draft: true

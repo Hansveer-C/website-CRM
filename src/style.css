@@ -837,10 +837,229 @@ body.pb-new-page-modal-open {
     padding-right: 16px;
   }
 
-  .pb-new-page-dialog footer {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-  }
+}
+
+/* Builder Route Management & Publish Styles (Phase 1B / Task 5C) */
+.pb-pages-route-publish-banner {
+  padding: 8px 12px;
+  background: #111827;
+  border-bottom: 1px solid #1f2937;
+}
+
+.pb-publish-routes-btn {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #10b981;
+  background: #065f46;
+  color: #ecfdf5;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.pb-publish-routes-btn:hover:not(:disabled) {
+  background: #047857;
+  border-color: #34d399;
+}
+
+.pb-publish-routes-btn:focus-visible {
+  outline: 2px solid #34d399;
+  outline-offset: 2px;
+}
+
+.pb-page-route-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.pb-page-route-badge.draft-rename,
+.pb-page-route-badge.draft-create {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.pb-page-route-badge.draft-delete {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.pb-page-route-badge.live {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.pb-page-route-badge.unrouted {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.pb-page-live-path-sub {
+  display: block;
+  font-size: 0.7rem;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+
+.pb-page-route-dialog-backdrop,
+.pb-route-publish-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.pb-page-route-dialog,
+.pb-route-publish-modal {
+  background: #181b20;
+  border: 1px solid #30343b;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+}
+
+.pb-page-route-dialog > header,
+.pb-route-publish-modal > header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #242830;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.pb-page-route-dialog > header h2,
+.pb-route-publish-modal > header h2 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 2px 0 4px;
+  color: #f9fafb;
+}
+
+.pb-page-route-dialog > header p,
+.pb-route-publish-modal > header p {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.pb-page-route-dialog > header span,
+.pb-route-publish-modal > header span {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 800;
+  color: #60a5fa;
+}
+
+.pb-page-route-live-preview {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+}
+
+.pb-page-route-live-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+.pb-page-route-live-val {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  color: #38bdf8;
+}
+
+.pb-route-publish-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.pb-route-publish-summary h4 {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin: 0 0 10px;
+}
+
+.pb-route-publish-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pb-route-publish-list li {
+  padding: 8px 10px;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pb-route-publish-list .badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.pb-route-change-rename .badge {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.pb-route-change-create .badge {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.pb-route-change-delete .badge {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.pb-route-publish-modal footer,
+.pb-page-route-dialog footer {
+  padding: 12px 20px;
+  border-top: 1px solid #242830;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  background: #111418;
 }
 
 .pb-page-settings {
