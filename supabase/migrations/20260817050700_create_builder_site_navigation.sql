@@ -1,7 +1,7 @@
 -- Migration: 20260817050700_create_builder_site_navigation.sql
 -- Description: Establishes canonical website navigation domain tables, drafts, and RPCs for Task 6A.
 
-create table if not null public.builder_site_navigation_live (
+create table if not exists public.builder_site_navigation_live (
   id uuid primary key default gen_random_uuid(),
   website_id uuid not null references public.websites(id) on delete cascade,
   menu_scope text not null default 'primary' check (menu_scope in ('primary', 'footer')),
@@ -12,7 +12,7 @@ create table if not null public.builder_site_navigation_live (
   constraint builder_site_nav_live_site_scope_unique unique (website_id, menu_scope)
 );
 
-create table if not null public.builder_site_navigation_drafts (
+create table if not exists public.builder_site_navigation_drafts (
   id uuid primary key default gen_random_uuid(),
   website_id uuid not null references public.websites(id) on delete cascade,
   menu_scope text not null default 'primary' check (menu_scope in ('primary', 'footer')),
