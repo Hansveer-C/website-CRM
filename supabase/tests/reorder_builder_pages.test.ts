@@ -463,6 +463,17 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const c2 = await pool.connect();
     const user = '00000000-0000-0000-0000-000000000001';
     try {
+      await pool.query(`
+        insert into public.users (id, email) values ('${user}', 'u@test.com') on conflict do nothing;
+        insert into public.funnels (id, user_id, name) values ('f-conc-rr', '${user}', 'Funnel RR') on conflict do nothing;
+        insert into public.pages (id, user_id, name, slug, funnel_id, step_order)
+        values
+          ('p-rr-1', '${user}', 'RR1', 'rr1', 'f-conc-rr', 0),
+          ('p-rr-2', '${user}', 'RR2', 'rr2', 'f-conc-rr', 1),
+          ('p-rr-3', '${user}', 'RR3', 'rr3', 'f-conc-rr', 2)
+        on conflict (id) do update set step_order = excluded.step_order;
+      `);
+
       await c1.query('begin');
       await c1.query(`set local request.jwt.claim.sub = '${user}'`);
 
@@ -472,9 +483,9 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       // c1 performs reorder (holds advisory lock until commit)
       await c1.query(`
         select public.reorder_builder_pages(
-          'f-valid',
-          array['p-val-2', 'p-val-1', 'p-val-3'],
-          array['p-val-1', 'p-val-2', 'p-val-3']
+          'f-conc-rr',
+          array['p-rr-2', 'p-rr-1', 'p-rr-3'],
+          array['p-rr-1', 'p-rr-2', 'p-rr-3']
         );
       `);
 
@@ -484,9 +495,9 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
 
       const c2Promise = c2.query(`
         select public.reorder_builder_pages(
-          'f-valid',
-          array['p-val-3', 'p-val-2', 'p-val-1'],
-          array['p-val-1', 'p-val-2', 'p-val-3']
+          'f-conc-rr',
+          array['p-rr-3', 'p-rr-2', 'p-rr-1'],
+          array['p-rr-1', 'p-rr-2', 'p-rr-3']
         );
       `);
 
@@ -516,6 +527,17 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const c2 = await pool.connect();
     const user = '00000000-0000-0000-0000-000000000001';
     try {
+      await pool.query(`
+        insert into public.users (id, email) values ('${user}', 'u@test.com') on conflict do nothing;
+        insert into public.funnels (id, user_id, name) values ('f-conc-rc', '${user}', 'Funnel RC') on conflict do nothing;
+        insert into public.pages (id, user_id, name, slug, funnel_id, step_order)
+        values
+          ('p-rc-1', '${user}', 'RC1', 'rc1', 'f-conc-rc', 0),
+          ('p-rc-2', '${user}', 'RC2', 'rc2', 'f-conc-rc', 1),
+          ('p-rc-3', '${user}', 'RC3', 'rc3', 'f-conc-rc', 2)
+        on conflict (id) do update set step_order = excluded.step_order;
+      `);
+
       await c1.query('begin');
       await c1.query(`set local request.jwt.claim.sub = '${user}'`);
 
@@ -525,9 +547,9 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       // c1 performs reorder (holds advisory lock)
       await c1.query(`
         select public.reorder_builder_pages(
-          'f-valid',
-          array['p-val-1', 'p-val-2', 'p-val-3'],
-          array['p-val-2', 'p-val-1', 'p-val-3']
+          'f-conc-rc',
+          array['p-rc-1', 'p-rc-3', 'p-rc-2'],
+          array['p-rc-1', 'p-rc-2', 'p-rc-3']
         );
       `);
 
@@ -536,7 +558,7 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       const pid2 = pid2Res.rows[0].pid;
 
       const c2Promise = c2.query(`
-        select public.create_builder_page('f-valid', 'New Page', 'new-p', 'landing');
+        select public.create_builder_page('f-conc-rc', 'New RC Page', 'new-rc-p', 'landing');
       `);
 
       await assertBackendWaiting(pool, pid2);
@@ -559,13 +581,14 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       await client.query('begin');
       await client.query(`set local request.jwt.claim.sub = '${user}'`);
 
-      // Reorder with expected list omitting the newly created page
+      // In f-conc-rc, a 4th page was created in test 13.
+      // Reorder with expected list of only the original 3 pages => PT409
       await expect(
         client.query(`
           select public.reorder_builder_pages(
-            'f-valid',
-            array['p-val-2', 'p-val-1', 'p-val-3'],
-            array['p-val-1', 'p-val-2', 'p-val-3']
+            'f-conc-rc',
+            array['p-rc-2', 'p-rc-1', 'p-rc-3'],
+            array['p-rc-1', 'p-rc-2', 'p-rc-3']
           );
         `)
       ).rejects.toMatchObject({ code: 'PT409' });
@@ -580,9 +603,16 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const c2 = await pool.connect();
     const user = '00000000-0000-0000-0000-000000000001';
     try {
-      // Get current valid pages
-      const curPagesRes = await pool.query("select id from public.pages where funnel_id = 'f-valid' order by step_order");
-      const pageIds = curPagesRes.rows.map(r => r.id);
+      await pool.query(`
+        insert into public.users (id, email) values ('${user}', 'u@test.com') on conflict do nothing;
+        insert into public.funnels (id, user_id, name) values ('f-conc-rd', '${user}', 'Funnel RD') on conflict do nothing;
+        insert into public.pages (id, user_id, name, slug, funnel_id, step_order)
+        values
+          ('p-rd-1', '${user}', 'RD1', 'rd1', 'f-conc-rd', 0),
+          ('p-rd-2', '${user}', 'RD2', 'rd2', 'f-conc-rd', 1),
+          ('p-rd-3', '${user}', 'RD3', 'rd3', 'f-conc-rd', 2)
+        on conflict (id) do update set step_order = excluded.step_order;
+      `);
 
       await c1.query('begin');
       await c1.query(`set local request.jwt.claim.sub = '${user}'`);
@@ -593,18 +623,18 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       // c1 reorders
       await c1.query(`
         select public.reorder_builder_pages(
-          'f-valid',
-          $1::text[],
-          $2::text[]
+          'f-conc-rd',
+          array['p-rd-3', 'p-rd-1', 'p-rd-2'],
+          array['p-rd-1', 'p-rd-2', 'p-rd-3']
         );
-      `, [pageIds, pageIds]);
+      `);
 
       // c2 invokes duplicate_builder_page
       const pid2Res = await c2.query('select pg_backend_pid() as pid');
       const pid2 = pid2Res.rows[0].pid;
 
       const c2Promise = c2.query(`
-        select public.duplicate_builder_page('p-val-1');
+        select public.duplicate_builder_page('p-rd-1');
       `);
 
       await assertBackendWaiting(pool, pid2);
@@ -625,9 +655,16 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     const c2 = await pool.connect();
     const user = '00000000-0000-0000-0000-000000000001';
     try {
-      const curPagesRes = await pool.query("select id from public.pages where funnel_id = 'f-valid' order by step_order");
-      const pageIds = curPagesRes.rows.map(r => r.id);
-      const pageToDelete = pageIds[pageIds.length - 1];
+      await pool.query(`
+        insert into public.users (id, email) values ('${user}', 'u@test.com') on conflict do nothing;
+        insert into public.funnels (id, user_id, name) values ('f-conc-rdel', '${user}', 'Funnel RDEL') on conflict do nothing;
+        insert into public.pages (id, user_id, name, slug, funnel_id, step_order)
+        values
+          ('p-rdel-1', '${user}', 'RDEL1', 'rdel1', 'f-conc-rdel', 0),
+          ('p-rdel-2', '${user}', 'RDEL2', 'rdel2', 'f-conc-rdel', 1),
+          ('p-rdel-3', '${user}', 'RDEL3', 'rdel3', 'f-conc-rdel', 2)
+        on conflict (id) do update set step_order = excluded.step_order;
+      `);
 
       await c1.query('begin');
       await c1.query(`set local request.jwt.claim.sub = '${user}'`);
@@ -638,19 +675,19 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       // c1 reorders
       await c1.query(`
         select public.reorder_builder_pages(
-          'f-valid',
-          $1::text[],
-          $2::text[]
+          'f-conc-rdel',
+          array['p-rdel-3', 'p-rdel-1', 'p-rdel-2'],
+          array['p-rdel-1', 'p-rdel-2', 'p-rdel-3']
         );
-      `, [pageIds, pageIds]);
+      `);
 
       // c2 deletes a page
       const pid2Res = await c2.query('select pg_backend_pid() as pid');
       const pid2 = pid2Res.rows[0].pid;
 
       const c2Promise = c2.query(`
-        select public.delete_builder_page($1);
-      `, [pageToDelete]);
+        select public.delete_builder_page('p-rdel-3');
+      `);
 
       await assertBackendWaiting(pool, pid2);
 
@@ -672,13 +709,13 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       await client.query('begin');
       await client.query(`set local request.jwt.claim.sub = '${user}'`);
 
-      // Try reordering with expected list containing already deleted page
+      // Try reordering with expected list containing already deleted page 'p-rdel-3'
       await expect(
         client.query(`
           select public.reorder_builder_pages(
-            'f-valid',
-            array['p-val-1', 'p-val-2', 'non-existent'],
-            array['p-val-1', 'p-val-2', 'non-existent']
+            'f-conc-rdel',
+            array['p-rdel-1', 'p-rdel-2', 'p-rdel-3'],
+            array['p-rdel-1', 'p-rdel-2', 'p-rdel-3']
           );
         `)
       ).rejects.toMatchObject({ code: 'PT400' });
