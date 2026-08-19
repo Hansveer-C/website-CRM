@@ -241,14 +241,17 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
     try {
       await client.query('begin');
       await client.query(`set local request.jwt.claim.sub = '${user}'`);
-
       await expect(
         client.query("select public.reorder_builder_pages('f-test', array[]::text[], array['p1'])")
       ).rejects.toMatchObject({ code: 'PT400' });
+      await client.query('rollback');
 
+      await client.query('begin');
+      await client.query(`set local request.jwt.claim.sub = '${user}'`);
       await expect(
         client.query("select public.reorder_builder_pages('f-test', array['p1', 'p2'], array['p1'])")
       ).rejects.toMatchObject({ code: 'PT400' });
+      await client.query('rollback');
     } finally {
       await client.query('rollback').catch(() => {});
       client.release();
@@ -552,7 +555,7 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
 
       // c2 invokes create_builder_page
       const c2Promise = c2.query(`
-        select public.create_builder_page('f-conc-rc', 'New RC Page', 'new-rc-p', 'landing');
+        select public.create_builder_page('New RC Page', 'new-rc-p', 'f-conc-rc');
       `);
 
       await assertBackendWaiting(pool, (c2 as any).processID);
