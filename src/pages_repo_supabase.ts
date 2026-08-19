@@ -119,11 +119,11 @@ export const PagesRepo = {
             } else {
               window.localStorage.removeItem(sectionKey);
             }
+            // Clear journal ONLY after restoration writes succeed
+            window.localStorage.removeItem(journalKey);
           }
         } catch {
-          // ignore
-        } finally {
-          window.localStorage.removeItem(journalKey);
+          // Restoration failed; retain journal for subsequent retry
         }
       }
 
@@ -422,13 +422,37 @@ export const PagesRepo = {
         return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
       }
 
-      // Clear recovery journal on committed success
+      // Clear recovery journal as part of durable commit
+      let journalCleared = true;
       if (hasLocalStorage) {
         try {
           window.localStorage.removeItem(journalKey);
         } catch {
-          // ignore
+          journalCleared = false;
         }
+      }
+
+      if (!journalCleared) {
+        // Never report success while a recovery journal still exists!
+        if (hasLocalStorage) {
+          try {
+            if (priorPagesRaw !== null) {
+              window.localStorage.setItem(pagesKey, priorPagesRaw);
+            } else {
+              window.localStorage.removeItem(pagesKey);
+            }
+            if (priorSectionRaw !== null) {
+              window.localStorage.setItem(sectionKey, priorSectionRaw);
+            } else {
+              window.localStorage.removeItem(sectionKey);
+            }
+          } catch {
+            // rollback best-effort (journal will restore on reload)
+          }
+        }
+        mockPages.splice(0, mockPages.length, ...previousPages);
+        mockPageSections.splice(0, mockPageSections.length, ...previousSections);
+        return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
       }
 
       return { success: true, data: { id, funnel_id: targetPage.funnel_id, deleted: true } };

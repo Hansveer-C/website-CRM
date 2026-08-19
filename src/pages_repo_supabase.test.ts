@@ -484,6 +484,101 @@ describe('PagesRepo.deletePage durability and transport error handling', () => {
     expect(storage.get(journalKey)).toBeUndefined(); // Journal cleared after recovery
   });
 
+  it('journal removal failure during commit returns PERSISTENCE_ERROR and aborts success', async () => {
+    const userId = 'settings-owner';
+    const pagesKey = `mock_pages_${userId}`;
+    const sectionKey = `mock_sections_${userId}:settings-page-a`;
+    const journalKey = `mock_journal_${userId}`;
+
+    const storage = new Map<string, string>();
+    storage.set(pagesKey, JSON.stringify(mockPages.filter(p => p.user_id === userId)));
+    storage.set(sectionKey, JSON.stringify([{ id: 'sec-a-1', page_id: 'settings-page-a' }]));
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => storage.get(k) ?? null,
+        setItem: (k: string, v: string) => storage.set(k, v),
+        removeItem: (k: string) => {
+          if (k === journalKey) throw new Error('JournalLockFailed');
+          storage.delete(k);
+        }
+      }
+    });
+
+    const result = await PagesRepo.deletePage('settings-page-a', userId);
+
+    expect(result).toMatchObject({ success: false, code: 'PERSISTENCE_ERROR' });
+    expect(mockPages.some(p => p.id === 'settings-page-a')).toBe(true);
+  });
+
+  it('hydration recovery failure retains journal for subsequent retry', async () => {
+    const userId = 'settings-owner';
+    const pagesKey = `mock_pages_${userId}`;
+    const sectionKey = `mock_sections_${userId}:settings-page-a`;
+    const journalKey = `mock_journal_${userId}`;
+
+    const storage = new Map<string, string>();
+    const originalOwnedPages = mockPages.filter(p => p.user_id === userId);
+    storage.set(journalKey, JSON.stringify({
+      pageId: 'settings-page-a',
+      priorPagesRaw: JSON.stringify(originalOwnedPages),
+      priorSectionRaw: JSON.stringify([{ id: 'sec-a-1', page_id: 'settings-page-a' }])
+    }));
+
+    let failHydrationWrite = true;
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => storage.get(k) ?? null,
+        setItem: (k: string, v: string) => {
+          if (failHydrationWrite && k === pagesKey) throw new Error('StorageFull');
+          storage.set(k, v);
+        },
+        removeItem: (k: string) => storage.delete(k)
+      }
+    });
+
+    // First hydration attempt: setItem throws, journal retained
+    PagesRepo.hydrateLocalPages(userId);
+    expect(storage.has(journalKey)).toBe(true);
+
+    // Second hydration attempt: storage works normally, recovery completes, journal cleared
+    failHydrationWrite = false;
+    PagesRepo.hydrateLocalPages(userId);
+    expect(storage.has(journalKey)).toBe(false);
+    expect(mockPages.some(p => p.id === 'settings-page-a')).toBe(true);
+  });
+
+  it('successful delete reload does not resurrect page or sections', async () => {
+    const userId = 'settings-owner';
+    const pagesKey = `mock_pages_${userId}`;
+    const sectionKeyA = `mock_sections_${userId}:settings-page-a`;
+    const journalKey = `mock_journal_${userId}`;
+
+    const storage = new Map<string, string>();
+    storage.set(pagesKey, JSON.stringify(mockPages.filter(p => p.user_id === userId)));
+    storage.set(sectionKeyA, JSON.stringify([{ id: 'sec-a-1', page_id: 'settings-page-a' }]));
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => storage.get(k) ?? null,
+        setItem: (k: string, v: string) => storage.set(k, v),
+        removeItem: (k: string) => storage.delete(k)
+      }
+    });
+
+    const result = await PagesRepo.deletePage('settings-page-a', userId);
+    expect(result.success).toBe(true);
+    expect(storage.has(journalKey)).toBe(false);
+
+    // Simulate fresh application reload
+    mockPages.splice(0, mockPages.length);
+    PagesRepo.hydrateLocalPages(userId);
+
+    expect(mockPages.some(p => p.id === 'settings-page-a')).toBe(false);
+    expect(storage.has(sectionKeyA)).toBe(false);
+  });
+
   it('returns AMBIGUOUS when remote Supabase transport throws uncaught exception', async () => {
     const client = {
       rpc: () => Promise.reject(new Error('Network error: Failed to fetch'))

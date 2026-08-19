@@ -311,7 +311,8 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
     try {
       const u1 = '11111111-1111-4111-8111-111111111111';
       const siteId = '10000000-0000-4000-8000-000000000001';
-      const revId = '20000000-0000-4000-8000-000000000001';
+      const revTargetId = '20000000-0000-4000-8000-000000000001';
+      const revOnlyId = '20000000-0000-4000-8000-000000000002';
 
       await client.query('begin');
       await client.query(`
@@ -325,8 +326,14 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
           ('p-pub-keep', '${u1}', 'Keep Page', 'pub-keep', 'draft', 'f-pub')
         on conflict do nothing;
 
-        insert into public.builder_published_revisions(id, website_id, page_id) values ('${revId}', '${siteId}', 'p-pub-rev') on conflict do nothing;
-        insert into public.builder_publication_targets(website_id, page_id, published_revision_id) values ('${siteId}', 'p-pub-target', '${revId}') on conflict do nothing;
+        insert into public.builder_published_revisions(id, website_id, page_id) values
+          ('${revTargetId}', '${siteId}', 'p-pub-target'),
+          ('${revOnlyId}', '${siteId}', 'p-pub-rev')
+        on conflict do nothing;
+
+        insert into public.builder_publication_targets(website_id, page_id, published_revision_id) values
+          ('${siteId}', 'p-pub-target', '${revTargetId}')
+        on conflict do nothing;
       `);
       await client.query('commit');
 
@@ -356,8 +363,41 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
 
       const targetCheck = await pool.query(`select * from public.builder_publication_targets where website_id = '${siteId}' and page_id = 'p-pub-target'`);
       expect(targetCheck.rows.length).toBe(1);
-      const revCheck = await pool.query(`select * from public.builder_published_revisions where id = '${revId}'`);
+      const revCheck = await pool.query(`select * from public.builder_published_revisions where id = '${revTargetId}'`);
       expect(revCheck.rows.length).toBe(1);
+    } finally {
+      await client.query('rollback').catch(() => {});
+      client.release();
+    }
+  });
+
+  it('7b. EXPLICIT CROSS-PAGE FK REJECTION: publication target cannot point to revision of a different page', async () => {
+    const client = await pool.connect();
+    try {
+      const u1 = '11111111-1111-4111-8111-111111111111';
+      const siteId = '10000000-0000-4000-8000-000000000099';
+      const revA = '20000000-0000-4000-8000-000000000099';
+
+      await client.query('begin');
+      await client.query(`
+        insert into public.users(id, email) values ('${u1}', 'u1@test.com') on conflict do nothing;
+        insert into public.funnels(id, user_id, name) values ('f-xp', '${u1}', 'XP Funnel') on conflict do nothing;
+        insert into public.websites(id, user_id, name, homepage_funnel_id) values ('${siteId}', '${u1}', 'XP Site', 'f-xp') on conflict do nothing;
+        insert into public.pages(id, user_id, name, slug, funnel_id) values
+          ('p-xp-A', '${u1}', 'XP Page A', 'xp-a', 'f-xp'),
+          ('p-xp-B', '${u1}', 'XP Page B', 'xp-b', 'f-xp')
+        on conflict do nothing;
+
+        insert into public.builder_published_revisions(id, website_id, page_id) values ('${revA}', '${siteId}', 'p-xp-A') on conflict do nothing;
+      `);
+      await client.query('commit');
+
+      await client.query('begin');
+      // Attempt target for Page B using revision of Page A -> must fail composite FK
+      await expect(
+        client.query(`insert into public.builder_publication_targets(website_id, page_id, published_revision_id) values ('${siteId}', 'p-xp-B', '${revA}')`)
+      ).rejects.toThrow(/foreign key constraint/);
+      await client.query('rollback');
     } finally {
       await client.query('rollback').catch(() => {});
       client.release();
