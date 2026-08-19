@@ -91,4 +91,35 @@ describe('authenticated preview routing', () => {
     const exact = { ...input, explicitPageId: 'p2' };
     expect(resolveAuthenticatedPreview(exact)).toEqual(resolveAuthenticatedPreview(exact));
   });
+
+  it('resolves draft_homepage_funnel_id override for root path while live route remains untouched', () => {
+    const siteWithDraft: Website = {
+      ...website('w1', 'u1', 'f1'),
+      homepage_funnel_id: 'f1',
+      draft_homepage_funnel_id: 'f2'
+    };
+
+    const res = resolveAuthenticatedPreview({
+      actingUserId: 'u1',
+      path: '/',
+      explicitWebsiteId: 'w1',
+      websites: [siteWithDraft],
+      routes: [route('/', 'w1', 'f1'), route('/services', 'w1', 'f2')],
+      funnels: [funnel('f1'), funnel('f2')],
+      pages: [
+        { ...page('p1', 'u1', 'f1'), name: 'Live Home Page' },
+        { ...page('p2', 'u1', 'f2'), name: 'Draft Home Page' }
+      ]
+    });
+
+    expect(res).toMatchObject({
+      status: 'resolved',
+      target: {
+        website: { id: 'w1' },
+        funnel: { id: 'f2' },
+        page: { id: 'p2', name: 'Draft Home Page' },
+        path: '/'
+      }
+    });
+  });
 });

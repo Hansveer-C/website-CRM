@@ -1,6 +1,14 @@
 import { DB } from './utils/db/db_module';
 import { Website } from './types';
 import { mockWebsites } from './db';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  setBuilderHomepage,
+  type SetHomepageResult,
+  type SetHomepageResultCode
+} from './builder_homepage_repository';
+
+export type { SetHomepageResult, SetHomepageResultCode };
 
 const isBrowser = typeof window !== 'undefined';
 const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
@@ -305,5 +313,24 @@ export const WebsitesRepo = {
       id: websiteId,
       domain: valResult.normalized
     });
+  },
+
+  /**
+   * Sets the canonical homepage funnel for a website.
+   */
+  async setHomepage(
+    websiteId: string,
+    funnelId: string,
+    expectedHomepageFunnelId: string | null | undefined,
+    actingUserId?: string,
+    client?: SupabaseClient
+  ): Promise<SetHomepageResult> {
+    return await setBuilderHomepage(
+      websiteId,
+      funnelId,
+      expectedHomepageFunnelId,
+      actingUserId,
+      client
+    );
   }
 };
