@@ -75,7 +75,8 @@ create policy "Users can delete route redirects of their websites"
 -- RPC: Atomic Route Publication
 create or replace function public.publish_builder_routes(
   p_website_id uuid,
-  p_expected_draft_count integer default null
+  p_expected_draft_count integer default null,
+  p_expected_draft_ids text[] default null
 )
 returns jsonb
 language plpgsql
@@ -86,6 +87,7 @@ declare
   v_user_id text := (select auth.uid())::text;
   v_website_exists boolean;
   v_draft_count integer := 0;
+  v_current_draft_ids text[];
   v_draft record;
   v_funnel_owner text;
   v_destination_published boolean;
@@ -118,7 +120,8 @@ begin
   end if;
 
   -- 5. Count and validate drafts
-  select count(*) into v_draft_count
+  select count(*), coalesce(array_agg(id::text order by id), array[]::text[])
+  into v_draft_count, v_current_draft_ids
   from public.builder_route_drafts
   where website_id = p_website_id;
 
@@ -130,8 +133,12 @@ begin
     );
   end if;
 
-  -- 6. Optimistic concurrency check on draft count
+  -- 6. Optimistic concurrency check on draft count and IDs
   if p_expected_draft_count is not null and v_draft_count <> p_expected_draft_count then
+    raise sqlstate 'PT409' using message = 'The route drafts were modified elsewhere. Reload and try again.';
+  end if;
+
+  if p_expected_draft_ids is not null and v_current_draft_ids <> p_expected_draft_ids then
     raise sqlstate 'PT409' using message = 'The route drafts were modified elsewhere. Reload and try again.';
   end if;
 
@@ -287,6 +294,23 @@ begin
       funnel_id = excluded.funnel_id;
   end loop;
 
+  -- 10.5. Cycle validation check across website_route_redirects
+  if exists (
+    with recursive redirect_chain as (
+      select from_path, to_path, array[from_path] as path_list
+      from public.website_route_redirects
+      where website_id = p_website_id
+      union all
+      select rc.from_path, r.to_path, rc.path_list || r.from_path
+      from redirect_chain rc
+      join public.website_route_redirects r on r.website_id = p_website_id and r.from_path = rc.to_path
+      where r.from_path = any(rc.path_list) or array_length(rc.path_list, 1) > 10
+    )
+    select 1 from redirect_chain where to_path = any(path_list) or array_length(path_list, 1) > 10
+  ) then
+    raise sqlstate 'PT400' using message = 'Publication would create a redirect loop.';
+  end if;
+
   -- 11. Clear successfully published route drafts
   delete from public.builder_route_drafts
   where website_id = p_website_id;
@@ -299,5 +323,5 @@ end;
 $$;
 
 -- Revoke from public, anon; Grant to authenticated, postgres, service_role
-revoke all on function public.publish_builder_routes(uuid, integer) from public, anon;
-grant execute on function public.publish_builder_routes(uuid, integer) to authenticated, postgres, service_role;
+revoke all on function public.publish_builder_routes(uuid, integer, text[]) from public, anon;
+grant execute on function public.publish_builder_routes(uuid, integer, text[]) to authenticated, postgres, service_role;

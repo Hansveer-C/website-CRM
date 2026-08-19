@@ -219,4 +219,18 @@ describe('builder_route_repository - In-Memory Draft Operations', () => {
     expect(pubRes.code).toBe('CONFLICT');
     expect(mockBuilderRouteDrafts).toHaveLength(1); // Not deleted
   });
+
+  it('rejects publication when same-count draft IDs do not match (stale replacement)', async () => {
+    await setBuilderRouteDraft({ websiteId, funnelId: funnel1, path: '/pressure-washing', routeId: 'r-1' }, userId);
+
+    const pubRes = await publishBuilderRoutes({
+      websiteId,
+      expectedDraftCount: 1,
+      expectedDraftIds: ['stale-draft-id-replaced']
+    }, userId);
+
+    expect(pubRes.success).toBe(false);
+    expect(pubRes.code).toBe('CONFLICT');
+    expect(mockBuilderRouteDrafts).toHaveLength(1);
+  });
 });

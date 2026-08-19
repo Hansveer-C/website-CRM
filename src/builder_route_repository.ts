@@ -475,6 +475,7 @@ export async function getBuilderEffectiveRoutes(
 export interface PublishRoutesInput {
   websiteId: string;
   expectedDraftCount?: number;
+  expectedDraftIds?: string[];
 }
 
 export interface RoutePublishResult {
@@ -525,6 +526,14 @@ export async function publishBuilderRoutes(
 
     if (input.expectedDraftCount !== undefined && drafts.length !== input.expectedDraftCount) {
       return { success: false, error: 'The route drafts were modified elsewhere. Reload and try again.', code: 'CONFLICT' };
+    }
+
+    if (input.expectedDraftIds !== undefined) {
+      const currentIds = drafts.map(d => d.id).sort();
+      const expectedIds = [...input.expectedDraftIds].sort();
+      if (JSON.stringify(currentIds) !== JSON.stringify(expectedIds)) {
+        return { success: false, error: 'The route drafts were modified elsewhere. Reload and try again.', code: 'CONFLICT' };
+      }
     }
 
     // Pre-validate all drafts
@@ -629,7 +638,8 @@ export async function publishBuilderRoutes(
   try {
     const rpcResult = await db.rpc('publish_builder_routes', {
       p_website_id: input.websiteId,
-      p_expected_draft_count: input.expectedDraftCount ?? null
+      p_expected_draft_count: input.expectedDraftCount ?? null,
+      p_expected_draft_ids: input.expectedDraftIds ?? null
     });
 
     if (rpcResult.error) {

@@ -22,6 +22,7 @@ export interface RoutePublicationState {
 export interface PublishRouteOptions {
   actingUserId?: string;
   expectedDraftCount?: number;
+  expectedDraftIds?: string[];
   client?: SupabaseClient;
 }
 
@@ -76,7 +77,8 @@ export class BuilderRoutePublicationController {
       const result = await publishBuilderRoutes(
         {
           websiteId,
-          expectedDraftCount: options.expectedDraftCount
+          expectedDraftCount: options.expectedDraftCount,
+          expectedDraftIds: options.expectedDraftIds
         },
         options.actingUserId,
         options.client

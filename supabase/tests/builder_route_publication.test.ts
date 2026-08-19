@@ -411,4 +411,25 @@ describe.skipIf(!DATABASE_URL)('PostgreSQL 17 Integration: Builder Route Publica
       client.release();
     }
   });
+
+  it('rejects publication when draft IDs do not match (same-count replacement protection)', async () => {
+    const client = await pool.connect();
+    const userId = randomUUID();
+    try {
+      const { websiteId, fnlAbout } = await createTestFixture(userId);
+      await setAuthUser(client, userId);
+
+      await client.query('select public.set_builder_route_draft($1, $2, $3)', [websiteId, fnlAbout, '/about']);
+
+      try {
+        await client.query('select public.publish_builder_routes($1, $2, $3)', [websiteId, 1, [randomUUID()]]);
+        expect.unreachable('Should have failed');
+      } catch (err: any) {
+        expect(err.code).toBe('PT409');
+        expect(err.message).toContain('modified elsewhere');
+      }
+    } finally {
+      client.release();
+    }
+  });
 });
