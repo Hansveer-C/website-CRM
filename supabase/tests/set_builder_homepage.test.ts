@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 
 const databaseUrl = process.env.BUILDER_HOMEPAGE_TEST_DATABASE_URL || process.env.PAGE_REORDER_TEST_DATABASE_URL || process.env.PAGE_LIFECYCLE_TEST_DATABASE_URL;
@@ -94,6 +95,10 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
           step_order integer,
           created_at timestamptz not null default now()
         );
+
+        create or replace function auth.uid() returns uuid as $$
+          select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
+        $$ language sql stable;
       `);
 
       // Apply migration under test
@@ -151,11 +156,10 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
   }
 
   async function setAuthUser(client: any, userId: string | null): Promise<void> {
-    await client.query(`drop function if exists auth.uid() cascade;`);
     if (userId === null) {
-      await client.query(`create or replace function auth.uid() returns text language sql as $$ select null::text $$;`);
+      await client.query(`set "request.jwt.claim.sub" = ''`);
     } else {
-      await client.query(`create or replace function auth.uid() returns text language sql as $$ select '${userId}'::text $$;`);
+      await client.query(`set "request.jwt.claim.sub" = '${userId}'`);
     }
   }
 
@@ -175,8 +179,9 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
 
   it('rejects null website_id with PT400', async () => {
     const client = await pool.connect();
+    const userId = randomUUID();
     try {
-      await setAuthUser(client, 'user-test-1');
+      await setAuthUser(client, userId);
       await client.query(`select public.set_builder_homepage(null, 'fnl-1', 'fnl-1')`);
       expect.unreachable('Should have failed');
     } catch (err: any) {
@@ -189,8 +194,9 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
 
   it('rejects blank funnel_id with PT400', async () => {
     const client = await pool.connect();
+    const userId = randomUUID();
     try {
-      await setAuthUser(client, 'user-test-1');
+      await setAuthUser(client, userId);
       await client.query(`select public.set_builder_homepage('00000000-0000-0000-0000-000000000000'::uuid, '   ', 'fnl-1')`);
       expect.unreachable('Should have failed');
     } catch (err: any) {
@@ -203,9 +209,11 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
 
   it('rejects foreign website with PT404', async () => {
     const client = await pool.connect();
+    const ownerId = randomUUID();
+    const attackerId = randomUUID();
     try {
-      const { websiteId } = await createTestFixture('owner-user');
-      await setAuthUser(client, 'attacker-user');
+      const { websiteId } = await createTestFixture(ownerId);
+      await setAuthUser(client, attackerId);
       await client.query(`select public.set_builder_homepage($1, 'fnl-1', 'fnl-1')`, [websiteId]);
       expect.unreachable('Should have failed');
     } catch (err: any) {
@@ -218,11 +226,13 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
 
   it('rejects foreign funnel with PT404', async () => {
     const client = await pool.connect();
+    const userAlpha = randomUUID();
+    const userBeta = randomUUID();
     try {
-      const { websiteId } = await createTestFixture('user-alpha');
-      const { fnl1: foreignFunnel } = await createTestFixture('user-beta');
+      const { websiteId } = await createTestFixture(userAlpha);
+      const { fnl1: foreignFunnel } = await createTestFixture(userBeta);
 
-      await setAuthUser(client, 'user-alpha');
+      await setAuthUser(client, userAlpha);
       await client.query(`select public.set_builder_homepage($1, $2, null)`, [websiteId, foreignFunnel]);
       expect.unreachable('Should have failed');
     } catch (err: any) {
@@ -235,8 +245,8 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
 
   it('rejects unassociated funnel with PT400', async () => {
     const client = await pool.connect();
+    const userId = randomUUID();
     try {
-      const userId = `user-unassoc-${Date.now()}`;
       const { websiteId } = await createTestFixture(userId);
 
       // Create an unassociated funnel for the same user (not in website_routes and not currently homepage)
@@ -259,8 +269,8 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
 
   it('rejects optimistic concurrency mismatch with PT409', async () => {
     const client = await pool.connect();
+    const userId = randomUUID();
     try {
-      const userId = `user-conflict-${Date.now()}`;
       const { websiteId, fnl1, fnl2 } = await createTestFixture(userId);
 
       await setAuthUser(client, userId);
@@ -277,8 +287,8 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
 
   it('successfully updates homepage and synchronizes root route', async () => {
     const client = await pool.connect();
+    const userId = randomUUID();
     try {
-      const userId = `user-success-${Date.now()}`;
       const { websiteId, fnl1, fnl2 } = await createTestFixture(userId);
 
       await setAuthUser(client, userId);
@@ -306,8 +316,8 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
 
   it('returns current state as no-op when already homepage', async () => {
     const client = await pool.connect();
+    const userId = randomUUID();
     try {
-      const userId = `user-noop-${Date.now()}`;
       const { websiteId, fnl1 } = await createTestFixture(userId);
 
       await setAuthUser(client, userId);
@@ -326,7 +336,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
   });
 
   it('serializes concurrent homepage updates using website lifecycle advisory lock', async () => {
-    const userId = `user-lock-${Date.now()}`;
+    const userId = randomUUID();
     const { websiteId, fnl1, fnl2 } = await createTestFixture(userId);
 
     const client1 = await pool.connect();
@@ -334,6 +344,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
 
     try {
       await setAuthUser(client1, userId);
+      await setAuthUser(client2, userId);
 
       // Client 1 begins transaction and holds lock
       await client1.query('begin');
