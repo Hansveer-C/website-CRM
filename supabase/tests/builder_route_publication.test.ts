@@ -138,7 +138,7 @@ describe.skipIf(!DATABASE_URL)('PostgreSQL 17 Integration: Builder Route Publica
          ($1, $2, 'Home', 'home', 'published', $3, 0),
          ($4, $2, 'Services', 'services', 'published', $5, 0),
          ($6, $2, 'About', 'about', 'published', $7, 0)`,
-        [randomUUID(), userId, fnlHome, randomUUID(), userId, fnlServices, randomUUID(), userId, fnlAbout]
+        [randomUUID(), userId, fnlHome, randomUUID(), fnlServices, randomUUID(), fnlAbout]
       );
 
       // Create website

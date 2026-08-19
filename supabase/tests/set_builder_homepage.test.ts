@@ -548,7 +548,8 @@ describeDatabase('set_builder_homepage Option B RPC Integration Tests (PostgreSQ
       const c2PidRes = await client2.query('select pg_backend_pid() as pid');
       const c2Pid = c2PidRes.rows[0].pid;
 
-      const client2Promise = client2.query(`select public.set_builder_draft_homepage($1, $2, null)`, [websiteId, fnl1]);
+      const client2Promise = client2.query(`select public.set_builder_draft_homepage($1, $2, null)`, [websiteId, fnl1])
+        .then(res => ({ ok: true as const, res }), err => ({ ok: false as const, err }));
 
       await assertBackendWaiting(pool, c2Pid);
 
@@ -556,11 +557,10 @@ describeDatabase('set_builder_homepage Option B RPC Integration Tests (PostgreSQ
       await client1.query('commit');
 
       // Client 2 should proceed now (and fail with PT409 conflict since draft is now fnl2)
-      try {
-        await client2Promise;
-        expect.unreachable('Should have conflicted');
-      } catch (err: any) {
-        expect(err.code).toBe('PT409');
+      const outcome = await client2Promise;
+      expect(outcome.ok).toBe(false);
+      if (!outcome.ok) {
+        expect(outcome.err.code).toBe('PT409');
       }
     } finally {
       client1.release();
