@@ -163,10 +163,12 @@ describeDatabase('set_builder_homepage Option B RPC Integration Tests (PostgreSQ
       const websiteId = websiteRes.rows[0].id;
 
       // Add published revision targets
+      const rev1 = randomUUID();
+      const rev2 = randomUUID();
       await client.query(
-        `insert into public.builder_publication_targets (website_id, page_id)
-         values ($1, $2), ($1, $3)`,
-        [websiteId, page1, page2]
+        `insert into public.builder_publication_targets (website_id, page_id, published_revision_id)
+         values ($1, $2, $3), ($1, $4, $5)`,
+        [websiteId, page1, rev1, page2, rev2]
       );
 
       // Add routes so both funnels are associated destinations for this website
