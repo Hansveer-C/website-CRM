@@ -48,13 +48,15 @@ export type RouteOperationResultCode =
   | 'INVALID_REDIRECT'
   | 'AMBIGUOUS';
 
+export type RouteDraftAction = 'upsert' | 'delete';
+
 export interface RouteDraft {
   id: string;
   website_id: string;
   route_id: string | null;
   path: string;
   funnel_id: string;
-  action: 'upsert' | 'delete';
+  action: RouteDraftAction;
   created_at: string;
   updated_at: string;
 }
@@ -75,6 +77,7 @@ export interface EffectiveRoute {
   funnel_id: string;
   live_path: string | null;
   draft_path: string | null;
+  draft_id?: string | null;
   is_draft_override: boolean;
   is_staged_delete: boolean;
   is_new_draft: boolean;

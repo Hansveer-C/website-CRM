@@ -68,6 +68,8 @@ import { BuilderReorderPagesController } from './builder_reorder_pages_controlle
 import { handleBuilderReorderPagesBrowserPost as handleBuilderReorderPagesBrowserPostImpl } from './builder_reorder_browser';
 import { BuilderSetHomepageController } from './builder_set_homepage_controller';
 import { handleBuilderSetHomepageBrowserPost as handleBuilderSetHomepageBrowserPostImpl } from './builder_homepage_browser';
+import { BuilderPageRouteController } from './builder_page_route_controller';
+import { createPageRouteViewModel, type PageRouteViewModel } from './builder_page_route_model';
 import { PagesRepo } from './pages_repo_supabase';
 import {
   createBuilderPublishedRevision,
@@ -4699,6 +4701,134 @@ export function getBuilderSetHomepageController(): BuilderSetHomepageController 
   }
 };
 
+let builderPageRouteController: BuilderPageRouteController | null = null;
+let builderPageRouteControllerIdentity = '';
+
+export function getBuilderPageRouteController(): BuilderPageRouteController {
+  const context = getBuilderNewPageContext();
+  const identity = `${context.actingUserId}:${context.website?.id ?? ''}`;
+  if (builderPageRouteController && builderPageRouteControllerIdentity === identity) {
+    return builderPageRouteController;
+  }
+  builderPageRouteControllerIdentity = identity;
+  builderPageRouteController = new BuilderPageRouteController({
+    actingUserId: context.actingUserId,
+    client: (window as any).supabaseClient ?? undefined
+  });
+  if (context.website?.id) {
+    builderPageRouteController.hydrate(context.website.id).then(() => {
+      renderBuilder();
+    });
+  }
+  return builderPageRouteController;
+}
+
+(window as any).openBuilderPageRouteEditor = (pageId: string) => {
+  const website = getActiveBuilderWebsite();
+  const page = mockPages.find(p => p.id === pageId);
+  if (!website || !page) return;
+  const entries = getBuilderWebsitePageEntries();
+  const isHomepage = entries.find(e => e.page.id === pageId)?.isHomepage === true;
+  const controller = getBuilderPageRouteController();
+  if (controller.openEditor(page, website, isHomepage)) {
+    renderBuilder();
+    setTimeout(() => document.getElementById('pb-page-route-input')?.focus(), 0);
+  }
+};
+
+(window as any).closeBuilderPageRouteEditor = () => {
+  const controller = getBuilderPageRouteController();
+  controller.closeEditor();
+  renderBuilder();
+};
+
+(window as any).updateBuilderPageRouteInput = (value: string) => {
+  const website = getActiveBuilderWebsite();
+  if (!website) return;
+  const controller = getBuilderPageRouteController();
+  controller.updateEditorInput(value, website);
+  renderBuilder();
+};
+
+(window as any).submitBuilderPageRoute = async () => {
+  const website = getActiveBuilderWebsite();
+  const controller = getBuilderPageRouteController();
+  const pageId = controller.getState().editingPageId;
+  const page = mockPages.find(p => p.id === pageId);
+  if (!website || !page) return;
+
+  const success = await controller.saveEditorRoute(page, website);
+  renderBuilder();
+  if (success) {
+    (window as any).showToast('Page URL draft saved', 'success');
+  }
+};
+
+(window as any).promptDeleteBuilderPageRoute = (pageId: string) => {
+  const controller = getBuilderPageRouteController();
+  controller.promptDeleteRoute(pageId);
+  renderBuilder();
+};
+
+(window as any).cancelDeleteBuilderPageRoute = () => {
+  const controller = getBuilderPageRouteController();
+  controller.cancelDeleteRoute();
+  renderBuilder();
+};
+
+(window as any).confirmDeleteBuilderPageRoute = async (pageId: string) => {
+  const website = getActiveBuilderWebsite();
+  const page = mockPages.find(p => p.id === pageId);
+  if (!website || !page) return;
+  const controller = getBuilderPageRouteController();
+  const success = await controller.confirmDeleteRoute(page, website);
+  renderBuilder();
+  if (success) {
+    (window as any).showToast('URL removal staged', 'success');
+  } else if (controller.getState().stagingError) {
+    (window as any).showToast(controller.getState().stagingError, 'error');
+  }
+};
+
+(window as any).revertBuilderPageRoute = async (pageId: string) => {
+  const website = getActiveBuilderWebsite();
+  const page = mockPages.find(p => p.id === pageId);
+  if (!website || !page) return;
+  const controller = getBuilderPageRouteController();
+  const success = await controller.revertRoute(page, website);
+  renderBuilder();
+  if (success) {
+    (window as any).showToast('Route draft reverted', 'success');
+  } else if (controller.getState().stagingError) {
+    (window as any).showToast(controller.getState().stagingError, 'error');
+  }
+};
+
+(window as any).openBuilderRoutePublishModal = () => {
+  const controller = getBuilderPageRouteController();
+  controller.openPublishModal();
+  renderBuilder();
+};
+
+(window as any).closeBuilderRoutePublishModal = () => {
+  const controller = getBuilderPageRouteController();
+  controller.closePublishModal();
+  renderBuilder();
+};
+
+(window as any).confirmBuilderRoutePublish = async () => {
+  const website = getActiveBuilderWebsite();
+  if (!website) return;
+  const controller = getBuilderPageRouteController();
+  const success = await controller.publishPendingRoutes(website.id);
+  renderBuilder();
+  if (success) {
+    (window as any).showToast('URL changes published to live site', 'success');
+  } else if (controller.getState().publicationState.errorMessage) {
+    (window as any).showToast(controller.getState().publicationState.errorMessage, 'error');
+  }
+};
+
 function getBuilderWebsitePageEntries(): BuilderWebsitePageEntry[] {
   const website = getActiveBuilderWebsite();
   if (!website) return [];
@@ -4838,6 +4968,7 @@ function renderBuilderPageSettingsPanel(): string {
   const issue = (field: BuilderPageSettingsField) => builderPageSettingsIssue(field);
   const invalid = (field: BuilderPageSettingsField) => issue(field) ? 'true' : 'false';
   const website = getActiveBuilderWebsite();
+  const routeVM = website ? getBuilderPageRouteController().getPageRoute(page, website, { isHomepage }) : null;
   const host = website?.domain || (website?.subdomain ? `${website.subdomain}.pressurepro.io` : 'your-site.example');
   const previewPath = entry?.path || (isHomepage ? '/' : `/${draft.slug || 'page-url'}`);
   const statusLabel = controller.status === 'saving' ? 'Saving…'
@@ -4863,9 +4994,26 @@ function renderBuilderPageSettingsPanel(): string {
             <div id="pb-page-name-error" class="pb-page-settings-error" role="alert">${escapeBuilderInspectorHtml(issue('name'))}</div>
           </div>
           <div class="pb-page-settings-field">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label>Public Route URL</label>
+              ${routeVM?.isEditable ? `
+                <button type="button" class="pb-page-settings-edit-route" onclick="window.openBuilderPageRouteEditor('${escapeBuilderInspectorHtml(page.id)}')" style="background: transparent; border: none; color: #60a5fa; cursor: pointer; font-size: 0.75rem; font-weight: 600; text-decoration: underline;">
+                  Edit URL
+                </button>
+              ` : ''}
+            </div>
+            <div style="padding: 8px 12px; background: #0f172a; border: 1px solid #1e293b; border-radius: 6px; font-family: monospace; font-size: 0.8rem; color: #38bdf8; display: flex; align-items: center; justify-content: space-between;">
+              <span>${escapeBuilderInspectorHtml(routeVM?.effectivePath || previewPath)}</span>
+              <span class="pb-page-route-badge ${routeVM?.routeStatus || 'unrouted'}">${escapeBuilderInspectorHtml(routeVM?.statusLabel || 'No public URL')}</span>
+            </div>
+            ${routeVM?.hasUnpublishedChanges && routeVM.currentLivePath ? `
+              <small style="color: #9ca3af; font-size: 0.72rem; margin-top: 4px; display: block;">Live URL: https://${escapeBuilderInspectorHtml(host)}${escapeBuilderInspectorHtml(routeVM.currentLivePath)}</small>
+            ` : ''}
+          </div>
+          <div class="pb-page-settings-field">
             <label for="pb-page-slug">URL slug</label>
             <div class="pb-page-slug-control"><span>/</span><input id="pb-page-slug" type="text" maxlength="${BUILDER_PAGE_SLUG_MAX_LENGTH}" value="${escapeBuilderInspectorHtml(draft.slug)}" ${isHomepage ? 'disabled' : ''} aria-invalid="${invalid('slug')}" aria-describedby="pb-page-slug-help pb-page-slug-error" oninput="window.updateBuilderPageSettingsField('slug', this.value)"></div>
-            <div id="pb-page-slug-help" class="pb-page-settings-help">${isHomepage ? 'Homepage URL is locked to the root route.' : 'Lowercase letters, numbers, and hyphens. Website routes are not changed here.'}</div>
+            <div id="pb-page-slug-help" class="pb-page-settings-help">${isHomepage ? 'Homepage URL is locked to the root route.' : 'Lowercase letters, numbers, and hyphens. Website routes are managed via Edit URL.'}</div>
             <div id="pb-page-slug-error" class="pb-page-settings-error" role="alert">${escapeBuilderInspectorHtml(issue('slug'))}</div>
           </div>
           ${typeof page.step_order === 'number' ? `<div class="pb-page-settings-readonly"><span>Funnel order</span><strong>${page.step_order}</strong><small>Informational; page reordering is outside this task.</small></div>` : ''}
@@ -4958,8 +5106,10 @@ function renderBuilderPagesPanel(): string {
   const deleteController = getBuilderDeletePageController();
   const reorderController = getBuilderReorderPagesController();
   const homepageController = getBuilderSetHomepageController();
+  const routeController = getBuilderPageRouteController();
   const isHomepageUpdating = homepageController.isUpdating;
   const updatingHomepageFunnelId = homepageController.updatingFunnelId;
+  const pendingRouteCount = routeController.getPendingDraftCount();
   const canCreate = !!getActiveBuilderWebsite()
     && !!getBuilderNewPageContext().actingUserId
     && newPage.destinations.length > 0
@@ -4985,6 +5135,13 @@ function renderBuilderPagesPanel(): string {
         <span>Website pages</span>
         <strong>${entries.length}</strong>
       </div>
+      ${pendingRouteCount > 0 ? `
+        <div class="pb-pages-route-publish-banner">
+          <button type="button" class="pb-publish-routes-btn" onclick="window.openBuilderRoutePublishModal()" aria-label="Publish ${pendingRouteCount} URL ${pendingRouteCount === 1 ? 'change' : 'changes'}">
+            🚀 Publish ${pendingRouteCount} URL ${pendingRouteCount === 1 ? 'change' : 'changes'}
+          </button>
+        </div>
+      ` : ''}
       ${deleteController.status === 'error' && deleteController.message ? `
         <div class="pb-page-delete-error" style="background: #fef2f2; color: #991b1b; padding: 8px 12px; border-radius: 6px; font-size: 0.825rem; margin-bottom: 12px; border: 1px solid #fecaca;">
           ${escapeBuilderInspectorHtml(deleteController.message)}
@@ -5015,8 +5172,11 @@ function renderBuilderPagesPanel(): string {
           const isThisDeleting = isDeleting && deletingPageId === page.id;
           const isThisConfirming = isConfirming && confirmingPageId === page.id;
           const isThisReordering = isReordering && reorderingPageId === page.id;
+          const routeVM = website ? routeController.getPageRoute(page, website, { isHomepage, isLiveHomepage, isDraftHomepage }) : null;
+          const isConfirmingDeleteRoute = routeController.getState().isConfirmingDelete && routeController.getState().deletingPageId === page.id;
+          const displayPath = routeVM?.displayPath ?? path;
           const safeName = escapeBuilderInspectorHtml(name);
-          const safePath = escapeBuilderInspectorHtml(path);
+          const safePath = escapeBuilderInspectorHtml(displayPath);
           const safeStatus = escapeBuilderInspectorHtml(status);
           const pageArg = builderInspectorJsArgument(page.id);
           const funnelEntries = entries.filter(e => e.page.funnel_id === page.funnel_id);
@@ -5053,6 +5213,12 @@ function renderBuilderPagesPanel(): string {
                 <span class="pb-page-badges">
                   <span class="pb-page-status ${status === 'published' ? 'published' : 'draft'}">${safeStatus}</span>
                   ${isDraftHomepage ? '<span class="pb-page-homepage-draft" style="background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">Home (Unpublished)</span>' : isLiveHomepage ? '<span class="pb-page-homepage-live" style="background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">Home (Live)</span>' : isHomepage ? '<span class="pb-page-homepage">Homepage</span>' : ''}
+                  ${routeVM?.hasUnpublishedChanges ? `
+                    <span class="pb-page-route-badge ${routeVM.routeStatus}">${escapeBuilderInspectorHtml(routeVM.statusLabel)}</span>
+                  ` : ''}
+                  ${routeVM?.currentLivePath && routeVM.currentLivePath !== routeVM.effectivePath ? `
+                    <small class="pb-page-live-path-sub">Live: ${escapeBuilderInspectorHtml(routeVM.currentLivePath)}</small>
+                  ` : ''}
                 </span>
               </button>
               <div class="pb-page-row-actions">
@@ -5077,6 +5243,27 @@ function renderBuilderPagesPanel(): string {
                       Cancel
                     </button>
                   </div>
+                ` : isConfirmingDeleteRoute ? `
+                  <div class="pb-page-delete-confirm-box" style="display: flex; gap: 4px; align-items: center;">
+                    <button
+                      type="button"
+                      class="pb-page-confirm-delete-button"
+                      onclick="event.stopPropagation(); window.confirmDeleteBuilderPageRoute(${pageArg})"
+                      aria-label="Confirm remove URL for ${safeName}"
+                      style="background: #dc2626; color: #ffffff; border: none; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; cursor: pointer;"
+                    >
+                      Confirm remove
+                    </button>
+                    <button
+                      type="button"
+                      class="pb-page-cancel-delete-button"
+                      onclick="event.stopPropagation(); window.cancelDeleteBuilderPageRoute()"
+                      aria-label="Cancel remove URL for ${safeName}"
+                      style="background: #4b5563; color: #ffffff; border: none; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 500; cursor: pointer;"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 ` : `
                   ${isDraftHomepage || (!website?.draft_homepage_funnel_id && isLiveHomepage) || !page.funnel_id ? '' : `
                     <button
@@ -5090,6 +5277,42 @@ function renderBuilderPagesPanel(): string {
                       ${isHomepageUpdating && updatingHomepageFunnelId === page.funnel_id ? 'Setting…' : 'Set as homepage'}
                     </button>
                   `}
+                  ${routeVM?.hasUnpublishedChanges ? `
+                    <button
+                      type="button"
+                      class="pb-page-revert-route-button"
+                      onclick='event.stopPropagation(); window.revertBuilderPageRoute(${pageArg})'
+                      aria-label="Revert pending URL for ${safeName}"
+                      title="Revert pending URL change"
+                      style="background: #374151; color: #f3f4f6; border: 1px solid #4b5563; padding: 3px 7px; border-radius: 4px; font-size: 0.72rem; cursor: pointer;"
+                    >
+                      Revert URL
+                    </button>
+                  ` : ''}
+                  ${routeVM?.isEditable ? `
+                    <button
+                      type="button"
+                      class="pb-page-edit-route-button"
+                      onclick='event.stopPropagation(); window.openBuilderPageRouteEditor(${pageArg})'
+                      aria-label="Edit URL for ${safeName}"
+                      title="Edit page URL"
+                      style="background: #1f2937; color: #93c5fd; border: 1px solid #3b82f6; padding: 3px 7px; border-radius: 4px; font-size: 0.72rem; cursor: pointer;"
+                    >
+                      Edit URL
+                    </button>
+                  ` : ''}
+                  ${routeVM?.currentLivePath && !routeVM.hasUnpublishedChanges ? `
+                    <button
+                      type="button"
+                      class="pb-page-delete-route-button"
+                      onclick='event.stopPropagation(); window.promptDeleteBuilderPageRoute(${pageArg})'
+                      aria-label="Remove URL for ${safeName}"
+                      title="Stage removal of URL from live site"
+                      style="background: transparent; color: #f87171; border: 1px solid #7f1d1d; padding: 3px 7px; border-radius: 4px; font-size: 0.72rem; cursor: pointer;"
+                    >
+                      Remove URL
+                    </button>
+                  ` : ''}
                   <button
                     type="button"
                     class="pb-page-move-up-button"
@@ -5199,6 +5422,126 @@ function renderBuilderNewPageDialog(): string {
             <button type="submit" class="pb-new-page-create" ${controller.isCreating || !destinations.length ? 'disabled' : ''}>${controller.isCreating ? 'Creating…' : controller.status === 'error' ? 'Retry create' : 'Create page'}</button>
           </footer>
         </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderBuilderPageRouteEditorDialog(): string {
+  const website = getActiveBuilderWebsite();
+  const controller = getBuilderPageRouteController();
+  const state = controller.getState();
+  if (!state.isEditing || !website || builderMode !== 'edit') return '';
+  const page = mockPages.find(p => p.id === state.editingPageId);
+  if (!page) return '';
+
+  const routeVM = controller.getPageRoute(page, website);
+  const host = website.domain || (website.subdomain ? `${website.subdomain}.pressurepro.io` : 'your-site.example');
+  const issue = state.editingValidationIssue || state.stagingError;
+
+  return `
+    <div class="pb-page-route-dialog-backdrop" onclick="if(event.target===this) window.closeBuilderPageRouteEditor()">
+      <section class="pb-page-route-dialog" role="dialog" aria-modal="true" aria-labelledby="pb-route-editor-title" aria-describedby="pb-route-editor-description">
+        <header>
+          <div>
+            <span>Page Routing</span>
+            <h2 id="pb-route-editor-title">Edit Page URL</h2>
+            <p id="pb-route-editor-description">Staging a new URL creates an unpublished route draft. Live website routing does not change until published.</p>
+          </div>
+          <button type="button" class="pb-new-page-close" aria-label="Close route editor dialog" onclick="window.closeBuilderPageRouteEditor()" ${state.isStaging ? 'disabled' : ''}>×</button>
+        </header>
+        <form onsubmit="event.preventDefault(); window.submitBuilderPageRoute()" novalidate>
+          <div class="pb-new-page-body">
+            ${routeVM.currentLivePath ? `
+              <div class="pb-page-route-live-preview">
+                <span class="pb-page-route-live-label">Current live URL</span>
+                <code class="pb-page-route-live-val">https://${escapeBuilderInspectorHtml(host)}${escapeBuilderInspectorHtml(routeVM.currentLivePath)}</code>
+              </div>
+            ` : ''}
+            <div class="pb-new-page-field">
+              <label for="pb-page-route-input">New page URL</label>
+              <div class="pb-new-page-slug">
+                <span>/</span>
+                <input
+                  id="pb-page-route-input"
+                  type="text"
+                  maxlength="256"
+                  value="${escapeBuilderInspectorHtml(state.editingInputPath.replace(/^\/+/, ''))}"
+                  aria-invalid="${!!issue}"
+                  aria-describedby="pb-page-route-help pb-page-route-error"
+                  oninput="window.updateBuilderPageRouteInput(this.value)"
+                  ${state.isStaging ? 'disabled' : ''}
+                  placeholder="e.g. pressure-washing"
+                >
+              </div>
+              <small id="pb-page-route-help">Lowercase letters, numbers, and hyphens. Changing a published URL automatically creates a permanent redirect from the old URL after publishing.</small>
+              <p id="pb-page-route-error" class="pb-new-page-error" role="alert">${escapeBuilderInspectorHtml(issue ?? '')}</p>
+            </div>
+            <div class="pb-new-page-path-preview">
+              <span>Normalized effective path</span>
+              <code id="pb-page-route-preview-val">${escapeBuilderInspectorHtml(state.normalizedEditingPath || '/')}</code>
+            </div>
+          </div>
+          <footer>
+            <button type="button" class="pb-new-page-cancel" onclick="window.closeBuilderPageRouteEditor()" ${state.isStaging ? 'disabled' : ''}>Cancel</button>
+            <button type="submit" class="pb-new-page-create" ${state.isStaging || !state.normalizedEditingPath || !!state.editingValidationIssue ? 'disabled' : ''}>
+              ${state.isStaging ? 'Saving URL…' : 'Save URL'}
+            </button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  `;
+}
+
+function renderBuilderRoutePublishModal(): string {
+  const website = getActiveBuilderWebsite();
+  const controller = getBuilderPageRouteController();
+  const state = controller.getState();
+  if (!state.isConfirmingPublish || !website || builderMode !== 'edit') return '';
+
+  const pendingDrafts = controller.getPendingDrafts();
+  const isPublishing = state.publicationState.status === 'publishing';
+  const errorMessage = state.publicationState.errorMessage;
+
+  return `
+    <div class="pb-route-publish-modal-backdrop" onclick="if(event.target===this) window.closeBuilderRoutePublishModal()">
+      <section class="pb-route-publish-modal" role="dialog" aria-modal="true" aria-labelledby="pb-route-publish-title" aria-describedby="pb-route-publish-desc">
+        <header>
+          <div>
+            <span>Website Routing</span>
+            <h2 id="pb-route-publish-title">Publish URL Changes</h2>
+            <p id="pb-route-publish-desc">Promote staged URL drafts to the live public website.</p>
+          </div>
+          <button type="button" class="pb-new-page-close" aria-label="Close publish modal" onclick="window.closeBuilderRoutePublishModal()" ${isPublishing ? 'disabled' : ''}>×</button>
+        </header>
+        <div class="pb-route-publish-body">
+          <div class="pb-route-publish-summary">
+            <h4>Pending Route Changes (${pendingDrafts.length})</h4>
+            <ul class="pb-route-publish-list">
+              ${pendingDrafts.map(d => {
+                if (d.is_staged_delete) {
+                  return `<li class="pb-route-change-delete"><span class="badge">Remove</span> <code>${escapeBuilderInspectorHtml(d.live_path || d.path)}</code> <small>(Will be removed from live site)</small></li>`;
+                }
+                if (d.is_new_draft) {
+                  return `<li class="pb-route-change-create"><span class="badge">New</span> <code>${escapeBuilderInspectorHtml(d.path)}</code></li>`;
+                }
+                return `<li class="pb-route-change-rename"><span class="badge">Rename</span> <code>${escapeBuilderInspectorHtml(d.live_path || '')}</code> → <strong>${escapeBuilderInspectorHtml(d.path)}</strong> <small>(Old URL will redirect automatically)</small></li>`;
+              }).join('')}
+            </ul>
+          </div>
+          ${errorMessage ? `
+            <div class="pb-route-publish-error" role="alert" style="background: #fef2f2; color: #991b1b; padding: 10px 14px; border-radius: 6px; font-size: 0.85rem; margin-top: 12px; border: 1px solid #fecaca;">
+              ${escapeBuilderInspectorHtml(errorMessage)}
+            </div>
+          ` : ''}
+        </div>
+        <footer>
+          <button type="button" class="pb-new-page-cancel" onclick="window.closeBuilderRoutePublishModal()" ${isPublishing ? 'disabled' : ''}>Cancel</button>
+          <button type="button" class="pb-new-page-create" onclick="window.confirmBuilderRoutePublish()" ${isPublishing ? 'disabled' : ''}>
+            ${isPublishing ? 'Publishing…' : 'Publish URL changes'}
+          </button>
+        </footer>
       </section>
     </div>
   `;
@@ -5949,6 +6292,8 @@ function _renderBuilder() {
       ${renderBuilderPublishModal(page, sections, publicationStatus)}
       ${renderBuilderNewPageDialog()}
       ${renderBuilderSetupDialog()}
+      ${renderBuilderPageRouteEditorDialog()}
+      ${renderBuilderRoutePublishModal()}
     </main>
   `;
 }
