@@ -191,7 +191,7 @@ jobs:
 
       - name: Run Standalone Route Drafts DB Tests
         run: |
-          BUILDER_ROUTE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run supabase/tests/builder_route_lifecycle.test.ts
+          TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" BUILDER_ROUTE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run --no-file-parallelism supabase/tests/builder_route_lifecycle.test.ts supabase/tests/builder_route_publication.test.ts
 
   combined-db-integration:
     name: Combined Duplicate + Delete + Reorder + Homepage + Route DB Integration (PostgreSQL 17)
@@ -227,4 +227,4 @@ jobs:
 
       - name: Run Combined DB Regression Tests
         run: |
-          PAGE_DUPLICATE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" PAGE_DELETE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" PAGE_REORDER_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" BUILDER_HOMEPAGE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" BUILDER_ROUTE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run --no-file-parallelism supabase/tests/duplicate_builder_page.test.ts supabase/tests/delete_builder_page.test.ts supabase/tests/reorder_builder_pages.test.ts supabase/tests/reorder_builder_pages_validation.test.ts supabase/tests/set_builder_homepage.test.ts supabase/tests/builder_route_lifecycle.test.ts
+          PAGE_DUPLICATE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" PAGE_DELETE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" PAGE_REORDER_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" BUILDER_HOMEPAGE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" BUILDER_ROUTE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run --no-file-parallelism supabase/tests/duplicate_builder_page.test.ts supabase/tests/delete_builder_page.test.ts supabase/tests/reorder_builder_pages.test.ts supabase/tests/reorder_builder_pages_validation.test.ts supabase/tests/set_builder_homepage.test.ts supabase/tests/builder_route_lifecycle.test.ts supabase/tests/builder_route_publication.test.ts

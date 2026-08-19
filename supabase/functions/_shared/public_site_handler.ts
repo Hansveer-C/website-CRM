@@ -419,6 +419,21 @@ export async function handlePublicSiteRequest(
     }
     const route = await options.dataSource.findRouteForWebsite(website.id, path);
     if (!route || route.websiteId !== website.id || route.path !== path) {
+      if (options.dataSource.findRedirectForWebsite) {
+        const redirect = await options.dataSource.findRedirectForWebsite(website.id, path);
+        if (redirect && redirect.websiteId === website.id && redirect.fromPath === path && redirect.toPath && redirect.toPath !== path) {
+          logger.info({ requestId, host, path, outcome: 'redirect', code: '308' });
+          return new Response(null, {
+            status: 308,
+            headers: {
+              ...CORS_HEADERS,
+              'Location': redirect.toPath,
+              'Cache-Control': 'public, max-age=300, stale-while-revalidate=86400'
+            }
+          });
+        }
+      }
+
       logger.info({ requestId, host, path, outcome: 'not-found', code: 'route' });
       return publicError('Site not found.', 404);
     }

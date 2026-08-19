@@ -471,3 +471,208 @@ export async function getBuilderEffectiveRoutes(
     };
   }
 }
+
+export interface PublishRoutesInput {
+  websiteId: string;
+  expectedDraftCount?: number;
+  expectedDraftIds?: string[];
+}
+
+export interface RoutePublishResult {
+  success: boolean;
+  code: RouteOperationResultCode;
+  data?: {
+    published_count: number;
+  };
+  error?: string;
+}
+
+export const mockWebsiteRouteRedirects: Array<{
+  id: string;
+  website_id: string;
+  from_path: string;
+  to_path: string;
+  created_at: string;
+  updated_at: string;
+}> = [];
+
+export async function publishBuilderRoutes(
+  input: PublishRoutesInput,
+  actingUserId?: string,
+  client?: SupabaseClient
+): Promise<RoutePublishResult> {
+  const userId = actingUserId?.trim();
+  if (!userId) {
+    return { success: false, error: 'UNAUTHORIZED', code: 'UNAUTHORIZED' };
+  }
+
+  if (!input.websiteId) {
+    return { success: false, error: 'INVALID_INPUT', code: 'INVALID_INPUT' };
+  }
+
+  const db = client ?? (typeof window !== 'undefined' ? (window as any).supabaseClient : undefined);
+  const usesRemote = !!db;
+
+  if (!usesRemote) {
+    const website = mockWebsites.find(w => w.id === input.websiteId && w.user_id === userId);
+    if (!website) {
+      return { success: false, error: 'Website not found', code: 'NOT_FOUND' };
+    }
+
+    const drafts = mockBuilderRouteDrafts.filter(d => d.website_id === input.websiteId);
+    if (drafts.length === 0) {
+      return { success: true, code: 'SUCCESS', data: { published_count: 0 } };
+    }
+
+    if (input.expectedDraftCount !== undefined && drafts.length !== input.expectedDraftCount) {
+      return { success: false, error: 'The route drafts were modified elsewhere. Reload and try again.', code: 'CONFLICT' };
+    }
+
+    if (input.expectedDraftIds !== undefined) {
+      const currentIds = drafts.map(d => d.id).sort();
+      const expectedIds = [...input.expectedDraftIds].sort();
+      if (JSON.stringify(currentIds) !== JSON.stringify(expectedIds)) {
+        return { success: false, error: 'The route drafts were modified elsewhere. Reload and try again.', code: 'CONFLICT' };
+      }
+    }
+
+    // Pre-validate all drafts
+    for (const draft of drafts) {
+      const funnel = mockFunnels.find(f => f.id === draft.funnel_id && f.user_id === userId);
+      if (!funnel) {
+        return { success: false, error: 'Funnel not found for draft route', code: 'NOT_FOUND' };
+      }
+
+      if (draft.path === '/') {
+        return { success: false, error: 'Root homepage route cannot be published through route management.', code: 'ROOT_ROUTE_RESERVED' };
+      }
+
+      if (draft.action === 'upsert') {
+        const otherLiveCollision = mockWebsiteRoutes.find(r => (
+          r.website_id === input.websiteId
+          && r.path === draft.path
+          && r.id !== draft.route_id
+          && !drafts.some(otherD => otherD.route_id === r.id && (otherD.action === 'delete' || otherD.path !== draft.path))
+        ));
+
+        if (otherLiveCollision) {
+          return { success: false, error: `Path ${draft.path} is already in use by another live page on this website`, code: 'COLLISION' };
+        }
+      }
+    }
+
+    // Apply deletes
+    for (const draft of drafts.filter(d => d.action === 'delete')) {
+      if (draft.route_id) {
+        const idx = mockWebsiteRoutes.findIndex(r => r.id === draft.route_id && r.website_id === input.websiteId);
+        if (idx !== -1) mockWebsiteRoutes.splice(idx, 1);
+      }
+    }
+
+    // Apply renames
+    for (const draft of drafts.filter(d => d.action === 'upsert' && d.route_id)) {
+      const liveRoute = mockWebsiteRoutes.find(r => r.id === draft.route_id && r.website_id === input.websiteId);
+      if (liveRoute && liveRoute.path !== draft.path) {
+        const oldPath = liveRoute.path;
+
+        // Remove any existing redirect with from_path = draft.path
+        const existingRedirectIdx = mockWebsiteRouteRedirects.findIndex(rd => rd.website_id === input.websiteId && rd.from_path === draft.path);
+        if (existingRedirectIdx !== -1) mockWebsiteRouteRedirects.splice(existingRedirectIdx, 1);
+
+        // Add/update redirect
+        const redirectIdx = mockWebsiteRouteRedirects.findIndex(rd => rd.website_id === input.websiteId && rd.from_path === oldPath);
+        if (redirectIdx !== -1) {
+          mockWebsiteRouteRedirects[redirectIdx].to_path = draft.path;
+          mockWebsiteRouteRedirects[redirectIdx].updated_at = new Date().toISOString();
+        } else {
+          mockWebsiteRouteRedirects.push({
+            id: `rd-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            website_id: input.websiteId,
+            from_path: oldPath,
+            to_path: draft.path,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        }
+
+        // Collapse sequential redirect chains
+        for (const rd of mockWebsiteRouteRedirects.filter(rd => rd.website_id === input.websiteId && rd.to_path === oldPath && rd.from_path !== draft.path)) {
+          rd.to_path = draft.path;
+          rd.updated_at = new Date().toISOString();
+        }
+
+        liveRoute.path = draft.path;
+        liveRoute.funnel_id = draft.funnel_id;
+      }
+    }
+
+    // Apply creates
+    for (const draft of drafts.filter(d => d.action === 'upsert' && !d.route_id)) {
+      const existingRedirectIdx = mockWebsiteRouteRedirects.findIndex(rd => rd.website_id === input.websiteId && rd.from_path === draft.path);
+      if (existingRedirectIdx !== -1) mockWebsiteRouteRedirects.splice(existingRedirectIdx, 1);
+
+      mockWebsiteRoutes.push({
+        id: `r-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        website_id: input.websiteId,
+        path: draft.path,
+        funnel_id: draft.funnel_id,
+        created_at: new Date().toISOString()
+      });
+    }
+
+    // Clear drafts
+    const draftIdsToRemove = new Set(drafts.map(d => d.id));
+    for (let i = mockBuilderRouteDrafts.length - 1; i >= 0; i--) {
+      if (draftIdsToRemove.has(mockBuilderRouteDrafts[i].id)) {
+        mockBuilderRouteDrafts.splice(i, 1);
+      }
+    }
+
+    return {
+      success: true,
+      code: 'SUCCESS',
+      data: { published_count: drafts.length }
+    };
+  }
+
+  try {
+    const rpcResult = await db.rpc('publish_builder_routes', {
+      p_website_id: input.websiteId,
+      p_expected_draft_count: input.expectedDraftCount ?? null,
+      p_expected_draft_ids: input.expectedDraftIds ?? null
+    });
+
+    if (rpcResult.error) {
+      const code = rpcResult.error.code;
+      const message = rpcResult.error.message || '';
+      if (code === 'PT404') return { success: false, error: message || 'NOT_FOUND', code: 'NOT_FOUND' };
+      if (code === 'PT401') return { success: false, error: 'UNAUTHORIZED', code: 'UNAUTHORIZED' };
+      if (code === 'PT409' || message.includes('already in use')) {
+        return { success: false, error: message || 'CONFLICT', code: message.includes('already in use') ? 'COLLISION' : 'CONFLICT' };
+      }
+      if (message.includes('not published yet')) {
+        return { success: false, error: message, code: 'UNPUBLISHED_DESTINATION' };
+      }
+      if (message.includes('Root route') || message.includes('Root homepage')) {
+        return { success: false, error: message, code: 'ROOT_ROUTE_RESERVED' };
+      }
+      if (code === 'PT400') {
+        return { success: false, error: message || 'INVALID_INPUT', code: 'INVALID_INPUT' };
+      }
+      return { success: false, error: message || 'ROUTE_PUBLISH_FAILED', code: 'AMBIGUOUS' };
+    }
+
+    const data = rpcResult.data as { published_count?: number };
+    return {
+      success: true,
+      code: 'SUCCESS',
+      data: { published_count: data?.published_count ?? 0 }
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'The route publication result is uncertain. Please reload to check.',
+      code: 'AMBIGUOUS'
+    };
+  }
+}

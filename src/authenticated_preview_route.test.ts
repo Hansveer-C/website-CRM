@@ -122,4 +122,139 @@ describe('authenticated preview routing', () => {
       }
     });
   });
+
+  it('resolves draft renamed route while old live route returns not-found in preview', () => {
+    const resNew = resolveAuthenticatedPreview({
+      actingUserId: 'u1',
+      path: '/pressure-washing',
+      explicitWebsiteId: 'w1',
+      websites: [website('w1', 'u1', 'f1')],
+      routes: [route('/services', 'w1', 'f2')],
+      funnels: [funnel('f1'), funnel('f2')],
+      pages: [{ ...page('p2', 'u1', 'f2'), name: 'Services Page', slug: 'services' }],
+      routeDrafts: [{
+        id: 'd1',
+        website_id: 'w1',
+        route_id: 'w1:/services',
+        path: '/pressure-washing',
+        funnel_id: 'f2',
+        action: 'upsert',
+        created_at: '',
+        updated_at: ''
+      }]
+    });
+
+    expect(resNew).toMatchObject({
+      status: 'resolved',
+      target: {
+        website: { id: 'w1' },
+        funnel: { id: 'f2' },
+        page: { id: 'p2' },
+        path: '/pressure-washing'
+      }
+    });
+
+    // Old live path is superseded in preview
+    const resOld = resolveAuthenticatedPreview({
+      actingUserId: 'u1',
+      path: '/services',
+      explicitWebsiteId: 'w1',
+      websites: [website('w1', 'u1', 'f1')],
+      routes: [route('/services', 'w1', 'f2')],
+      funnels: [funnel('f1'), funnel('f2')],
+      pages: [{ ...page('p2', 'u1', 'f2'), name: 'Services Page', slug: 'services' }],
+      routeDrafts: [{
+        id: 'd1',
+        website_id: 'w1',
+        route_id: 'w1:/services',
+        path: '/pressure-washing',
+        funnel_id: 'f2',
+        action: 'upsert',
+        created_at: '',
+        updated_at: ''
+      }]
+    });
+
+    expect(resOld.status).toBe('not-found');
+  });
+
+  it('resolves draft-only created route in preview', () => {
+    const res = resolveAuthenticatedPreview({
+      actingUserId: 'u1',
+      path: '/pricing',
+      explicitWebsiteId: 'w1',
+      websites: [website('w1', 'u1', 'f1')],
+      routes: [route('/', 'w1', 'f1')],
+      funnels: [funnel('f1'), funnel('f3')],
+      pages: [{ ...page('p3', 'u1', 'f3'), name: 'Pricing Page', slug: 'pricing' }],
+      routeDrafts: [{
+        id: 'd2',
+        website_id: 'w1',
+        route_id: null,
+        path: '/pricing',
+        funnel_id: 'f3',
+        action: 'upsert',
+        created_at: '',
+        updated_at: ''
+      }]
+    });
+
+    expect(res).toMatchObject({
+      status: 'resolved',
+      target: {
+        website: { id: 'w1' },
+        funnel: { id: 'f3' },
+        page: { id: 'p3' },
+        path: '/pricing'
+      }
+    });
+  });
+
+  it('returns not-found in preview for staged deleted route', () => {
+    const res = resolveAuthenticatedPreview({
+      actingUserId: 'u1',
+      path: '/about',
+      explicitWebsiteId: 'w1',
+      websites: [website('w1', 'u1', 'f1')],
+      routes: [route('/', 'w1', 'f1'), route('/about', 'w1', 'f2')],
+      funnels: [funnel('f1'), funnel('f2')],
+      pages: [{ ...page('p2', 'u1', 'f2'), name: 'About Page', slug: 'about' }],
+      routeDrafts: [{
+        id: 'd3',
+        website_id: 'w1',
+        route_id: 'w1:/about',
+        path: '/about',
+        funnel_id: 'f2',
+        action: 'delete',
+        created_at: '',
+        updated_at: ''
+      }]
+    });
+
+    expect(res.status).toBe('not-found');
+  });
+
+  it('rejects foreign user route drafts (tenant isolation)', () => {
+    const res = resolveAuthenticatedPreview({
+      actingUserId: 'u1',
+      path: '/secret-draft',
+      explicitWebsiteId: 'w1',
+      websites: [website('w1', 'u1', 'f1')],
+      routes: [route('/', 'w1', 'f1')],
+      funnels: [funnel('f1'), funnel('f2', 'u2')], // foreign funnel
+      pages: [page('p2', 'u2', 'f2')],
+      routeDrafts: [{
+        id: 'd-foreign',
+        website_id: 'foreign-site',
+        route_id: null,
+        path: '/secret-draft',
+        funnel_id: 'f2',
+        action: 'upsert',
+        created_at: '',
+        updated_at: ''
+      }]
+    });
+
+    expect(res.status).toBe('not-found');
+  });
 });

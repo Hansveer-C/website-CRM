@@ -68,10 +68,27 @@ export interface PublicLegacySectionRecord {
   styles: unknown;
 }
 
+export interface PublicWebsiteRouteRedirectRecord {
+  id: string;
+  websiteId: string;
+  fromPath: string;
+  toPath: string;
+}
+
+export function mapRedirect(row: Record<string, unknown>): PublicWebsiteRouteRedirectRecord {
+  return {
+    id: String(row.id ?? ''),
+    websiteId: String(row.website_id ?? ''),
+    fromPath: String(row.from_path ?? ''),
+    toPath: String(row.to_path ?? '')
+  };
+}
+
 /** Read-only, one-site data boundary. Deliberately exposes no generic query or write operation. */
 export interface PublicSiteDataSource {
   findWebsiteByHost(host: string): Promise<PublicWebsiteRecord | null>;
   findRouteForWebsite(websiteId: string, path: string): Promise<PublicWebsiteRouteRecord | null>;
+  findRedirectForWebsite?(websiteId: string, path: string): Promise<PublicWebsiteRouteRedirectRecord | null>;
   findPageForRoute(
     website: PublicWebsiteRecord,
     route: PublicWebsiteRouteRecord,
@@ -193,6 +210,15 @@ export class SupabasePublicSiteDataSource implements PublicSiteDataSource {
       'route-read'
     );
     return row ? mapRoute(row) : null;
+  }
+
+  async findRedirectForWebsite(websiteId: string, path: string): Promise<PublicWebsiteRouteRedirectRecord | null> {
+    const row = await this.one(
+      this.client.from('website_route_redirects').select<Record<string, unknown>>('id,website_id,from_path,to_path')
+        .eq('website_id', websiteId).eq('from_path', path).limit(1).maybeSingle(),
+      'redirect-read'
+    );
+    return row ? mapRedirect(row) : null;
   }
 
   private pageQuery(funnelId: string): QueryBuilder<Record<string, unknown>> {
