@@ -66,6 +66,8 @@ import {
 } from './builder_delete_page_controller';
 import { BuilderReorderPagesController } from './builder_reorder_pages_controller';
 import { handleBuilderReorderPagesBrowserPost as handleBuilderReorderPagesBrowserPostImpl } from './builder_reorder_browser';
+import { BuilderSetHomepageController } from './builder_set_homepage_controller';
+import { handleBuilderSetHomepageBrowserPost as handleBuilderSetHomepageBrowserPostImpl } from './builder_homepage_browser';
 import { PagesRepo } from './pages_repo_supabase';
 import {
   createBuilderPublishedRevision,
@@ -1287,6 +1289,15 @@ export async function handleBuilderReorderPagesBrowserPost(input: RequestInfo | 
     });
 }
 
+export async function handleBuilderSetHomepageBrowserPost(input: RequestInfo | URL, init?: RequestInit): Promise<Response | null> {
+    return handleBuilderSetHomepageBrowserPostImpl(input, init, {
+        getCurrentUser: () => (typeof (window as any).currentUser === 'string' ? (window as any).currentUser.trim() : ''),
+        editorUsesSupabase: () => editorUsesSupabase(),
+        editorUsesLocalData: () => editorUsesLocalData(),
+        getSupabaseClient: () => getBuilderPublicationSupabaseClient().then(c => c ?? undefined)
+    });
+}
+
 const originalFetch = window.fetch;
 const browserCallSimulator = createBrowserCallSimulator();
 const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1325,6 +1336,9 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
 
     const builderReorderPagesResponse = await handleBuilderReorderPagesBrowserPost(input, init);
     if (builderReorderPagesResponse) return builderReorderPagesResponse;
+
+    const builderSetHomepageResponse = await handleBuilderSetHomepageBrowserPost(input, init);
+    if (builderSetHomepageResponse) return builderSetHomepageResponse;
     
     if (url.startsWith('/api/')) {
         const method = getBuilderSectionsRequestMethod(input, init).toUpperCase();
@@ -4634,6 +4648,54 @@ export function getBuilderReorderPagesController(): BuilderReorderPagesControlle
   renderBuilderPagesPanel();
 };
 
+let builderSetHomepageController: BuilderSetHomepageController | null = null;
+let builderSetHomepageControllerIdentity = '';
+
+export function getBuilderSetHomepageController(): BuilderSetHomepageController {
+  const context = getBuilderNewPageContext();
+  const identity = `${context.actingUserId}:${context.website?.id ?? ''}`;
+  if (builderSetHomepageController && builderSetHomepageControllerIdentity === identity) {
+    return builderSetHomepageController;
+  }
+  builderSetHomepageControllerIdentity = identity;
+  builderSetHomepageController = new BuilderSetHomepageController(() => {
+    const current = getBuilderNewPageContext();
+    return {
+      actingUserId: current.actingUserId,
+      website: current.website,
+      funnels: mockFunnels,
+      websiteRoutes: mockWebsiteRoutes,
+      client: (window as any).supabaseClient ?? undefined,
+      onHomepageSet: (updatedWebsite) => {
+        const idx = mockWebsites.findIndex(w => w.id === updatedWebsite.id);
+        if (idx >= 0) {
+          mockWebsites[idx] = updatedWebsite;
+        }
+        const activeSite = getActiveBuilderWebsite();
+        if (activeSite && activeSite.id === updatedWebsite.id) {
+          activeSite.homepage_funnel_id = updatedWebsite.homepage_funnel_id;
+        }
+        renderBuilder();
+      },
+      onConflict: () => {
+        renderBuilder();
+      }
+    };
+  });
+  return builderSetHomepageController;
+}
+
+(window as any).setBuilderHomepage = async (funnelId: string) => {
+  const controller = getBuilderSetHomepageController();
+  const success = await controller.setHomepage(funnelId);
+  renderBuilder();
+  if (success) {
+    (window as any).showToast('Homepage updated', 'success');
+  } else if (controller.error) {
+    (window as any).showToast(controller.error, 'error');
+  }
+};
+
 function getBuilderWebsitePageEntries(): BuilderWebsitePageEntry[] {
   const website = getActiveBuilderWebsite();
   if (!website) return [];
@@ -4887,6 +4949,9 @@ function renderBuilderPagesPanel(): string {
   const duplicate = getBuilderDuplicatePageController();
   const deleteController = getBuilderDeletePageController();
   const reorderController = getBuilderReorderPagesController();
+  const homepageController = getBuilderSetHomepageController();
+  const isHomepageUpdating = homepageController.isUpdating;
+  const updatingHomepageFunnelId = homepageController.updatingFunnelId;
   const canCreate = !!getActiveBuilderWebsite()
     && !!getBuilderNewPageContext().actingUserId
     && newPage.destinations.length > 0
@@ -4920,6 +4985,11 @@ function renderBuilderPagesPanel(): string {
       ${reorderController.status === 'error' && reorderController.error ? `
         <div class="pb-page-reorder-error" style="background: #fef2f2; color: #991b1b; padding: 8px 12px; border-radius: 6px; font-size: 0.825rem; margin-bottom: 12px; border: 1px solid #fecaca;">
           ${escapeBuilderInspectorHtml(reorderController.error)}
+        </div>
+      ` : ''}
+      ${homepageController.status === 'error' && homepageController.error ? `
+        <div class="pb-page-homepage-error" style="background: #fef2f2; color: #991b1b; padding: 8px 12px; border-radius: 6px; font-size: 0.825rem; margin-bottom: 12px; border: 1px solid #fecaca;">
+          ${escapeBuilderInspectorHtml(homepageController.error)}
         </div>
       ` : ''}
       <div class="pb-new-page-entry">
@@ -5000,6 +5070,18 @@ function renderBuilderPagesPanel(): string {
                     </button>
                   </div>
                 ` : `
+                  ${isHomepage || !page.funnel_id ? '' : `
+                    <button
+                      type="button"
+                      class="pb-page-set-homepage-button"
+                      onclick='event.stopPropagation(); window.setBuilderHomepage(${builderInspectorJsArgument(page.funnel_id)})'
+                      aria-label="Set ${safeName} destination as homepage"
+                      title="Set as homepage"
+                      ${isHomepageUpdating || isDuplicating || isDeleting || isReordering ? 'disabled' : ''}
+                    >
+                      ${isHomepageUpdating && updatingHomepageFunnelId === page.funnel_id ? 'Setting…' : 'Set home'}
+                    </button>
+                  `}
                   <button
                     type="button"
                     class="pb-page-move-up-button"
