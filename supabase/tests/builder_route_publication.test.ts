@@ -1,38 +1,110 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import pg from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { randomUUID } from 'crypto';
 
-const { Pool } = pg;
+const DATABASE_URL = process.env.BUILDER_ROUTE_TEST_DATABASE_URL || process.env.TEST_DATABASE_URL || process.env.DATABASE_URL;
 
-const DB_URL = process.env.TEST_DATABASE_URL || 'postgres://postgres:postgres@127.0.0.1:54322/postgres';
-const shouldRunDbTests = Boolean(process.env.TEST_DATABASE_URL || process.env.CI);
+describe.skipIf(!DATABASE_URL)('PostgreSQL 17 Integration: Builder Route Publication & Redirect Lifecycle (Task 5B)', () => {
+  let pool: Pool;
 
-const suite = shouldRunDbTests ? describe : describe.skip;
-
-suite('PostgreSQL 17 Integration: Builder Route Publication & Redirect Lifecycle (Task 5B)', () => {
-  let pool: pg.Pool;
+  async function setAuthUser(client: PoolClient, userId: string | null): Promise<void> {
+    if (userId === null) {
+      await client.query(`set "request.jwt.claim.sub" = ''`);
+    } else {
+      await client.query(`set "request.jwt.claim.sub" = '${userId}'`);
+    }
+  }
 
   beforeAll(async () => {
-    pool = new Pool({ connectionString: DB_URL, max: 10 });
+    pool = new Pool({ connectionString: DATABASE_URL, max: 10 });
     const client = await pool.connect();
     try {
-      // Apply prerequisite and new migrations
-      const schemaSql = readFileSync(resolve(__dirname, '../schema.sql'), 'utf-8');
-      await client.query(schemaSql);
+      await client.query('begin');
 
+      // Create base schemas and roles if missing
+      await client.query(`
+        do $$ begin create role anon; exception when duplicate_object then null; end $$;
+        do $$ begin create role authenticated; exception when duplicate_object then null; end $$;
+        do $$ begin create role service_role; exception when duplicate_object then null; end $$;
+        do $$ begin create schema auth; exception when duplicate_schema then null; end $$;
+
+        create table if not exists public.users (
+          id text primary key,
+          email text unique
+        );
+
+        create table if not exists public.funnels (
+          id text primary key,
+          user_id text not null references public.users(id) on delete cascade,
+          name text not null,
+          created_at timestamptz not null default now()
+        );
+
+        create table if not exists public.pages (
+          id text primary key,
+          user_id text not null references public.users(id) on delete cascade,
+          name text not null,
+          slug text not null,
+          status text not null default 'draft',
+          funnel_id text not null references public.funnels(id) on delete cascade,
+          step_order integer not null default 0,
+          created_at timestamptz not null default now()
+        );
+
+        create table if not exists public.websites (
+          id uuid primary key default gen_random_uuid(),
+          user_id text not null references public.users(id) on delete cascade,
+          name text not null,
+          domain text unique,
+          subdomain text not null unique,
+          homepage_funnel_id text references public.funnels(id) on delete set null,
+          draft_homepage_funnel_id text,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now()
+        );
+
+        create table if not exists public.website_routes (
+          id uuid primary key default gen_random_uuid(),
+          website_id uuid not null references public.websites(id) on delete cascade,
+          path text not null,
+          funnel_id text not null references public.funnels(id) on delete cascade,
+          created_at timestamptz not null default now(),
+          unique (website_id, path)
+        );
+
+        create table if not exists public.builder_publication_targets (
+          website_id uuid not null references public.websites(id) on delete cascade,
+          page_id text not null references public.pages(id) on delete cascade,
+          published_revision_id text not null,
+          published_at timestamptz not null default now(),
+          primary key (website_id, page_id)
+        );
+
+        create or replace function auth.uid() returns uuid as $$
+          select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
+        $$ language sql stable;
+      `);
+
+      // Apply Task 5A draft routes migration
       const draftMigration = readFileSync(
         resolve(__dirname, '../migrations/20260817050500_create_builder_route_drafts.sql'),
         'utf-8'
       );
       await client.query(draftMigration);
 
+      // Apply Task 5B route publication migration
       const pubMigration = readFileSync(
         resolve(__dirname, '../migrations/20260817050600_create_builder_route_redirects_and_publication.sql'),
         'utf-8'
       );
       await client.query(pubMigration);
+
+      await client.query('commit');
+    } catch (err) {
+      await client.query('rollback');
+      throw err;
     } finally {
       client.release();
     }
@@ -44,18 +116,6 @@ suite('PostgreSQL 17 Integration: Builder Route Publication & Redirect Lifecycle
     }
   });
 
-  async function setAuthUser(client: pg.PoolClient, userId: string) {
-    await client.query(`set session "request.jwt.claim.sub" = '${userId}'`);
-    await client.query(`set session "request.jwt.claims" = '{"sub":"${userId}"}'`);
-    await client.query(`set session role = 'authenticated'`);
-  }
-
-  async function clearAuthUser(client: pg.PoolClient) {
-    await client.query(`reset role`);
-    await client.query(`reset "request.jwt.claim.sub"`);
-    await client.query(`reset "request.jwt.claims"`);
-  }
-
   async function createTestFixture(userId: string) {
     const client = await pool.connect();
     try {
@@ -63,6 +123,8 @@ suite('PostgreSQL 17 Integration: Builder Route Publication & Redirect Lifecycle
       const fnlHome = randomUUID();
       const fnlServices = randomUUID();
       const fnlAbout = randomUUID();
+
+      await client.query(`insert into public.users (id, email) values ($1, $2) on conflict (id) do nothing`, [userId, `${userId}@example.com`]);
 
       // Create funnels
       await client.query(
@@ -111,7 +173,7 @@ suite('PostgreSQL 17 Integration: Builder Route Publication & Redirect Lifecycle
   it('rejects unauthenticated caller with PT401', async () => {
     const client = await pool.connect();
     try {
-      await clearAuthUser(client);
+      await setAuthUser(client, null);
       await client.query('select public.publish_builder_routes($1)', [randomUUID()]);
       expect.unreachable('Should have failed');
     } catch (err: any) {
@@ -127,6 +189,7 @@ suite('PostgreSQL 17 Integration: Builder Route Publication & Redirect Lifecycle
     const userB = randomUUID();
     try {
       const { websiteId } = await createTestFixture(userA);
+      await client.query(`insert into public.users (id, email) values ($1, $2) on conflict (id) do nothing`, [userB, `${userB}@example.com`]);
       await setAuthUser(client, userB);
       await client.query('select public.publish_builder_routes($1)', [websiteId]);
       expect.unreachable('Should have failed');
