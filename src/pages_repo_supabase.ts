@@ -100,6 +100,33 @@ export const PagesRepo = {
     if (remoteConfigured || typeof window === 'undefined' || !window.localStorage) return;
     const userId = typeof user === 'string' ? user : user.id;
     try {
+      // Check recovery journal for incomplete local delete operations
+      const journalKey = `mock_journal_${userId}`;
+      const journalRaw = window.localStorage.getItem(journalKey);
+      if (journalRaw) {
+        try {
+          const journal = JSON.parse(journalRaw) as { pageId?: string; priorPagesRaw?: string | null; priorSectionRaw?: string | null };
+          if (journal && typeof journal.pageId === 'string') {
+            const pagesKey = localPagesStorageKey(userId);
+            const sectionKey = `mock_sections_${userId}:${journal.pageId}`;
+            if (journal.priorPagesRaw !== undefined && journal.priorPagesRaw !== null) {
+              window.localStorage.setItem(pagesKey, journal.priorPagesRaw);
+            } else {
+              window.localStorage.removeItem(pagesKey);
+            }
+            if (journal.priorSectionRaw !== undefined && journal.priorSectionRaw !== null) {
+              window.localStorage.setItem(sectionKey, journal.priorSectionRaw);
+            } else {
+              window.localStorage.removeItem(sectionKey);
+            }
+            // Clear journal ONLY after restoration writes succeed
+            window.localStorage.removeItem(journalKey);
+          }
+        } catch {
+          // Restoration failed; retain journal for subsequent retry
+        }
+      }
+
       const raw = window.localStorage.getItem(localPagesStorageKey(userId));
       if (!raw) return;
       const pages = JSON.parse(raw) as unknown;
@@ -296,26 +323,178 @@ export const PagesRepo = {
   },
 
   /**
-   * Deletes a page and all its sections (cascading).
+   * Deletes a page and all its sections atomically.
    */
   async deletePage(id: string, user: User | string, client?: SupabaseClient): Promise<RepoResponse<any>> {
     const userId = typeof user === 'string' ? user : user.id;
     const db = client ?? await getServerSupabaseClient();
+    const useRemote = db !== null;
 
-    if (!db) {
-      const idx = mockPages.findIndex(p => p.id === id && p.user_id === userId);
-      if (idx !== -1) {
-        mockPages.splice(idx, 1);
+    if (!useRemote) {
+      const pageIndex = mockPages.findIndex(p => p.id === id && p.user_id === userId);
+      if (pageIndex === -1) {
+        return { success: false, error: 'NOT_FOUND', code: 'NOT_FOUND' };
       }
-      return { success: true, data: { id } };
+
+      const targetPage = mockPages[pageIndex];
+      if (targetPage.status === 'published') {
+        return { success: false, error: 'PUBLISHED_BLOCKED', code: 'PUBLISHED_BLOCKED' };
+      }
+
+      const funnelPages = mockPages.filter(p => p.user_id === userId && p.funnel_id === targetPage.funnel_id);
+      if (funnelPages.length <= 1) {
+        return { success: false, error: 'LAST_PAGE', code: 'LAST_PAGE' };
+      }
+
+      const previousPages = structuredClone(mockPages);
+      const previousSections = structuredClone(mockPageSections);
+
+      // Durable local storage backup
+      const pagesKey = localPagesStorageKey(userId);
+      const sectionKey = `mock_sections_${userId}:${id}`;
+      const journalKey = `mock_journal_${userId}`;
+      let priorPagesRaw: string | null = null;
+      let priorSectionRaw: string | null = null;
+      let hasLocalStorage = typeof window !== 'undefined' && Boolean(window.localStorage);
+
+      if (hasLocalStorage) {
+        try {
+          priorPagesRaw = window.localStorage.getItem(pagesKey);
+          priorSectionRaw = window.localStorage.getItem(sectionKey);
+        } catch {
+          // Backup read failed! Zero memory mutation, zero storage mutation.
+          return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
+        }
+
+        try {
+          // Write recovery journal BEFORE destructive writes
+          window.localStorage.setItem(journalKey, JSON.stringify({
+            pageId: id,
+            priorPagesRaw,
+            priorSectionRaw,
+            timestamp: Date.now()
+          }));
+        } catch {
+          // Journal write failed! Zero memory mutation, zero storage mutation.
+          return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
+        }
+      }
+
+      // Snapshot memory & apply changes
+      mockPages.splice(pageIndex, 1);
+      const remainingSections = mockPageSections.filter(s => s.page_id !== id);
+      mockPageSections.splice(0, mockPageSections.length, ...remainingSections);
+
+      // Reversible local persistence
+      let persistSuccess = true;
+      if (hasLocalStorage) {
+        try {
+          // Write updated pages
+          const owned = mockPages.filter(page => page.user_id === userId);
+          window.localStorage.setItem(pagesKey, JSON.stringify(owned));
+          // Remove target section storage key
+          window.localStorage.removeItem(sectionKey);
+        } catch {
+          persistSuccess = false;
+        }
+      }
+
+      if (!persistSuccess) {
+        // Full durable rollback: restore localStorage keys & in-memory arrays
+        if (hasLocalStorage) {
+          try {
+            if (priorPagesRaw !== null) {
+              window.localStorage.setItem(pagesKey, priorPagesRaw);
+            } else {
+              window.localStorage.removeItem(pagesKey);
+            }
+            if (priorSectionRaw !== null) {
+              window.localStorage.setItem(sectionKey, priorSectionRaw);
+            } else {
+              window.localStorage.removeItem(sectionKey);
+            }
+          } catch {
+            // rollback best-effort (journal will restore on fresh reload/hydration)
+          }
+        }
+        mockPages.splice(0, mockPages.length, ...previousPages);
+        mockPageSections.splice(0, mockPageSections.length, ...previousSections);
+        return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
+      }
+
+      // Clear recovery journal as part of durable commit
+      let journalCleared = true;
+      if (hasLocalStorage) {
+        try {
+          window.localStorage.removeItem(journalKey);
+        } catch {
+          journalCleared = false;
+        }
+      }
+
+      if (!journalCleared) {
+        // Never report success while a recovery journal still exists!
+        if (hasLocalStorage) {
+          try {
+            if (priorPagesRaw !== null) {
+              window.localStorage.setItem(pagesKey, priorPagesRaw);
+            } else {
+              window.localStorage.removeItem(pagesKey);
+            }
+            if (priorSectionRaw !== null) {
+              window.localStorage.setItem(sectionKey, priorSectionRaw);
+            } else {
+              window.localStorage.removeItem(sectionKey);
+            }
+          } catch {
+            // rollback best-effort (journal will restore on reload)
+          }
+        }
+        mockPages.splice(0, mockPages.length, ...previousPages);
+        mockPageSections.splice(0, mockPageSections.length, ...previousSections);
+        return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
+      }
+
+      return { success: true, data: { id, funnel_id: targetPage.funnel_id, deleted: true } };
     }
 
-    return queryResult(db
-      .from('pages')
-      .delete()
-      .eq('id', id)
-      .eq('user_id', userId)
-    );
+    try {
+      const rpcResult = await db.rpc('delete_builder_page', { p_page_id: id });
+      if (rpcResult.error) {
+        const code = rpcResult.error.code;
+        const message = rpcResult.error.message;
+        if (code === 'PT404' || message?.includes('Page not found')) {
+          return { success: false, error: 'NOT_FOUND', code: 'NOT_FOUND' };
+        }
+        if (code === 'PT401' || message?.includes('Authentication required')) {
+          return { success: false, error: 'UNAUTHORIZED', code: 'UNAUTHORIZED' };
+        }
+        if (code === 'PT403') {
+          return { success: false, error: 'FORBIDDEN', code: 'FORBIDDEN' };
+        }
+        if (code === 'PT423' || message?.includes('published')) {
+          return { success: false, error: 'PUBLISHED_BLOCKED', code: 'PUBLISHED_BLOCKED' };
+        }
+        if (code === 'PT409' && message?.includes('lead')) {
+          return { success: false, error: 'LEAD_HISTORY_BLOCKED', code: 'LEAD_HISTORY_BLOCKED' };
+        }
+        if (code === 'PT409' || message?.includes('destination changed')) {
+          return { success: false, error: 'CONFLICT', code: 'CONFLICT' };
+        }
+        if (code === 'PT422' || message?.includes('only page')) {
+          return { success: false, error: 'LAST_PAGE', code: 'LAST_PAGE' };
+        }
+        return { success: false, error: message ?? 'DELETE_FAILED', code: code ?? 'AMBIGUOUS' };
+      }
+
+      return { success: true, data: rpcResult.data };
+    } catch {
+      return {
+        success: false,
+        error: 'The deletion result is uncertain. Please reload to check.',
+        code: 'AMBIGUOUS'
+      };
+    }
   },
 
   /**

@@ -59,6 +59,12 @@ describeDatabase('PostgreSQL 17 duplicate_builder_page and create_builder_page R
           select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
         $$ language sql stable;
 
+        create table if not exists public.users (
+          id text primary key,
+          email text,
+          created_at timestamptz default now()
+        );
+
         create table if not exists public.funnels (
           id text primary key,
           user_id text not null,
@@ -104,6 +110,12 @@ describeDatabase('PostgreSQL 17 duplicate_builder_page and create_builder_page R
 
       // 3. Populate base fixtures
       await client.query(`
+        insert into public.users (id, email)
+        values
+          ('${userA}', 'usera@test.com'),
+          ('${userB}', 'userb@test.com')
+        on conflict (id) do nothing;
+
         insert into public.funnels (id, user_id, name)
         values
           ('fnl-user-a', '${userA}', 'User A Funnel'),

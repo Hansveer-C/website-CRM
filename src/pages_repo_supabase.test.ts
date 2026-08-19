@@ -12,6 +12,7 @@ beforeEach(() => {
   originalSections = structuredClone(mockPageSections);
   mockPages.push(
     { id: 'settings-page-a', user_id: 'settings-owner', name: 'A', slug: 'a', status: 'draft', seo_title: '', seo_description: '', seo_keywords: [], created_at: '2026-07-26T00:00:00.000Z', funnel_id: 'funnel-a' },
+    { id: 'settings-page-a2', user_id: 'settings-owner', name: 'A2', slug: 'a2', status: 'draft', seo_title: '', seo_description: '', seo_keywords: [], created_at: '2026-07-26T00:00:00.000Z', funnel_id: 'funnel-a' },
     { id: 'settings-page-b', user_id: 'settings-owner', name: 'B', slug: 'b', status: 'draft', seo_title: '', seo_description: '', seo_keywords: [], created_at: '2026-07-26T00:00:00.000Z', funnel_id: 'funnel-b' }
   );
 });
@@ -321,5 +322,273 @@ describe('PagesRepo.duplicatePage Supabase adapter', () => {
 
       expect(result).toMatchObject({ success: false, code: expectedCode });
     }
+  });
+});
+
+describe('PagesRepo.deletePage durability and transport error handling', () => {
+  it('A. rolls back memory and storage when local Page storage write fails', async () => {
+    const userId = 'settings-owner';
+    const pagesKey = `mock_pages_${userId}`;
+    const sectionKey = `mock_sections_${userId}:settings-page-a`;
+
+    const storage = new Map<string, string>();
+    storage.set(pagesKey, JSON.stringify(mockPages.filter(p => p.user_id === userId)));
+    storage.set(sectionKey, JSON.stringify([{ id: 'sec-a-1', page_id: 'settings-page-a' }]));
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => storage.get(k) ?? null,
+        setItem: (k: string, v: string) => {
+          if (k === pagesKey) throw new Error('QuotaExceeded');
+          storage.set(k, v);
+        },
+        removeItem: (k: string) => storage.delete(k)
+      }
+    });
+
+    const beforePageCount = mockPages.length;
+    const result = await PagesRepo.deletePage('settings-page-a', userId);
+
+    expect(result).toMatchObject({ success: false, code: 'PERSISTENCE_ERROR' });
+    expect(mockPages.length).toBe(beforePageCount);
+    expect(mockPages.some(p => p.id === 'settings-page-a')).toBe(true);
+    expect(storage.get(sectionKey)).not.toBeUndefined();
+  });
+
+  it('B & C. rolls back both durable keys when Section key removal fails after Page write', async () => {
+    const userId = 'settings-owner';
+    const pagesKey = `mock_pages_${userId}`;
+    const sectionKey = `mock_sections_${userId}:settings-page-a`;
+
+    const storage = new Map<string, string>();
+    const originalOwnedPages = mockPages.filter(p => p.user_id === userId);
+    storage.set(pagesKey, JSON.stringify(originalOwnedPages));
+    storage.set(sectionKey, JSON.stringify([{ id: 'sec-a-1', page_id: 'settings-page-a' }]));
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => storage.get(k) ?? null,
+        setItem: (k: string, v: string) => storage.set(k, v),
+        removeItem: (k: string) => {
+          if (k === sectionKey) throw new Error('StorageLocked');
+          storage.delete(k);
+        }
+      }
+    });
+
+    const result = await PagesRepo.deletePage('settings-page-a', userId);
+
+    expect(result).toMatchObject({ success: false, code: 'PERSISTENCE_ERROR' });
+
+    // Assert re-read from storage matches original persisted state
+    const restoredPages = JSON.parse(storage.get(pagesKey)!);
+    expect(restoredPages.some((p: Page) => p.id === 'settings-page-a')).toBe(true);
+    expect(storage.get(sectionKey)).toBe(JSON.stringify([{ id: 'sec-a-1', page_id: 'settings-page-a' }]));
+  });
+
+  it('D & E. successful local deletion removes both durable Page and target Section state while preserving unrelated data', async () => {
+    const userId = 'settings-owner';
+    const pagesKey = `mock_pages_${userId}`;
+    const sectionKeyA = `mock_sections_${userId}:settings-page-a`;
+    const sectionKeyB = `mock_sections_${userId}:settings-page-b`;
+
+    const storage = new Map<string, string>();
+    storage.set(pagesKey, JSON.stringify(mockPages.filter(p => p.user_id === userId)));
+    storage.set(sectionKeyA, JSON.stringify([{ id: 'sec-a-1', page_id: 'settings-page-a' }]));
+    storage.set(sectionKeyB, JSON.stringify([{ id: 'sec-b-1', page_id: 'settings-page-b' }]));
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => storage.get(k) ?? null,
+        setItem: (k: string, v: string) => storage.set(k, v),
+        removeItem: (k: string) => storage.delete(k)
+      }
+    });
+
+    const result = await PagesRepo.deletePage('settings-page-a', userId);
+    expect(result.success).toBe(true);
+
+    const updatedPages = JSON.parse(storage.get(pagesKey)!);
+    expect(updatedPages.some((p: Page) => p.id === 'settings-page-a')).toBe(false);
+    expect(updatedPages.some((p: Page) => p.id === 'settings-page-b')).toBe(true);
+    expect(storage.has(sectionKeyA)).toBe(false);
+    expect(storage.has(sectionKeyB)).toBe(true);
+  });
+
+  it('zero memory mutation when backup read throws', async () => {
+    const userId = 'settings-owner';
+    const pagesKey = `mock_pages_${userId}`;
+    const sectionKey = `mock_sections_${userId}:settings-page-a`;
+
+    const storage = new Map<string, string>();
+    storage.set(pagesKey, JSON.stringify(mockPages.filter(p => p.user_id === userId)));
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => {
+          if (k === pagesKey) throw new Error('BackupReadFailed');
+          return storage.get(k) ?? null;
+        },
+        setItem: (k: string, v: string) => storage.set(k, v),
+        removeItem: (k: string) => storage.delete(k)
+      }
+    });
+
+    const beforePageCount = mockPages.length;
+    const result = await PagesRepo.deletePage('settings-page-a', userId);
+
+    expect(result).toMatchObject({ success: false, code: 'PERSISTENCE_ERROR' });
+    expect(mockPages.length).toBe(beforePageCount);
+    expect(mockPages.some(p => p.id === 'settings-page-a')).toBe(true);
+  });
+
+  it('restores original Page and Sections on fresh reload/hydration if rollback write fails but journal was created', async () => {
+    const userId = 'settings-owner';
+    const pagesKey = `mock_pages_${userId}`;
+    const sectionKey = `mock_sections_${userId}:settings-page-a`;
+    const journalKey = `mock_journal_${userId}`;
+
+    const storage = new Map<string, string>();
+    const originalOwnedPages = mockPages.filter(p => p.user_id === userId);
+    storage.set(pagesKey, JSON.stringify(originalOwnedPages));
+    storage.set(sectionKey, JSON.stringify([{ id: 'sec-a-1', page_id: 'settings-page-a' }]));
+
+    let failRollbackWrites = false;
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => storage.get(k) ?? null,
+        setItem: (k: string, v: string) => {
+          if (failRollbackWrites && k === pagesKey) throw new Error('DiskFull');
+          storage.set(k, v);
+        },
+        removeItem: (k: string) => {
+          if (k === sectionKey) {
+            failRollbackWrites = true; // Trigger failure during Section delete
+            throw new Error('RemoveFailed');
+          }
+          storage.delete(k);
+        }
+      }
+    });
+
+    const result = await PagesRepo.deletePage('settings-page-a', userId);
+    expect(result).toMatchObject({ success: false, code: 'PERSISTENCE_ERROR' });
+
+    // Simulate fresh application startup / reload: hydrateLocalPages reads journal & restores original state
+    failRollbackWrites = false;
+    mockPages.splice(0, mockPages.length); // clear memory to simulate cold restart
+    PagesRepo.hydrateLocalPages(userId);
+
+    expect(mockPages.some(p => p.id === 'settings-page-a')).toBe(true);
+    expect(storage.get(journalKey)).toBeUndefined(); // Journal cleared after recovery
+  });
+
+  it('journal removal failure during commit returns PERSISTENCE_ERROR and aborts success', async () => {
+    const userId = 'settings-owner';
+    const pagesKey = `mock_pages_${userId}`;
+    const sectionKey = `mock_sections_${userId}:settings-page-a`;
+    const journalKey = `mock_journal_${userId}`;
+
+    const storage = new Map<string, string>();
+    storage.set(pagesKey, JSON.stringify(mockPages.filter(p => p.user_id === userId)));
+    storage.set(sectionKey, JSON.stringify([{ id: 'sec-a-1', page_id: 'settings-page-a' }]));
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => storage.get(k) ?? null,
+        setItem: (k: string, v: string) => storage.set(k, v),
+        removeItem: (k: string) => {
+          if (k === journalKey) throw new Error('JournalLockFailed');
+          storage.delete(k);
+        }
+      }
+    });
+
+    const result = await PagesRepo.deletePage('settings-page-a', userId);
+
+    expect(result).toMatchObject({ success: false, code: 'PERSISTENCE_ERROR' });
+    expect(mockPages.some(p => p.id === 'settings-page-a')).toBe(true);
+  });
+
+  it('hydration recovery failure retains journal for subsequent retry', async () => {
+    const userId = 'settings-owner';
+    const pagesKey = `mock_pages_${userId}`;
+    const sectionKey = `mock_sections_${userId}:settings-page-a`;
+    const journalKey = `mock_journal_${userId}`;
+
+    const storage = new Map<string, string>();
+    const originalOwnedPages = mockPages.filter(p => p.user_id === userId);
+    storage.set(journalKey, JSON.stringify({
+      pageId: 'settings-page-a',
+      priorPagesRaw: JSON.stringify(originalOwnedPages),
+      priorSectionRaw: JSON.stringify([{ id: 'sec-a-1', page_id: 'settings-page-a' }])
+    }));
+
+    let failHydrationWrite = true;
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => storage.get(k) ?? null,
+        setItem: (k: string, v: string) => {
+          if (failHydrationWrite && k === pagesKey) throw new Error('StorageFull');
+          storage.set(k, v);
+        },
+        removeItem: (k: string) => storage.delete(k)
+      }
+    });
+
+    // First hydration attempt: setItem throws, journal retained
+    PagesRepo.hydrateLocalPages(userId);
+    expect(storage.has(journalKey)).toBe(true);
+
+    // Second hydration attempt: storage works normally, recovery completes, journal cleared
+    failHydrationWrite = false;
+    PagesRepo.hydrateLocalPages(userId);
+    expect(storage.has(journalKey)).toBe(false);
+    expect(mockPages.some(p => p.id === 'settings-page-a')).toBe(true);
+  });
+
+  it('successful delete reload does not resurrect page or sections', async () => {
+    const userId = 'settings-owner';
+    const pagesKey = `mock_pages_${userId}`;
+    const sectionKeyA = `mock_sections_${userId}:settings-page-a`;
+    const journalKey = `mock_journal_${userId}`;
+
+    const storage = new Map<string, string>();
+    storage.set(pagesKey, JSON.stringify(mockPages.filter(p => p.user_id === userId)));
+    storage.set(sectionKeyA, JSON.stringify([{ id: 'sec-a-1', page_id: 'settings-page-a' }]));
+
+    vi.stubGlobal('window', {
+      localStorage: {
+        getItem: (k: string) => storage.get(k) ?? null,
+        setItem: (k: string, v: string) => storage.set(k, v),
+        removeItem: (k: string) => storage.delete(k)
+      }
+    });
+
+    const result = await PagesRepo.deletePage('settings-page-a', userId);
+    expect(result.success).toBe(true);
+    expect(storage.has(journalKey)).toBe(false);
+
+    // Simulate fresh application reload
+    mockPages.splice(0, mockPages.length);
+    PagesRepo.hydrateLocalPages(userId);
+
+    expect(mockPages.some(p => p.id === 'settings-page-a')).toBe(false);
+    expect(storage.has(sectionKeyA)).toBe(false);
+  });
+
+  it('returns AMBIGUOUS when remote Supabase transport throws uncaught exception', async () => {
+    const client = {
+      rpc: () => Promise.reject(new Error('Network error: Failed to fetch'))
+    } as unknown as SupabaseClient;
+
+    const result = await PagesRepo.deletePage('some-id', 'trusted-owner', client);
+    expect(result).toMatchObject({
+      success: false,
+      code: 'AMBIGUOUS',
+      error: 'The deletion result is uncertain. Please reload to check.'
+    });
   });
 });

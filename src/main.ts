@@ -60,6 +60,10 @@ import {
   BuilderDuplicatePageController,
   type BuilderDuplicatePagePersistResult
 } from './builder_duplicate_page_controller';
+import {
+  BuilderDeletePageController,
+  type BuilderDeletePagePersistResult
+} from './builder_delete_page_controller';
 import { PagesRepo } from './pages_repo_supabase';
 import {
   createBuilderPublishedRevision,
@@ -1217,6 +1221,61 @@ async function handleBuilderDuplicatePageBrowserPost(
     return builderSectionsJsonResponse({ success: true, data: result.data }, 201);
 }
 
+async function handleBuilderDeletePageBrowserDelete(input: RequestInfo | URL, init?: RequestInit): Promise<Response | null> {
+    const requestUrl = getBuilderSectionsRequestUrl(input);
+    if (!requestUrl) return null;
+    const parsedUrl = new URL(requestUrl, window.location.origin);
+    const match = parsedUrl.pathname.match(/^\/api\/pages\/([^/]+)$/);
+    if (!match || getBuilderSectionsRequestMethod(input, init).toUpperCase() !== 'DELETE') {
+        return null;
+    }
+
+    const pageId = decodeURIComponent(match[1]);
+    const userId = typeof (window as any).currentUser === 'string' ? (window as any).currentUser.trim() : '';
+    if (!userId) return builderSectionsJsonResponse({ success: false, code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+
+    let client: SupabaseClient | undefined;
+    if (editorUsesSupabase()) {
+        client = await getBuilderPublicationSupabaseClient() ?? undefined;
+        if (!client) return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Page deletion is unavailable' }, 503);
+        const authResult = await client.auth.getUser();
+        if (authResult.error || authResult.data.user?.id !== userId) {
+            return builderSectionsJsonResponse({ success: false, code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+        }
+    } else if (!editorUsesLocalData()) {
+        return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Page deletion is unavailable' }, 503);
+    }
+
+    const result = await PagesRepo.deletePage(pageId, userId, client);
+
+    if (!result.success || !result.data) {
+        const lastPage = result.code === 'LAST_PAGE';
+        const publishedBlocked = result.code === 'PUBLISHED_BLOCKED';
+        const leadBlocked = result.code === 'LEAD_HISTORY_BLOCKED';
+        const conflict = result.code === 'CONFLICT';
+        const ambiguous = result.code === 'AMBIGUOUS';
+        const notFound = result.code === 'NOT_FOUND';
+        const forbidden = result.code === 'FORBIDDEN';
+        return builderSectionsJsonResponse({
+            success: false,
+            code: lastPage ? 'LAST_PAGE' : publishedBlocked ? 'PUBLISHED_BLOCKED' : leadBlocked ? 'LEAD_HISTORY_BLOCKED' : conflict ? 'CONFLICT' : ambiguous ? 'AMBIGUOUS' : notFound ? 'NOT_FOUND' : forbidden ? 'FORBIDDEN' : 'UNAVAILABLE',
+            error: lastPage
+                ? 'Cannot delete the only page in this destination.'
+                : publishedBlocked
+                  ? 'This page is published. Unpublish it before deleting it.'
+                  : leadBlocked
+                    ? 'This page has historical lead submissions and cannot be deleted.'
+                    : conflict
+                      ? 'The page destination changed while deleting. Please try again.'
+                      : ambiguous
+                        ? 'The deletion result is uncertain. Please reload to check.'
+                        : notFound ? 'Page not found' : 'The page could not be deleted. Please try again.'
+        }, lastPage ? 422 : publishedBlocked ? 423 : (leadBlocked || conflict || ambiguous) ? 409 : notFound ? 404 : forbidden ? 403 : 503);
+    }
+
+    return builderSectionsJsonResponse({ success: true, data: result.data }, 200);
+}
+
 const originalFetch = window.fetch;
 const browserCallSimulator = createBrowserCallSimulator();
 const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1249,6 +1308,9 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
 
     const builderDuplicatePageResponse = await handleBuilderDuplicatePageBrowserPost(input, init);
     if (builderDuplicatePageResponse) return builderDuplicatePageResponse;
+
+    const builderDeletePageResponse = await handleBuilderDeletePageBrowserDelete(input, init);
+    if (builderDeletePageResponse) return builderDeletePageResponse;
     
     if (url.startsWith('/api/')) {
         const method = getBuilderSectionsRequestMethod(input, init).toUpperCase();
@@ -4438,6 +4500,79 @@ function getBuilderDuplicatePageController(): BuilderDuplicatePageController {
   return builderDuplicatePageController;
 }
 
+let builderDeletePageController: BuilderDeletePageController | null = null;
+let builderDeletePageControllerIdentity = '';
+
+function getBuilderDeletePageController(): BuilderDeletePageController {
+  const context = getBuilderNewPageContext();
+  const identity = `${context.actingUserId}:${context.website?.id ?? ''}`;
+  if (builderDeletePageController && builderDeletePageControllerIdentity === identity) {
+    return builderDeletePageController;
+  }
+  builderDeletePageControllerIdentity = identity;
+  builderDeletePageController = new BuilderDeletePageController({
+    getContext: getBuilderNewPageContext,
+    persist: async request => {
+      if (!(await flushActiveBuilderBeforeNewPage())) {
+        return { success: false, code: 'UNAVAILABLE' };
+      }
+      try {
+        const response = await fetch(`/api/pages/${encodeURIComponent(request.pageId)}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const payload = await response.json() as {
+          success?: boolean;
+          data?: { id: string; funnel_id?: string };
+          code?: BuilderDeletePagePersistResult['code'];
+          error?: string;
+        };
+        return response.ok && payload.success && payload.data
+          ? { success: true, data: payload.data }
+          : { success: false, code: payload.code ?? 'INVALID_RESPONSE', error: payload.error };
+      } catch {
+        return { success: false, code: 'AMBIGUOUS' };
+      }
+    },
+    onDeleted: async (deletedPageId, meta) => {
+      const pageIndex = mockPages.findIndex(item => item.id === deletedPageId);
+      if (pageIndex >= 0) mockPages.splice(pageIndex, 1);
+
+      const remainingSections = mockPageSections.filter(s => s.page_id !== deletedPageId);
+      mockPageSections.splice(0, mockPageSections.length, ...remainingSections);
+
+      builderPagesPanelView = 'list';
+      if (meta?.shouldNavigate && meta.replacementPageId) {
+        await (window as any).switchBuilderPage(meta.replacementPageId);
+      } else {
+        renderBuilderPagesPanel();
+      }
+    }
+  });
+  return builderDeletePageController;
+}
+
+(window as any).promptDeleteBuilderPage = (pageId: string) => {
+  const controller = getBuilderDeletePageController();
+  if (controller.promptDelete(pageId)) {
+    renderBuilderPagesPanel();
+  } else if (controller.status === 'error') {
+    renderBuilderPagesPanel();
+  }
+};
+
+(window as any).cancelDeleteBuilderPage = () => {
+  const controller = getBuilderDeletePageController();
+  controller.cancelDelete();
+  renderBuilderPagesPanel();
+};
+
+(window as any).confirmDeleteBuilderPage = async () => {
+  const controller = getBuilderDeletePageController();
+  await controller.confirmDelete();
+  renderBuilderPagesPanel();
+};
+
 function getBuilderWebsitePageEntries(): BuilderWebsitePageEntry[] {
   const website = getActiveBuilderWebsite();
   if (!website) return [];
@@ -4689,12 +4824,18 @@ function renderBuilderPagesPanel(): string {
   const entries = getBuilderWebsitePageEntries();
   const newPage = getBuilderNewPageController();
   const duplicate = getBuilderDuplicatePageController();
+  const deleteController = getBuilderDeletePageController();
   const canCreate = !!getActiveBuilderWebsite()
     && !!getBuilderNewPageContext().actingUserId
     && newPage.destinations.length > 0
     && !newPage.isCreating;
   const isDuplicating = duplicate.isDuplicating;
   const duplicatingPageId = duplicate.duplicatingPageId;
+  const isDeleting = deleteController.isDeleting;
+  const deletingPageId = deleteController.deletingPageId;
+  const isConfirming = deleteController.isConfirming;
+  const confirmingPageId = deleteController.confirmingPageId;
+  const isOnlyPage = entries.length <= 1;
 
   return `
     <div class="pb-pages-panel">
@@ -4707,6 +4848,11 @@ function renderBuilderPagesPanel(): string {
         <span>Website pages</span>
         <strong>${entries.length}</strong>
       </div>
+      ${deleteController.status === 'error' && deleteController.message ? `
+        <div class="pb-page-delete-error" style="background: #fef2f2; color: #991b1b; padding: 8px 12px; border-radius: 6px; font-size: 0.825rem; margin-bottom: 12px; border: 1px solid #fecaca;">
+          ${escapeBuilderInspectorHtml(deleteController.message)}
+        </div>
+      ` : ''}
       <div class="pb-new-page-entry">
         <button type="button" class="pb-new-page-button" aria-label="New page" onclick="window.openBuilderNewPageDialog()" ${canCreate ? '' : 'disabled'}>
           <span aria-hidden="true">+</span> New page
@@ -4719,10 +4865,21 @@ function renderBuilderPagesPanel(): string {
           const status = page.status || 'draft';
           const isCurrent = page.id === builderPageId;
           const isThisDuplicating = isDuplicating && duplicatingPageId === page.id;
+          const isThisDeleting = isDeleting && deletingPageId === page.id;
+          const isThisConfirming = isConfirming && confirmingPageId === page.id;
           const safeName = escapeBuilderInspectorHtml(name);
           const safePath = escapeBuilderInspectorHtml(path);
           const safeStatus = escapeBuilderInspectorHtml(status);
           const pageArg = builderInspectorJsArgument(page.id);
+          const funnelPageCount = entries.filter(e => e.page.funnel_id === page.funnel_id).length;
+          const isOnlyFunnelPage = funnelPageCount <= 1;
+          const isPublished = status === 'published';
+          const isDeleteDisabled = isDuplicating || isDeleting || isOnlyFunnelPage || isPublished;
+          const deleteTooltip = isPublished
+            ? 'This page is published. Unpublish it before deleting it.'
+            : isOnlyFunnelPage
+              ? 'Cannot delete the only page in this destination'
+              : 'Delete page';
 
           return `
             <div
@@ -4746,16 +4903,50 @@ function renderBuilderPagesPanel(): string {
                 </span>
               </button>
               <div class="pb-page-row-actions">
-                <button
-                  type="button"
-                  class="pb-page-duplicate-button"
-                  onclick='event.stopPropagation(); window.duplicateBuilderPage(${pageArg})'
-                  aria-label="Duplicate ${safeName} page"
-                  title="Duplicate page"
-                  ${isDuplicating ? 'disabled' : ''}
-                >
-                  ${isThisDuplicating ? 'Duplicating…' : 'Duplicate'}
-                </button>
+                ${isThisConfirming ? `
+                  <div class="pb-page-delete-confirm-box" style="display: flex; gap: 4px; align-items: center;">
+                    <button
+                      type="button"
+                      class="pb-page-confirm-delete-button"
+                      onclick="event.stopPropagation(); window.confirmDeleteBuilderPage()"
+                      aria-label="Confirm delete ${safeName}"
+                      style="background: #dc2626; color: #ffffff; border: none; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; cursor: pointer;"
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      type="button"
+                      class="pb-page-cancel-delete-button"
+                      onclick="event.stopPropagation(); window.cancelDeleteBuilderPage()"
+                      aria-label="Cancel delete ${safeName}"
+                      style="background: #4b5563; color: #ffffff; border: none; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 500; cursor: pointer;"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ` : `
+                  <button
+                    type="button"
+                    class="pb-page-duplicate-button"
+                    onclick='event.stopPropagation(); window.duplicateBuilderPage(${pageArg})'
+                    aria-label="Duplicate ${safeName} page"
+                    title="Duplicate page"
+                    ${isDuplicating || isDeleting ? 'disabled' : ''}
+                  >
+                    ${isThisDuplicating ? 'Duplicating…' : 'Duplicate'}
+                  </button>
+                  <button
+                    type="button"
+                    class="pb-page-delete-button"
+                    onclick='event.stopPropagation(); window.promptDeleteBuilderPage(${pageArg})'
+                    aria-label="Delete ${safeName} page"
+                    title="${escapeBuilderInspectorHtml(deleteTooltip)}"
+                    style="color: #dc2626;"
+                    ${isDeleteDisabled ? 'disabled' : ''}
+                  >
+                    ${isThisDeleting ? 'Deleting…' : 'Delete'}
+                  </button>
+                `}
               </div>
             </div>
           `;
