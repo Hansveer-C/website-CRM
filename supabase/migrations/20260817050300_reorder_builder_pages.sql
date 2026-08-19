@@ -116,7 +116,7 @@ begin
   for i in 1..v_page_count loop
     if v_current_page_ids[i] <> p_ordered_page_ids[i] then
       v_is_noop := false;
-      break;
+      exit;
     end if;
   end loop;
 
