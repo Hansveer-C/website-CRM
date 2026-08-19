@@ -591,4 +591,92 @@ describe('PagesRepo.deletePage durability and transport error handling', () => {
       error: 'The deletion result is uncertain. Please reload to check.'
     });
   });
+
+  describe('PagesRepo.reorderPages', () => {
+    const reorderUser = 'reorder-user-1';
+    const reorderFunnel = 'reorder-funnel-1';
+
+    beforeEach(() => {
+      mockPages.splice(0, mockPages.length,
+        { id: 'page-r1', user_id: reorderUser, name: 'R1', slug: 'r1', status: 'draft', funnel_id: reorderFunnel, step_order: 0, seo_title: '', seo_description: '', seo_keywords: [], created_at: '2026-01-01' },
+        { id: 'page-r2', user_id: reorderUser, name: 'R2', slug: 'r2', status: 'draft', funnel_id: reorderFunnel, step_order: 1, seo_title: '', seo_description: '', seo_keywords: [], created_at: '2026-01-02' },
+        { id: 'page-r3', user_id: reorderUser, name: 'R3', slug: 'r3', status: 'draft', funnel_id: reorderFunnel, step_order: 2, seo_title: '', seo_description: '', seo_keywords: [], created_at: '2026-01-03' }
+      );
+    });
+
+    it('reorders pages locally and assigns contiguous 0-based step_order', async () => {
+      const result = await PagesRepo.reorderPages(
+        reorderFunnel,
+        ['page-r3', 'page-r1', 'page-r2'],
+        ['page-r1', 'page-r2', 'page-r3'],
+        reorderUser
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.data?.pages.map(p => p.id)).toEqual(['page-r3', 'page-r1', 'page-r2']);
+      expect(result.data?.pages.map(p => p.step_order)).toEqual([0, 1, 2]);
+
+      const r3 = mockPages.find(p => p.id === 'page-r3');
+      const r1 = mockPages.find(p => p.id === 'page-r1');
+      const r2 = mockPages.find(p => p.id === 'page-r2');
+      expect(r3?.step_order).toBe(0);
+      expect(r1?.step_order).toBe(1);
+      expect(r2?.step_order).toBe(2);
+    });
+
+    it('rejects with CONFLICT if expected order does not match current local order', async () => {
+      const result = await PagesRepo.reorderPages(
+        reorderFunnel,
+        ['page-r3', 'page-r1', 'page-r2'],
+        ['page-r2', 'page-r1', 'page-r3'], // Stale expected
+        reorderUser
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.code).toBe('CONFLICT');
+      expect(result.error).toBe('The page order changed elsewhere. Reload and try again.');
+    });
+
+    it('rolls back in-memory order if local storage write fails', async () => {
+      const storageKey = `mock_pages_${reorderUser}`;
+      vi.stubGlobal('window', {
+        localStorage: {
+          setItem: (k: string) => {
+            if (k === storageKey) throw new Error('StorageFull');
+          }
+        }
+      });
+
+      const result = await PagesRepo.reorderPages(
+        reorderFunnel,
+        ['page-r3', 'page-r1', 'page-r2'],
+        ['page-r1', 'page-r2', 'page-r3'],
+        reorderUser
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.code).toBe('PERSISTENCE_ERROR');
+
+      const r1 = mockPages.find(p => p.id === 'page-r1');
+      const r3 = mockPages.find(p => p.id === 'page-r3');
+      expect(r1?.step_order).toBe(0);
+      expect(r3?.step_order).toBe(2);
+    });
+
+    it('maps remote RPC PT409 code to CONFLICT', async () => {
+      const client = {
+        rpc: () => Promise.resolve({
+          error: { code: 'PT409', message: 'The page order changed elsewhere. Reload and try again.' },
+          data: null
+        })
+      } as unknown as SupabaseClient;
+
+      const result = await PagesRepo.reorderPages(reorderFunnel, ['p2', 'p1'], ['p1', 'p2'], reorderUser, client);
+      expect(result).toMatchObject({
+        success: false,
+        code: 'CONFLICT',
+        error: 'The page order changed elsewhere. Reload and try again.'
+      });
+    });
+  });
 });

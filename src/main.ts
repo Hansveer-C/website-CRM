@@ -64,6 +64,7 @@ import {
   BuilderDeletePageController,
   type BuilderDeletePagePersistResult
 } from './builder_delete_page_controller';
+import { BuilderReorderPagesController } from './builder_reorder_pages_controller';
 import { PagesRepo } from './pages_repo_supabase';
 import {
   createBuilderPublishedRevision,
@@ -1276,6 +1277,58 @@ async function handleBuilderDeletePageBrowserDelete(input: RequestInfo | URL, in
     return builderSectionsJsonResponse({ success: true, data: result.data }, 200);
 }
 
+async function handleBuilderReorderPagesBrowserPost(input: RequestInfo | URL, init?: RequestInit): Promise<Response | null> {
+    const requestUrl = getBuilderSectionsRequestUrl(input);
+    if (!requestUrl) return null;
+    const parsedUrl = new URL(requestUrl, window.location.origin);
+    if (parsedUrl.pathname !== '/api/pages/reorder' || getBuilderSectionsRequestMethod(input, init).toUpperCase() !== 'POST') {
+        return null;
+    }
+
+    const userId = typeof (window as any).currentUser === 'string' ? (window as any).currentUser.trim() : '';
+    if (!userId) return builderSectionsJsonResponse({ success: false, code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+
+    let payload: { funnel_id?: string; ordered_page_ids?: string[]; expected_page_ids?: string[] } | undefined;
+    try {
+        payload = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
+    } catch {
+        return builderSectionsJsonResponse({ success: false, code: 'INVALID_PAYLOAD', error: 'Invalid page order payload' }, 400);
+    }
+
+    if (!payload?.funnel_id || !Array.isArray(payload.ordered_page_ids) || !Array.isArray(payload.expected_page_ids)) {
+        return builderSectionsJsonResponse({ success: false, code: 'INVALID_PAYLOAD', error: 'Invalid page order payload' }, 400);
+    }
+
+    let client: SupabaseClient | undefined;
+    if (editorUsesSupabase()) {
+        client = await getBuilderPublicationSupabaseClient() ?? undefined;
+        if (!client) return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Page reordering is unavailable' }, 503);
+        const authResult = await client.auth.getUser();
+        if (authResult.error || authResult.data.user?.id !== userId) {
+            return builderSectionsJsonResponse({ success: false, code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+        }
+    } else if (!editorUsesLocalData()) {
+        return builderSectionsJsonResponse({ success: false, code: 'UNAVAILABLE', error: 'Page reordering is unavailable' }, 503);
+    }
+
+    const result = await PagesRepo.reorderPages(payload.funnel_id, payload.ordered_page_ids, payload.expected_page_ids, userId, client);
+
+    if (!result.success || !result.data) {
+        const conflict = result.code === 'CONFLICT';
+        const notFound = result.code === 'NOT_FOUND';
+        const forbidden = result.code === 'FORBIDDEN';
+        return builderSectionsJsonResponse({
+            success: false,
+            code: conflict ? 'CONFLICT' : notFound ? 'NOT_FOUND' : forbidden ? 'FORBIDDEN' : 'UNAVAILABLE',
+            error: conflict
+                ? 'The page order changed elsewhere. Reload and try again.'
+                : notFound ? 'Funnel not found' : 'The page order could not be updated. Please try again.'
+        }, conflict ? 409 : notFound ? 404 : forbidden ? 403 : 503);
+    }
+
+    return builderSectionsJsonResponse({ success: true, data: result.data }, 200);
+}
+
 const originalFetch = window.fetch;
 const browserCallSimulator = createBrowserCallSimulator();
 const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1311,6 +1364,9 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
 
     const builderDeletePageResponse = await handleBuilderDeletePageBrowserDelete(input, init);
     if (builderDeletePageResponse) return builderDeletePageResponse;
+
+    const builderReorderPagesResponse = await handleBuilderReorderPagesBrowserPost(input, init);
+    if (builderReorderPagesResponse) return builderReorderPagesResponse;
     
     if (url.startsWith('/api/')) {
         const method = getBuilderSectionsRequestMethod(input, init).toUpperCase();
@@ -4573,6 +4629,49 @@ function getBuilderDeletePageController(): BuilderDeletePageController {
   renderBuilderPagesPanel();
 };
 
+let builderReorderPagesController: BuilderReorderPagesController | null = null;
+let builderReorderPagesControllerIdentity = '';
+
+function getBuilderReorderPagesController(): BuilderReorderPagesController {
+  const context = getBuilderNewPageContext();
+  const identity = `${context.actingUserId}:${context.website?.id ?? ''}`;
+  if (builderReorderPagesController && builderReorderPagesControllerIdentity === identity) {
+    return builderReorderPagesController;
+  }
+  builderReorderPagesControllerIdentity = identity;
+  builderReorderPagesController = new BuilderReorderPagesController(() => ({
+    actingUserId: context.actingUserId,
+    websiteId: context.website?.id,
+    pages: mockPages,
+    client: (window as any).supabaseClient ?? undefined,
+    onPagesReordered: (updatedPages) => {
+      updatedPages.forEach(up => {
+        const idx = mockPages.findIndex(p => p.id === up.id);
+        if (idx >= 0) {
+          mockPages[idx].step_order = up.step_order;
+        }
+      });
+      renderBuilderPagesPanel();
+    },
+    onConflict: () => {
+      renderBuilderPagesPanel();
+    }
+  }));
+  return builderReorderPagesController;
+}
+
+(window as any).moveBuilderPageUp = async (pageId: string) => {
+  const controller = getBuilderReorderPagesController();
+  await controller.movePageUp(pageId);
+  renderBuilderPagesPanel();
+};
+
+(window as any).moveBuilderPageDown = async (pageId: string) => {
+  const controller = getBuilderReorderPagesController();
+  await controller.movePageDown(pageId);
+  renderBuilderPagesPanel();
+};
+
 function getBuilderWebsitePageEntries(): BuilderWebsitePageEntry[] {
   const website = getActiveBuilderWebsite();
   if (!website) return [];
@@ -4825,6 +4924,7 @@ function renderBuilderPagesPanel(): string {
   const newPage = getBuilderNewPageController();
   const duplicate = getBuilderDuplicatePageController();
   const deleteController = getBuilderDeletePageController();
+  const reorderController = getBuilderReorderPagesController();
   const canCreate = !!getActiveBuilderWebsite()
     && !!getBuilderNewPageContext().actingUserId
     && newPage.destinations.length > 0
@@ -4835,6 +4935,8 @@ function renderBuilderPagesPanel(): string {
   const deletingPageId = deleteController.deletingPageId;
   const isConfirming = deleteController.isConfirming;
   const confirmingPageId = deleteController.confirmingPageId;
+  const isReordering = reorderController.isReordering;
+  const reorderingPageId = reorderController.reorderingPageId;
   const isOnlyPage = entries.length <= 1;
 
   return `
@@ -4853,6 +4955,11 @@ function renderBuilderPagesPanel(): string {
           ${escapeBuilderInspectorHtml(deleteController.message)}
         </div>
       ` : ''}
+      ${reorderController.status === 'error' && reorderController.error ? `
+        <div class="pb-page-reorder-error" style="background: #fef2f2; color: #991b1b; padding: 8px 12px; border-radius: 6px; font-size: 0.825rem; margin-bottom: 12px; border: 1px solid #fecaca;">
+          ${escapeBuilderInspectorHtml(reorderController.error)}
+        </div>
+      ` : ''}
       <div class="pb-new-page-entry">
         <button type="button" class="pb-new-page-button" aria-label="New page" onclick="window.openBuilderNewPageDialog()" ${canCreate ? '' : 'disabled'}>
           <span aria-hidden="true">+</span> New page
@@ -4867,14 +4974,20 @@ function renderBuilderPagesPanel(): string {
           const isThisDuplicating = isDuplicating && duplicatingPageId === page.id;
           const isThisDeleting = isDeleting && deletingPageId === page.id;
           const isThisConfirming = isConfirming && confirmingPageId === page.id;
+          const isThisReordering = isReordering && reorderingPageId === page.id;
           const safeName = escapeBuilderInspectorHtml(name);
           const safePath = escapeBuilderInspectorHtml(path);
           const safeStatus = escapeBuilderInspectorHtml(status);
           const pageArg = builderInspectorJsArgument(page.id);
-          const funnelPageCount = entries.filter(e => e.page.funnel_id === page.funnel_id).length;
-          const isOnlyFunnelPage = funnelPageCount <= 1;
+          const funnelEntries = entries.filter(e => e.page.funnel_id === page.funnel_id);
+          const funnelIndex = funnelEntries.findIndex(e => e.page.id === page.id);
+          const isFirstInFunnel = funnelIndex === 0;
+          const isLastInFunnel = funnelIndex === funnelEntries.length - 1;
+          const canMoveUp = !isFirstInFunnel && !isReordering && !isDuplicating && !isDeleting;
+          const canMoveDown = !isLastInFunnel && !isReordering && !isDuplicating && !isDeleting;
+          const isOnlyFunnelPage = funnelEntries.length <= 1;
           const isPublished = status === 'published';
-          const isDeleteDisabled = isDuplicating || isDeleting || isOnlyFunnelPage || isPublished;
+          const isDeleteDisabled = isDuplicating || isDeleting || isReordering || isOnlyFunnelPage || isPublished;
           const deleteTooltip = isPublished
             ? 'This page is published. Unpublish it before deleting it.'
             : isOnlyFunnelPage
@@ -4927,11 +5040,31 @@ function renderBuilderPagesPanel(): string {
                 ` : `
                   <button
                     type="button"
+                    class="pb-page-move-up-button"
+                    onclick='event.stopPropagation(); window.moveBuilderPageUp(${pageArg})'
+                    aria-label="Move ${safeName} page up"
+                    title="Move page up"
+                    ${canMoveUp ? '' : 'disabled'}
+                  >
+                    ${isThisReordering && reorderController.reorderingDirection === 'up' ? '…' : '↑'}
+                  </button>
+                  <button
+                    type="button"
+                    class="pb-page-move-down-button"
+                    onclick='event.stopPropagation(); window.moveBuilderPageDown(${pageArg})'
+                    aria-label="Move ${safeName} page down"
+                    title="Move page down"
+                    ${canMoveDown ? '' : 'disabled'}
+                  >
+                    ${isThisReordering && reorderController.reorderingDirection === 'down' ? '…' : '↓'}
+                  </button>
+                  <button
+                    type="button"
                     class="pb-page-duplicate-button"
                     onclick='event.stopPropagation(); window.duplicateBuilderPage(${pageArg})'
                     aria-label="Duplicate ${safeName} page"
                     title="Duplicate page"
-                    ${isDuplicating || isDeleting ? 'disabled' : ''}
+                    ${isDuplicating || isDeleting || isReordering ? 'disabled' : ''}
                   >
                     ${isThisDuplicating ? 'Duplicating…' : 'Duplicate'}
                   </button>

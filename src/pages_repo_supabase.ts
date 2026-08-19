@@ -641,5 +641,135 @@ export const PagesRepo = {
     } catch {
       return { success: false, error: 'UNAVAILABLE', code: 'UNAVAILABLE' };
     }
+  },
+
+  /**
+   * Reorders pages within a funnel atomically.
+   */
+  async reorderPages(
+    funnelId: string,
+    orderedPageIds: string[],
+    expectedPageIds: string[],
+    user: User | string,
+    client?: SupabaseClient
+  ): Promise<RepoResponse<{ funnel_id: string; pages: Page[] }>> {
+    const userId = typeof user === 'string' ? user : user.id;
+    const db = client ?? await getServerSupabaseClient();
+    const useRemote = db !== null;
+
+    if (!useRemote) {
+      // 1. Input validation
+      if (!funnelId || !orderedPageIds || !expectedPageIds || orderedPageIds.length === 0 || orderedPageIds.length !== expectedPageIds.length) {
+        return { success: false, error: 'INVALID_PAYLOAD', code: 'INVALID_PAYLOAD' };
+      }
+
+      // 2. Load current pages in funnel for user
+      const funnelPages = mockPages.filter(p => p.user_id === userId && p.funnel_id === funnelId);
+      if (funnelPages.length === 0) {
+        return { success: false, error: 'FUNNEL_NOT_FOUND', code: 'NOT_FOUND' };
+      }
+
+      // Deterministic sort: step_order nulls last, created_at, id
+      const currentSorted = [...funnelPages].sort((a, b) => {
+        const orderA = typeof a.step_order === 'number' && Number.isFinite(a.step_order) ? a.step_order : Number.POSITIVE_INFINITY;
+        const orderB = typeof b.step_order === 'number' && Number.isFinite(b.step_order) ? b.step_order : Number.POSITIVE_INFINITY;
+        if (orderA !== orderB) return orderA - orderB;
+        const createdComp = (a.created_at || '').localeCompare(b.created_at || '');
+        if (createdComp !== 0) return createdComp;
+        return a.id.localeCompare(b.id);
+      });
+
+      const currentIds = currentSorted.map(p => p.id);
+
+      // 3. Optimistic concurrency check: compare currentIds with expectedPageIds
+      if (currentIds.length !== expectedPageIds.length || !currentIds.every((id, idx) => id === expectedPageIds[idx])) {
+        return { success: false, error: 'The page order changed elsewhere. Reload and try again.', code: 'CONFLICT' };
+      }
+
+      // 4. Verify orderedPageIds is an exact permutation of currentIds
+      const currentSet = new Set(currentIds);
+      const orderedSet = new Set(orderedPageIds);
+      if (orderedSet.size !== orderedPageIds.length || orderedPageIds.length !== currentIds.length || !orderedPageIds.every(id => currentSet.has(id))) {
+        return { success: false, error: 'INVALID_PAGE_SET', code: 'INVALID_PAGE_SET' };
+      }
+
+      // 5. Memory snapshot for rollback
+      const previousPages = structuredClone(mockPages);
+
+      // 6. Apply contiguous 0-based step_order: 0, 1, ..., N-1
+      orderedPageIds.forEach((pageId, idx) => {
+        const p = mockPages.find(item => item.id === pageId && item.user_id === userId && item.funnel_id === funnelId);
+        if (p) {
+          p.step_order = idx;
+        }
+      });
+
+      // 7. Atomic local persistence
+      const persistSuccess = persistLocalPages(userId);
+      if (!persistSuccess) {
+        mockPages.splice(0, mockPages.length, ...previousPages);
+        return { success: false, error: 'PERSISTENCE_ERROR', code: 'PERSISTENCE_ERROR' };
+      }
+
+      const updatedFunnelPages = mockPages
+        .filter(p => p.user_id === userId && p.funnel_id === funnelId)
+        .sort((a, b) => (a.step_order ?? 0) - (b.step_order ?? 0));
+
+      return {
+        success: true,
+        data: {
+          funnel_id: funnelId,
+          pages: updatedFunnelPages.map(p => ({ ...p }))
+        }
+      };
+    }
+
+    try {
+      const rpcResult = await db.rpc('reorder_builder_pages', {
+        p_funnel_id: funnelId,
+        p_ordered_page_ids: orderedPageIds,
+        p_expected_page_ids: expectedPageIds
+      });
+
+      if (rpcResult.error) {
+        const code = rpcResult.error.code;
+        const message = rpcResult.error.message;
+        if (code === 'PT404') {
+          return { success: false, error: 'NOT_FOUND', code: 'NOT_FOUND' };
+        }
+        if (code === 'PT401') {
+          return { success: false, error: 'UNAUTHORIZED', code: 'UNAUTHORIZED' };
+        }
+        if (code === 'PT403') {
+          return { success: false, error: 'FORBIDDEN', code: 'FORBIDDEN' };
+        }
+        if (code === 'PT409' || message?.includes('changed elsewhere') || message?.includes('concurrently')) {
+          return { success: false, error: 'The page order changed elsewhere. Reload and try again.', code: 'CONFLICT' };
+        }
+        if (code === 'PT400') {
+          return { success: false, error: message ?? 'INVALID_INPUT', code: 'INVALID_INPUT' };
+        }
+        return { success: false, error: message ?? 'REORDER_FAILED', code: code ?? 'AMBIGUOUS' };
+      }
+
+      const data = rpcResult.data as { funnel_id?: string; pages?: Record<string, unknown>[] };
+      const pages: Page[] = Array.isArray(data?.pages)
+        ? data.pages.map(p => mapCreatedPage(p))
+        : [];
+
+      return {
+        success: true,
+        data: {
+          funnel_id: funnelId,
+          pages
+        }
+      };
+    } catch {
+      return {
+        success: false,
+        error: 'The reorder result is uncertain. Please reload to check.',
+        code: 'AMBIGUOUS'
+      };
+    }
   }
 };
