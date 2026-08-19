@@ -10,6 +10,45 @@ permissions:
   contents: read
 
 jobs:
+  builder-reorder-quality-gate:
+    name: Builder Reorder Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Focused Lifecycle Tests
+        run: npx vitest run src/builder_page_lifecycle.test.ts src/builder_duplicate_page_controller.test.ts src/builder_delete_page_controller.test.ts src/builder_reorder_pages_controller.test.ts src/pages_repo_supabase.test.ts
+
+      - name: Run Phase 0 Tests
+        run: npm run test:phase0
+
+      - name: Run Safe Broad Suite
+        run: npx vitest run --exclude "**/verify_sms_backend.test.ts"
+
+      - name: Typecheck App
+        run: npm run typecheck:app
+
+      - name: Typecheck API
+        run: npm run typecheck:api
+
+      - name: Build
+        run: npm run build
+
+      - name: Check PR Diff Whitespace
+        run: git diff --check origin/main...HEAD
+
   standalone-delete-db-integration:
     name: Standalone Delete DB Integration (PostgreSQL 17)
     runs-on: ubuntu-latest
