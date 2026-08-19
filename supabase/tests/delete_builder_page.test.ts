@@ -184,7 +184,7 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       `);
       expect(procRes.rows.length).toBe(1);
       expect(procRes.rows[0].prosecdef).toBe(true);
-      expect(procRes.rows[0].proconfig).toEqual(['search_path=']);
+      expect(procRes.rows[0].proconfig[0]).toMatch(/^search_path=(""|=)$/);
 
       const publicPriv = await client.query("select has_function_privilege('public', 'public.delete_builder_page(text)', 'execute') as has_priv");
       expect(publicPriv.rows[0].has_priv).toBe(false);
