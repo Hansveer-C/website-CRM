@@ -88,7 +88,7 @@ begin
     -- Synchronize root route '/' in website_routes to point to the new homepage funnel
     insert into public.website_routes(id, website_id, path, funnel_id, created_at)
     values (
-      'route-' || pg_catalog.gen_random_uuid()::text,
+      pg_catalog.gen_random_uuid(),
       p_website_id,
       '/',
       p_funnel_id,

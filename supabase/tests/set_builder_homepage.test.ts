@@ -76,7 +76,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
         alter table public.websites add column if not exists created_at timestamptz not null default now();
 
         create table if not exists public.website_routes (
-          id text primary key,
+          id uuid primary key default gen_random_uuid(),
           website_id uuid not null references public.websites(id) on delete cascade,
           path text not null,
           funnel_id text not null,
@@ -144,9 +144,9 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
 
       // Add routes so both funnels are associated destinations for this website
       await client.query(
-        `insert into public.website_routes (id, website_id, path, funnel_id)
-         values ($1, $2, '/home', $3), ($4, $5, '/services', $6)`,
-        [`r1-${Date.now()}`, websiteId, fnl1, `r2-${Date.now()}`, websiteId, fnl2]
+        `insert into public.website_routes (website_id, path, funnel_id)
+         values ($1, '/home', $2), ($1, '/services', $3)`,
+        [websiteId, fnl1, fnl2]
       );
 
       return { websiteId, fnl1, fnl2 };
@@ -367,6 +367,100 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
     } finally {
       client1.release();
       client2.release();
+    }
+  });
+
+  it('strictly conforms to the production schema contract for website_routes.id data type (uuid)', async () => {
+    const client = await pool.connect();
+    try {
+      const res = await client.query(`
+        select data_type, is_nullable
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'website_routes'
+          and column_name = 'id'
+      `);
+      expect(res.rows.length).toBe(1);
+      expect(res.rows[0].data_type).toBe('uuid');
+      expect(res.rows[0].is_nullable).toBe('NO');
+    } finally {
+      client.release();
+    }
+  });
+
+  it('correctly creates a missing root route with a valid UUID when setting homepage', async () => {
+    const client = await pool.connect();
+    const userId = randomUUID();
+    try {
+      await client.query('insert into public.users (id, email) values ($1, $2) on conflict (id) do nothing', [
+        userId,
+        `${userId}@example.com`
+      ]);
+
+      const fnl1 = `fnl-1-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const fnl2 = `fnl-2-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+      await client.query(
+        `insert into public.funnels (id, user_id, name) values ($1, $2, 'Home Funnel'), ($3, $2, 'Service Funnel')`,
+        [fnl1, userId, fnl2]
+      );
+
+      const websiteRes = await client.query(
+        `insert into public.websites (user_id, name, subdomain, homepage_funnel_id)
+         values ($1, 'Test Site Missing Root', $2, $3)
+         returning id`,
+        [userId, `sub-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`, fnl1]
+      );
+      const websiteId = websiteRes.rows[0].id;
+
+      // Add a route for fnl2 but NO route for '/'
+      await client.query(
+        `insert into public.website_routes (website_id, path, funnel_id)
+         values ($1, '/services', $2)`,
+        [websiteId, fnl2]
+      );
+
+      // Verify no '/' route exists before the call
+      const preCheck = await client.query(
+        `select * from public.website_routes where website_id = $1 and path = '/'`,
+        [websiteId]
+      );
+      expect(preCheck.rows.length).toBe(0);
+
+      await setAuthUser(client, userId);
+
+      // Change homepage to fnl2
+      const res = await client.query(`select public.set_builder_homepage($1, $2, $3) as result`, [
+        websiteId,
+        fnl2,
+        fnl1
+      ]);
+
+      const data = res.rows[0].result;
+      expect(data.website.homepage_funnel_id).toBe(fnl2);
+
+      // Verify exactly one '/' route exists now
+      const postRoutes = await client.query(
+        `select * from public.website_routes where website_id = $1 order by path`,
+        [websiteId]
+      );
+      expect(postRoutes.rows.length).toBe(2);
+
+      const rootRoute = postRoutes.rows.find(r => r.path === '/');
+      expect(rootRoute).toBeDefined();
+      expect(rootRoute.website_id).toBe(websiteId);
+      expect(rootRoute.funnel_id).toBe(fnl2);
+
+      // Verify route.id is a valid UUID
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      expect(rootRoute.id).toMatch(uuidRegex);
+
+      // Verify unrelated '/services' route remains untouched
+      const servicesRoute = postRoutes.rows.find(r => r.path === '/services');
+      expect(servicesRoute).toBeDefined();
+      expect(servicesRoute.funnel_id).toBe(fnl2);
+    } finally {
+      client.release();
     }
   });
 });
