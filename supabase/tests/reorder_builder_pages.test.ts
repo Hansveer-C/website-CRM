@@ -490,9 +490,6 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       `);
 
       // c2 begins reorder on same funnel with old expected order
-      const pid2Res = await c2.query('select pg_backend_pid() as pid');
-      const pid2 = pid2Res.rows[0].pid;
-
       const c2Promise = c2.query(`
         select public.reorder_builder_pages(
           'f-conc-rr',
@@ -502,7 +499,7 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       `);
 
       // Assert c2 is waiting on advisory lock
-      await assertBackendWaiting(pool, pid2);
+      await assertBackendWaiting(pool, (c2 as any).processID);
 
       // c1 commits
       await c1.query('commit');
@@ -554,14 +551,11 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       `);
 
       // c2 invokes create_builder_page
-      const pid2Res = await c2.query('select pg_backend_pid() as pid');
-      const pid2 = pid2Res.rows[0].pid;
-
       const c2Promise = c2.query(`
         select public.create_builder_page('f-conc-rc', 'New RC Page', 'new-rc-p', 'landing');
       `);
 
-      await assertBackendWaiting(pool, pid2);
+      await assertBackendWaiting(pool, (c2 as any).processID);
 
       await c1.query('commit');
       const c2Res = await c2Promise;
@@ -630,14 +624,11 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       `);
 
       // c2 invokes duplicate_builder_page
-      const pid2Res = await c2.query('select pg_backend_pid() as pid');
-      const pid2 = pid2Res.rows[0].pid;
-
       const c2Promise = c2.query(`
         select public.duplicate_builder_page('p-rd-1');
       `);
 
-      await assertBackendWaiting(pool, pid2);
+      await assertBackendWaiting(pool, (c2 as any).processID);
 
       await c1.query('commit');
       const c2Res = await c2Promise;
@@ -682,14 +673,11 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       `);
 
       // c2 deletes a page
-      const pid2Res = await c2.query('select pg_backend_pid() as pid');
-      const pid2 = pid2Res.rows[0].pid;
-
       const c2Promise = c2.query(`
         select public.delete_builder_page('p-rdel-3');
       `);
 
-      await assertBackendWaiting(pool, pid2);
+      await assertBackendWaiting(pool, (c2 as any).processID);
 
       await c1.query('commit');
       const c2Res = await c2Promise;
@@ -709,7 +697,7 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       await client.query('begin');
       await client.query(`set local request.jwt.claim.sub = '${user}'`);
 
-      // Try reordering with expected list containing already deleted page 'p-rdel-3'
+      // Try reordering with expected list containing already deleted page 'p-rdel-3' => rejects with PT409
       await expect(
         client.query(`
           select public.reorder_builder_pages(
@@ -718,7 +706,7 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
             array['p-rdel-1', 'p-rdel-2', 'p-rdel-3']
           );
         `)
-      ).rejects.toMatchObject({ code: 'PT400' });
+      ).rejects.toMatchObject({ code: 'PT409' });
     } finally {
       await client.query('rollback').catch(() => {});
       client.release();
