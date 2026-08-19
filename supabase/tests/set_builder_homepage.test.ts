@@ -150,7 +150,7 @@ describeDatabase('set_builder_homepage Option B RPC Integration Tests (PostgreSQ
       await client.query(
         `insert into public.pages (id, user_id, name, slug, status, funnel_id, step_order)
          values ($1, $2, 'Home Page', 'home', 'published', $3, 0),
-                ($4, $2, 'Service Page', 'services', 'published', $5, 0)`,
+                ($4, $5, 'Service Page', 'services', 'published', $6, 0)`,
         [page1, userId, fnl1, page2, userId, fnl2]
       );
 
