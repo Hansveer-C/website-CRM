@@ -134,7 +134,7 @@ describeDatabase('set_builder_homepage RPC Integration Tests (PostgreSQL 17)', (
       // Add routes
       await client.query(
         `insert into public.website_routes (id, website_id, path, funnel_id)
-         values ($1, $2, '/', $3), ($4, $2, '/services', $5)`,
+         values ($1, $2, '/', $3), ($4, $5, '/services', $6)`,
         [`r1-${Date.now()}`, websiteId, fnl1, `r2-${Date.now()}`, websiteId, fnl2]
       );
 
