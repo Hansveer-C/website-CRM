@@ -4,7 +4,9 @@ import {
   deleteBuilderRouteDraft,
   revertBuilderRouteDraft,
   getBuilderEffectiveRoutes,
-  mockBuilderRouteDrafts
+  publishBuilderRoutes,
+  mockBuilderRouteDrafts,
+  mockWebsiteRouteRedirects
 } from './builder_route_repository';
 import { mockWebsiteRoutes, mockWebsites, mockFunnels } from './db';
 
@@ -153,5 +155,68 @@ describe('builder_route_repository - In-Memory Draft Operations', () => {
     expect(pricing?.path).toBe('/pricing');
     expect(pricing?.is_new_draft).toBe(true);
     expect(pricing?.live_path).toBeNull();
+  });
+
+  it('atomically publishes route drafts and creates redirects', async () => {
+    // Stage rename: /services -> /pressure-washing
+    await setBuilderRouteDraft({ websiteId, funnelId: funnel1, path: '/pressure-washing', routeId: 'r-1' }, userId);
+    // Stage delete: /about
+    await deleteBuilderRouteDraft({ websiteId, routeId: 'r-2' }, userId);
+    // Stage create: /pricing
+    await setBuilderRouteDraft({ websiteId, funnelId: funnel3, path: '/pricing' }, userId);
+
+    expect(mockBuilderRouteDrafts).toHaveLength(3);
+
+    const pubRes = await publishBuilderRoutes({ websiteId }, userId);
+    expect(pubRes.success).toBe(true);
+    expect(pubRes.data?.published_count).toBe(3);
+
+    // Drafts cleared
+    expect(mockBuilderRouteDrafts).toHaveLength(0);
+
+    // Live routes updated
+    const servicesRoute = mockWebsiteRoutes.find(r => r.id === 'r-1');
+    expect(servicesRoute?.path).toBe('/pressure-washing');
+
+    const aboutRoute = mockWebsiteRoutes.find(r => r.id === 'r-2');
+    expect(aboutRoute).toBeUndefined(); // Deleted
+
+    const pricingRoute = mockWebsiteRoutes.find(r => r.funnel_id === funnel3);
+    expect(pricingRoute?.path).toBe('/pricing');
+
+    // Redirect created for rename
+    const redirect = mockWebsiteRouteRedirects.find(rd => rd.website_id === websiteId && rd.from_path === '/services');
+    expect(redirect?.to_path).toBe('/pressure-washing');
+  });
+
+  it('collapses sequential rename redirect chains during publication', async () => {
+    // Initial rename: /services -> /pressure-washing
+    await setBuilderRouteDraft({ websiteId, funnelId: funnel1, path: '/pressure-washing', routeId: 'r-1' }, userId);
+    await publishBuilderRoutes({ websiteId }, userId);
+
+    expect(mockWebsiteRouteRedirects).toContainEqual(expect.objectContaining({
+      from_path: '/services',
+      to_path: '/pressure-washing'
+    }));
+
+    // Second rename: /pressure-washing -> /exterior-cleaning
+    await setBuilderRouteDraft({ websiteId, funnelId: funnel1, path: '/exterior-cleaning', routeId: 'r-1' }, userId);
+    await publishBuilderRoutes({ websiteId }, userId);
+
+    // Both old paths now point directly to the latest path
+    const servicesRedirect = mockWebsiteRouteRedirects.find(rd => rd.from_path === '/services');
+    const pressureRedirect = mockWebsiteRouteRedirects.find(rd => rd.from_path === '/pressure-washing');
+
+    expect(servicesRedirect?.to_path).toBe('/exterior-cleaning');
+    expect(pressureRedirect?.to_path).toBe('/exterior-cleaning');
+  });
+
+  it('rejects publication when optimistic draft count is stale', async () => {
+    await setBuilderRouteDraft({ websiteId, funnelId: funnel1, path: '/pressure-washing', routeId: 'r-1' }, userId);
+
+    const pubRes = await publishBuilderRoutes({ websiteId, expectedDraftCount: 5 }, userId);
+    expect(pubRes.success).toBe(false);
+    expect(pubRes.code).toBe('CONFLICT');
+    expect(mockBuilderRouteDrafts).toHaveLength(1); // Not deleted
   });
 });

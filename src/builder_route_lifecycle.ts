@@ -44,6 +44,8 @@ export type RouteOperationResultCode =
   | 'RESERVED_PATH'
   | 'INVALID_PATH'
   | 'INVALID_INPUT'
+  | 'UNPUBLISHED_DESTINATION'
+  | 'INVALID_REDIRECT'
   | 'AMBIGUOUS';
 
 export interface RouteDraft {
@@ -53,6 +55,15 @@ export interface RouteDraft {
   path: string;
   funnel_id: string;
   action: 'upsert' | 'delete';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RouteRedirect {
+  id: string;
+  website_id: string;
+  from_path: string;
+  to_path: string;
   created_at: string;
   updated_at: string;
 }

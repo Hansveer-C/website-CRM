@@ -85,6 +85,7 @@ class FakeDataSource implements PublicSiteDataSource {
   target: PublicPublicationTargetRecord | null = null;
   revision: PublicPublishedRevisionRecord | null = null;
   legacy: readonly PublicLegacySectionRecord[] = structuredClone(legacySections);
+  redirect: PublicWebsiteRouteRedirectRecord | null = null;
   failure: Error | null = null;
 
   private call(name: string): void {
@@ -93,6 +94,7 @@ class FakeDataSource implements PublicSiteDataSource {
   }
   async findWebsiteByHost(): Promise<PublicWebsiteRecord | null> { this.call('website'); return this.website; }
   async findRouteForWebsite(): Promise<PublicWebsiteRouteRecord | null> { this.call('route'); return this.route; }
+  async findRedirectForWebsite(): Promise<PublicWebsiteRouteRedirectRecord | null> { this.call('redirect'); return this.redirect; }
   async findPageForRoute(): Promise<PublicPageRecord | null> { this.call('page'); return this.page; }
   async getPublicWebsiteSettings(): Promise<PublicWebsiteSettingsRecord | null> { this.call('settings'); return this.settings; }
   async getPublicWebsiteLayout(): Promise<PublicWebsiteLayoutRecord | null> { this.call('layout'); return this.layout; }
@@ -539,5 +541,56 @@ describe('caching, CORS, and failures', () => {
   it('exposes no write operation on the data-source contract implementation', () => {
     const names = Object.getOwnPropertyNames(FakeDataSource.prototype);
     expect(names.some(name => /^(create|insert|update|delete|upsert|write)/i.test(name))).toBe(false);
+  });
+
+  it('returns HTTP 308 permanent redirect when path matches a live redirect and route does not exist', async () => {
+    const source = new FakeDataSource();
+    source.route = null;
+    source.redirect = {
+      id: 'rd-1',
+      websiteId: website.id,
+      fromPath: '/old-services',
+      toPath: '/services'
+    };
+
+    const req = request('/old-services');
+    const result = await handlePublicSiteRequest(req, { dataSource: source });
+
+    expect(result.status).toBe(308);
+    expect(result.headers.get('Location')).toBe('/services');
+    expect(result.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=86400');
+  });
+
+  it('prefers exact live route over redirect when both match', async () => {
+    const source = new FakeDataSource();
+    source.route = {
+      id: 'route-services',
+      websiteId: website.id,
+      path: '/services',
+      funnelId: 'funnel-home'
+    };
+    source.redirect = {
+      id: 'rd-1',
+      websiteId: website.id,
+      fromPath: '/services',
+      toPath: '/power-washing'
+    };
+
+    const req = request('/services');
+    const result = await handlePublicSiteRequest(req, { dataSource: source });
+
+    // Live route wins -> 200 payload
+    expect(result.status).toBe(200);
+  });
+
+  it('returns 404 for draft paths not present in live routes or redirects', async () => {
+    const source = new FakeDataSource();
+    source.route = null;
+    source.redirect = null;
+
+    const req = request('/draft-only-page');
+    const result = await handlePublicSiteRequest(req, { dataSource: source });
+
+    expect(result.status).toBe(404);
   });
 });
