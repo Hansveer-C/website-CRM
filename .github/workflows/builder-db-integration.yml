@@ -29,7 +29,7 @@ jobs:
         run: npm ci
 
       - name: Run Focused Lifecycle Tests
-        run: npx vitest run src/builder_page_lifecycle.test.ts src/builder_duplicate_page_controller.test.ts src/builder_delete_page_controller.test.ts src/builder_reorder_pages_controller.test.ts src/builder_set_homepage_controller.test.ts src/builder_homepage_browser.test.ts src/builder_route_lifecycle.test.ts src/builder_route_repository.test.ts src/pages_repo_supabase.test.ts
+        run: npx vitest run src/builder_page_lifecycle.test.ts src/builder_duplicate_page_controller.test.ts src/builder_delete_page_controller.test.ts src/builder_reorder_pages_controller.test.ts src/builder_set_homepage_controller.test.ts src/builder_homepage_browser.test.ts src/builder_route_lifecycle.test.ts src/builder_route_repository.test.ts src/pages_repo_supabase.test.ts src/builder_unified_publication.test.ts src/builder_unified_publication_controller.test.ts
 
       - name: Run Phase 0 Tests
         run: npm run test:phase0

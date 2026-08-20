@@ -101,6 +101,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
           constraint website_routes_website_path_key unique (website_id, path)
         );
 
+        drop function if exists auth.uid() cascade;
         create or replace function auth.uid() returns text as $$
           select nullif(current_setting('request.jwt.claim.sub', true), '')::text;
         $$ language sql stable;
