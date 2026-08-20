@@ -745,14 +745,13 @@ begin
 
     -- Upsert root route '/' to point to new homepage
     insert into public.website_routes (
-      website_id, path, funnel_id, created_at, updated_at
+      website_id, path, funnel_id, created_at
     ) values (
-      p_website_id, '/', v_draft_homepage, v_now, v_now
+      p_website_id, '/', v_draft_homepage, v_now
     )
     on conflict (website_id, path)
     do update set
-      funnel_id = excluded.funnel_id,
-      updated_at = excluded.updated_at;
+      funnel_id = excluded.funnel_id;
   end if;
 
   -- C. Route Drafts Promotion
@@ -781,8 +780,7 @@ begin
         -- Path changed (Rename): Update live route, create redirect, and collapse chains
         update public.website_routes
         set path = v_draft_route.path,
-            funnel_id = v_draft_route.funnel_id,
-            updated_at = v_now
+            funnel_id = v_draft_route.funnel_id
         where id = v_draft_route.route_id and website_id = p_website_id;
 
         -- Create redirect from old path to new path
@@ -814,8 +812,7 @@ begin
       else
         -- Same path, destination funnel change only:
         update public.website_routes
-        set funnel_id = v_draft_route.funnel_id,
-            updated_at = v_now
+        set funnel_id = v_draft_route.funnel_id
         where id = v_draft_route.route_id and website_id = p_website_id;
       end if;
     end if;
@@ -828,14 +825,13 @@ begin
     where website_id = p_website_id and action = 'upsert' and route_id is null
   ) loop
     insert into public.website_routes (
-      website_id, path, funnel_id, created_at, updated_at
+      website_id, path, funnel_id, created_at
     ) values (
-      p_website_id, v_draft_route.path, v_draft_route.funnel_id, v_now, v_now
+      p_website_id, v_draft_route.path, v_draft_route.funnel_id, v_now
     )
     on conflict (website_id, path)
     do update set
-      funnel_id = excluded.funnel_id,
-      updated_at = excluded.updated_at;
+      funnel_id = excluded.funnel_id;
 
     -- Reclaim redirect if new path was previously a redirect
     delete from public.website_route_redirects
