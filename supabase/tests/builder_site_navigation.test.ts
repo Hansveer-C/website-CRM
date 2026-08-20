@@ -6,15 +6,14 @@ import { randomUUID } from 'crypto';
 
 const DATABASE_URL =
   process.env.BUILDER_ROUTE_TEST_DATABASE_URL ||
-  process.env.TEST_DATABASE_URL ||
-  'postgres://postgres:postgres@127.0.0.1:5432/postgres';
+  process.env.TEST_DATABASE_URL;
 
 const MIGRATION_PATH = resolve(
   __dirname,
   '../migrations/20260817050700_create_builder_site_navigation.sql'
 );
 
-describe('Builder Site Navigation Hardened Integration Tests (PostgreSQL 17)', () => {
+describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tests (PostgreSQL 17)', () => {
   let pool: Pool;
 
   beforeAll(async () => {
