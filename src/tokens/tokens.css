@@ -1,0 +1,323 @@
+/**
+ * WashOps Design System — Canonical Token Foundation (Phase 1C / Task 7A.1)
+ * 
+ * Hierarchy:
+ * 1. Foundational Palettes (Raw primitives)
+ * 2. Semantic Design Tokens (--wo-*)
+ * 3. Theme Overrides (Light default / Dark strategy)
+ * 4. Responsive & Accessibility Contracts
+ */
+
+:root {
+  /* ==========================================================================
+     1. FOUNDATIONAL PALETTES (Raw Primitives)
+     ========================================================================== */
+
+  /* Neutral Scale (Slate/Zinc hybrid for modern crisp readability) */
+  --wo-primitive-neutral-0: #ffffff;
+  --wo-primitive-neutral-50: #f9fafb;
+  --wo-primitive-neutral-100: #f3f4f6;
+  --wo-primitive-neutral-200: #e5e7eb;
+  --wo-primitive-neutral-300: #d1d5db;
+  --wo-primitive-neutral-400: #9ca3af;
+  --wo-primitive-neutral-500: #6b7280;
+  --wo-primitive-neutral-600: #4b5563;
+  --wo-primitive-neutral-700: #374151;
+  --wo-primitive-neutral-800: #1f2937;
+  --wo-primitive-neutral-900: #111827;
+  --wo-primitive-neutral-950: #0a0a0a;
+
+  /* Brand / Primary Scale (WashOps Precision Blue) */
+  --wo-primitive-brand-50: #eff6ff;
+  --wo-primitive-brand-100: #dbeafe;
+  --wo-primitive-brand-200: #bfdbfe;
+  --wo-primitive-brand-300: #93c5fd;
+  --wo-primitive-brand-400: #60a5fa;
+  --wo-primitive-brand-500: #3b82f6;
+  --wo-primitive-brand-600: #2563eb;
+  --wo-primitive-brand-700: #1d4ed8;
+  --wo-primitive-brand-800: #1e40af;
+  --wo-primitive-brand-900: #1e3a8a;
+
+  /* Semantic Feedback Primitives */
+  --wo-primitive-emerald-50: #ecfdf5;
+  --wo-primitive-emerald-100: #d1fae5;
+  --wo-primitive-emerald-200: #a7f3d0;
+  --wo-primitive-emerald-500: #10b981;
+  --wo-primitive-emerald-600: #059669;
+  --wo-primitive-emerald-700: #047857;
+  --wo-primitive-emerald-800: #065f46;
+
+  --wo-primitive-amber-50: #fffbeb;
+  --wo-primitive-amber-100: #fef3c7;
+  --wo-primitive-amber-200: #fde68a;
+  --wo-primitive-amber-500: #f59e0b;
+  --wo-primitive-amber-600: #d97706;
+  --wo-primitive-amber-700: #b45309;
+  --wo-primitive-amber-800: #92400e;
+
+  --wo-primitive-rose-50: #fef2f2;
+  --wo-primitive-rose-100: #fee2e2;
+  --wo-primitive-rose-200: #fecaca;
+  --wo-primitive-rose-500: #ef4444;
+  --wo-primitive-rose-600: #dc2626;
+  --wo-primitive-rose-700: #b91c1c;
+  --wo-primitive-rose-800: #991b1b;
+
+  /* ==========================================================================
+     2. SEMANTIC COLOR TOKENS (Default Light Theme)
+     ========================================================================== */
+
+  /* Canvas & Surfaces */
+  --wo-color-canvas: var(--wo-primitive-neutral-50);
+  --wo-color-surface: var(--wo-primitive-neutral-0);
+  --wo-color-surface-subtle: var(--wo-primitive-neutral-100);
+  --wo-color-surface-elevated: var(--wo-primitive-neutral-0);
+  --wo-color-surface-sunken: var(--wo-primitive-neutral-100);
+  --wo-color-sidebar-bg: var(--wo-primitive-neutral-800);
+
+  /* Borders */
+  --wo-color-border: var(--wo-primitive-neutral-200);
+  --wo-color-border-subtle: var(--wo-primitive-neutral-100);
+  --wo-color-border-strong: var(--wo-primitive-neutral-300);
+  --wo-color-border-interactive: var(--wo-primitive-brand-600);
+
+  /* Text & Content */
+  --wo-color-text-primary: var(--wo-primitive-neutral-900);
+  --wo-color-text-secondary: var(--wo-primitive-neutral-600);
+  --wo-color-text-muted: var(--wo-primitive-neutral-500);
+  --wo-color-text-subtle: var(--wo-primitive-neutral-400);
+  --wo-color-text-inverse: var(--wo-primitive-neutral-0);
+  --wo-color-text-link: var(--wo-primitive-brand-600);
+  --wo-color-text-link-hover: var(--wo-primitive-brand-700);
+
+  /* Interactive States */
+  --wo-color-interactive: var(--wo-primitive-brand-600);
+  --wo-color-interactive-hover: var(--wo-primitive-brand-700);
+  --wo-color-interactive-active: var(--wo-primitive-brand-800);
+  --wo-color-interactive-subtle: var(--wo-primitive-brand-50);
+  --wo-color-interactive-subtle-hover: var(--wo-primitive-brand-100);
+  --wo-color-interactive-disabled: var(--wo-primitive-neutral-300);
+  --wo-color-focus-ring: rgba(37, 99, 235, 0.35);
+
+  /* Feedback: Success */
+  --wo-color-success: var(--wo-primitive-emerald-600);
+  --wo-color-success-hover: var(--wo-primitive-emerald-700);
+  --wo-color-success-subtle: var(--wo-primitive-emerald-50);
+  --wo-color-success-border: var(--wo-primitive-emerald-200);
+  --wo-color-success-text: var(--wo-primitive-emerald-800);
+
+  /* Feedback: Warning */
+  --wo-color-warning: var(--wo-primitive-amber-600);
+  --wo-color-warning-hover: var(--wo-primitive-amber-700);
+  --wo-color-warning-subtle: var(--wo-primitive-amber-50);
+  --wo-color-warning-border: var(--wo-primitive-amber-200);
+  --wo-color-warning-text: var(--wo-primitive-amber-800);
+
+  /* Feedback: Danger / Error */
+  --wo-color-danger: var(--wo-primitive-rose-600);
+  --wo-color-danger-hover: var(--wo-primitive-rose-700);
+  --wo-color-danger-subtle: var(--wo-primitive-rose-50);
+  --wo-color-danger-border: var(--wo-primitive-rose-200);
+  --wo-color-danger-text: var(--wo-primitive-rose-800);
+
+  /* Feedback: Info */
+  --wo-color-info: var(--wo-primitive-brand-600);
+  --wo-color-info-hover: var(--wo-primitive-brand-700);
+  --wo-color-info-subtle: var(--wo-primitive-brand-50);
+  --wo-color-info-border: var(--wo-primitive-brand-200);
+  --wo-color-info-text: var(--wo-primitive-brand-800);
+
+  /* ==========================================================================
+     3. TYPOGRAPHY TOKENS
+     ========================================================================== */
+
+  --wo-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+  --wo-font-mono: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", "Courier New", monospace;
+
+  /* Font Sizes */
+  --wo-font-size-xs: 0.75rem;    /* 12px */
+  --wo-font-size-sm: 0.875rem;   /* 14px */
+  --wo-font-size-base: 1rem;     /* 16px */
+  --wo-font-size-md: 1.125rem;   /* 18px */
+  --wo-font-size-lg: 1.25rem;    /* 20px */
+  --wo-font-size-xl: 1.375rem;   /* 22px */
+  --wo-font-size-2xl: 1.5rem;    /* 24px */
+  --wo-font-size-3xl: 1.75rem;   /* 28px */
+  --wo-font-size-4xl: 2.25rem;   /* 36px */
+
+  /* Font Weights */
+  --wo-font-weight-regular: 400;
+  --wo-font-weight-medium: 500;
+  --wo-font-weight-semibold: 600;
+  --wo-font-weight-bold: 700;
+  --wo-font-weight-extrabold: 800;
+
+  /* Line Heights */
+  --wo-line-height-none: 1;
+  --wo-line-height-tight: 1.2;
+  --wo-line-height-snug: 1.3;
+  --wo-line-height-normal: 1.5;
+  --wo-line-height-relaxed: 1.6;
+
+  /* Letter Spacing */
+  --wo-letter-spacing-tighter: -0.02em;
+  --wo-letter-spacing-tight: -0.01em;
+  --wo-letter-spacing-normal: 0;
+  --wo-letter-spacing-wide: 0.04em;
+  --wo-letter-spacing-wider: 0.08em;
+
+  /* ==========================================================================
+     4. SPACING SCALE
+     ========================================================================== */
+
+  --wo-space-0: 0px;
+  --wo-space-1: 4px;     /* 0.25rem */
+  --wo-space-2: 8px;     /* 0.5rem  */
+  --wo-space-3: 12px;    /* 0.75rem */
+  --wo-space-4: 16px;    /* 1rem    */
+  --wo-space-5: 20px;    /* 1.25rem */
+  --wo-space-6: 24px;    /* 1.5rem  */
+  --wo-space-8: 32px;    /* 2rem    */
+  --wo-space-10: 40px;   /* 2.5rem  */
+  --wo-space-12: 48px;   /* 3rem    */
+  --wo-space-16: 64px;   /* 4rem    */
+
+  /* ==========================================================================
+     5. SHAPE & BORDER RADII
+     ========================================================================== */
+
+  --wo-radius-none: 0px;
+  --wo-radius-xs: 2px;
+  --wo-radius-sm: 4px;
+  --wo-radius-md: 8px;
+  --wo-radius-lg: 12px;
+  --wo-radius-xl: 16px;
+  --wo-radius-2xl: 24px;
+  --wo-radius-full: 9999px;
+
+  /* ==========================================================================
+     6. ELEVATION & SHADOWS
+     ========================================================================== */
+
+  --wo-shadow-none: none;
+  --wo-shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --wo-shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.08), 0 1px 2px -1px rgba(0, 0, 0, 0.08);
+  --wo-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
+  --wo-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+  --wo-shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+  --wo-shadow-focus: 0 0 0 3px var(--wo-color-focus-ring);
+
+  /* ==========================================================================
+     7. Z-INDEX LAYERS & CONTAINERS
+     ========================================================================== */
+
+  --wo-z-base: 0;
+  --wo-z-docked: 10;
+  --wo-z-dropdown: 100;
+  --wo-z-sticky: 500;
+  --wo-z-drawer: 900;
+  --wo-z-modal-backdrop: 1000;
+  --wo-z-modal: 1100;
+  --wo-z-popover: 1200;
+  --wo-z-toast: 1500;
+  --wo-z-max: 9999;
+
+  --wo-content-width-sm: 640px;
+  --wo-content-width-md: 768px;
+  --wo-content-width-lg: 1024px;
+  --wo-content-width-xl: 1280px;
+  --wo-content-width-2xl: 1536px;
+
+  /* ==========================================================================
+     8. MOTION & TRANSITIONS
+     ========================================================================== */
+
+  --wo-duration-fast: 150ms;
+  --wo-duration-normal: 200ms;
+  --wo-duration-slow: 300ms;
+
+  --wo-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --wo-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --wo-ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  --wo-transition-all: all var(--wo-duration-fast) var(--wo-ease-standard);
+  --wo-transition-colors: background-color var(--wo-duration-fast) var(--wo-ease-standard), border-color var(--wo-duration-fast) var(--wo-ease-standard), color var(--wo-duration-fast) var(--wo-ease-standard);
+  --wo-transition-opacity: opacity var(--wo-duration-fast) var(--wo-ease-standard);
+  --wo-transition-transform: transform var(--wo-duration-fast) var(--wo-ease-standard);
+
+  /* ==========================================================================
+     9. ACCESSIBILITY CONTRACT
+     ========================================================================== */
+
+  --wo-min-touch-target: 44px;
+  --wo-focus-outline-width: 2px;
+  --wo-focus-outline-offset: 2px;
+}
+
+/* ==========================================================================
+   10. FUTURE DARK THEME STRATEGY (Semantic Inversion Boundary)
+   ========================================================================== */
+[data-theme="dark"],
+.theme-dark {
+  --wo-color-canvas: var(--wo-primitive-neutral-950);
+  --wo-color-surface: var(--wo-primitive-neutral-900);
+  --wo-color-surface-subtle: var(--wo-primitive-neutral-800);
+  --wo-color-surface-elevated: var(--wo-primitive-neutral-800);
+  --wo-color-surface-sunken: var(--wo-primitive-neutral-950);
+  --wo-color-sidebar-bg: var(--wo-primitive-neutral-950);
+
+  --wo-color-border: var(--wo-primitive-neutral-700);
+  --wo-color-border-subtle: var(--wo-primitive-neutral-800);
+  --wo-color-border-strong: var(--wo-primitive-neutral-600);
+
+  --wo-color-text-primary: var(--wo-primitive-neutral-50);
+  --wo-color-text-secondary: var(--wo-primitive-neutral-300);
+  --wo-color-text-muted: var(--wo-primitive-neutral-400);
+  --wo-color-text-subtle: var(--wo-primitive-neutral-500);
+  --wo-color-text-inverse: var(--wo-primitive-neutral-900);
+
+  --wo-color-interactive: var(--wo-primitive-brand-500);
+  --wo-color-interactive-hover: var(--wo-primitive-brand-400);
+  --wo-color-interactive-active: var(--wo-primitive-brand-300);
+  --wo-color-interactive-subtle: rgba(59, 130, 246, 0.15);
+  --wo-color-interactive-subtle-hover: rgba(59, 130, 246, 0.25);
+  --wo-color-focus-ring: rgba(96, 165, 250, 0.5);
+
+  --wo-color-success-subtle: rgba(16, 185, 129, 0.15);
+  --wo-color-success-border: var(--wo-primitive-emerald-700);
+  --wo-color-success-text: var(--wo-primitive-emerald-200);
+
+  --wo-color-warning-subtle: rgba(245, 158, 11, 0.15);
+  --wo-color-warning-border: var(--wo-primitive-amber-700);
+  --wo-color-warning-text: var(--wo-primitive-amber-200);
+
+  --wo-color-danger-subtle: rgba(239, 68, 68, 0.15);
+  --wo-color-danger-border: var(--wo-primitive-rose-700);
+  --wo-color-danger-text: var(--wo-primitive-rose-200);
+
+  --wo-color-info-subtle: rgba(59, 130, 246, 0.15);
+  --wo-color-info-border: var(--wo-primitive-brand-700);
+  --wo-color-info-text: var(--wo-primitive-brand-200);
+
+  --wo-shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+  --wo-shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.4);
+  --wo-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.4);
+  --wo-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
+  --wo-shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.6);
+}
+
+/* ==========================================================================
+   11. REDUCED MOTION CONTRACT (A11y)
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --wo-duration-fast: 0ms;
+    --wo-duration-normal: 0ms;
+    --wo-duration-slow: 0ms;
+    --wo-transition-all: none;
+    --wo-transition-colors: none;
+    --wo-transition-opacity: none;
+    --wo-transition-transform: none;
+  }
+}

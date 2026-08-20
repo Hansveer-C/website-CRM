@@ -1,41 +1,43 @@
+@import './tokens/tokens.css';
+
 :root {
-    /* Colors */
-    --background: #F9FAFB;
-    --card: #FFFFFF;
-    --primary: #2563EB;
-    --text-primary: #111827;
-    --text-secondary: #6B7280;
-    --border: #E5E7EB;
+    /* Legacy Compatibility Aliases -> Canonical WashOps Tokens */
+    --background: var(--wo-color-canvas);
+    --card: var(--wo-color-surface);
+    --primary: var(--wo-color-interactive);
+    --text-primary: var(--wo-color-text-primary);
+    --text-secondary: var(--wo-color-text-secondary);
+    --border: var(--wo-color-border);
 
     /* Legacy Map (for backwards compatibility) */
     --primary-color: var(--primary);
     --secondary-color: var(--text-secondary);
     --bg-color: var(--background);
-    --sidebar-bg: #1f2937;
+    --sidebar-bg: var(--wo-color-sidebar-bg);
     --card-bg: var(--card);
     --text-color: var(--text-primary);
     --border-color: var(--border);
 
-    /* Spacing Scale */
-    --space-xs: 4px;
-    --space-sm: 8px;
-    --space-md: 16px;
-    --space-lg: 24px;
-    --space-xl: 32px;
+    /* Spacing Scale Aliases */
+    --space-xs: var(--wo-space-1);
+    --space-sm: var(--wo-space-2);
+    --space-md: var(--wo-space-4);
+    --space-lg: var(--wo-space-6);
+    --space-xl: var(--wo-space-8);
 
-    /* Radius */
-    --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
+    /* Radius Aliases */
+    --radius-sm: var(--wo-radius-md);
+    --radius-md: var(--wo-radius-lg);
+    --radius-lg: var(--wo-radius-xl);
 
-    /* Shadows & Effects */
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-    --shadow-subtle: var(--shadow-sm);
-    --shadow: var(--shadow-sm);
+    /* Shadows & Effects Aliases */
+    --shadow-sm: var(--wo-shadow-sm);
+    --shadow-md: var(--wo-shadow-md);
+    --shadow-lg: var(--wo-shadow-lg);
+    --shadow-subtle: var(--wo-shadow-sm);
+    --shadow: var(--wo-shadow-sm);
     --border-radius: var(--radius-md);
-    --transition: all 150ms ease;
+    --transition: var(--wo-transition-all);
 }
 
 * {
