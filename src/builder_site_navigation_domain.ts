@@ -2,7 +2,7 @@ import type { EffectiveRoute } from './builder_route_lifecycle';
 
 export type NavigationMenuScope = 'primary' | 'footer';
 
-export type NavigationTargetKind = 'internal' | 'external' | 'phone' | 'email';
+export type NavigationTargetKind = 'internal' | 'external' | 'phone' | 'email' | 'homepage';
 
 export interface SiteNavigationItem {
   id: string;
@@ -153,12 +153,14 @@ export function validateNavigationItem(input: unknown): NavigationValidationResu
   }
 
   const kind = raw.target_kind;
-  if (kind !== 'internal' && kind !== 'external' && kind !== 'phone' && kind !== 'email') {
-    return { valid: false, error: 'Target kind must be internal, external, phone, or email', code: 'INVALID_KIND' };
+  if (kind !== 'internal' && kind !== 'external' && kind !== 'phone' && kind !== 'email' && kind !== 'homepage') {
+    return { valid: false, error: 'Target kind must be internal, external, phone, email, or homepage', code: 'INVALID_KIND' };
   }
 
   let normalizedValue = '';
-  if (kind === 'internal') {
+  if (kind === 'homepage') {
+    normalizedValue = '__homepage__';
+  } else if (kind === 'internal') {
     if (typeof raw.target_value !== 'string' || raw.target_value.trim().length === 0) {
       return { valid: false, error: 'Internal target must specify a destination/funnel ID', code: 'INVALID_INTERNAL_TARGET' };
     }
@@ -290,6 +292,14 @@ export function resolveNavigationItem(
     };
   }
 
+  if (item.target_kind === 'homepage' || item.target_value === '__homepage__') {
+    return {
+      ...item,
+      resolved_href: '/',
+      resolution_status: 'resolved'
+    };
+  }
+
   // Internal link resolution via funnel_id
   const funnelId = item.target_value;
 
@@ -337,4 +347,57 @@ export function resolveEffectiveNavigation(
   }
 ): ResolvedNavigationItem[] {
   return items.map(item => resolveNavigationItem(item, context));
+}
+
+export interface PublicNavigationLink {
+  label: string;
+  path: string;
+  is_cta?: boolean;
+}
+
+export function resolvePublicNavigation(
+  items: SiteNavigationItem[],
+  context: {
+    liveRoutes: readonly { funnel_id: string; path: string }[];
+    homepageFunnelId?: string | null;
+  }
+): PublicNavigationLink[] {
+  const result: PublicNavigationLink[] = [];
+
+  for (const item of items) {
+    if (!item.visible) continue;
+
+    if (item.target_kind === 'external') {
+      result.push({ label: item.label, path: item.target_value, ...(item.is_cta ? { is_cta: true } : {}) });
+      continue;
+    }
+
+    if (item.target_kind === 'phone') {
+      result.push({ label: item.label, path: `tel:${item.target_value}`, ...(item.is_cta ? { is_cta: true } : {}) });
+      continue;
+    }
+
+    if (item.target_kind === 'email') {
+      result.push({ label: item.label, path: `mailto:${item.target_value}`, ...(item.is_cta ? { is_cta: true } : {}) });
+      continue;
+    }
+
+    if (item.target_kind === 'homepage' || item.target_value === '__homepage__') {
+      result.push({ label: item.label, path: '/', ...(item.is_cta ? { is_cta: true } : {}) });
+      continue;
+    }
+
+    if (context.homepageFunnelId && item.target_value === context.homepageFunnelId) {
+      result.push({ label: item.label, path: '/', ...(item.is_cta ? { is_cta: true } : {}) });
+      continue;
+    }
+
+    const route = context.liveRoutes.find(r => r.funnel_id === item.target_value);
+    if (route) {
+      result.push({ label: item.label, path: route.path, ...(item.is_cta ? { is_cta: true } : {}) });
+    }
+    // If not resolvable, omit safely (fail-closed, no #, no corrupt link)
+  }
+
+  return result;
 }

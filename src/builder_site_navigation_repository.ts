@@ -29,6 +29,13 @@ export interface BuilderSiteNavigationRepository {
     expectedDraftRevision?: number,
     menuScope?: NavigationMenuScope
   ): Promise<SiteNavigationRepositoryResult<EffectiveSiteNavigation>>;
+
+  publishNavigation(
+    websiteId: string,
+    expectedBaseRevision?: number,
+    expectedDraftRevision?: number,
+    menuScope?: NavigationMenuScope
+  ): Promise<SiteNavigationRepositoryResult<{ is_draft: false; live_revision: number; items: SiteNavigationItem[] }>>;
 }
 
 // In-Memory Mock Repository for Testing / Offline Development
@@ -219,5 +226,67 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
 
     this.draftStore.delete(key);
     return this.getEffectiveNavigation(websiteId, menuScope);
+  }
+
+  async publishNavigation(
+    websiteId: string,
+    expectedBaseRevision?: number,
+    expectedDraftRevision?: number,
+    menuScope: NavigationMenuScope = 'primary'
+  ): Promise<SiteNavigationRepositoryResult<{ is_draft: false; live_revision: number; items: SiteNavigationItem[] }>> {
+    if (!websiteId) {
+      return { success: false, error: 'Website ID is required', code: 'INVALID_INPUT' };
+    }
+
+    const key = `${websiteId}:${menuScope}`;
+    const live = this.liveStore.get(key);
+    const draft = this.draftStore.get(key);
+    const liveRevision = live?.revision ?? 0;
+
+    if (!draft) {
+      return {
+        success: false,
+        error: 'No navigation draft found to publish',
+        code: 'NOT_FOUND'
+      };
+    }
+
+    if (typeof expectedBaseRevision === 'number' && expectedBaseRevision !== liveRevision) {
+      return {
+        success: false,
+        error: 'Navigation has been modified live elsewhere. Reload and try again.',
+        code: 'CONFLICT'
+      };
+    }
+
+    if (typeof expectedDraftRevision === 'number' && expectedDraftRevision !== draft.draft_revision) {
+      return {
+        success: false,
+        error: 'Navigation draft has been modified elsewhere. Reload and try again.',
+        code: 'CONFLICT'
+      };
+    }
+
+    const nextLiveRevision = liveRevision + 1;
+    const publishedItems = [...draft.items];
+
+    this.liveStore.set(key, {
+      website_id: websiteId,
+      menu_scope: menuScope,
+      items: publishedItems,
+      revision: nextLiveRevision,
+      updated_at: new Date().toISOString()
+    });
+
+    this.draftStore.delete(key);
+
+    return {
+      success: true,
+      data: {
+        is_draft: false,
+        live_revision: nextLiveRevision,
+        items: publishedItems
+      }
+    };
   }
 }

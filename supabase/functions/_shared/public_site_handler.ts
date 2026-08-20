@@ -249,13 +249,80 @@ function sanitizeNavigation(value: unknown): readonly PublicSiteNavigationItem[]
   });
 }
 
-function sanitizeLayout(record: PublicWebsiteLayoutRecord | null): PublicSiteLayout {
+function sanitizeCanonicalNavigation(
+  rawItems: unknown[],
+  liveRoutes: readonly PublicWebsiteRouteRecord[],
+  homepageFunnelId: string | null
+): readonly PublicSiteNavigationItem[] {
+  if (!Array.isArray(rawItems)) return [];
+  const result: PublicSiteNavigationItem[] = [];
+
+  for (const item of rawItems) {
+    if (!isPlainRecord(item)) continue;
+    const visible = typeof item.visible === 'boolean' ? item.visible : true;
+    if (!visible) continue;
+
+    const label = optionalText(item.label);
+    if (!label) continue;
+
+    const targetKind = optionalText(item.target_kind);
+    const targetValue = optionalText(item.target_value);
+
+    let path: string | undefined;
+
+    if (targetKind === 'homepage' || targetValue === '__homepage__') {
+      path = '/';
+    } else if (targetKind === 'internal' && targetValue) {
+      if (homepageFunnelId && targetValue === homepageFunnelId) {
+        path = '/';
+      } else {
+        const matchingRoute = liveRoutes.find(r => r.funnelId === targetValue);
+        if (matchingRoute) {
+          path = matchingRoute.path;
+        }
+      }
+    } else if (targetKind === 'external' && targetValue) {
+      if (/^https?:\/\//i.test(targetValue)) {
+        path = targetValue;
+      }
+    } else if (targetKind === 'phone' && targetValue) {
+      path = `tel:${targetValue}`;
+    } else if (targetKind === 'email' && targetValue) {
+      path = `mailto:${targetValue}`;
+    }
+
+    if (path) {
+      result.push({
+        label,
+        path,
+        visible: true
+      });
+    }
+  }
+
+  return result;
+}
+
+function sanitizeLayout(
+  record: PublicWebsiteLayoutRecord | null,
+  canonicalNavRecord?: PublicCanonicalNavigationRecord | null,
+  liveRoutes: readonly PublicWebsiteRouteRecord[] = [],
+  homepageFunnelId: string | null = null
+): PublicSiteLayout {
   const rawHeader = isPlainRecord(record?.headerConfig) ? record.headerConfig : {};
   const rawFooter = isPlainRecord(record?.footerConfig) ? record.footerConfig : {};
+
+  let navigation: readonly PublicSiteNavigationItem[];
+  if (canonicalNavRecord !== null && canonicalNavRecord !== undefined) {
+    navigation = sanitizeCanonicalNavigation(canonicalNavRecord.items, liveRoutes, homepageFunnelId);
+  } else {
+    navigation = sanitizeNavigation(rawHeader.nav_items ?? rawHeader.navigation);
+  }
+
   const header: PublicSiteHeader = {
     ...(optionalText(rawHeader.logo_text) ? { logoText: optionalText(rawHeader.logo_text) } : {}),
     ...(optionalText(rawHeader.logo_url) ? { logoUrl: optionalText(rawHeader.logo_url) } : {}),
-    navigation: sanitizeNavigation(rawHeader.nav_items ?? rawHeader.navigation),
+    navigation,
     ...(optionalText(rawHeader.cta_text) ? { ctaText: optionalText(rawHeader.cta_text) } : {}),
     ...(optionalText(rawHeader.cta_link) ? { ctaLink: optionalText(rawHeader.cta_link) } : {})
   };
@@ -447,13 +514,17 @@ export async function handlePublicSiteRequest(
       return publicError('Site not found.', 404);
     }
 
-    const [settingsRecord, layoutRecord, target] = await Promise.all([
+    const [settingsRecord, layoutRecord, target, canonicalNavRecord] = await Promise.all([
       options.dataSource.getPublicWebsiteSettings(website.id),
       options.dataSource.getPublicWebsiteLayout(website.id),
-      options.dataSource.getPublicationTarget(website.id, page.id)
+      options.dataSource.getPublicationTarget(website.id, page.id),
+      options.dataSource.getPublicCanonicalNavigation ? options.dataSource.getPublicCanonicalNavigation(website.id, 'primary') : Promise.resolve(null)
     ]);
+    const liveRoutes = (canonicalNavRecord && canonicalNavRecord.items.length > 0 && options.dataSource.listRoutesForWebsite)
+      ? await options.dataSource.listRoutesForWebsite(website.id)
+      : [route];
     const settings = sanitizeSettings(settingsRecord, website.name);
-    const layout = sanitizeLayout(layoutRecord);
+    const layout = sanitizeLayout(layoutRecord, canonicalNavRecord, liveRoutes, website.homepageFunnelId);
 
     let publicPage: PublicSitePage;
     let sections: readonly PublicSiteSection[];

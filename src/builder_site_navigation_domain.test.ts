@@ -9,6 +9,7 @@ import {
   areNavigationSnapshotsEqual,
   resolveNavigationItem,
   resolveEffectiveNavigation,
+  resolvePublicNavigation,
   SiteNavigationItem
 } from './builder_site_navigation_domain';
 import type { EffectiveRoute } from './builder_route_lifecycle';
@@ -18,6 +19,7 @@ describe('builder_site_navigation_domain', () => {
   const uuid2 = '22222222-2222-4222-8222-222222222222';
   const uuid3 = '33333333-3333-4333-8333-333333333333';
   const uuid4 = '44444444-4444-4444-8444-444444444444';
+  const uuid5 = '55555555-5555-4555-8555-555555555555';
 
   describe('label validation', () => {
     it('accepts clean labels and preserves casing and spaces', () => {
@@ -338,6 +340,57 @@ describe('builder_site_navigation_domain', () => {
       expect(resolved[0].resolved_href).toBe('tel:+15551234567');
       expect(resolved[1].resolved_href).toBe('mailto:info@washops.com');
       expect(resolved[2].resolved_href).toBe('https://washops.blog');
+    });
+
+    it('validates and resolves target_kind: homepage dynamically to /', () => {
+      const itemRes = validateNavigationItem({
+        id: uuid1,
+        label: 'Home',
+        target_kind: 'homepage',
+        target_value: '',
+        position: 0,
+        visible: true,
+        is_cta: false
+      });
+      expect(itemRes.valid).toBe(true);
+      if (!itemRes.valid) return;
+
+      expect(itemRes.item.target_value).toBe('__homepage__');
+
+      const resolved = resolveNavigationItem(itemRes.item, {
+        effectiveRoutes,
+        homepageFunnelId: 'fnl-custom-home'
+      });
+      expect(resolved.resolved_href).toBe('/');
+      expect(resolved.resolution_status).toBe('resolved');
+    });
+  });
+
+  describe('resolvePublicNavigation', () => {
+    it('omits hidden items and resolves live routes and homepage safely', () => {
+      const items: SiteNavigationItem[] = [
+        { id: uuid1, label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false },
+        { id: uuid2, label: 'Services', target_kind: 'internal', target_value: 'fnl-services', position: 1, visible: true, is_cta: false },
+        { id: uuid3, label: 'Hidden Secret', target_kind: 'internal', target_value: 'fnl-secret', position: 2, visible: false, is_cta: false },
+        { id: uuid4, label: 'Ghost Unrouted', target_kind: 'internal', target_value: 'fnl-unrouted', position: 3, visible: true, is_cta: false },
+        { id: uuid5, label: 'Book Now', target_kind: 'phone', target_value: '+15551234567', position: 4, visible: true, is_cta: true }
+      ];
+
+      const liveRoutes = [
+        { funnel_id: 'fnl-services', path: '/our-services' },
+        { funnel_id: 'fnl-secret', path: '/secret' }
+      ];
+
+      const links = resolvePublicNavigation(items, {
+        liveRoutes,
+        homepageFunnelId: 'fnl-home'
+      });
+
+      expect(links).toEqual([
+        { label: 'Home', path: '/' },
+        { label: 'Services', path: '/our-services' },
+        { label: 'Book Now', path: 'tel:+15551234567', is_cta: true }
+      ]);
     });
   });
 });
