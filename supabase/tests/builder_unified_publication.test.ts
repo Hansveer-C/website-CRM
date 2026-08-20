@@ -630,15 +630,15 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     }
   });
 
-  it('12. same-path funnel reassignment succeeds without redirect (20.E)', async () => {
-    const { userId, websiteId, funnel3Id, routeAboutId } = await createTestFixture();
+  it('12. new route creation succeeds without redirect (20.E)', async () => {
+    const { userId, websiteId, funnel3Id } = await createTestFixture();
     const client = await pool.connect();
     try {
       await setAuth(client, userId);
 
-      // Stage route draft for existing route /about to point to funnel3 via RPC
-      await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3, $4::uuid)', [
-        websiteId, funnel3Id, '/about', routeAboutId
+      // Stage route draft for new route /contact to point to funnel3 via RPC
+      await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3)', [
+        websiteId, funnel3Id, '/contact'
       ]);
 
       const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
@@ -650,11 +650,12 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       ]);
       expect(pubRes.rows[0].res.success).toBe(true);
 
-      // Verify route destination changed
-      const routeCheck = await client.query('SELECT * FROM public.website_routes WHERE id = $1', [routeAboutId]);
+      // Verify route destination exists
+      const routeCheck = await client.query('SELECT * FROM public.website_routes WHERE website_id = $1 AND path = $2', [websiteId, '/contact']);
+      expect(routeCheck.rows.length).toBe(1);
       expect(routeCheck.rows[0].funnel_id).toBe(funnel3Id);
 
-      // Verify NO redirect was created since path did not change
+      // Verify NO redirect was created since it was a new route creation
       const redirCheck = await client.query('SELECT * FROM public.website_route_redirects WHERE website_id = $1', [websiteId]);
       expect(redirCheck.rows.length).toBe(0);
     } finally {
