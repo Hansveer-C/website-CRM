@@ -87,6 +87,11 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
           created_at timestamptz not null default now()
         );
 
+        create table if not exists public.public_lead_intake_requests (
+          id uuid primary key default gen_random_uuid(),
+          page_id text not null
+        );
+
         create table if not exists public.websites (
           id uuid primary key default gen_random_uuid(),
           user_id text not null references public.users(id) on delete cascade,
@@ -178,6 +183,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
         grant all on table public.website_routes to authenticated, anon, service_role;
         grant all on table public.builder_published_revisions to authenticated, anon, service_role;
         grant all on table public.builder_publication_targets to authenticated, anon, service_role;
+        grant all on table public.public_lead_intake_requests to authenticated, anon, service_role;
       `);
 
       // Execute migrations in sequence
@@ -1108,8 +1114,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
 
       // Session B begins txn and calls released create_builder_page RPC in funnel1
       await clientB.query('BEGIN');
-      const newPageId = `pg-phantom-${randomUUID()}`;
-      await clientB.query("SELECT public.create_builder_page('Phantom Page', $1, $2)", [newPageId, funnel1Id]);
+      await clientB.query("SELECT public.create_builder_page('Phantom Page', 'phantom-slug', $1)", [funnel1Id]);
 
       // Session A calls publish_builder_website with old expected state
       let publishDone = false;
@@ -1163,9 +1168,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       // Session B calls create_builder_page in funnel1
       let createDone = false;
       let createRes: any = null;
-      const newPageId = `pg-inv-${randomUUID()}`;
-      const createPromise = clientB.query("SELECT public.create_builder_page('Inverse Page', $1, $2) as res", [
-        newPageId, funnel1Id
+      const createPromise = clientB.query("SELECT public.create_builder_page('Inverse Page', 'inv-slug', $1) as res", [
+        funnel1Id
       ]).then((r) => {
         createDone = true;
         createRes = r;
@@ -1181,7 +1185,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       // Session B resumes and succeeds
       await createPromise;
       expect(createDone).toBe(true);
-      expect(createRes.rows[0].res.id).toBe(newPageId);
+      expect(createRes.rows[0].res.id).toBeTruthy();
     } finally {
       await setAuth(clientA, null);
       await setAuth(clientB, null);
@@ -1199,8 +1203,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       await setAuth(clientB, userId);
 
       // Create a draft page in funnel1 to test deletion
-      const draftPageRes = await clientA.query("SELECT public.create_builder_page('Draft To Delete', $1, $2) as res", [
-        `pg-del-${randomUUID()}`, funnel1Id
+      const draftPageRes = await clientA.query("SELECT public.create_builder_page('Draft To Delete', 'draft-del-slug', $1) as res", [
+        funnel1Id
       ]);
       const draftPageId = draftPageRes.rows[0].res.id;
 
@@ -1244,8 +1248,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       await setAuth(clientB, userId);
 
       // Create a second page in funnel1 first
-      const p2Res = await clientA.query("SELECT public.create_builder_page('Second Page', $1, $2) as res", [
-        `pg2-${randomUUID()}`, funnel1Id
+      const p2Res = await clientA.query("SELECT public.create_builder_page('Second Page', 'second-page-slug', $1) as res", [
+        funnel1Id
       ]);
       const page2Id = p2Res.rows[0].res.id;
 
@@ -1273,7 +1277,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       // Session B completes
       await reorderPromise;
       expect(reorderDone).toBe(true);
-      expect(reorderRes.rows[0].res.success).toBe(true);
+      expect(reorderRes.rows[0].res.funnel_id).toBe(funnel1Id);
+      expect(reorderRes.rows[0].res.pages.length).toBe(2);
     } finally {
       await setAuth(clientA, null);
       await setAuth(clientB, null);
