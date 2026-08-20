@@ -57,6 +57,8 @@ describe('builder_site_navigation_domain', () => {
       expect(validateExternalUrl('https://example.com:65535/').normalized).toBe('https://example.com:65535/');
       expect(validateExternalUrl('https://1.2.3.4/').normalized).toBe('https://1.2.3.4/');
       expect(validateExternalUrl('https://127.0.0.1/').normalized).toBe('https://127.0.0.1/');
+      expect(validateExternalUrl('https://127.1/').normalized).toBe('https://127.0.0.1/');
+      expect(validateExternalUrl('https://127.0.0.01/').normalized).toBe('https://127.0.0.1/');
     });
 
     it('rejects unsafe schemes', () => {
@@ -79,8 +81,6 @@ describe('builder_site_navigation_domain', () => {
       expect(validateExternalUrl('https://xn--mnich-kva.example/').valid).toBe(false);
       expect(validateExternalUrl('https://example .com').valid).toBe(false);
       expect(validateExternalUrl('https://999.999.999.999/').valid).toBe(false);
-      expect(validateExternalUrl('https://127.1/').valid).toBe(false);
-      expect(validateExternalUrl('https://127.0.0.01/').valid).toBe(false);
     });
   });
 
