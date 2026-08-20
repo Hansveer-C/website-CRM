@@ -65,8 +65,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
           slug text not null,
           status text not null default 'draft',
           step_order integer not null default 0,
-          created_at timestamptz not null default now(),
-          updated_at timestamptz not null default now()
+          created_at timestamptz not null default now()
         );
 
         create table if not exists public.page_sections (

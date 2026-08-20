@@ -672,7 +672,7 @@ begin
 
       -- Set page status published
       update public.pages
-      set status = 'published', updated_at = v_now
+      set status = 'published'
       where id = v_page_rec.id and user_id = v_user_id;
     end if;
   end loop;
