@@ -71,7 +71,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
           step_type text,
           seo_title text,
           seo_description text,
-          seo_keywords text,
+          seo_keywords text[] not null default '{}'::text[],
           created_at timestamptz not null default now(),
           updated_at timestamptz not null default now()
         );
@@ -154,6 +154,21 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
 
         drop policy if exists "funnels_user_policy" on public.funnels;
         create policy "funnels_user_policy" on public.funnels for all to authenticated using (user_id = (select auth.uid())::text);
+
+        drop policy if exists "website_routes_user_policy" on public.website_routes;
+        create policy "website_routes_user_policy" on public.website_routes for all to authenticated using (
+          exists (select 1 from public.websites w where w.id = website_routes.website_id and w.user_id = (select auth.uid())::text)
+        );
+
+        drop policy if exists "builder_published_revisions_user_policy" on public.builder_published_revisions;
+        create policy "builder_published_revisions_user_policy" on public.builder_published_revisions for all to authenticated using (
+          exists (select 1 from public.websites w where w.id = builder_published_revisions.website_id and w.user_id = (select auth.uid())::text)
+        );
+
+        drop policy if exists "builder_publication_targets_user_policy" on public.builder_publication_targets;
+        create policy "builder_publication_targets_user_policy" on public.builder_publication_targets for all to authenticated using (
+          exists (select 1 from public.websites w where w.id = builder_publication_targets.website_id and w.user_id = (select auth.uid())::text)
+        );
 
         grant all on table public.users to authenticated, anon, service_role;
         grant all on table public.funnels to authenticated, anon, service_role;
@@ -701,10 +716,9 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2)', [websiteId, funnel2Id]);
 
       // 3. Route draft
-      const stageRes = await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3) as res', [
+      await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3)', [
         websiteId, funnel3Id, '/services-new'
       ]);
-      const draftId = stageRes.rows[0].res.draft.id;
 
       // 4. Primary nav pointing to funnel3 (valid while route draft exists)
       const navItems = [
@@ -715,8 +729,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       ]);
 
       // 5. Revert the route draft for funnel3 via RPC so that the nav item is now UNROUTED
-      await client.query('SELECT public.revert_builder_route_draft($1::uuid, $2::uuid, null)', [
-        websiteId, draftId
+      await client.query('SELECT public.revert_builder_route_draft($1::uuid, null, $2)', [
+        websiteId, funnel3Id
       ]);
 
       const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
@@ -1329,9 +1343,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       ]);
       expect(stageRes.rows[0].res.success).toBe(true);
 
-      const draftId = stageRes.rows[0].res.draft.id;
-      const revertRes = await client.query('SELECT public.revert_builder_route_draft($1::uuid, $2::uuid, null) as res', [
-        websiteId, draftId
+      const revertRes = await client.query('SELECT public.revert_builder_route_draft($1::uuid, null, $2) as res', [
+        websiteId, funnel2Id
       ]);
       expect(revertRes.rows[0].res.success).toBe(true);
     } finally {
