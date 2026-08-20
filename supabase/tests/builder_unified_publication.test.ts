@@ -104,6 +104,13 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
         create or replace function auth.uid() returns text as $$
           select nullif(current_setting('request.jwt.claim.sub', true), '')::text;
         $$ language sql stable;
+
+        grant all on table public.users to authenticated, anon, service_role;
+        grant all on table public.funnels to authenticated, anon, service_role;
+        grant all on table public.pages to authenticated, anon, service_role;
+        grant all on table public.sections to authenticated, anon, service_role;
+        grant all on table public.websites to authenticated, anon, service_role;
+        grant all on table public.website_routes to authenticated, anon, service_role;
       `);
 
       // Execute migrations in sequence
@@ -301,6 +308,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
       expect(result.publication_revision).toBe(1);
 
       // Verify website row
+      await client.query('RESET ROLE');
       const siteCheck = await client.query('SELECT homepage_funnel_id, draft_homepage_funnel_id, publication_revision FROM public.websites WHERE id = $1', [fix.websiteId]);
       expect(siteCheck.rows[0].homepage_funnel_id).toBe(fix.funnel2Id);
       expect(siteCheck.rows[0].draft_homepage_funnel_id).toBeNull();
@@ -323,8 +331,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
 
       // Stage route draft for /services -> funnel3Id
       await client.query(
-        'SELECT public.stage_builder_route_draft($1::uuid, $2::text, $3::text, $4::text)',
-        [fix.websiteId, '/services', fix.funnel3Id, 'upsert']
+        'SELECT public.stage_builder_route_draft($1::uuid, $2::text, $3::text, $4::text, $5::uuid)',
+        [fix.websiteId, '/services', fix.funnel3Id, 'upsert', null]
       );
 
       // Stage primary navigation draft pointing to funnel3Id
@@ -361,6 +369,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
       expect(result.status).toBe('PUBLISHED');
 
       // Verify live route exists
+      await client.query('RESET ROLE');
       const liveRoute = await client.query('SELECT path, funnel_id FROM public.website_routes WHERE website_id = $1 AND path = $2', [fix.websiteId, '/services']);
       expect(liveRoute.rows[0].funnel_id).toBe(fix.funnel3Id);
 
@@ -431,6 +440,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
       expect(pubRes.rows[0].val.status).toBe('PUBLISHED');
 
       // Verify route was deleted and nav updated to empty
+      await client.query('RESET ROLE');
       const checkRoute = await client.query('SELECT * FROM public.website_routes WHERE website_id = $1 AND path = $2', [fix.websiteId, '/about']);
       expect(checkRoute.rows.length).toBe(0);
 
@@ -448,7 +458,12 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
     try {
       await setAuth(client, fix.userId);
 
-      // Stage nav item pointing to an unrouted funnel (funnel3Id has no live or draft route)
+      // Associate funnel3Id via a temporary route draft first so stage nav succeeds
+      await client.query(
+        'SELECT public.stage_builder_route_draft($1::uuid, $2::text, $3::text, $4::text, $5::uuid)',
+        [fix.websiteId, '/services', fix.funnel3Id, 'upsert', null]
+      );
+
       const invalidNavItem = {
         id: randomUUID(),
         label: 'Unrouted Link',
@@ -462,6 +477,9 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
         'SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb)',
         [fix.websiteId, 'primary', JSON.stringify([invalidNavItem])]
       );
+
+      // Now remove the route draft for /services so funnel3Id has no route in projected state
+      await client.query('DELETE FROM public.builder_route_drafts WHERE website_id = $1 AND path = $2', [fix.websiteId, '/services']);
 
       // Stage valid draft homepage to About
       await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2::text)', [fix.websiteId, fix.funnel2Id]);
@@ -482,6 +500,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
       ).rejects.toThrow(/Primary navigation link "Unrouted Link" points to a destination without a public route/);
 
       // Verify 100% rollback: homepage remained live funnel1Id
+      await client.query('RESET ROLE');
       const siteCheck = await client.query('SELECT homepage_funnel_id, draft_homepage_funnel_id FROM public.websites WHERE id = $1', [fix.websiteId]);
       expect(siteCheck.rows[0].homepage_funnel_id).toBe(fix.funnel1Id);
       expect(siteCheck.rows[0].draft_homepage_funnel_id).toBe(fix.funnel2Id); // draft preserved!
@@ -536,6 +555,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
       ]);
       const pubId = pubRes.rows[0].val.publication_id;
 
+      await client.query('RESET ROLE');
       const auditCheck = await client.query(
         'SELECT * FROM public.builder_website_publications WHERE id = $1',
         [pubId]
