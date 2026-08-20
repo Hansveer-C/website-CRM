@@ -29,9 +29,17 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
 
       // Create base schemas, roles, and dependency tables
       await client.query(`
-        do $$ begin create role anon; exception when duplicate_object then null; end $$;
-        do $$ begin create role authenticated; exception when duplicate_object then null; end $$;
-        do $$ begin create role service_role; exception when duplicate_object then null; end $$;
+        do $$ begin
+          if not exists (select 1 from pg_roles where rolname = 'anon') then
+            begin create role anon; exception when others then null; end;
+          end if;
+          if not exists (select 1 from pg_roles where rolname = 'authenticated') then
+            begin create role authenticated; exception when others then null; end;
+          end if;
+          if not exists (select 1 from pg_roles where rolname = 'service_role') then
+            begin create role service_role; exception when others then null; end;
+          end if;
+        end $$;
         do $$ begin create schema auth; exception when duplicate_schema then null; end $$;
 
         create table if not exists public.users (
