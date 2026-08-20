@@ -105,11 +105,11 @@ describe('Builder Site Navigation Hardened Integration Tests (PostgreSQL 17)', (
     }
   });
 
-  async function setAuthUser(client: any, userId: string | null) {
-    if (!userId) {
-      await client.query("select set_config('request.jwt.claim.sub', '', true)");
+  async function setAuthUser(client: any, userId: string | null): Promise<void> {
+    if (userId === null) {
+      await client.query(`set "request.jwt.claim.sub" = ''`);
     } else {
-      await client.query("select set_config('request.jwt.claim.sub', $1, true)", [userId]);
+      await client.query(`set "request.jwt.claim.sub" = '${userId}'`);
     }
   }
 
