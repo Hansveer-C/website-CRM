@@ -64,21 +64,24 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
           unique (website_id, path)
         );
 
-        create table if not exists public.builder_route_drafts (
-          id uuid primary key default gen_random_uuid(),
-          website_id uuid not null references public.websites(id) on delete cascade,
-          path text not null,
-          action text not null check (action in ('upsert', 'delete')),
-          funnel_id text references public.funnels(id) on delete set null,
-          created_at timestamptz not null default now(),
-          updated_at timestamptz not null default now(),
-          unique (website_id, path)
-        );
-
         create or replace function auth.uid() returns uuid as $$
           select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
         $$ language sql stable;
       `);
+
+      // Apply Task 5A draft routes migration
+      const draftMigration = readFileSync(
+        resolve(__dirname, '../migrations/20260817050500_create_builder_route_drafts.sql'),
+        'utf-8'
+      );
+      await client.query(draftMigration);
+
+      // Apply Task 5B route publication migration
+      const pubMigration = readFileSync(
+        resolve(__dirname, '../migrations/20260817050600_create_builder_route_redirects_and_publication.sql'),
+        'utf-8'
+      );
+      await client.query(pubMigration);
 
       // Apply Task 6A migration
       const migrationSql = readFileSync(MIGRATION_PATH, 'utf8');
