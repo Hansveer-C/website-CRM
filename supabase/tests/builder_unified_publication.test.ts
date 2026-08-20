@@ -89,6 +89,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
 
         create table if not exists public.public_lead_intake_requests (
           id uuid primary key default gen_random_uuid(),
+          website_id uuid,
           page_id text not null
         );
 
