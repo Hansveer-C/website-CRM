@@ -476,7 +476,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       const initialRevCount = initialRevCountRes.rows[0].count;
 
       // Change draft homepage to funnel2
-      await client.query('SELECT public.set_builder_homepage_draft($1::uuid, $2)', [websiteId, funnel2Id]);
+      await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2)', [websiteId, funnel2Id]);
 
       const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
       const plan = planRes.rows[0].plan;
@@ -503,8 +503,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       await setAuth(client, userId);
 
       // Create route draft for /services -> funnel3
-      await client.query('SELECT public.stage_builder_route_draft($1::uuid, null, $2, $3)', [
-        websiteId, '/services', funnel3Id
+      await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3)', [
+        websiteId, funnel3Id, '/services'
       ]);
 
       // Create nav draft pointing to funnel3
@@ -550,8 +550,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       await setAuth(client, userId);
 
       // 1. Stage route draft /pricing -> funnel2
-      const stageRes = await client.query('SELECT public.stage_builder_route_draft($1::uuid, null, $2, $3) as res', [
-        websiteId, '/pricing', funnel2Id
+      const stageRes = await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3) as res', [
+        websiteId, funnel2Id, '/pricing'
       ]);
       const draftId = stageRes.rows[0].res.draft.id;
 
@@ -583,8 +583,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       await setAuth(client, userId);
 
       // Update existing route /about to point to funnel3 instead of funnel2
-      await client.query('SELECT public.stage_builder_route_draft($1::uuid, $2::uuid, $3, $4)', [
-        websiteId, routeAboutId, '/about', funnel3Id
+      await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3, $4::uuid)', [
+        websiteId, funnel3Id, '/about', routeAboutId
       ]);
 
       const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
@@ -622,8 +622,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       );
 
       // Rename route /about -> /our-story with funnel3
-      await client.query('SELECT public.stage_builder_route_draft($1::uuid, $2::uuid, $3, $4)', [
-        websiteId, routeAboutId, '/our-story', funnel3Id
+      await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3, $4::uuid)', [
+        websiteId, funnel3Id, '/our-story', routeAboutId
       ]);
 
       const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
@@ -664,11 +664,11 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page1Id, JSON.stringify(secA)]);
 
       // 2. Homepage draft
-      await client.query('SELECT public.set_builder_homepage_draft($1::uuid, $2)', [websiteId, funnel2Id]);
+      await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2)', [websiteId, funnel2Id]);
 
       // 3. Route draft
-      await client.query('SELECT public.stage_builder_route_draft($1::uuid, null, $2, $3)', [
-        websiteId, '/services-new', funnel3Id
+      await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3)', [
+        websiteId, funnel3Id, '/services-new'
       ]);
 
       // 4. Primary nav with UNROUTED invalid target
