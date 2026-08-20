@@ -1,6 +1,6 @@
 /**
  * WashOps Design System — Canonical Token Foundation (Phase 1C / Task 7A.1)
- * 
+ *
  * Hierarchy:
  * 1. Foundational Palettes (Raw primitives)
  * 2. Semantic Design Tokens (--wo-*)
@@ -247,12 +247,14 @@
   --wo-transition-transform: transform var(--wo-duration-fast) var(--wo-ease-standard);
 
   /* ==========================================================================
-     9. ACCESSIBILITY CONTRACT
+     9. ACCESSIBILITY & FOCUS CONTRACT
      ========================================================================== */
 
   --wo-min-touch-target: 44px;
   --wo-focus-outline-width: 2px;
   --wo-focus-outline-offset: 2px;
+  --wo-focus-outline-style: solid;
+  --wo-focus-ring-outline: var(--wo-focus-outline-width) var(--wo-focus-outline-style) var(--wo-color-interactive);
 }
 
 /* ==========================================================================
