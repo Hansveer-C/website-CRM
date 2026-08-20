@@ -180,10 +180,11 @@ begin
       raise sqlstate 'PT400' using message = 'Item position must be a number';
     end if;
 
-    v_position := (v_item->>'position')::integer;
-    if (v_item->>'position')::numeric <> v_position::numeric then
+    if (v_item->>'position') ~ '\.' then
       raise sqlstate 'PT400' using message = 'Item position cannot be fractional';
     end if;
+
+    v_position := (v_item->>'position')::integer;
 
     if v_position < 0 or v_position >= v_item_count then
       raise sqlstate 'PT400' using message = 'Item position must be between 0 and ' || (v_item_count - 1);
