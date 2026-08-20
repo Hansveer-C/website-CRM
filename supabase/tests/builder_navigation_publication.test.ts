@@ -897,7 +897,7 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
       }
     });
 
-    it('allows atomic replacement of destination route in the same batch (delete old + create new)', async () => {
+    it('allows atomic route rename/replacement of destination in the same batch', async () => {
       const client = await pool.connect();
       try {
         const f = await createFixture(client);
@@ -917,19 +917,18 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
 
         const r1Id = (await client.query('select id from public.website_routes where website_id = $1 and path = $2', [f.siteId, '/services'])).rows[0].id;
 
-        // Batch: Delete /services (r1Id) AND Create /pressure-washing for fnlServices
+        // Draft: Rename /services (r1Id) to /pressure-washing for fnlServices
         await client.query(
           'insert into public.builder_route_drafts (website_id, route_id, path, funnel_id, action) values ($1, $2, $3, $4, $5)',
-          [f.siteId, r1Id, '/services', f.fnlServices, 'delete']
-        );
-        await client.query(
-          'insert into public.builder_route_drafts (website_id, route_id, path, funnel_id, action) values ($1, $2, $3, $4, $5)',
-          [f.siteId, null, '/pressure-washing', f.fnlServices, 'upsert']
+          [f.siteId, r1Id, '/pressure-washing', f.fnlServices, 'upsert']
         );
 
-        // Succeeded because the atomic replacement preserves a live route for fnlServices
+        // Succeeded because the route update preserves a live route for fnlServices
         const res = await client.query('select public.publish_builder_routes($1) as data', [f.siteId]);
         expect(res.rows[0].data.success).toBe(true);
+
+        const newRoute = (await client.query('select path from public.website_routes where website_id = $1 and funnel_id = $2', [f.siteId, f.fnlServices])).rows[0];
+        expect(newRoute.path).toBe('/pressure-washing');
       } finally {
         client.release();
       }

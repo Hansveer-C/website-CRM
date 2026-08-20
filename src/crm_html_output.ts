@@ -23,4 +23,3 @@ export function safeNavHref(path: unknown): string {
   if (cleanPath.startsWith('/')) return `/site${cleanPath}`;
   return `/site/${cleanPath}`;
 }
-
