@@ -9,7 +9,6 @@ const DATABASE_URL =
   process.env.TEST_DATABASE_URL;
 
 const MIGRATIONS = [
-  resolve(__dirname, '../migrations/20260725220000_create_builder_publication_storage.sql'),
   resolve(__dirname, '../migrations/20260817050400_set_builder_homepage.sql'),
   resolve(__dirname, '../migrations/20260817050500_create_builder_route_drafts.sql'),
   resolve(__dirname, '../migrations/20260817050600_create_builder_route_redirects_and_publication.sql'),
@@ -101,6 +100,27 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
           constraint website_routes_website_path_key unique (website_id, path)
         );
 
+        create table if not exists public.builder_published_revisions (
+          id uuid not null primary key default gen_random_uuid(),
+          website_id uuid not null references public.websites(id) on delete cascade,
+          page_id text not null references public.pages(id) on delete cascade,
+          created_at timestamptz not null default now(),
+          created_by text,
+          schema_version smallint not null default 1,
+          document jsonb not null default '{}'::jsonb,
+          document_fingerprint text not null default 'fp',
+          constraint builder_published_revisions_composite_key unique (website_id, page_id, id)
+        );
+
+        create table if not exists public.builder_publication_targets (
+          website_id uuid not null references public.websites(id) on delete cascade,
+          page_id text not null references public.pages(id) on delete cascade,
+          published_revision_id uuid not null,
+          published_at timestamptz not null default now(),
+          published_by text,
+          primary key (website_id, page_id)
+        );
+
         create or replace function auth.uid() returns uuid as $$
           select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
         $$ language sql stable;
@@ -111,6 +131,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
         grant all on table public.sections to authenticated, anon, service_role;
         grant all on table public.websites to authenticated, anon, service_role;
         grant all on table public.website_routes to authenticated, anon, service_role;
+        grant all on table public.builder_published_revisions to authenticated, anon, service_role;
+        grant all on table public.builder_publication_targets to authenticated, anon, service_role;
       `);
 
       // Execute migrations in sequence
