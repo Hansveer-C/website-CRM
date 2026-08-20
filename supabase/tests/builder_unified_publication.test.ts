@@ -442,7 +442,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       const initialRevCount = initialRevCountRes.rows[0].count;
 
       // Create primary nav draft
-      const navItems = [{ id: 'nav-1', label: 'Home', target_kind: 'homepage', target_value: '', visible: true }];
+      const navItems = [{ id: randomUUID(), label: 'Home', target_kind: 'homepage', target_value: '', visible: true }];
       await client.query('SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb, 0)', [
         websiteId, 'primary', JSON.stringify(navItems)
       ]);
@@ -509,8 +509,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
 
       // Create nav draft pointing to funnel3
       const navItems = [
-        { id: 'nav-home', label: 'Home', target_kind: 'homepage', target_value: '', visible: true },
-        { id: 'nav-serv', label: 'Services', target_kind: 'internal', target_value: funnel3Id, visible: true }
+        { id: randomUUID(), label: 'Home', target_kind: 'homepage', target_value: '', visible: true },
+        { id: randomUUID(), label: 'Services', target_kind: 'internal', target_value: funnel3Id, visible: true }
       ];
       await client.query('SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb, 0)', [
         websiteId, 'primary', JSON.stringify(navItems)
@@ -675,7 +675,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
 
       // 4. Primary nav with UNROUTED invalid target
       const navItems = [
-        { id: 'nav-1', label: 'Broken Link', target_kind: 'internal', target_value: 'non-existent-funnel', visible: true }
+        { id: randomUUID(), label: 'Broken Link', target_kind: 'internal', target_value: 'non-existent-funnel', visible: true }
       ];
       await client.query('SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb, 0)', [
         websiteId, 'primary', JSON.stringify(navItems)
