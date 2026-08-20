@@ -15,6 +15,8 @@ export interface PreviewNavigationSnapshot {
   draft_revision?: number;
 }
 
+export type PreviewNavigationSourceAuthority = 'canonical-draft' | 'canonical-live' | 'legacy';
+
 export interface AuthenticatedPreviewTarget {
   website: Website;
   route: WebsiteRoute;
@@ -24,7 +26,9 @@ export interface AuthenticatedPreviewTarget {
   effectiveNavigation?: {
     primary: readonly ResolvedNavigationItem[];
     footer: readonly ResolvedNavigationItem[];
-    source: 'canonical-draft' | 'canonical-live' | 'legacy';
+    primarySource: PreviewNavigationSourceAuthority;
+    footerSource: PreviewNavigationSourceAuthority;
+    source?: PreviewNavigationSourceAuthority;
   };
 }
 
@@ -224,15 +228,16 @@ export function resolveAuthenticatedPreview(input: {
   const footerDraft = input.canonicalNavDrafts?.find(d => d.website_id === website.id && d.menu_scope === 'footer');
   const footerLive = input.canonicalNavLive?.find(l => l.website_id === website.id && l.menu_scope === 'footer');
 
-  let navSource: 'canonical-draft' | 'canonical-live' | 'legacy' = 'legacy';
+  let primarySource: PreviewNavigationSourceAuthority = 'legacy';
+  let footerSource: PreviewNavigationSourceAuthority = 'legacy';
   let primaryItems: SiteNavigationItem[] = [];
   let footerItems: SiteNavigationItem[] = [];
 
   if (primaryDraft) {
-    navSource = 'canonical-draft';
+    primarySource = 'canonical-draft';
     primaryItems = primaryDraft.items;
   } else if (primaryLive) {
-    navSource = 'canonical-live';
+    primarySource = 'canonical-live';
     primaryItems = primaryLive.items;
   } else if (input.legacyLayout?.headerConfig) {
     const legacyRaw = (input.legacyLayout.headerConfig.nav_items ?? input.legacyLayout.headerConfig.navigation ?? []) as Array<Record<string, unknown>>;
@@ -248,10 +253,10 @@ export function resolveAuthenticatedPreview(input: {
   }
 
   if (footerDraft) {
-    if (navSource === 'legacy') navSource = 'canonical-draft';
+    footerSource = 'canonical-draft';
     footerItems = footerDraft.items;
   } else if (footerLive) {
-    if (navSource === 'legacy') navSource = 'canonical-live';
+    footerSource = 'canonical-live';
     footerItems = footerLive.items;
   } else if (input.legacyLayout?.footerConfig?.links) {
     const legacyLinks = input.legacyLayout.footerConfig.links as Array<Record<string, unknown>>;
@@ -287,7 +292,9 @@ export function resolveAuthenticatedPreview(input: {
       effectiveNavigation: {
         primary: effectivePrimary,
         footer: effectiveFooter,
-        source: navSource
+        primarySource,
+        footerSource,
+        source: primarySource
       }
     }
   };

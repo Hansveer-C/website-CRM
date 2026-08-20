@@ -359,5 +359,114 @@ describe('authenticated preview routing', () => {
         ]);
       }
     });
+
+    it('handles mixed-source Case A: primary legacy and footer canonical live', () => {
+      const res = resolveAuthenticatedPreview({
+        actingUserId: 'u1',
+        path: '/',
+        explicitWebsiteId: 'w1',
+        websites: [website('w1', 'u1', 'f1')],
+        routes: [route('/', 'w1', 'f1'), route('/terms', 'w1', 'f2')],
+        funnels: [funnel('f1'), funnel('f2')],
+        pages: [page('p1', 'u1', 'f1')],
+        legacyLayout: {
+          headerConfig: {
+            nav_items: [{ label: 'Legacy Header Item', path: '/' }]
+          }
+        },
+        canonicalNavLive: [{
+          website_id: 'w1',
+          menu_scope: 'footer',
+          items: [
+            { id: '44444444-4444-4444-8444-444444444444', label: 'Canonical Live Footer', target_kind: 'internal', target_value: 'f2', position: 0, visible: true, is_cta: false }
+          ]
+        }]
+      });
+
+      expect(res.status).toBe('resolved');
+      if (res.status === 'resolved') {
+        expect(res.target.effectiveNavigation?.primarySource).toBe('legacy');
+        expect(res.target.effectiveNavigation?.footerSource).toBe('canonical-live');
+        expect(res.target.effectiveNavigation?.primary).toEqual([
+          expect.objectContaining({ label: 'Legacy Header Item', resolved_href: '/' })
+        ]);
+        expect(res.target.effectiveNavigation?.footer).toEqual([
+          expect.objectContaining({ label: 'Canonical Live Footer', resolved_href: '/terms' })
+        ]);
+      }
+    });
+
+    it('handles mixed-source Case B: primary canonical live and footer canonical draft', () => {
+      const res = resolveAuthenticatedPreview({
+        actingUserId: 'u1',
+        path: '/',
+        explicitWebsiteId: 'w1',
+        websites: [website('w1', 'u1', 'f1')],
+        routes: [route('/', 'w1', 'f1'), route('/contact', 'w1', 'f2')],
+        funnels: [funnel('f1'), funnel('f2')],
+        pages: [page('p1', 'u1', 'f1')],
+        canonicalNavLive: [{
+          website_id: 'w1',
+          menu_scope: 'primary',
+          items: [
+            { id: '11111111-1111-4111-8111-111111111111', label: 'Live Primary Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false }
+          ]
+        }],
+        canonicalNavDrafts: [{
+          website_id: 'w1',
+          menu_scope: 'footer',
+          items: [
+            { id: '55555555-5555-4555-8555-555555555555', label: 'Draft Footer Contact', target_kind: 'internal', target_value: 'f2', position: 0, visible: true, is_cta: false }
+          ]
+        }]
+      });
+
+      expect(res.status).toBe('resolved');
+      if (res.status === 'resolved') {
+        expect(res.target.effectiveNavigation?.primarySource).toBe('canonical-live');
+        expect(res.target.effectiveNavigation?.footerSource).toBe('canonical-draft');
+        expect(res.target.effectiveNavigation?.primary).toEqual([
+          expect.objectContaining({ label: 'Live Primary Home', resolved_href: '/' })
+        ]);
+        expect(res.target.effectiveNavigation?.footer).toEqual([
+          expect.objectContaining({ label: 'Draft Footer Contact', resolved_href: '/contact' })
+        ]);
+      }
+    });
+
+    it('handles Case C: primary explicit empty canonical draft does not fall back to legacy header', () => {
+      const res = resolveAuthenticatedPreview({
+        actingUserId: 'u1',
+        path: '/',
+        explicitWebsiteId: 'w1',
+        websites: [website('w1', 'u1', 'f1')],
+        routes: [route('/', 'w1', 'f1')],
+        funnels: [funnel('f1')],
+        pages: [page('p1', 'u1', 'f1')],
+        legacyLayout: {
+          headerConfig: {
+            nav_items: [{ label: 'Legacy Header Item', path: '/' }]
+          },
+          footerConfig: {
+            links: [{ label: 'Legacy Footer Link', path: '/legacy' }]
+          }
+        },
+        canonicalNavDrafts: [{
+          website_id: 'w1',
+          menu_scope: 'primary',
+          items: []
+        }]
+      });
+
+      expect(res.status).toBe('resolved');
+      if (res.status === 'resolved') {
+        expect(res.target.effectiveNavigation?.primarySource).toBe('canonical-draft');
+        expect(res.target.effectiveNavigation?.footerSource).toBe('legacy');
+        expect(res.target.effectiveNavigation?.primary).toEqual([]);
+        expect(res.target.effectiveNavigation?.footer).toEqual([
+          expect.objectContaining({ label: 'Legacy Footer Link', resolved_href: '/legacy' })
+        ]);
+      }
+    });
   });
 });

@@ -687,4 +687,252 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
       client.release();
     }
   });
+
+  describe('mandatory publication tokens and concurrency authority (Section 1 & 14)', () => {
+    it('enforces mandatory publication tokens and rejects missing or stale tokens with PT409', async () => {
+      const client = await pool.connect();
+      try {
+        const f = await createFixture(client);
+        await setAuthUser(client, f.userId);
+
+        const u1 = randomUUID();
+        const items = [
+          { id: u1, label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false }
+        ];
+
+        // Stage draft (rev 1, base 0)
+        await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+          f.siteId, 'primary', JSON.stringify(items)
+        ]);
+
+        // 1. Missing base token -> PT409
+        await expect(
+          client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [
+            f.siteId, 'primary', null, 1
+          ])
+        ).rejects.toMatchObject({ code: 'PT409' });
+
+        // 2. Missing draft token -> PT409
+        await expect(
+          client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [
+            f.siteId, 'primary', 0, null
+          ])
+        ).rejects.toMatchObject({ code: 'PT409' });
+
+        // 3. Stale base token -> PT409
+        await expect(
+          client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [
+            f.siteId, 'primary', 99, 1
+          ])
+        ).rejects.toMatchObject({ code: 'PT409' });
+
+        // 4. Stale draft token -> PT409
+        await expect(
+          client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [
+            f.siteId, 'primary', 0, 99
+          ])
+        ).rejects.toMatchObject({ code: 'PT409' });
+
+        // 5. Failed publication leaves live (none) and draft (rev 1) untouched
+        const draftCheck = (await client.query(
+          'select draft_revision from public.builder_site_navigation_drafts where website_id = $1 and menu_scope = $2',
+          [f.siteId, 'primary']
+        )).rows[0];
+        expect(draftCheck.draft_revision).toBe(1);
+
+        const liveCheck = (await client.query(
+          'select revision from public.builder_site_navigation_live where website_id = $1 and menu_scope = $2',
+          [f.siteId, 'primary']
+        )).rows;
+        expect(liveCheck.length).toBe(0);
+
+        // 6. Valid exact tokens publish successfully
+        const pubRes = await client.query('select public.publish_builder_site_navigation($1, $2, $3, $4) as data', [
+          f.siteId, 'primary', 0, 1
+        ]);
+        expect(pubRes.rows[0].data.success).toBe(true);
+        expect(pubRes.rows[0].data.live_revision).toBe(1);
+      } finally {
+        client.release();
+      }
+    });
+  });
+
+  describe('server-side canonicalization and auto-clean (Section 3, 4, 5, 6, 15)', () => {
+    it('canonicalizes trimmed labels, homepage sentinel, and lowercase email server-side', async () => {
+      const client = await pool.connect();
+      try {
+        const f = await createFixture(client);
+        await setAuthUser(client, f.userId);
+
+        const u1 = randomUUID();
+        const u2 = randomUUID();
+        const u3 = randomUUID();
+
+        const rawItems = [
+          { id: u1, label: '   Home Page   ', target_kind: 'homepage', target_value: '', position: 0, visible: true, is_cta: false },
+          { id: u2, label: '  Email Us  ', target_kind: 'email', target_value: '  Contact@Example.COM  ', position: 1, visible: true, is_cta: false },
+          { id: u3, label: '  Call Us  ', target_kind: 'phone', target_value: '  +1-604-555-0199  ', position: 2, visible: true, is_cta: true }
+        ];
+
+        await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+          f.siteId, 'primary', JSON.stringify(rawItems)
+        ]);
+
+        const storedDraft = (await client.query(
+          'select items from public.builder_site_navigation_drafts where website_id = $1 and menu_scope = $2',
+          [f.siteId, 'primary']
+        )).rows[0].items;
+
+        expect(storedDraft).toEqual([
+          { id: u1, label: 'Home Page', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false },
+          { id: u2, label: 'Email Us', target_kind: 'email', target_value: 'contact@example.com', position: 1, visible: true, is_cta: false },
+          { id: u3, label: 'Call Us', target_kind: 'phone', target_value: '+1-604-555-0199', position: 2, visible: true, is_cta: true }
+        ]);
+
+        // Publish live
+        await client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [
+          f.siteId, 'primary', 0, 1
+        ]);
+
+        // Staging equivalent items with formatting variants should auto-clean (redundant draft cleared)
+        const variantItems = [
+          { id: u1, label: 'Home Page', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false },
+          { id: u2, label: 'Email Us', target_kind: 'email', target_value: 'CONTACT@EXAMPLE.COM', position: 1, visible: true, is_cta: false },
+          { id: u3, label: 'Call Us', target_kind: 'phone', target_value: '+1-604-555-0199', position: 2, visible: true, is_cta: true }
+        ];
+
+        const cleanRes = await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5) as data', [
+          f.siteId, 'primary', JSON.stringify(variantItems), 1, null
+        ]);
+        expect(cleanRes.rows[0].data.is_draft).toBe(false);
+
+        const draftsRemaining = (await client.query(
+          'select * from public.builder_site_navigation_drafts where website_id = $1 and menu_scope = $2',
+          [f.siteId, 'primary']
+        )).rows;
+        expect(draftsRemaining.length).toBe(0);
+      } finally {
+        client.release();
+      }
+    });
+  });
+
+  describe('route dependency safety covering destination reassignment (Section 8 & 16)', () => {
+    it('rejects publication when only route for destination is reassigned to another funnel', async () => {
+      const client = await pool.connect();
+      try {
+        const f = await createFixture(client);
+        await setAuthUser(client, f.userId);
+
+        const u1 = randomUUID();
+        const items = [
+          { id: u1, label: 'Services', target_kind: 'internal', target_value: f.fnlServices, position: 0, visible: true, is_cta: false }
+        ];
+
+        // Publish navigation targeting fnlServices
+        await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+          f.siteId, 'primary', JSON.stringify(items)
+        ]);
+        await client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [
+          f.siteId, 'primary', 0, 1
+        ]);
+
+        // Existing route /services points to fnlServices
+        const r1Id = (await client.query('select id from public.website_routes where website_id = $1 and path = $2', [f.siteId, '/services'])).rows[0].id;
+
+        // Stage draft that reassigns /services to fnlAbout (f.fnlAbout)
+        await client.query(
+          'insert into public.builder_route_drafts (website_id, route_id, path, funnel_id, action) values ($1, $2, $3, $4, $5)',
+          [f.siteId, r1Id, '/services', f.fnlAbout, 'upsert']
+        );
+
+        // Publication must be rejected with PT422 because fnlServices is stranded by the reassignment
+        await expect(
+          client.query('select public.publish_builder_routes($1)', [f.siteId])
+        ).rejects.toMatchObject({ code: 'PT422' });
+      } finally {
+        client.release();
+      }
+    });
+
+    it('allows reassignment when another route for destination remains', async () => {
+      const client = await pool.connect();
+      try {
+        const f = await createFixture(client);
+        await setAuthUser(client, f.userId);
+
+        // Add a second route for fnlServices
+        const r2Id = randomUUID();
+        await client.query(
+          'insert into public.website_routes (id, website_id, path, funnel_id) values ($1, $2, $3, $4)',
+          [r2Id, f.siteId, '/clean', f.fnlServices]
+        );
+
+        const u1 = randomUUID();
+        const items = [
+          { id: u1, label: 'Services', target_kind: 'internal', target_value: f.fnlServices, position: 0, visible: true, is_cta: false }
+        ];
+
+        await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+          f.siteId, 'primary', JSON.stringify(items)
+        ]);
+        await client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [
+          f.siteId, 'primary', 0, 1
+        ]);
+
+        const r1Id = (await client.query('select id from public.website_routes where website_id = $1 and path = $2', [f.siteId, '/services'])).rows[0].id;
+
+        // Reassign /services to fnlAbout
+        await client.query(
+          'insert into public.builder_route_drafts (website_id, route_id, path, funnel_id, action) values ($1, $2, $3, $4, $5)',
+          [f.siteId, r1Id, '/services', f.fnlAbout, 'upsert']
+        );
+
+        // Succeeds because /clean still resolves fnlServices!
+        const res = await client.query('select public.publish_builder_routes($1) as data', [f.siteId]);
+        expect(res.rows[0].data.success).toBe(true);
+      } finally {
+        client.release();
+      }
+    });
+
+    it('allows atomic replacement of destination route in the same batch (delete old + create new)', async () => {
+      const client = await pool.connect();
+      try {
+        const f = await createFixture(client);
+        await setAuthUser(client, f.userId);
+
+        const u1 = randomUUID();
+        const items = [
+          { id: u1, label: 'Services', target_kind: 'internal', target_value: f.fnlServices, position: 0, visible: true, is_cta: false }
+        ];
+
+        await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+          f.siteId, 'primary', JSON.stringify(items)
+        ]);
+        await client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [
+          f.siteId, 'primary', 0, 1
+        ]);
+
+        const r1Id = (await client.query('select id from public.website_routes where website_id = $1 and path = $2', [f.siteId, '/services'])).rows[0].id;
+
+        // Batch: Delete /services (r1Id) AND Create /pressure-washing for fnlServices
+        await client.query(
+          'insert into public.builder_route_drafts (website_id, route_id, path, funnel_id, action) values ($1, $2, $3, $4, $5)',
+          [f.siteId, r1Id, '/services', f.fnlServices, 'delete']
+        );
+        await client.query(
+          'insert into public.builder_route_drafts (website_id, route_id, path, funnel_id, action) values ($1, $2, $3, $4, $5)',
+          [f.siteId, null, '/pressure-washing', f.fnlServices, 'upsert']
+        );
+
+        // Succeeded because the atomic replacement preserves a live route for fnlServices
+        const res = await client.query('select public.publish_builder_routes($1) as data', [f.siteId]);
+        expect(res.rows[0].data.success).toBe(true);
+      } finally {
+        client.release();
+      }
+    });
+  });
 });

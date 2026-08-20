@@ -271,7 +271,7 @@ function sanitizeCanonicalNavigation(
 
     let path: string | undefined;
 
-    if (targetKind === 'homepage' || targetValue === '__homepage__') {
+    if (targetKind === 'homepage') {
       path = '/';
     } else if (targetKind === 'internal' && targetValue) {
       const matchingRoute = liveRoutes.find(r => r.funnelId === targetValue);
@@ -322,7 +322,7 @@ function sanitizeCanonicalFooterLinks(
 
     let path: string | undefined;
 
-    if (targetKind === 'homepage' || targetValue === '__homepage__') {
+    if (targetKind === 'homepage') {
       path = '/';
     } else if (targetKind === 'internal' && targetValue) {
       const matchingRoute = liveRoutes.find(r => r.funnelId === targetValue);

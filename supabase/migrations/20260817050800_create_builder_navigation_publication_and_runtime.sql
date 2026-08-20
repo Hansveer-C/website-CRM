@@ -1,13 +1,14 @@
 -- Migration: 20260817050800_create_builder_navigation_publication_and_runtime.sql
--- Description: Navigation publication authority, stable homepage target semantics, route dependency protections, and explicit-empty draft adoption.
+-- Description: Navigation publication authority, canonical snapshot storage, mandatory publication tokens, stable homepage target semantics, route dependency protections, and explicit-empty draft adoption.
 -- Invariants:
 -- 1. "Editing navigation changes draft state. Publishing navigation changes live state."
--- 2. Concurrency tokens: base revision + draft revision optimistic locking against race conditions.
--- 3. Stable homepage target kind ('homepage') dynamically follows the active root authority without breaking when homepage changes.
--- 4. Internal navigation items require an actual live route upon publication; homepage status alone does not satisfy internal route requirement.
--- 5. Route deletion fails (PT422) if it would remove the last remaining live route for a visible canonical live navigation item.
--- 6. Preserves all Task 5B route publication behaviors (chain collapse, cycle rejection, route updates, redirect reclaim, collision safety).
--- 7. Preserves all Task 6A navigation domain validation rules (strict contiguous 0..N-1 positions, UUIDs, canonical URLs/phones/emails).
+-- 2. Concurrency tokens: base revision + draft revision optimistic locking against race conditions. Mandatory on publication.
+-- 3. Stored navigation snapshots are strictly canonicalized on server (normalized keys, trimmed labels, canonical sentinel for homepage, trimmed/lowercase targets).
+-- 4. Stable homepage target kind ('homepage') dynamically follows active root authority; only target_kind = 'homepage' maps to root '/'.
+-- 5. Internal navigation items require an actual live route upon publication; homepage status alone does not satisfy internal route requirement.
+-- 6. Route publication fails (PT422) if the batch removes or reassigns the final live route for a visible canonical live navigation item.
+-- 7. Preserves all Task 5B route publication behaviors (chain collapse, cycle rejection, route updates, redirect reclaim, collision safety).
+-- 8. Preserves all Task 6A navigation domain validation rules (strict contiguous 0..N-1 positions, UUIDs, canonical URLs/phones/emails).
 
 -- 1. Update check constraints on navigation tables to support 'homepage' target kind
 alter table public.builder_site_navigation_live
@@ -26,7 +27,7 @@ alter table public.builder_site_navigation_drafts
     jsonb_typeof(items) = 'array'
   );
 
--- 2. RPC: Hardened stage_builder_site_navigation_draft with Task 6A draft concurrency, strict positions, and empty-draft adoption
+-- 2. RPC: Hardened stage_builder_site_navigation_draft with Task 6A draft concurrency, canonical server snapshot, strict positions, and empty-draft adoption
 create or replace function public.stage_builder_site_navigation_draft(
   p_website_id uuid,
   p_menu_scope text,
@@ -54,13 +55,17 @@ declare
   v_target_kind text;
   v_target_value text;
   v_position integer;
+  v_visible boolean;
+  v_is_cta boolean;
   v_funnel_owner text;
   v_destination_valid boolean := false;
   v_now timestamptz := pg_catalog.clock_timestamp();
   v_seen_ids text[] := array[]::text[];
   v_seen_positions integer[] := array[]::integer[];
   v_item_count integer := 0;
-  v_idx integer := 0;
+  v_accumulated_items jsonb := '[]'::jsonb;
+  v_normalized_items jsonb := '[]'::jsonb;
+  v_normalized_item jsonb;
 begin
   if v_user_id is null or v_user_id = '' then
     raise sqlstate 'PT401' using message = 'Authentication required';
@@ -128,7 +133,7 @@ begin
     v_next_draft_revision := 1;
   end if;
 
-  -- 3. Strict Server-Side Validation of Navigation Items
+  -- 3. Strict Server-Side Validation and Canonical Snapshot Construction
   v_item_count := jsonb_array_length(p_items);
 
   for v_item in select jsonb_array_elements(p_items) loop
@@ -151,7 +156,7 @@ begin
     end if;
     v_seen_ids := array_append(v_seen_ids, v_item_id);
 
-    -- Validate label
+    -- Validate and canonicalize label
     v_label := nullif(trim(both from (v_item->>'label')), '');
     if v_label is null then
       raise sqlstate 'PT400' using message = 'Navigation item label cannot be empty';
@@ -169,7 +174,7 @@ begin
       raise sqlstate 'PT400' using message = 'Invalid target_kind. Allowed: internal, external, phone, email, homepage';
     end if;
 
-    -- Validate target_value
+    -- Validate and canonicalize target_value
     v_target_value := nullif(trim(both from (v_item->>'target_value')), '');
     if v_target_value is null and v_target_kind <> 'homepage' then
       raise sqlstate 'PT400' using message = 'Navigation item target_value cannot be empty';
@@ -199,15 +204,17 @@ begin
     if jsonb_typeof(v_item->'visible') <> 'boolean' then
       raise sqlstate 'PT400' using message = 'Item visible must be a boolean';
     end if;
+    v_visible := (v_item->>'visible')::boolean;
 
     if jsonb_typeof(v_item->'is_cta') <> 'boolean' then
       raise sqlstate 'PT400' using message = 'Item is_cta must be a boolean';
     end if;
+    v_is_cta := (v_item->>'is_cta')::boolean;
 
-    -- Validate specific target kinds
+    -- Target kind-specific canonicalization and validation
     if v_target_kind = 'homepage' then
-      -- Normalize target_value to '__homepage__' if not specified
-      null;
+      -- Always store canonical sentinel '__homepage__' regardless of caller input
+      v_target_value := '__homepage__';
     elsif v_target_kind = 'external' then
       if not (v_target_value ~* '^https?://[^\s/$.?#].[^\s]*$') then
         raise sqlstate 'PT400' using message = 'External URL must be a valid http:// or https:// URL';
@@ -220,6 +227,7 @@ begin
       if not (v_target_value ~* '^[^\s@]+@[^\s@]+\.[^\s@]+$') then
         raise sqlstate 'PT400' using message = 'Invalid email address format';
       end if;
+      v_target_value := lower(v_target_value);
     elsif v_target_kind = 'internal' then
       -- Verify destination funnel exists and belongs to acting user
       select user_id into v_funnel_owner
@@ -257,7 +265,18 @@ begin
       end if;
     end if;
 
-    v_idx := v_idx + 1;
+    -- Build canonical item representation
+    v_normalized_item := jsonb_build_object(
+      'id', v_item_id,
+      'label', v_label,
+      'target_kind', v_target_kind,
+      'target_value', v_target_value,
+      'position', v_position,
+      'visible', v_visible,
+      'is_cta', v_is_cta
+    );
+
+    v_accumulated_items := v_accumulated_items || jsonb_build_array(v_normalized_item);
   end loop;
 
   -- Ensure all positions 0..N-1 were covered
@@ -267,10 +286,17 @@ begin
         raise sqlstate 'PT400' using message = 'Item positions must be contiguous indices from 0 to N-1';
       end if;
     end loop;
+
+    -- Order canonical snapshot deterministically by position 0..N-1
+    select coalesce(jsonb_agg(item order by (item->>'position')::integer), '[]'::jsonb)
+    into v_normalized_items
+    from jsonb_array_elements(v_accumulated_items) as item;
+  else
+    v_normalized_items := '[]'::jsonb;
   end if;
 
   -- If a canonical live row exists and draft snapshot matches live snapshot exactly, clear the draft row (auto-clean)
-  if v_live.revision is not null and p_items = v_live_items then
+  if v_live.revision is not null and v_normalized_items = v_live_items then
     delete from public.builder_site_navigation_drafts
     where website_id = p_website_id and menu_scope = v_menu_scope;
 
@@ -283,7 +309,7 @@ begin
     );
   end if;
 
-  -- Upsert draft snapshot
+  -- Upsert canonical draft snapshot
   insert into public.builder_site_navigation_drafts (
     website_id,
     menu_scope,
@@ -295,7 +321,7 @@ begin
   ) values (
     p_website_id,
     v_menu_scope,
-    p_items,
+    v_normalized_items,
     v_live_revision,
     v_next_draft_revision,
     v_now,
@@ -318,7 +344,7 @@ begin
 end;
 $$;
 
--- 3. RPC: Atomic publish_builder_site_navigation
+-- 3. RPC: Atomic publish_builder_site_navigation with mandatory publication tokens
 create or replace function public.publish_builder_site_navigation(
   p_website_id uuid,
   p_menu_scope text default 'primary',
@@ -394,18 +420,27 @@ begin
     raise sqlstate 'PT404' using message = 'No navigation draft found to publish';
   end if;
 
+  -- Mandatory publication tokens: caller MUST provide expected base and draft revisions
+  if p_expected_base_revision is null then
+    raise sqlstate 'PT409' using message = 'Base revision token is required to publish navigation.';
+  end if;
+
+  if p_expected_draft_revision is null then
+    raise sqlstate 'PT409' using message = 'Draft revision token is required to publish navigation.';
+  end if;
+
   -- Verify draft is based on current live revision
   if v_draft.base_revision <> v_live_revision then
     raise sqlstate 'PT409' using message = 'The draft is based on a stale navigation revision. Re-stage or discard draft before publishing.';
   end if;
 
   -- Concurrency check on base revision
-  if p_expected_base_revision is not null and p_expected_base_revision <> v_live_revision then
+  if p_expected_base_revision <> v_live_revision then
     raise sqlstate 'PT409' using message = 'Stale base revision. Reload and try again.';
   end if;
 
   -- Concurrency check on draft revision
-  if p_expected_draft_revision is not null and p_expected_draft_revision <> v_draft.draft_revision then
+  if p_expected_draft_revision <> v_draft.draft_revision then
     raise sqlstate 'PT409' using message = 'Stale draft revision. Reload and try again.';
   end if;
 
@@ -468,7 +503,7 @@ begin
 end;
 $$;
 
--- 4. RPC: Hardened publish_builder_routes from Task 5B (50600) with added navigation dependency guard
+-- 4. RPC: Hardened publish_builder_routes from Task 5B (50600) with route-set destination dependency guard (deletes and reassignments)
 create or replace function public.publish_builder_routes(
   p_website_id uuid,
   p_expected_draft_count integer default null,
@@ -599,10 +634,10 @@ begin
     end if;
   end loop;
 
-  -- 7.5. Navigation Dependency Guard: Ensure route deletions do not strand visible canonical live navigation links
+  -- 7.5. Navigation Dependency Guard: Ensure route publication (deletes and reassignments) does not strand visible canonical live navigation links
   if exists (
-    select 1 from public.builder_route_drafts
-    where website_id = p_website_id and action = 'delete'
+    select 1 from public.builder_site_navigation_live
+    where website_id = p_website_id and jsonb_array_length(items) > 0
   ) then
     for v_nav_row in (
       select items, menu_scope
@@ -614,16 +649,14 @@ begin
            and v_nav_item->>'target_kind' = 'internal'
            and v_nav_item->>'target_value' is not null then
 
-          -- Check if this visible internal target is affected by a staged deletion
+          -- Check if destination currently has a live route
           if exists (
-            select 1 from public.builder_route_drafts d
-            where d.website_id = p_website_id
-              and d.action = 'delete'
-              and d.funnel_id = v_nav_item->>'target_value'
+            select 1 from public.website_routes
+            where website_id = p_website_id and funnel_id = v_nav_item->>'target_value'
           ) then
             -- Evaluate post-publication route set: Does the destination still have at least one live route after this batch?
             select (
-              -- 1. Another live route for this destination that is NOT being deleted in this batch
+              -- 1. An existing live route for this destination that is NEITHER deleted NOR reassigned to another funnel in this batch
               exists (
                 select 1 from public.website_routes wr
                 where wr.website_id = p_website_id
@@ -631,11 +664,13 @@ begin
                   and not exists (
                     select 1 from public.builder_route_drafts d
                     where d.website_id = p_website_id
-                      and d.action = 'delete'
-                      and d.route_id = wr.id
+                      and (
+                        (d.action = 'delete' and d.route_id = wr.id)
+                        or (d.action = 'upsert' and d.route_id = wr.id and d.funnel_id <> v_nav_item->>'target_value')
+                      )
                   )
               )
-              -- 2. OR an upsert draft in this batch that will provide a live route for this destination
+              -- 2. OR an upsert draft in this batch that assigns a route to this destination
               or exists (
                 select 1 from public.builder_route_drafts d
                 where d.website_id = p_website_id
@@ -645,7 +680,7 @@ begin
             ) into v_dest_has_remaining_route;
 
             if not coalesce(v_dest_has_remaining_route, false) then
-              raise sqlstate 'PT422' using message = 'Cannot publish route deletion: visible live navigation item "' || coalesce(v_nav_item->>'label', '') || '" depends on this route destination. Update or publish navigation first.';
+              raise sqlstate 'PT422' using message = 'Cannot publish route changes: visible live navigation item "' || coalesce(v_nav_item->>'label', '') || '" depends on destination ' || (v_nav_item->>'target_value') || '. Update or publish navigation first.';
             end if;
           end if;
         end if;

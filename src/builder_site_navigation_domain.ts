@@ -292,7 +292,7 @@ export function resolveNavigationItem(
     };
   }
 
-  if (item.target_kind === 'homepage' || item.target_value === '__homepage__') {
+  if (item.target_kind === 'homepage') {
     return {
       ...item,
       resolved_href: '/',
@@ -373,7 +373,7 @@ export function resolvePublicNavigation(
       continue;
     }
 
-    if (item.target_kind === 'homepage' || item.target_value === '__homepage__') {
+    if (item.target_kind === 'homepage') {
       result.push({ label: item.label, path: '/', ...(item.is_cta ? { is_cta: true } : {}) });
       continue;
     }

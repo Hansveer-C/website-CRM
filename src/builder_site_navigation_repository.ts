@@ -32,8 +32,8 @@ export interface BuilderSiteNavigationRepository {
 
   publishNavigation(
     websiteId: string,
-    expectedBaseRevision?: number,
-    expectedDraftRevision?: number,
+    expectedBaseRevision: number,
+    expectedDraftRevision: number,
     menuScope?: NavigationMenuScope
   ): Promise<SiteNavigationRepositoryResult<{ is_draft: false; live_revision: number; items: SiteNavigationItem[] }>>;
 }
@@ -150,8 +150,23 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
       }
     }
 
+    // Canonicalize items
+    const canonicalItems: SiteNavigationItem[] = items.map((item, idx) => ({
+      id: item.id.trim(),
+      label: item.label.trim(),
+      target_kind: item.target_kind,
+      target_value: item.target_kind === 'homepage'
+        ? '__homepage__'
+        : item.target_kind === 'email'
+          ? item.target_value.trim().toLowerCase()
+          : item.target_value.trim(),
+      position: typeof item.position === 'number' ? item.position : idx,
+      visible: typeof item.visible === 'boolean' ? item.visible : true,
+      is_cta: Boolean(item.is_cta)
+    })).sort((a, b) => a.position - b.position);
+
     // Validate internal items target valid funnels
-    for (const item of items) {
+    for (const item of canonicalItems) {
       if (item.target_kind === 'internal') {
         if (this.validFunnelIds.size > 0 && !this.validFunnelIds.has(item.target_value)) {
           return {
@@ -164,7 +179,7 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
     }
 
     // Check if draft equals live snapshot (only if live snapshot exists)
-    if (live && areNavigationSnapshotsEqual(items, liveItems)) {
+    if (live && areNavigationSnapshotsEqual(canonicalItems, liveItems)) {
       this.draftStore.delete(key);
       return {
         success: true,
@@ -179,7 +194,7 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
     const nextDraftRev = draft ? draft.draft_revision + 1 : 1;
 
     this.draftStore.set(key, {
-      items: [...items],
+      items: [...canonicalItems],
       base_revision: liveRevision,
       draft_revision: nextDraftRev,
       updated_at: new Date().toISOString()
@@ -230,8 +245,8 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
 
   async publishNavigation(
     websiteId: string,
-    expectedBaseRevision?: number,
-    expectedDraftRevision?: number,
+    expectedBaseRevision: number,
+    expectedDraftRevision: number,
     menuScope: NavigationMenuScope = 'primary'
   ): Promise<SiteNavigationRepositoryResult<{ is_draft: false; live_revision: number; items: SiteNavigationItem[] }>> {
     if (!websiteId) {
@@ -251,6 +266,14 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
       };
     }
 
+    if (typeof expectedBaseRevision !== 'number' || typeof expectedDraftRevision !== 'number') {
+      return {
+        success: false,
+        error: 'Base revision and draft revision tokens are mandatory to publish navigation.',
+        code: 'CONFLICT'
+      };
+    }
+
     if (draft.base_revision !== liveRevision) {
       return {
         success: false,
@@ -259,7 +282,7 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
       };
     }
 
-    if (typeof expectedBaseRevision === 'number' && expectedBaseRevision !== liveRevision) {
+    if (expectedBaseRevision !== liveRevision) {
       return {
         success: false,
         error: 'Navigation has been modified live elsewhere. Reload and try again.',
@@ -267,7 +290,7 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
       };
     }
 
-    if (typeof expectedDraftRevision === 'number' && expectedDraftRevision !== draft.draft_revision) {
+    if (expectedDraftRevision !== draft.draft_revision) {
       return {
         success: false,
         error: 'Navigation draft has been modified elsewhere. Reload and try again.',

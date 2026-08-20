@@ -157,8 +157,8 @@ export class SupabaseBuilderSiteNavigationRepository implements BuilderSiteNavig
 
   async publishNavigation(
     websiteId: string,
-    expectedBaseRevision?: number,
-    expectedDraftRevision?: number,
+    expectedBaseRevision: number,
+    expectedDraftRevision: number,
     menuScope: NavigationMenuScope = 'primary'
   ): Promise<SiteNavigationRepositoryResult<{ is_draft: false; live_revision: number; items: SiteNavigationItem[] }>> {
     try {

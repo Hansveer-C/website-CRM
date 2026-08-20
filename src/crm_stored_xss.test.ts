@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { escapeHtmlText, safeTelHref } from './crm_html_output';
+import { escapeHtmlText, safeTelHref, safeNavHref } from './crm_html_output';
 
 const chromeCandidates = [
   process.env.CHROME_PATH,
@@ -179,6 +179,34 @@ describe.skipIf(!chromeExecutable)('authenticated CRM stored-XSS browser probes'
       handlers: document.querySelectorAll('[onclick],[onmouseover],[onerror]').length
     })`);
     expect(result).toEqual({ href: 'tel:+16045550198', attributes: ['id', 'href'], handlers: 0 });
+  });
+
+  it('navigation labels and paths render inert text without executing scripts or injecting DOM elements', () => {
+    const maliciousLabel = '"><img src=x onerror="window.__xss=1"><svg onload="window.__xss=1"></svg>Malicious';
+    const maliciousPath = '"><script>window.__xss=1</script>';
+    const safeHref = safeNavHref(maliciousPath);
+    const body = `
+      <header>
+        <nav>
+          <a href="${escapeHtmlText(safeHref)}"
+             data-nav-path="${escapeHtmlText(maliciousPath)}"
+             onclick="event.preventDefault(); window.navigateTo('site', this.getAttribute('data-nav-path'))">
+             ${escapeHtmlText(maliciousLabel)}
+          </a>
+        </nav>
+      </header>
+    `;
+    const result = inspectDom<{ linkText: string; href: string; nodes: number; handlers: number; xss: number }>(body, `({
+      linkText: document.querySelector('a').textContent.trim(),
+      href: document.querySelector('a').getAttribute('href'),
+      nodes: document.querySelectorAll('img,svg,script:not(:last-child)').length,
+      handlers: document.querySelectorAll('[onerror],[onload]').length,
+      xss: window.__xss
+    })`);
+    expect(result.linkText).toBe(maliciousLabel);
+    expect(result.nodes).toBe(0);
+    expect(result.handlers).toBe(0);
+    expect(result.xss).toBe(0);
   });
 });
 
