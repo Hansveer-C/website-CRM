@@ -13,3 +13,13 @@ export function safeTelHref(value: unknown): string | null {
   const compact = input.replace(/[().\-\s]/g, '');
   return /^\+?\d{3,32}$/.test(compact) ? `tel:${compact}` : null;
 }
+
+export function safeNavHref(path: unknown): string {
+  const p = String(path ?? '').trim();
+  if (/^https?:\/\/[^\s"'<>]+$/i.test(p)) return p;
+  if (/^mailto:[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(p)) return p;
+  if (/^tel:\+?[\d\s().-]{3,30}$/i.test(p)) return p;
+  const cleanPath = p.replace(/[^\w/.\-_#?&=]/g, '');
+  if (cleanPath.startsWith('/')) return `/site${cleanPath}`;
+  return `/site/${cleanPath}`;
+}

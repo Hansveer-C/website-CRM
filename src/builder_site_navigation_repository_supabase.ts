@@ -154,4 +154,42 @@ export class SupabaseBuilderSiteNavigationRepository implements BuilderSiteNavig
       return { success: false, ...this.mapError(err) };
     }
   }
+
+  async publishNavigation(
+    websiteId: string,
+    expectedBaseRevision: number,
+    expectedDraftRevision: number,
+    menuScope: NavigationMenuScope = 'primary'
+  ): Promise<SiteNavigationRepositoryResult<{ is_draft: false; live_revision: number; items: SiteNavigationItem[] }>> {
+    try {
+      const client = await this.clientProvider();
+      if (!client) {
+        return { success: false, error: 'Database client unavailable', code: 'TRANSPORT_ERROR' };
+      }
+
+      const { data, error } = await client.rpc('publish_builder_site_navigation', {
+        p_website_id: websiteId,
+        p_menu_scope: menuScope,
+        p_expected_base_revision: expectedBaseRevision ?? null,
+        p_expected_draft_revision: expectedDraftRevision ?? null
+      });
+
+      if (error) {
+        return { success: false, ...this.mapError(error) };
+      }
+
+      const rawItems = Array.isArray(data?.items) ? (data.items as SiteNavigationItem[]) : [];
+
+      return {
+        success: true,
+        data: {
+          is_draft: false,
+          live_revision: Number(data?.live_revision ?? 1),
+          items: rawItems
+        }
+      };
+    } catch (err: any) {
+      return { success: false, ...this.mapError(err) };
+    }
+  }
 }

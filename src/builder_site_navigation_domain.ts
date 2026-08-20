@@ -2,7 +2,7 @@ import type { EffectiveRoute } from './builder_route_lifecycle';
 
 export type NavigationMenuScope = 'primary' | 'footer';
 
-export type NavigationTargetKind = 'internal' | 'external' | 'phone' | 'email';
+export type NavigationTargetKind = 'internal' | 'external' | 'phone' | 'email' | 'homepage';
 
 export interface SiteNavigationItem {
   id: string;
@@ -81,8 +81,8 @@ export function validateExternalUrl(url: unknown): { valid: boolean; normalized?
   if (trimmed.length === 0) {
     return { valid: false, error: 'External URL cannot be empty' };
   }
-  if (/[\u0000-\u001F\u007F-\u009F]/.test(trimmed)) {
-    return { valid: false, error: 'External URL contains invalid characters' };
+  if (/[\u0000-\u001F\u007F-\u009F\s]/.test(trimmed)) {
+    return { valid: false, error: 'External URL cannot contain whitespace or control characters' };
   }
 
   let parsed: URL;
@@ -94,6 +94,48 @@ export function validateExternalUrl(url: unknown): { valid: boolean; normalized?
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return { valid: false, error: 'External URL must use http:// or https://' };
+  }
+
+  // Reject credentials
+  if (parsed.username || parsed.password || /^https?:\/\/[^/]*@/i.test(trimmed)) {
+    return { valid: false, error: 'External URL cannot contain username or password credentials' };
+  }
+
+  // Reject IPv6 hostnames
+  if (parsed.hostname.startsWith('[') || parsed.hostname.endsWith(']')) {
+    return { valid: false, error: 'IPv6 hostnames are not supported for external navigation' };
+  }
+
+  // Reject IDN / non-ASCII domains (including punycode xn--)
+  if (/[^\x20-\x7E]/.test(trimmed) || /^xn--/i.test(parsed.hostname) || parsed.hostname.includes('.xn--')) {
+    return { valid: false, error: 'Internationalized/non-ASCII domain names are not supported for external navigation' };
+  }
+
+  // Validate ASCII DNS hostname or canonical 4-octet IPv4
+  const host = parsed.hostname.toLowerCase();
+  if (!host) {
+    return { valid: false, error: 'External URL contains invalid host' };
+  }
+
+  if (/^[0-9.]+$/.test(host)) {
+    const octets = host.split('.');
+    if (octets.length !== 4) {
+      return { valid: false, error: 'IPv4 host must have exactly 4 octets' };
+    }
+    for (const oct of octets) {
+      if (!/^\d{1,3}$/.test(oct)) {
+        return { valid: false, error: 'Invalid IPv4 octet format' };
+      }
+      const num = Number(oct);
+      if (num < 0 || num > 255 || (oct.length > 1 && oct.startsWith('0'))) {
+        return { valid: false, error: 'IPv4 octets must be between 0 and 255 without leading zeros' };
+      }
+    }
+  } else {
+    const isDnsHost = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host);
+    if (!isDnsHost) {
+      return { valid: false, error: 'External URL contains invalid host' };
+    }
   }
 
   return { valid: true, normalized: parsed.href };
@@ -153,12 +195,14 @@ export function validateNavigationItem(input: unknown): NavigationValidationResu
   }
 
   const kind = raw.target_kind;
-  if (kind !== 'internal' && kind !== 'external' && kind !== 'phone' && kind !== 'email') {
-    return { valid: false, error: 'Target kind must be internal, external, phone, or email', code: 'INVALID_KIND' };
+  if (kind !== 'internal' && kind !== 'external' && kind !== 'phone' && kind !== 'email' && kind !== 'homepage') {
+    return { valid: false, error: 'Target kind must be internal, external, phone, email, or homepage', code: 'INVALID_KIND' };
   }
 
   let normalizedValue = '';
-  if (kind === 'internal') {
+  if (kind === 'homepage') {
+    normalizedValue = '__homepage__';
+  } else if (kind === 'internal') {
     if (typeof raw.target_value !== 'string' || raw.target_value.trim().length === 0) {
       return { valid: false, error: 'Internal target must specify a destination/funnel ID', code: 'INVALID_INTERNAL_TARGET' };
     }
@@ -290,11 +334,7 @@ export function resolveNavigationItem(
     };
   }
 
-  // Internal link resolution via funnel_id
-  const funnelId = item.target_value;
-
-  // 1. Check if it targets the homepage funnel
-  if (context.homepageFunnelId && context.homepageFunnelId === funnelId) {
+  if (item.target_kind === 'homepage') {
     return {
       ...item,
       resolved_href: '/',
@@ -302,7 +342,10 @@ export function resolveNavigationItem(
     };
   }
 
-  // 2. Check effective routes for this funnel
+  // Internal link resolution via funnel_id
+  const funnelId = item.target_value;
+
+  // Check effective routes for this funnel
   const matchingRoute = context.effectiveRoutes.find(r => r.funnel_id === funnelId);
   if (!matchingRoute) {
     return {
@@ -337,4 +380,52 @@ export function resolveEffectiveNavigation(
   }
 ): ResolvedNavigationItem[] {
   return items.map(item => resolveNavigationItem(item, context));
+}
+
+export interface PublicNavigationLink {
+  label: string;
+  path: string;
+  is_cta?: boolean;
+}
+
+export function resolvePublicNavigation(
+  items: SiteNavigationItem[],
+  context: {
+    liveRoutes: readonly { funnel_id: string; path: string }[];
+    homepageFunnelId?: string | null;
+  }
+): PublicNavigationLink[] {
+  const result: PublicNavigationLink[] = [];
+
+  for (const item of items) {
+    if (!item.visible) continue;
+
+    if (item.target_kind === 'external') {
+      result.push({ label: item.label, path: item.target_value, ...(item.is_cta ? { is_cta: true } : {}) });
+      continue;
+    }
+
+    if (item.target_kind === 'phone') {
+      result.push({ label: item.label, path: `tel:${item.target_value}`, ...(item.is_cta ? { is_cta: true } : {}) });
+      continue;
+    }
+
+    if (item.target_kind === 'email') {
+      result.push({ label: item.label, path: `mailto:${item.target_value}`, ...(item.is_cta ? { is_cta: true } : {}) });
+      continue;
+    }
+
+    if (item.target_kind === 'homepage') {
+      result.push({ label: item.label, path: '/', ...(item.is_cta ? { is_cta: true } : {}) });
+      continue;
+    }
+
+    const route = context.liveRoutes.find(r => r.funnel_id === item.target_value);
+    if (route) {
+      result.push({ label: item.label, path: route.path, ...(item.is_cta ? { is_cta: true } : {}) });
+    }
+    // If not resolvable, omit safely (fail-closed, no #, no corrupt link)
+  }
+
+  return result;
 }

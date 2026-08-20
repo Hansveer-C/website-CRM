@@ -27,6 +27,7 @@ export interface PublicSiteNavigationItem {
   label: string;
   path: string;
   visible?: boolean;
+  isCta?: boolean;
   children?: readonly PublicSiteNavigationItem[];
 }
 
@@ -41,6 +42,7 @@ export interface PublicSiteHeader {
 export interface PublicSiteFooterLink {
   label: string;
   path: string;
+  isCta?: boolean;
 }
 
 export interface PublicSiteFooter {

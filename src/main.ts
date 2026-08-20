@@ -1,5 +1,5 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
-import { escapeHtmlText, safeTelHref } from './crm_html_output';
+import { escapeHtmlText, safeTelHref, safeNavHref } from './crm_html_output';
 import { contactMatchesClientSearch, formatContactPhone, hasContactPhone } from './crm_contact_phone';
 import { templates } from './templates';
 import { Activity, Contact, Funnel, Page, PageSection, User, Website, WebsiteLayout, WebsiteRoute, WebsiteSettings } from './types';
@@ -7649,19 +7649,38 @@ function renderPublicHeader(config: any, settings: any) {
          <span style="font-weight: 800; font-size: 1.25rem; color: #1e293b; overflow-wrap: anywhere;">${displayName}</span>
       </div>
       <nav style="display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: center; justify-content: flex-end; min-width: 0; max-width: 100%;">
-         ${(config.nav_items || []).map((item: any) => `
-           <a href="/site${item.path.startsWith('/') ? item.path : '/' + item.path}"
-              onclick="event.preventDefault(); window.navigateTo('site', '${item.path}')"
-              style="text-decoration: none; color: #475569; font-weight: 600; font-size: 0.95rem; transition: color 0.2s;"
-              onmouseover="this.style.color='var(--primary-color)'"
-              onmouseout="this.style.color='#475569'">
-              ${item.label}
-           </a>
-         `).join('')}
+         ${(config.nav_items || []).map((item: any) => {
+           const isCta = Boolean(item.is_cta || item.isCta);
+           const rawPath = String(item.path || '');
+           const isSpecialScheme = rawPath.startsWith('http://') || rawPath.startsWith('https://') || rawPath.startsWith('tel:') || rawPath.startsWith('mailto:');
+           const href = safeNavHref(rawPath);
+           const clickHandler = isSpecialScheme
+             ? ''
+             : `data-nav-path="${escapeHtmlText(rawPath)}" onclick="event.preventDefault(); window.navigateTo('site', this.getAttribute('data-nav-path'))"`;
+           if (isCta) {
+             return `
+               <a href="${escapeHtmlText(href)}"
+                  ${clickHandler}
+                  class="btn-primary"
+                  style="padding: 8px 16px; font-size: 0.9rem; border-radius: 8px; text-decoration: none; font-weight: 700;">
+                  ${escapeHtmlText(item.label)}
+               </a>
+             `;
+           }
+           return `
+             <a href="${escapeHtmlText(href)}"
+                ${clickHandler}
+                style="text-decoration: none; color: #475569; font-weight: 600; font-size: 0.95rem; transition: color 0.2s;"
+                onmouseover="this.style.color='var(--primary-color)'"
+                onmouseout="this.style.color='#475569'">
+                ${escapeHtmlText(item.label)}
+             </a>
+           `;
+         }).join('')}
          ${config.cta_text ? `
-           <a href="#quote-form" class="btn-primary" style="padding: 10px 20px; font-size: 0.9rem; border-radius: 8px; text-decoration: none;" onclick="event.preventDefault(); document.querySelector('#quote-form, .site-form-section')?.scrollIntoView({behavior: 'smooth', block: 'start'});">${config.cta_text}</a>
+           <a href="#quote-form" class="btn-primary" style="padding: 10px 20px; font-size: 0.9rem; border-radius: 8px; text-decoration: none;" onclick="event.preventDefault(); document.querySelector('#quote-form, .site-form-section')?.scrollIntoView({behavior: 'smooth', block: 'start'});">${escapeHtmlText(config.cta_text)}</a>
          ` : `
-           <a href="tel:${settings.phone}" style="color: var(--primary-color); font-weight: 700; text-decoration: none;">Call ${settings.phone}</a>
+           <a href="tel:${settings.phone}" style="color: var(--primary-color); font-weight: 700; text-decoration: none;">Call ${escapeHtmlText(settings.phone)}</a>
          `}
       </nav>
     </header>
@@ -7683,24 +7702,32 @@ function renderPublicFooter(config: any, settings: any) {
       <div style="max-width: 1200px; margin: 0 auto;">
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 40px; margin-bottom: 40px;">
           <div>
-            <h3 style="color: white; font-size: 1.5rem; font-weight: 800; margin-bottom: 16px; letter-spacing: -0.5px;">${businessName}</h3>
+            <h3 style="color: white; font-size: 1.5rem; font-weight: 800; margin-bottom: 16px; letter-spacing: -0.5px;">${escapeHtmlText(businessName)}</h3>
             <p style="color: #94a3b8; line-height: 1.6; font-size: 0.95rem; margin-bottom: 24px;">
               Providing professional exterior cleaning and restoration services with a focus on quality, reliability, and customer satisfaction.
             </p>
             <div style="display: flex; align-items: center; gap: 10px; color: #3b82f6; font-weight: 600;">
-              <span>Serving ${serviceArea}</span>
+              <span>Serving ${escapeHtmlText(serviceArea)}</span>
             </div>
           </div>
           <div>
             <h4 style="color: white; font-size: 1.1rem; font-weight: 700; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 1px;">Navigation</h4>
             <div style="display: flex; flex-direction: column; gap: 12px;">
-              ${links.map((l: any) => `
-                <a href="${l.path}"
-                   onclick="event.preventDefault(); window.navigateTo('site', '${l.path}')"
-                   style="color: #94a3b8; text-decoration: none; font-size: 0.9rem; transition: all 0.2s;" onmouseover="this.style.color='white'; this.style.paddingLeft='4px'" onmouseout="this.style.color='#94a3b8'; this.style.paddingLeft='0'">
-                  ${l.label}
-                </a>
-              `).join('')}
+              ${links.map((l: any) => {
+                const rawPath = String(l.path || '');
+                const isSpecialScheme = rawPath.startsWith('http://') || rawPath.startsWith('https://') || rawPath.startsWith('tel:') || rawPath.startsWith('mailto:');
+                const href = safeNavHref(rawPath);
+                const clickHandler = isSpecialScheme
+                  ? ''
+                  : `data-nav-path="${escapeHtmlText(rawPath)}" onclick="event.preventDefault(); window.navigateTo('site', this.getAttribute('data-nav-path'))"`;
+                return `
+                  <a href="${escapeHtmlText(href)}"
+                     ${clickHandler}
+                     style="color: #94a3b8; text-decoration: none; font-size: 0.9rem; transition: all 0.2s;" onmouseover="this.style.color='white'; this.style.paddingLeft='4px'" onmouseout="this.style.color='#94a3b8'; this.style.paddingLeft='0'">
+                    ${escapeHtmlText(l.label)}
+                  </a>
+                `;
+              }).join('')}
             </div>
           </div>
           <div>

@@ -84,11 +84,19 @@ export function mapRedirect(row: Record<string, unknown>): PublicWebsiteRouteRed
   };
 }
 
+export interface PublicCanonicalNavigationRecord {
+  websiteId: string;
+  menuScope: string;
+  items: unknown[];
+  revision: number;
+}
+
 /** Read-only, one-site data boundary. Deliberately exposes no generic query or write operation. */
 export interface PublicSiteDataSource {
   findWebsiteByHost(host: string): Promise<PublicWebsiteRecord | null>;
   findRouteForWebsite(websiteId: string, path: string): Promise<PublicWebsiteRouteRecord | null>;
   findRedirectForWebsite?(websiteId: string, path: string): Promise<PublicWebsiteRouteRedirectRecord | null>;
+  listRoutesForWebsite?(websiteId: string): Promise<readonly PublicWebsiteRouteRecord[]>;
   findPageForRoute(
     website: PublicWebsiteRecord,
     route: PublicWebsiteRouteRecord,
@@ -96,6 +104,10 @@ export interface PublicSiteDataSource {
   ): Promise<PublicPageRecord | null>;
   getPublicWebsiteSettings(websiteId: string): Promise<PublicWebsiteSettingsRecord | null>;
   getPublicWebsiteLayout(websiteId: string): Promise<PublicWebsiteLayoutRecord | null>;
+  getPublicCanonicalNavigation?(
+    websiteId: string,
+    menuScope?: 'primary' | 'footer'
+  ): Promise<PublicCanonicalNavigationRecord | null>;
   getPublicationTarget(websiteId: string, pageId: string): Promise<PublicPublicationTargetRecord | null>;
   getRevisionById(
     revisionId: string,
@@ -290,6 +302,33 @@ export class SupabasePublicSiteDataSource implements PublicSiteDataSource {
       'layout-read'
     );
     return row ? { headerConfig: row.header_config, footerConfig: row.footer_config } : null;
+  }
+
+  async listRoutesForWebsite(websiteId: string): Promise<readonly PublicWebsiteRouteRecord[]> {
+    const { data, error } = await this.client.from('website_routes').select<Record<string, unknown>[]>(
+      'id,website_id,path,funnel_id'
+    ).eq('website_id', websiteId);
+    if (error) throw new PublicSiteDataSourceError('routes-list-read');
+    return (data ?? []).map(mapRoute);
+  }
+
+  async getPublicCanonicalNavigation(
+    websiteId: string,
+    menuScope: 'primary' | 'footer' = 'primary'
+  ): Promise<PublicCanonicalNavigationRecord | null> {
+    const row = await this.one(
+      this.client.from('builder_site_navigation_live').select<Record<string, unknown>>(
+        'website_id,menu_scope,items,revision'
+      ).eq('website_id', websiteId).eq('menu_scope', menuScope).limit(1).maybeSingle(),
+      'navigation-live-read'
+    );
+    if (!row) return null;
+    return {
+      websiteId: String(row.website_id),
+      menuScope: String(row.menu_scope),
+      items: Array.isArray(row.items) ? (row.items as unknown[]) : [],
+      revision: Number(row.revision ?? 1)
+    };
   }
 
   async getPublicationTarget(websiteId: string, pageId: string): Promise<PublicPublicationTargetRecord | null> {
