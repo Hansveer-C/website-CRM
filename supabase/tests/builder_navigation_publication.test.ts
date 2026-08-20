@@ -56,21 +56,24 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
         );
 
         create table if not exists public.pages (
-          id uuid primary key default gen_random_uuid(),
+          id text primary key,
           user_id text not null references public.users(id) on delete cascade,
-          funnel_id text references public.funnels(id) on delete set null,
+          funnel_id text references public.funnels(id) on delete cascade,
           name text not null,
           slug text not null,
           status text not null default 'draft',
+          step_order integer not null default 0,
           created_at timestamptz not null default now()
         );
 
+        alter table public.pages add column if not exists step_order integer not null default 0;
+
         create table if not exists public.builder_publication_targets (
-          id uuid primary key default gen_random_uuid(),
-          website_id uuid not null,
-          page_id uuid not null,
-          published_revision_id uuid not null,
-          published_at timestamptz not null default now()
+          website_id uuid not null references public.websites(id) on delete cascade,
+          page_id text not null references public.pages(id) on delete cascade,
+          published_revision_id text not null,
+          published_at timestamptz not null default now(),
+          primary key (website_id, page_id)
         );
 
         create table if not exists public.websites (
@@ -175,7 +178,7 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
 
     // Create published pages so route publication validations pass
     await client.query(
-      'insert into public.pages (id, user_id, funnel_id, name, slug, status) values ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $10, $11, $12)',
+      'insert into public.pages (id, user_id, funnel_id, name, slug, status, step_order) values ($1, $2, $3, $4, $5, $6, 0), ($7, $8, $9, $10, $11, $12, 1)',
       [
         randomUUID(), userId, fnlServices, 'Services Page', 'services', 'published',
         randomUUID(), userId, fnlAbout, 'About Page', 'about', 'published'
