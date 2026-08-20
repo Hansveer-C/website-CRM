@@ -20,11 +20,13 @@ export interface BuilderSiteNavigationRepository {
     websiteId: string,
     items: SiteNavigationItem[],
     expectedBaseRevision?: number,
+    expectedDraftRevision?: number,
     menuScope?: NavigationMenuScope
-  ): Promise<SiteNavigationRepositoryResult<{ is_draft: boolean; base_revision: number }>>;
+  ): Promise<SiteNavigationRepositoryResult<{ is_draft: boolean; base_revision: number; draft_revision: number }>>;
 
   revertNavigationDraft(
     websiteId: string,
+    expectedDraftRevision?: number,
     menuScope?: NavigationMenuScope
   ): Promise<SiteNavigationRepositoryResult<EffectiveSiteNavigation>>;
 }
@@ -32,7 +34,7 @@ export interface BuilderSiteNavigationRepository {
 // In-Memory Mock Repository for Testing / Offline Development
 export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigationRepository {
   private liveStore = new Map<string, SiteNavigationSnapshot>();
-  private draftStore = new Map<string, { items: SiteNavigationItem[]; base_revision: number; updated_at: string }>();
+  private draftStore = new Map<string, { items: SiteNavigationItem[]; base_revision: number; draft_revision: number; updated_at: string }>();
   private validFunnelIds = new Set<string>();
 
   public registerFunnel(funnelId: string) {
@@ -75,6 +77,7 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
           raw_items: [...draft.items],
           is_draft: true,
           base_revision: draft.base_revision,
+          draft_revision: draft.draft_revision,
           live_revision: liveRevision,
           updated_at: draft.updated_at
         }
@@ -90,6 +93,7 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
         raw_items: [...liveItems],
         is_draft: false,
         base_revision: liveRevision,
+        draft_revision: 0,
         live_revision: liveRevision,
         updated_at: live?.updated_at ?? new Date().toISOString()
       }
@@ -100,14 +104,16 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
     websiteId: string,
     items: SiteNavigationItem[],
     expectedBaseRevision?: number,
+    expectedDraftRevision?: number,
     menuScope: NavigationMenuScope = 'primary'
-  ): Promise<SiteNavigationRepositoryResult<{ is_draft: boolean; base_revision: number }>> {
+  ): Promise<SiteNavigationRepositoryResult<{ is_draft: boolean; base_revision: number; draft_revision: number }>> {
     if (!websiteId) {
       return { success: false, error: 'Website ID is required', code: 'INVALID_INPUT' };
     }
 
     const key = `${websiteId}:${menuScope}`;
     const live = this.liveStore.get(key);
+    const draft = this.draftStore.get(key);
     const liveRevision = live?.revision ?? 0;
     const liveItems = live?.items ?? [];
 
@@ -117,6 +123,24 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
         error: 'The navigation configuration was modified elsewhere. Reload and try again.',
         code: 'CONFLICT'
       };
+    }
+
+    if (draft) {
+      if (typeof expectedDraftRevision === 'number' && expectedDraftRevision !== draft.draft_revision) {
+        return {
+          success: false,
+          error: 'The navigation draft was modified elsewhere. Reload and try again.',
+          code: 'CONFLICT'
+        };
+      }
+    } else {
+      if (typeof expectedDraftRevision === 'number' && expectedDraftRevision !== 0) {
+        return {
+          success: false,
+          error: 'The navigation draft was modified elsewhere. Reload and try again.',
+          code: 'CONFLICT'
+        };
+      }
     }
 
     // Validate internal items target valid funnels
@@ -139,14 +163,18 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
         success: true,
         data: {
           is_draft: false,
-          base_revision: liveRevision
+          base_revision: liveRevision,
+          draft_revision: 0
         }
       };
     }
 
+    const nextDraftRev = draft ? draft.draft_revision + 1 : 1;
+
     this.draftStore.set(key, {
       items: [...items],
       base_revision: liveRevision,
+      draft_revision: nextDraftRev,
       updated_at: new Date().toISOString()
     });
 
@@ -154,13 +182,15 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
       success: true,
       data: {
         is_draft: true,
-        base_revision: liveRevision
+        base_revision: liveRevision,
+        draft_revision: nextDraftRev
       }
     };
   }
 
   async revertNavigationDraft(
     websiteId: string,
+    expectedDraftRevision?: number,
     menuScope: NavigationMenuScope = 'primary'
   ): Promise<SiteNavigationRepositoryResult<EffectiveSiteNavigation>> {
     if (!websiteId) {
@@ -168,6 +198,16 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
     }
 
     const key = `${websiteId}:${menuScope}`;
+    const draft = this.draftStore.get(key);
+
+    if (draft && typeof expectedDraftRevision === 'number' && expectedDraftRevision !== draft.draft_revision) {
+      return {
+        success: false,
+        error: 'The navigation draft was modified elsewhere. Reload and try again.',
+        code: 'CONFLICT'
+      };
+    }
+
     this.draftStore.delete(key);
     return this.getEffectiveNavigation(websiteId, menuScope);
   }

@@ -19,16 +19,16 @@ export class SupabaseBuilderSiteNavigationRepository implements BuilderSiteNavig
     if (code === 'PT401' || msg.includes('Authentication required')) {
       return { error: 'Authentication required', code: 'UNAUTHORIZED' };
     }
-    if (code === 'PT403') {
+    if (code === 'PT403' || msg.includes('permission denied')) {
       return { error: 'Permission denied', code: 'FORBIDDEN' };
     }
-    if (code === 'PT404' || msg.includes('not found')) {
+    if (code === 'PT404' || msg.includes('not found') || msg.includes('not associated')) {
       return { error: msg, code: 'NOT_FOUND' };
     }
     if (code === 'PT409' || msg.includes('modified elsewhere')) {
       return { error: msg, code: 'CONFLICT' };
     }
-    if (code === 'PT400' || msg.includes('Invalid') || msg.includes('required')) {
+    if (code === 'PT400' || msg.includes('Invalid') || msg.includes('required') || msg.includes('cannot')) {
       return { error: msg, code: 'INVALID_INPUT' };
     }
 
@@ -65,6 +65,7 @@ export class SupabaseBuilderSiteNavigationRepository implements BuilderSiteNavig
           raw_items: rawItems,
           is_draft: Boolean(data.is_draft),
           base_revision: Number(data.base_revision ?? 0),
+          draft_revision: Number(data.draft_revision ?? 0),
           live_revision: Number(data.live_revision ?? 0),
           updated_at: data.updated_at || new Date().toISOString()
         }
@@ -78,8 +79,9 @@ export class SupabaseBuilderSiteNavigationRepository implements BuilderSiteNavig
     websiteId: string,
     items: SiteNavigationItem[],
     expectedBaseRevision?: number,
+    expectedDraftRevision?: number,
     menuScope: NavigationMenuScope = 'primary'
-  ): Promise<SiteNavigationRepositoryResult<{ is_draft: boolean; base_revision: number }>> {
+  ): Promise<SiteNavigationRepositoryResult<{ is_draft: boolean; base_revision: number; draft_revision: number }>> {
     try {
       const client = await this.clientProvider();
       if (!client) {
@@ -90,7 +92,8 @@ export class SupabaseBuilderSiteNavigationRepository implements BuilderSiteNavig
         p_website_id: websiteId,
         p_menu_scope: menuScope,
         p_items: items,
-        p_expected_base_revision: expectedBaseRevision ?? null
+        p_expected_base_revision: expectedBaseRevision ?? null,
+        p_expected_draft_revision: expectedDraftRevision ?? null
       });
 
       if (error) {
@@ -101,7 +104,8 @@ export class SupabaseBuilderSiteNavigationRepository implements BuilderSiteNavig
         success: true,
         data: {
           is_draft: Boolean(data?.is_draft),
-          base_revision: Number(data?.base_revision ?? 0)
+          base_revision: Number(data?.base_revision ?? 0),
+          draft_revision: Number(data?.draft_revision ?? 0)
         }
       };
     } catch (err: any) {
@@ -111,6 +115,7 @@ export class SupabaseBuilderSiteNavigationRepository implements BuilderSiteNavig
 
   async revertNavigationDraft(
     websiteId: string,
+    expectedDraftRevision?: number,
     menuScope: NavigationMenuScope = 'primary'
   ): Promise<SiteNavigationRepositoryResult<EffectiveSiteNavigation>> {
     try {
@@ -121,7 +126,8 @@ export class SupabaseBuilderSiteNavigationRepository implements BuilderSiteNavig
 
       const { data, error } = await client.rpc('revert_builder_site_navigation_draft', {
         p_website_id: websiteId,
-        p_menu_scope: menuScope
+        p_menu_scope: menuScope,
+        p_expected_draft_revision: expectedDraftRevision ?? null
       });
 
       if (error) {
@@ -139,6 +145,7 @@ export class SupabaseBuilderSiteNavigationRepository implements BuilderSiteNavig
           raw_items: rawItems,
           is_draft: Boolean(data.is_draft),
           base_revision: Number(data.base_revision ?? 0),
+          draft_revision: Number(data.draft_revision ?? 0),
           live_revision: Number(data.live_revision ?? 0),
           updated_at: data.updated_at || new Date().toISOString()
         }

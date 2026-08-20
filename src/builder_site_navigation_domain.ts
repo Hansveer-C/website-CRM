@@ -42,6 +42,7 @@ export interface EffectiveSiteNavigation {
   raw_items: SiteNavigationItem[];
   is_draft: boolean;
   base_revision: number;
+  draft_revision: number;
   live_revision: number;
   updated_at: string;
 }

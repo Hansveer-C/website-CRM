@@ -22,6 +22,7 @@ export type SiteNavigationUiState =
       rawItems: SiteNavigationItem[];
       isDraft: boolean;
       baseRevision: number;
+      draftRevision: number;
       liveRevision: number;
       isSaving: boolean;
       errorMessage: string | null;
@@ -99,6 +100,7 @@ export class BuilderSiteNavigationController {
       rawItems: res.data.raw_items,
       isDraft: res.data.is_draft,
       baseRevision: res.data.base_revision,
+      draftRevision: res.data.draft_revision,
       liveRevision: res.data.live_revision,
       isSaving: false,
       errorMessage: null
@@ -107,22 +109,29 @@ export class BuilderSiteNavigationController {
   }
 
   public async stageDraft(
-    items: SiteNavigationItem[],
+    proposedItems: SiteNavigationItem[],
     context: {
       effectiveRoutes: readonly EffectiveRoute[];
       homepageFunnelId?: string | null;
     }
   ): Promise<{ success: boolean; error?: string }> {
     if (this.state.status !== 'ready') {
-      return { success: false, error: 'Navigation state not ready' };
+      return { success: false, error: 'Controller not in ready state' };
     }
 
-    const normRes = validateAndNormalizeNavigationItems(items);
-    if (!normRes.valid) {
-      return { success: false, error: normRes.error };
+    const { websiteId, menuScope, baseRevision, draftRevision, liveRevision } = this.state;
+
+    // Validate and normalize contiguous positions in TypeScript domain before sending
+    const norm = validateAndNormalizeNavigationItems(proposedItems);
+    if (!norm.valid) {
+      this.state = {
+        ...this.state,
+        errorMessage: norm.error
+      };
+      this.notify();
+      return { success: false, error: norm.error };
     }
 
-    const { websiteId, menuScope, baseRevision, liveRevision } = this.state;
     this.state = {
       ...this.state,
       isSaving: true,
@@ -130,7 +139,13 @@ export class BuilderSiteNavigationController {
     };
     this.notify();
 
-    const res = await this.repo.stageNavigationDraft(websiteId, normRes.items, baseRevision, menuScope);
+    const res = await this.repo.stageNavigationDraft(
+      websiteId,
+      norm.items,
+      baseRevision,
+      draftRevision,
+      menuScope
+    );
 
     if (!res.success) {
       if (this.state.status === 'ready' && this.state.websiteId === websiteId) {
@@ -144,15 +159,16 @@ export class BuilderSiteNavigationController {
       return { success: false, error: res.error };
     }
 
-    const resolved = resolveEffectiveNavigation(normRes.items, context);
+    const resolved = resolveEffectiveNavigation(norm.items, context);
 
     if (this.state.status === 'ready' && this.state.websiteId === websiteId) {
       this.state = {
         ...this.state,
         items: resolved,
-        rawItems: normRes.items,
+        rawItems: norm.items,
         isDraft: res.data.is_draft,
         baseRevision: res.data.base_revision,
+        draftRevision: res.data.draft_revision,
         liveRevision,
         isSaving: false,
         errorMessage: null
@@ -163,15 +179,18 @@ export class BuilderSiteNavigationController {
     return { success: true };
   }
 
-  public async revertDraft(context: {
-    effectiveRoutes: readonly EffectiveRoute[];
-    homepageFunnelId?: string | null;
-  }): Promise<{ success: boolean; error?: string }> {
+  public async revertDraft(
+    context: {
+      effectiveRoutes: readonly EffectiveRoute[];
+      homepageFunnelId?: string | null;
+    }
+  ): Promise<{ success: boolean; error?: string }> {
     if (this.state.status !== 'ready') {
-      return { success: false, error: 'Navigation state not ready' };
+      return { success: false, error: 'Controller not in ready state' };
     }
 
-    const { websiteId, menuScope } = this.state;
+    const { websiteId, menuScope, draftRevision } = this.state;
+
     this.state = {
       ...this.state,
       isSaving: true,
@@ -179,7 +198,7 @@ export class BuilderSiteNavigationController {
     };
     this.notify();
 
-    const res = await this.repo.revertNavigationDraft(websiteId, menuScope);
+    const res = await this.repo.revertNavigationDraft(websiteId, draftRevision, menuScope);
 
     if (!res.success) {
       if (this.state.status === 'ready' && this.state.websiteId === websiteId) {
@@ -202,6 +221,7 @@ export class BuilderSiteNavigationController {
         rawItems: res.data.raw_items,
         isDraft: res.data.is_draft,
         baseRevision: res.data.base_revision,
+        draftRevision: res.data.draft_revision,
         liveRevision: res.data.live_revision,
         isSaving: false,
         errorMessage: null

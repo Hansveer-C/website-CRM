@@ -48,10 +48,11 @@ describe('BuilderSiteNavigationController', () => {
       expect(state.items).toEqual([]);
       expect(state.isDraft).toBe(false);
       expect(state.baseRevision).toBe(0);
+      expect(state.draftRevision).toBe(0);
     }
   });
 
-  it('stages draft items and updates resolved navigation state', async () => {
+  it('stages draft items and updates resolved navigation state with draftRevision', async () => {
     const repo = new MockBuilderSiteNavigationRepository();
     repo.registerFunnel('fnl-home');
     repo.registerFunnel('fnl-serv');
@@ -72,11 +73,21 @@ describe('BuilderSiteNavigationController', () => {
     expect(state.status).toBe('ready');
     if (state.status === 'ready') {
       expect(state.isDraft).toBe(true);
+      expect(state.draftRevision).toBe(1);
       expect(state.items.length).toBe(3);
       expect(state.items[0].resolved_href).toBe('/');
       expect(state.items[1].resolved_href).toBe('/services');
       expect(state.items[2].resolved_href).toBe('tel:+15551234567');
       expect(state.items[2].is_cta).toBe(true);
+    }
+
+    // Subsequent draft stage increments draft revision
+    const stage2Result = await controller.stageDraft([
+      { id: '1', label: 'Home Page', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }
+    ], context);
+    expect(stage2Result.success).toBe(true);
+    if (controller.getState().status === 'ready') {
+      expect((controller.getState() as any).draftRevision).toBe(2);
     }
   });
 
@@ -108,12 +119,13 @@ describe('BuilderSiteNavigationController', () => {
     expect(finalState.status).toBe('ready');
     if (finalState.status === 'ready') {
       expect(finalState.isDraft).toBe(false);
+      expect(finalState.draftRevision).toBe(0);
       expect(finalState.items.length).toBe(1);
       expect(finalState.items[0].label).toBe('Home');
     }
   });
 
-  it('rejects stale draft write and reports conflict error', async () => {
+  it('rejects stale live revision write and reports conflict error', async () => {
     const repo = new MockBuilderSiteNavigationRepository();
     repo.registerFunnel('fnl-home');
     const liveItems: SiteNavigationItem[] = [
@@ -134,6 +146,40 @@ describe('BuilderSiteNavigationController', () => {
 
     expect(res.success).toBe(false);
     expect(res.error).toContain('modified elsewhere');
+  });
+
+  it('rejects stale draft write when live is unchanged but another editor changed the draft', async () => {
+    const repo = new MockBuilderSiteNavigationRepository();
+    repo.registerFunnel('fnl-home');
+    repo.registerFunnel('fnl-serv');
+    const liveItems: SiteNavigationItem[] = [
+      { id: '1', label: 'Home', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }
+    ];
+    repo.setLiveSnapshot('site-1', liveItems, 1);
+
+    // Tab A loads
+    const tabA = new BuilderSiteNavigationController(repo);
+    await tabA.hydrate('site-1', context);
+
+    // Tab B loads same initial state
+    const tabB = new BuilderSiteNavigationController(repo);
+    await tabB.hydrate('site-1', context);
+
+    // Tab B saves a draft (advancing draft revision to 1)
+    const resB = await tabB.stageDraft(
+      [{ id: '1', label: 'Home (Tab B)', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }],
+      context
+    );
+    expect(resB.success).toBe(true);
+
+    // Tab A attempts to save against stale draftRevision 0
+    const resA = await tabA.stageDraft(
+      [{ id: '1', label: 'Home (Tab A)', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }],
+      context
+    );
+
+    expect(resA.success).toBe(false);
+    expect(resA.error).toContain('modified elsewhere');
   });
 
   it('discards out-of-order hydration responses across website switches', async () => {
@@ -159,6 +205,7 @@ describe('BuilderSiteNavigationController', () => {
           raw_items: [],
           is_draft: false,
           base_revision: 1,
+          draft_revision: 0,
           live_revision: 1,
           updated_at: new Date().toISOString()
         }
@@ -181,6 +228,7 @@ describe('BuilderSiteNavigationController', () => {
         raw_items: [],
         is_draft: false,
         base_revision: 1,
+        draft_revision: 0,
         live_revision: 1,
         updated_at: new Date().toISOString()
       }
