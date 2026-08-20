@@ -101,9 +101,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
           constraint website_routes_website_path_key unique (website_id, path)
         );
 
-        drop function if exists auth.uid() cascade;
-        create or replace function auth.uid() returns text as $$
-          select nullif(current_setting('request.jwt.claim.sub', true), '')::text;
+        create or replace function auth.uid() returns uuid as $$
+          select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
         $$ language sql stable;
 
         grant all on table public.users to authenticated, anon, service_role;
@@ -135,9 +134,9 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
     }
   });
 
-  async function createTestFixture(userIdPrefix: string = 'user') {
+  async function createTestFixture() {
     const client = await pool.connect();
-    const userId = `${userIdPrefix}-${randomUUID()}`;
+    const userId = randomUUID();
     const userEmail = `${userId}@example.com`;
 
     await client.query('INSERT INTO public.users (id, email) VALUES ($1, $2)', [userId, userEmail]);
@@ -225,8 +224,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
   });
 
   it('2. rejects foreign website plan request (PT404)', async () => {
-    const fixA = await createTestFixture('userA');
-    const fixB = await createTestFixture('userB');
+    const fixA = await createTestFixture();
+    const fixB = await createTestFixture();
     const client = await pool.connect();
     try {
       await setAuth(client, fixA.userId);
@@ -254,8 +253,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
   });
 
   it('4. rejects foreign website publish request (PT404)', async () => {
-    const fixA = await createTestFixture('userA');
-    const fixB = await createTestFixture('userB');
+    const fixA = await createTestFixture();
+    const fixB = await createTestFixture();
     const client = await pool.connect();
     try {
       await setAuth(client, fixA.userId);
