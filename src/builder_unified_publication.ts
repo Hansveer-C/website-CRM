@@ -73,7 +73,8 @@ export interface WebsitePublishExpectedRouteDraft {
 export interface WebsitePublishExpectedPageState {
   page_id: string;
   save_revision: number;
-  document_hash: string;
+  section_document_hash: string;
+  canonical_document_fingerprint: string;
   current_published_revision_id: string | null;
 }
 

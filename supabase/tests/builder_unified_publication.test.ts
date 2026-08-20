@@ -287,7 +287,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     }
   });
 
-  it('2. rejects foreign website plan request (PT404)', async () => {
+  it('2. rejects cross-tenant plan request (PT404)', async () => {
     const fixA = await createTestFixture();
     const fixB = await createTestFixture();
     const client = await pool.connect();
@@ -302,7 +302,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     }
   });
 
-  it('3. rejects unauthenticated publish request (PT401)', async () => {
+  it('3. rejects unauthenticated publish execution (PT401)', async () => {
     const { websiteId } = await createTestFixture();
     const client = await pool.connect();
     try {
@@ -316,7 +316,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     }
   });
 
-  it('4. rejects foreign website publish request (PT404)', async () => {
+  it('4. rejects cross-tenant publish execution (PT404)', async () => {
     const fixA = await createTestFixture();
     const fixB = await createTestFixture();
     const client = await pool.connect();
@@ -331,32 +331,23 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     }
   });
 
-  it('5. published page edited through canonical save boundary: plan reports page pending (A & B)', async () => {
-    const { userId, websiteId, page1Id } = await createTestFixture();
+  it('5. clean website: plan reports no changes (B)', async () => {
+    const { userId, websiteId } = await createTestFixture();
     const client = await pool.connect();
     try {
       await setAuth(client, userId);
+      const res = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan = res.rows[0].plan;
 
-      // Baseline: plan should report no changes
-      const plan1Res = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
-      const plan1 = plan1Res.rows[0].plan;
-      expect(plan1.has_pending_changes).toBe(false);
-      expect(plan1.summary.pages.has_changes).toBe(false);
-
-      // Edit page1 through canonical save boundary
-      const updatedSec1 = [
-        { id: `sec1-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Updated Welcome Title' }, styles: {} }
-      ];
-      await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page1Id, JSON.stringify(updatedSec1)]);
-
-      // Now plan should report page1 pending
-      const plan2Res = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
-      const plan2 = plan2Res.rows[0].plan;
-      expect(plan2.has_pending_changes).toBe(true);
-      expect(plan2.pending_domains).toContain('pages');
-      expect(plan2.summary.pages.has_changes).toBe(true);
-      expect(plan2.summary.pages.count).toBe(1);
-      expect(plan2.summary.pages.items[0].page_id).toBe(page1Id);
+      expect(plan.has_pending_changes).toBe(false);
+      expect(plan.pending_domains).toEqual([]);
+      expect(plan.is_publishable).toBe(true);
+      expect(plan.blockers).toEqual([]);
+      expect(plan.summary.pages.has_changes).toBe(false);
+      expect(plan.summary.homepage.changed).toBe(false);
+      expect(plan.summary.routes.has_changes).toBe(false);
+      expect(plan.summary.primary_navigation.has_changes).toBe(false);
+      expect(plan.summary.footer_navigation.has_changes).toBe(false);
     } finally {
       await setAuth(client, null);
       client.release();
@@ -369,27 +360,40 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     try {
       await setAuth(client, userId);
 
-      // Edit page1 content
-      const updatedSec = [
-        { id: `sec1-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Exclusive Special' }, styles: {} }
+      // Verify clean initially
+      const plan1Res = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      expect(plan1Res.rows[0].plan.has_pending_changes).toBe(false);
+
+      // Save a new section document via canonical save_page_sections_document
+      const updatedSec1 = [
+        { id: `sec1-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Exclusive Special' }, styles: { bg: 'blue' } }
       ];
-      await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page1Id, JSON.stringify(updatedSec)]);
+      await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page1Id, JSON.stringify(updatedSec1)]);
 
-      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
-      const plan = planRes.rows[0].plan;
+      // Fetch publish plan -> pending changes detected
+      const plan2Res = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan2 = plan2Res.rows[0].plan;
+      expect(plan2.has_pending_changes).toBe(true);
+      expect(plan2.pending_domains).toContain('pages');
+      expect(plan2.summary.pages.has_changes).toBe(true);
+      expect(plan2.summary.pages.count).toBe(1);
+      expect(plan2.summary.pages.items[0].page_id).toBe(page1Id);
 
+      // Execute unified publish
       const pubRes = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as res', [
         websiteId,
-        JSON.stringify(plan.expected_state)
+        JSON.stringify(plan2.expected_state)
       ]);
-      const res = pubRes.rows[0].res;
-      expect(res.success).toBe(true);
-      expect(res.status).toBe('PUBLISHED');
-      expect(res.publication_revision).toBe(2);
+      const pub = pubRes.rows[0].res;
+      expect(pub.success).toBe(true);
+      expect(pub.publication_revision).toBe(2);
 
-      // Verify the new publication target
+      // Verify target updated and document has exact content
       const targetRes = await client.query(
-        'SELECT bpt.*, bpr.document FROM public.builder_publication_targets bpt JOIN public.builder_published_revisions bpr ON bpr.id = bpt.published_revision_id WHERE bpt.website_id = $1 AND bpt.page_id = $2',
+        `SELECT bpt.*, bpr.document, bpr.document_fingerprint
+         FROM public.builder_publication_targets bpt
+         JOIN public.builder_published_revisions bpr ON bpr.id = bpt.published_revision_id
+         WHERE bpt.website_id = $1 AND bpt.page_id = $2`,
         [websiteId, page1Id]
       );
       expect(targetRes.rows.length).toBe(1);
@@ -400,24 +404,23 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     }
   });
 
-  it('7. concurrent page save after plan results in PT409 conflict (D & E)', async () => {
+  it('7. optimistic concurrency: page edited concurrently triggers PT409 (E)', async () => {
     const { userId, websiteId, page1Id } = await createTestFixture();
     const client = await pool.connect();
     try {
       await setAuth(client, userId);
 
-      // 1. Initial edit and plan
-      const secA = [{ id: `sec-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Title A' }, styles: {} }];
-      await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page1Id, JSON.stringify(secA)]);
-
+      // 1. Get plan at initial revision
       const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
       const staleExpectedState = planRes.rows[0].plan.expected_state;
 
-      // 2. Another tab edits the page content (e.g. revision 3)
-      const secB = [{ id: `sec-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Title B' }, styles: {} }];
-      await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 3)', [page1Id, JSON.stringify(secB)]);
+      // 2. Concurrently mutate page sections
+      const updatedSec = [
+        { id: `sec-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Concurrent Change' }, styles: {} }
+      ];
+      await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page1Id, JSON.stringify(updatedSec)]);
 
-      // 3. First tab attempts to publish with stale expected_state
+      // 3. Attempt publish using stale expected state
       await expect(
         client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
           websiteId,
@@ -430,8 +433,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     }
   });
 
-  it('8. navigation-only unified publish creates ZERO new builder_published_revisions (F)', async () => {
-    const { userId, websiteId, funnel1Id } = await createTestFixture();
+  it('8. nav-only publish does not republish unchanged page content (F)', async () => {
+    const { userId, websiteId } = await createTestFixture();
     const client = await pool.connect();
     try {
       await setAuth(client, userId);
@@ -717,29 +720,327 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     try {
       await setAuth(client, userId);
 
-      // Perform a valid publish
-      const secA = [{ id: `sec-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'New Edition' }, styles: {} }];
+      // Edit page1 and publish
+      const secA = [{ id: `sec-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'First Edit' }, styles: {} }];
       await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page1Id, JSON.stringify(secA)]);
 
-      const planRes1 = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
-      await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan = planRes.rows[0].plan;
+
+      const pub1Res = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as res', [
         websiteId,
-        JSON.stringify(planRes1.rows[0].plan.expected_state)
+        JSON.stringify(plan.expected_state)
+      ]);
+      expect(pub1Res.rows[0].res.success).toBe(true);
+      expect(pub1Res.rows[0].res.publication_revision).toBe(2);
+
+      // Now query plan again -> NO CHANGES
+      const cleanPlanRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const cleanPlan = cleanPlanRes.rows[0].plan;
+      expect(cleanPlan.has_pending_changes).toBe(false);
+
+      // Calling publish with clean plan returns NO_CHANGES status idempotently
+      const pub2Res = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as res', [
+        websiteId,
+        JSON.stringify(cleanPlan.expected_state)
+      ]);
+      expect(pub2Res.rows[0].res.success).toBe(true);
+      expect(pub2Res.rows[0].res.status).toBe('NO_CHANGES');
+
+      // Verify publication history has exactly 1 entry
+      const histRes = await client.query('SELECT public.get_builder_website_publication_history($1::uuid) as hist', [websiteId]);
+      expect(histRes.rows[0].hist.publications.length).toBe(1);
+    } finally {
+      await setAuth(client, null);
+      client.release();
+    }
+  });
+
+  it('16. two-session concurrency: page-save advisory lock blocks concurrent unified publish until commit, then publish detects stale state and throws PT409 (6 & 25.1)', async () => {
+    const { userId, websiteId, page1Id } = await createTestFixture();
+    const clientA = await pool.connect();
+    const clientB = await pool.connect();
+    try {
+      await setAuth(clientA, userId);
+      await setAuth(clientB, userId);
+
+      // Session A obtains initial publish plan at revision 1
+      const planRes = await clientA.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const planA = planRes.rows[0].plan;
+
+      // Session B begins transaction and starts saving page_sections on page1 (holding the page-sections advisory lock)
+      await clientB.query('BEGIN');
+      const secB = [{ id: `sec-b-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Session B Live Edit' }, styles: {} }];
+      await clientB.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page1Id, JSON.stringify(secB)]);
+
+      // Session A attempts to execute publish_builder_website using its earlier expected state
+      let publishDone = false;
+      let publishErr: any = null;
+      const publishPromise = clientA.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
+        websiteId,
+        JSON.stringify(planA.expected_state)
+      ]).then(() => {
+        publishDone = true;
+      }).catch((e) => {
+        publishDone = true;
+        publishErr = e;
+      });
+
+      // Verify Session A is actively blocked on the advisory lock while Session B is uncommitted
+      await new Promise((r) => setTimeout(r, 100));
+      expect(publishDone).toBe(false);
+
+      // Session B commits its transaction, releasing the lock and persisting revision 2
+      await clientB.query('COMMIT');
+
+      // Session A unblocks, reconstructs state under lock, detects stale expected state, and throws PT409
+      await publishPromise;
+      expect(publishDone).toBe(true);
+      expect(publishErr).toBeTruthy();
+      expect(publishErr.message).toMatch(/Website changes were updated elsewhere/);
+
+      // Verify zero audit publications exist
+      const pubCountRes = await clientA.query('SELECT count(*)::integer as count FROM public.builder_website_publications WHERE website_id = $1', [websiteId]);
+      expect(pubCountRes.rows[0].count).toBe(0);
+    } finally {
+      await setAuth(clientA, null);
+      await setAuth(clientB, null);
+      clientA.release();
+      clientB.release();
+    }
+  });
+
+  it('17. two-session concurrency: in-flight unified publish page-section lock blocks concurrent page save (7 & 25.2)', async () => {
+    const { userId, page1Id } = await createTestFixture();
+    const clientA = await pool.connect();
+    const clientB = await pool.connect();
+    try {
+      await setAuth(clientA, userId);
+      await setAuth(clientB, userId);
+
+      // Session A begins transaction and acquires the page-sections advisory lock
+      await clientA.query('BEGIN');
+      await clientA.query(`SELECT pg_advisory_xact_lock(hashtextextended('page-sections:' || $1, 0))`, [page1Id]);
+
+      // Session B attempts to save_page_sections_document on the same page
+      let saveDone = false;
+      let saveRes: any = null;
+      const secB = [{ id: `sec-b-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Session B After Publish' }, styles: {} }];
+      const savePromise = clientB.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2) as res', [
+        page1Id, JSON.stringify(secB)
+      ]).then((r) => {
+        saveDone = true;
+        saveRes = r;
+      });
+
+      // Verify Session B is blocked while Session A holds the lock
+      await new Promise((r) => setTimeout(r, 100));
+      expect(saveDone).toBe(false);
+
+      // Session A commits
+      await clientA.query('COMMIT');
+
+      // Session B resumes and completes
+      await savePromise;
+      expect(saveDone).toBe(true);
+      expect(saveRes.rows[0].res.success).toBe(true);
+    } finally {
+      await setAuth(clientA, null);
+      await setAuth(clientB, null);
+      clientA.release();
+      clientB.release();
+    }
+  });
+
+  it('18. page metadata mutation after plan (name/slug changed without section save) triggers PT409 on publish (11 & 25.3)', async () => {
+    const { userId, websiteId, page1Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // 1. Get publish plan
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const oldExpectedState = planRes.rows[0].plan.expected_state;
+
+      // 2. Modify page name in public.pages without modifying sections
+      await client.query('UPDATE public.pages SET name = $1 WHERE id = $2', ['Brand New Home Title', page1Id]);
+
+      // 3. Calling publish with old expected state fails with PT409 because canonical document fingerprint changed
+      await expect(
+        client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
+          websiteId,
+          JSON.stringify(oldExpectedState)
+        ])
+      ).rejects.toThrow(/Website changes were updated elsewhere/);
+    } finally {
+      await setAuth(client, null);
+      client.release();
+    }
+  });
+
+  it('19. section save mutation after plan triggers PT409 on publish (12 & 25.4)', async () => {
+    const { userId, websiteId, page2Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const oldExpectedState = planRes.rows[0].plan.expected_state;
+
+      // Modify page2 sections
+      const updatedSec2 = [
+        { id: `sec2-${randomUUID()}`, page_id: page2Id, type: 'hero', order: 0, content: { title: 'Updated About Us' }, styles: {} }
+      ];
+      await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page2Id, JSON.stringify(updatedSec2)]);
+
+      // Publish with old expected state throws PT409
+      await expect(
+        client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
+          websiteId,
+          JSON.stringify(oldExpectedState)
+        ])
+      ).rejects.toThrow(/Website changes were updated elsewhere/);
+
+      // Verify new plan contains updated tokens
+      const newPlanRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const newPlan = newPlanRes.rows[0].plan;
+      const page2Token = newPlan.expected_state.pages.find((p: any) => p.page_id === page2Id);
+      expect(page2Token.save_revision).toBe(2);
+      expect(page2Token.canonical_document_fingerprint).toBeTruthy();
+    } finally {
+      await setAuth(client, null);
+      client.release();
+    }
+  });
+
+  it('20. exact full-document fingerprint and section hash appear in expected_state.pages (8, 9 & 25.5)', async () => {
+    const { userId, websiteId, page1Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const pageToken = planRes.rows[0].plan.expected_state.pages.find((p: any) => p.page_id === page1Id);
+
+      expect(pageToken).toBeDefined();
+      expect(pageToken.page_id).toBe(page1Id);
+      expect(typeof pageToken.save_revision).toBe('number');
+      expect(typeof pageToken.section_document_hash).toBe('string');
+      expect(typeof pageToken.canonical_document_fingerprint).toBe('string');
+      expect(pageToken.section_document_hash.length).toBe(32); // md5
+      expect(pageToken.canonical_document_fingerprint.length).toBe(32); // md5
+    } finally {
+      await setAuth(client, null);
+      client.release();
+    }
+  });
+
+  it('21. homepage change Funnel A -> Funnel B removes Funnel A root from projected graph, blocking internal nav to now-unrouted Funnel A (14, 16 & 25.6, 25.7)', async () => {
+    const { userId, websiteId, funnel1Id, funnel2Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Change draft homepage to funnel2
+      await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2)', [websiteId, funnel2Id]);
+
+      // Stage nav item with internal link to funnel1 (which is unrouted once homepage switches to funnel2!)
+      const navItems = [
+        { id: randomUUID(), label: 'Old Home Link', target_kind: 'internal', target_value: funnel1Id, visible: true }
+      ];
+      await client.query('SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb, 0)', [
+        websiteId, 'primary', JSON.stringify(navItems)
       ]);
 
-      // Call plan again: has_pending_changes must be false
-      const planRes2 = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
-      expect(planRes2.rows[0].plan.has_pending_changes).toBe(false);
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan = planRes.rows[0].plan;
 
-      // If published again with fresh plan: returns NO_CHANGES without incrementing revision or audit row
-      const noChangeRes = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as res', [
-        websiteId,
-        JSON.stringify(planRes2.rows[0].plan.expected_state)
+      expect(plan.is_publishable).toBe(false);
+      expect(plan.blockers.some((b: any) => b.code === 'NAV_TARGET_UNROUTED')).toBe(true);
+
+      await expect(
+        client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
+          websiteId,
+          JSON.stringify(plan.expected_state)
+        ])
+      ).rejects.toThrow(/Publication blocked|without a public route/);
+    } finally {
+      await setAuth(client, null);
+      client.release();
+    }
+  });
+
+  it('22. homepage semantic navigation link remains valid after homepage change and resolves to root (17 & 25.8)', async () => {
+    const { userId, websiteId, funnel2Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Change draft homepage to funnel2
+      await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2)', [websiteId, funnel2Id]);
+
+      // Stage nav item with target_kind = 'homepage'
+      const navItems = [
+        { id: randomUUID(), label: 'Home', target_kind: 'homepage', target_value: '', visible: true }
+      ];
+      await client.query('SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb, 0)', [
+        websiteId, 'primary', JSON.stringify(navItems)
       ]);
-      expect(noChangeRes.rows[0].res.status).toBe('NO_CHANGES');
 
-      const auditCount = await client.query('SELECT count(*)::integer as count FROM public.builder_website_publications WHERE website_id = $1', [websiteId]);
-      expect(auditCount.rows[0].count).toBe(1); // Only 1 audit record exists
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan = planRes.rows[0].plan;
+
+      expect(plan.is_publishable).toBe(true);
+      expect(plan.blockers.length).toBe(0);
+
+      const pubRes = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as res', [
+        websiteId,
+        JSON.stringify(plan.expected_state)
+      ]);
+      expect(pubRes.rows[0].res.success).toBe(true);
+
+      // Verify root route now points to funnel2
+      const rootRoute = await client.query('SELECT * FROM public.website_routes WHERE website_id = $1 AND path = $2', [websiteId, '/']);
+      expect(rootRoute.rows[0].funnel_id).toBe(funnel2Id);
+    } finally {
+      await setAuth(client, null);
+      client.release();
+    }
+  });
+
+  it('23. internal nav to Funnel A remains valid after homepage change when Funnel A has a second route (18 & 25.9)', async () => {
+    const { userId, websiteId, funnel1Id, funnel2Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Add a secondary route for funnel1 at /archive-home
+      await client.query('INSERT INTO public.website_routes (website_id, path, funnel_id) VALUES ($1, $2, $3)', [
+        websiteId, '/archive-home', funnel1Id
+      ]);
+
+      // Change draft homepage to funnel2
+      await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2)', [websiteId, funnel2Id]);
+
+      // Stage internal nav pointing to funnel1
+      const navItems = [
+        { id: randomUUID(), label: 'Archive Home', target_kind: 'internal', target_value: funnel1Id, visible: true }
+      ];
+      await client.query('SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb, 0)', [
+        websiteId, 'primary', JSON.stringify(navItems)
+      ]);
+
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan = planRes.rows[0].plan;
+
+      expect(plan.is_publishable).toBe(true);
+      expect(plan.blockers.length).toBe(0);
+
+      const pubRes = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as res', [
+        websiteId,
+        JSON.stringify(plan.expected_state)
+      ]);
+      expect(pubRes.rows[0].res.success).toBe(true);
     } finally {
       await setAuth(client, null);
       client.release();
