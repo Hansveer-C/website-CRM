@@ -26,10 +26,97 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
     const client = await pool.connect();
     try {
       await client.query('begin');
+
+      // Create base schemas, roles, and dependency tables
+      await client.query(`
+        do $$ begin create role anon; exception when duplicate_object then null; end $$;
+        do $$ begin create role authenticated; exception when duplicate_object then null; end $$;
+        do $$ begin create role service_role; exception when duplicate_object then null; end $$;
+        do $$ begin create schema auth; exception when duplicate_schema then null; end $$;
+
+        create table if not exists public.users (
+          id text primary key,
+          email text unique,
+          password_hash text
+        );
+
+        create table if not exists public.funnels (
+          id text primary key,
+          user_id text not null references public.users(id) on delete cascade,
+          name text not null,
+          created_at timestamptz not null default now()
+        );
+
+        create table if not exists public.pages (
+          id uuid primary key default gen_random_uuid(),
+          user_id text not null references public.users(id) on delete cascade,
+          funnel_id text references public.funnels(id) on delete set null,
+          name text not null,
+          slug text not null,
+          status text not null default 'draft',
+          created_at timestamptz not null default now()
+        );
+
+        create table if not exists public.builder_publication_targets (
+          id uuid primary key default gen_random_uuid(),
+          website_id uuid not null,
+          page_id uuid not null,
+          published_revision_id uuid not null,
+          published_at timestamptz not null default now()
+        );
+
+        create table if not exists public.websites (
+          id uuid primary key default gen_random_uuid(),
+          user_id text not null references public.users(id) on delete cascade,
+          name text not null,
+          domain text unique,
+          subdomain text not null unique,
+          homepage_funnel_id text references public.funnels(id) on delete set null,
+          draft_homepage_funnel_id text,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now()
+        );
+
+        alter table public.websites add column if not exists subdomain text;
+        alter table public.websites add column if not exists homepage_funnel_id text;
+        alter table public.websites add column if not exists draft_homepage_funnel_id text;
+
+        create table if not exists public.website_routes (
+          id uuid primary key default gen_random_uuid(),
+          website_id uuid not null references public.websites(id) on delete cascade,
+          path text not null,
+          funnel_id text not null references public.funnels(id) on delete cascade,
+          created_at timestamptz not null default now(),
+          unique (website_id, path)
+        );
+
+        create or replace function auth.uid() returns uuid as $$
+          select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
+        $$ language sql stable;
+      `);
+
+      // Apply Task 5A draft routes migration
+      const draftMigration = readFileSync(
+        resolve(__dirname, '../migrations/20260817050500_create_builder_route_drafts.sql'),
+        'utf-8'
+      );
+      await client.query(draftMigration);
+
+      // Apply Task 5B route publication migration
+      const pubMigration = readFileSync(
+        resolve(__dirname, '../migrations/20260817050600_create_builder_route_redirects_and_publication.sql'),
+        'utf-8'
+      );
+      await client.query(pubMigration);
+
+      // Apply Task 6A migration
       const sql6A = readFileSync(MIGRATION_PATH_6A, 'utf8');
       await client.query(sql6A);
+
+      // Apply Task 6B migration
       const sql6B = readFileSync(MIGRATION_PATH_6B, 'utf8');
       await client.query(sql6B);
+
       await client.query('commit');
     } catch (err) {
       await client.query('rollback');
