@@ -55,6 +55,10 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
           updated_at timestamptz not null default now()
         );
 
+        alter table public.websites add column if not exists subdomain text;
+        alter table public.websites add column if not exists homepage_funnel_id text;
+        alter table public.websites add column if not exists draft_homepage_funnel_id text;
+
         create table if not exists public.website_routes (
           id uuid primary key default gen_random_uuid(),
           website_id uuid not null references public.websites(id) on delete cascade,
