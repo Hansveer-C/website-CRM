@@ -21,6 +21,11 @@ create index if not exists idx_builder_website_publications_lookup
   on public.builder_website_publications (website_id, publication_revision desc);
 
 alter table public.builder_website_publications enable row level security;
+alter table public.builder_website_publications force row level security;
+
+-- Revoke default access and grant SELECT to authenticated under RLS
+revoke all on table public.builder_website_publications from public, anon;
+grant select on table public.builder_website_publications to authenticated, postgres, service_role;
 
 -- RLS: Only website owners can read their publication history
 drop policy if exists "Owners can view builder website publications" on public.builder_website_publications;
@@ -55,7 +60,7 @@ declare
   v_homepage_changed boolean := false;
   v_homepage_label text := '';
   v_live_homepage_label text := '';
-  
+
   -- Route drafts
   v_route_drafts record;
   v_route_draft_ids text[] := array[]::text[];
@@ -63,7 +68,7 @@ declare
   v_route_updates jsonb := '[]'::jsonb;
   v_route_deletes jsonb := '[]'::jsonb;
   v_has_route_changes boolean := false;
-  
+
   -- Navigation
   v_primary_draft record;
   v_primary_live record;
@@ -75,26 +80,26 @@ declare
   v_footer_items jsonb := '[]'::jsonb;
   v_primary_expected jsonb;
   v_footer_expected jsonb;
-  
+
   -- Pages / Content
   v_pending_pages jsonb := '[]'::jsonb;
   v_has_page_changes boolean := false;
   v_page_rec record;
-  
+
   -- Projected State Collections
   v_projected_routes jsonb := '[]'::jsonb;
   v_projected_funnels text[] := array[]::text[];
   v_projected_paths text[] := array[]::text[];
   v_live_route_rec record;
   v_draft_route_rec record;
-  
+
   -- Blockers & Warnings
   v_blockers jsonb := '[]'::jsonb;
   v_warnings jsonb := '[]'::jsonb;
   v_pending_domains text[] := array[]::text[];
   v_has_pending_changes boolean := false;
   v_is_publishable boolean := true;
-  
+
   -- Helper vars
   v_item jsonb;
   v_item_label text;
@@ -433,7 +438,7 @@ declare
   v_next_pub_revision integer;
   v_pub_id uuid := pg_catalog.gen_random_uuid();
   v_now timestamptz := pg_catalog.clock_timestamp();
-  
+
   -- Domain variables
   v_draft_homepage text;
   v_draft_route record;
