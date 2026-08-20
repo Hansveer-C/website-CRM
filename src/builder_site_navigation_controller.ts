@@ -126,10 +126,10 @@ export class BuilderSiteNavigationController {
     if (!norm.valid) {
       this.state = {
         ...this.state,
-        errorMessage: norm.error
+        errorMessage: norm.error ?? null
       };
       this.notify();
-      return { success: false, error: norm.error };
+      return { success: false, error: norm.error ?? 'Validation failed' };
     }
 
     this.state = {

@@ -115,6 +115,21 @@ import {
   resolveBuilderNavigationTarget,
   type BuilderNavigationAction
 } from './builder_navigation';
+import {
+  BuilderNavigationUiManager,
+  renderBuilderNavigationPanel,
+  renderNavigationItemModal,
+  renderNavigationPublishModal,
+  type NavigationUiContext
+} from './builder_site_navigation_ui';
+import { BuilderSiteNavigationController } from './builder_site_navigation_controller';
+import { BuilderSiteNavigationPublishController } from './builder_site_navigation_publish_controller';
+import {
+  BuilderSiteNavigationRepository,
+  MockBuilderSiteNavigationRepository
+} from './builder_site_navigation_repository';
+import { SupabaseBuilderSiteNavigationRepository } from './builder_site_navigation_repository_supabase';
+import type { NavigationMenuScope } from './builder_site_navigation_domain';
 import { WebsiteDashboardController, type WebsiteDashboardCoreData } from './website_dashboard_controller';
 import { getWebsiteScopedPages, resolveWebsiteHomepage, type WebsiteDashboardModel, type WebsiteDashboardSummaryInput } from './website_dashboard_model';
 import { createBrowserCallSimulator } from './browser_call_simulation';
@@ -1935,7 +1950,7 @@ let consumedBuilderInitialAction: string | null = null;
 let builderSelectedSectionId: string | null = null;
 let builderInsertOrder: number | null = null;
 let builderInspectorTab: BuilderInspectorTab = 'content';
-type BuilderLeftPanelTab = 'add' | 'pages' | 'layers';
+type BuilderLeftPanelTab = 'add' | 'pages' | 'navigation' | 'layers';
 type BuilderMediaLeftPanelTab = BuilderLeftPanelTab | 'assets';
 let builderLeftPanelTab: BuilderMediaLeftPanelTab = 'add';
 let builderPagesPanelView: 'list' | 'settings' = 'list';
@@ -4095,6 +4110,17 @@ function renderBuilderInspectorPanel(sections: PageSection[]): string {
   if (builderLeftPanelTab === tab) return;
   builderLeftPanelTab = tab;
   if (tab === 'assets') void ensureBuilderMediaController();
+  if (tab === 'navigation') {
+    const manager = getBuilderSiteNavigationManager();
+    const website = getActiveBuilderWebsite();
+    if (website?.id && builderSiteNavigationController) {
+      const context = getNavUiContext();
+      void builderSiteNavigationController.hydrate(website.id, {
+        effectiveRoutes: context.effectiveRoutes,
+        homepageFunnelId: website.homepage_funnel_id
+      }, manager.getActiveScope());
+    }
+  }
   renderBuilder();
 };
 
@@ -4827,6 +4853,265 @@ export function getBuilderPageRouteController(): BuilderPageRouteController {
   } else if (controller.getState().publicationState.errorMessage) {
     (window as any).showToast(controller.getState().publicationState.errorMessage, 'error');
   }
+};
+
+let builderSiteNavigationController: BuilderSiteNavigationController | null = null;
+let builderSiteNavigationPublishController: BuilderSiteNavigationPublishController | null = null;
+let builderNavigationUiManager: BuilderNavigationUiManager | null = null;
+let builderSiteNavigationIdentity = '';
+
+function getNavUiContext(): NavigationUiContext {
+  const website = getActiveBuilderWebsite() || mockWebsites[0];
+  const routeController = getBuilderPageRouteController();
+  const effectiveRoutes = routeController.getState().effectiveRoutes;
+  const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : null;
+  return {
+    website,
+    pages: mockPages.filter(p => p.user_id === website.user_id),
+    funnels: mockFunnels.filter(f => f.user_id === website.user_id),
+    effectiveRoutes,
+    layout,
+    actingUserId: getActingUserId()
+  };
+}
+
+export function getBuilderSiteNavigationManager(): BuilderNavigationUiManager {
+  const website = getActiveBuilderWebsite();
+  const userId = getActingUserId();
+  const identity = `${userId}:${website?.id ?? ''}`;
+  if (builderNavigationUiManager && builderSiteNavigationIdentity === identity && builderSiteNavigationController) {
+    return builderNavigationUiManager;
+  }
+  builderSiteNavigationIdentity = identity;
+
+  const repo: BuilderSiteNavigationRepository = editorUsesSupabase()
+    ? new SupabaseBuilderSiteNavigationRepository(getBuilderPublicationSupabaseClient)
+    : new MockBuilderSiteNavigationRepository();
+
+  builderSiteNavigationController = new BuilderSiteNavigationController(repo);
+  builderSiteNavigationPublishController = new BuilderSiteNavigationPublishController(repo);
+  builderNavigationUiManager = new BuilderNavigationUiManager(
+    builderSiteNavigationController,
+    builderSiteNavigationPublishController
+  );
+
+  builderNavigationUiManager.subscribe(() => {
+    if (currentView === 'builder' && builderLeftPanelTab === 'navigation') {
+      renderBuilder();
+    }
+  });
+
+  builderSiteNavigationController.subscribe(() => {
+    if (currentView === 'builder' && builderLeftPanelTab === 'navigation') {
+      renderBuilder();
+    }
+  });
+
+  builderSiteNavigationPublishController.subscribe(() => {
+    if (currentView === 'builder' && builderLeftPanelTab === 'navigation') {
+      renderBuilder();
+    }
+  });
+
+  if (website?.id) {
+    const routeController = getBuilderPageRouteController();
+    const effectiveRoutes = routeController.getState().effectiveRoutes;
+    builderSiteNavigationController.hydrate(website.id, {
+      effectiveRoutes,
+      homepageFunnelId: website.homepage_funnel_id
+    }, builderNavigationUiManager.getActiveScope());
+  }
+
+  return builderNavigationUiManager;
+}
+
+function renderBuilderSiteNavigationPanel(): string {
+  const manager = getBuilderSiteNavigationManager();
+  const state = builderSiteNavigationController?.getState() ?? { status: 'uninitialized' as const };
+  const context = getNavUiContext();
+  return renderBuilderNavigationPanel(state, manager, context);
+}
+
+function renderBuilderNavigationDialogs(): string {
+  const manager = getBuilderSiteNavigationManager();
+  const context = getNavUiContext();
+  const itemModalHtml = renderNavigationItemModal(manager.getItemModalState(), context);
+  const publishModalHtml = renderNavigationPublishModal(manager.getPublishModalState());
+  return `${itemModalHtml}\n${publishModalHtml}`;
+}
+
+(window as any).setBuilderNavScope = (scope: NavigationMenuScope) => {
+  const manager = getBuilderSiteNavigationManager();
+  manager.setActiveScope(scope);
+  const website = getActiveBuilderWebsite();
+  if (website?.id && builderSiteNavigationController) {
+    const context = getNavUiContext();
+    builderSiteNavigationController.hydrate(website.id, {
+      effectiveRoutes: context.effectiveRoutes,
+      homepageFunnelId: website.homepage_funnel_id
+    }, scope);
+  }
+  renderBuilder();
+};
+
+(window as any).openAddBuilderNavItemModal = () => {
+  const manager = getBuilderSiteNavigationManager();
+  manager.openAddItemModal();
+  renderBuilder();
+};
+
+(window as any).openEditBuilderNavItemModal = (itemId: string) => {
+  const manager = getBuilderSiteNavigationManager();
+  const state = builderSiteNavigationController?.getState();
+  if (state?.status === 'ready') {
+    const item = state.rawItems.find(i => i.id === itemId);
+    if (item) {
+      manager.openEditItemModal(item);
+      renderBuilder();
+    }
+  }
+};
+
+(window as any).closeBuilderNavItemModal = () => {
+  const manager = getBuilderSiteNavigationManager();
+  manager.closeItemModal();
+  renderBuilder();
+};
+
+(window as any).setBuilderNavItemModalField = (field: string, value: any) => {
+  const manager = getBuilderSiteNavigationManager();
+  manager.setItemModalField(field as any, value);
+};
+
+(window as any).saveBuilderNavItemModal = async () => {
+  const manager = getBuilderSiteNavigationManager();
+  const website = getActiveBuilderWebsite();
+  const context = getNavUiContext();
+  const success = await manager.saveItemModal({
+    effectiveRoutes: context.effectiveRoutes,
+    homepageFunnelId: website?.homepage_funnel_id
+  });
+  if (success) {
+    (window as any).showToast('Navigation item saved', 'success');
+  }
+  renderBuilder();
+};
+
+(window as any).removeBuilderNavItem = async (itemId: string) => {
+  const manager = getBuilderSiteNavigationManager();
+  const website = getActiveBuilderWebsite();
+  const context = getNavUiContext();
+  const success = await manager.removeItem(itemId, {
+    effectiveRoutes: context.effectiveRoutes,
+    homepageFunnelId: website?.homepage_funnel_id
+  });
+  if (success) {
+    (window as any).showToast('Navigation item removed', 'success');
+  }
+  renderBuilder();
+};
+
+(window as any).toggleBuilderNavItemVisibility = async (itemId: string) => {
+  const manager = getBuilderSiteNavigationManager();
+  const website = getActiveBuilderWebsite();
+  const context = getNavUiContext();
+  const success = await manager.toggleItemVisibility(itemId, {
+    effectiveRoutes: context.effectiveRoutes,
+    homepageFunnelId: website?.homepage_funnel_id
+  });
+  if (success) {
+    (window as any).showToast('Visibility updated', 'success');
+  }
+  renderBuilder();
+};
+
+(window as any).moveBuilderNavItem = async (itemId: string, direction: 'up' | 'down') => {
+  const manager = getBuilderSiteNavigationManager();
+  const website = getActiveBuilderWebsite();
+  const context = getNavUiContext();
+  const success = await manager.moveItem(itemId, direction, {
+    effectiveRoutes: context.effectiveRoutes,
+    homepageFunnelId: website?.homepage_funnel_id
+  });
+  renderBuilder();
+};
+
+(window as any).adoptBuilderLegacyNav = async () => {
+  const manager = getBuilderSiteNavigationManager();
+  const website = getActiveBuilderWebsite();
+  const context = getNavUiContext();
+  const success = await manager.adoptLegacy(context.layout, {
+    effectiveRoutes: context.effectiveRoutes,
+    funnels: context.funnels,
+    pages: context.pages,
+    homepageFunnelId: website?.homepage_funnel_id
+  });
+  if (success) {
+    (window as any).showToast('Converted legacy layout to editable navigation draft', 'success');
+  }
+  renderBuilder();
+};
+
+(window as any).revertBuilderNavDraft = async () => {
+  if (!builderSiteNavigationController) return;
+  const website = getActiveBuilderWebsite();
+  const context = getNavUiContext();
+  const state = builderSiteNavigationController.getState();
+  if (state.status !== 'ready' || !state.isDraft) return;
+
+  const res = await builderSiteNavigationController.revertDraft({
+    effectiveRoutes: context.effectiveRoutes,
+    homepageFunnelId: website?.homepage_funnel_id
+  });
+  if (res.success) {
+    (window as any).showToast('Navigation draft reverted', 'success');
+  } else {
+    (window as any).showToast(res.error || 'Failed to revert navigation draft', 'error');
+  }
+  renderBuilder();
+};
+
+(window as any).previewBuilderNavChanges = () => {
+  (window as any).setBuilderMode('preview');
+};
+
+(window as any).openPublishBuilderNavModal = () => {
+  const manager = getBuilderSiteNavigationManager();
+  manager.openPublishModal();
+  renderBuilder();
+};
+
+(window as any).closePublishBuilderNavModal = () => {
+  const manager = getBuilderSiteNavigationManager();
+  manager.closePublishModal();
+  renderBuilder();
+};
+
+(window as any).confirmPublishBuilderNav = async () => {
+  const manager = getBuilderSiteNavigationManager();
+  const website = getActiveBuilderWebsite();
+  const context = getNavUiContext();
+  const success = await manager.confirmPublish({
+    effectiveRoutes: context.effectiveRoutes,
+    homepageFunnelId: website?.homepage_funnel_id
+  });
+  if (success) {
+    (window as any).showToast('Navigation published successfully', 'success');
+  }
+  renderBuilder();
+};
+
+(window as any).reloadBuilderNavigation = async () => {
+  const manager = getBuilderSiteNavigationManager();
+  const website = getActiveBuilderWebsite();
+  if (website?.id && builderSiteNavigationController) {
+    const context = getNavUiContext();
+    await builderSiteNavigationController.hydrate(website.id, {
+      effectiveRoutes: context.effectiveRoutes,
+      homepageFunnelId: website.homepage_funnel_id
+    }, manager.getActiveScope());
+  }
+  renderBuilder();
 };
 
 function getBuilderWebsitePageEntries(): BuilderWebsitePageEntry[] {
@@ -6108,6 +6393,7 @@ function _renderBuilder() {
           <div class="pb-left-tabs" role="tablist" aria-label="Builder sidebar">
             <button type="button" role="tab" aria-selected="${builderLeftPanelTab === 'add'}" class="${builderLeftPanelTab === 'add' ? 'active' : ''}" onclick="window.setBuilderLeftPanelTab('add')">Add</button>
             <button type="button" role="tab" aria-selected="${builderLeftPanelTab === 'pages'}" class="${builderLeftPanelTab === 'pages' ? 'active' : ''}" onclick="window.setBuilderLeftPanelTab('pages')">Pages</button>
+            <button type="button" role="tab" aria-selected="${builderLeftPanelTab === 'navigation'}" class="${builderLeftPanelTab === 'navigation' ? 'active' : ''}" onclick="window.setBuilderLeftPanelTab('navigation')">Nav</button>
             <button type="button" role="tab" aria-selected="${builderLeftPanelTab === 'layers'}" class="${builderLeftPanelTab === 'layers' ? 'active' : ''}" onclick="window.setBuilderLeftPanelTab('layers')">Layers</button>
             <button type="button" role="tab" aria-selected="${builderLeftPanelTab === 'assets'}" class="${builderLeftPanelTab === 'assets' ? 'active' : ''}" onclick="window.setBuilderLeftPanelTab('assets')">Assets</button>
           </div>
@@ -6134,9 +6420,11 @@ function _renderBuilder() {
           </div>
           ` : builderLeftPanelTab === 'pages'
             ? renderBuilderPagesPanel()
-            : builderLeftPanelTab === 'layers'
-              ? renderBuilderLayersPanel(sections)
-              : renderBuilderAssetsPanel(sections)}
+            : builderLeftPanelTab === 'navigation'
+              ? renderBuilderSiteNavigationPanel()
+              : builderLeftPanelTab === 'layers'
+                ? renderBuilderLayersPanel(sections)
+                : renderBuilderAssetsPanel(sections)}
 
           <div style="padding: 20px; border-top: 1px solid #222; background: #0a0a0a;">
              <div style="font-size: 0.6rem; color: #444; text-transform: uppercase; font-weight: 800; margin-bottom: 10px; letter-spacing: 0.05em;">Switch Page</div>
@@ -6294,6 +6582,7 @@ function _renderBuilder() {
       ${renderBuilderSetupDialog()}
       ${renderBuilderPageRouteEditorDialog()}
       ${renderBuilderRoutePublishModal()}
+      ${renderBuilderNavigationDialogs()}
     </main>
   `;
 }
@@ -11187,6 +11476,8 @@ function prepareBuilderInitialAction(context: BuilderContext | null): boolean {
     builderPagesPanelView = context.action === 'settings' ? 'settings' : 'list';
   } else if (context.action === 'assets') {
     builderLeftPanelTab = 'assets';
+  } else if (context.action === 'navigation') {
+    builderLeftPanelTab = 'navigation';
   }
   return true;
 }
