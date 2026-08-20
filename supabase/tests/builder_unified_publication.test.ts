@@ -133,7 +133,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
           published_revision_id uuid not null,
           published_at timestamptz not null default now(),
           published_by text,
-          primary key (website_id, page_id)
+          primary key (website_id, page_id),
+          constraint builder_publication_targets_composite_fkey foreign key (website_id, page_id, published_revision_id) references public.builder_published_revisions(website_id, page_id, id) on delete cascade
         );
 
         create or replace function auth.uid() returns uuid as $$
