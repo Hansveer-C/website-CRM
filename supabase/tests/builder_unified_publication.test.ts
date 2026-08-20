@@ -188,8 +188,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     ]);
 
     // Save initial page sections via canonical save_page_sections_document
-    await client.query(`SET LOCAL "request.jwt.claim.sub" = '${userId}'`);
-    await client.query('SET LOCAL ROLE authenticated');
+    await client.query(`set "request.jwt.claim.sub" = '${userId}'`);
 
     const sec1 = [{ id: `sec1-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Welcome' }, styles: {} }];
     const sec2 = [{ id: `sec2-${randomUUID()}`, page_id: page2Id, type: 'hero', order: 0, content: { title: 'About Us' }, styles: {} }];
@@ -199,7 +198,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 1)', [page2Id, JSON.stringify(sec2)]);
     await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 1)', [page3Id, JSON.stringify(sec3)]);
 
-    await client.query('RESET ROLE');
+    await client.query(`set "request.jwt.claim.sub" = ''`);
 
     const websiteRes = await client.query(
       `INSERT INTO public.websites (user_id, name, subdomain, homepage_funnel_id, publication_revision)
@@ -269,11 +268,9 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
 
   async function setAuth(client: pg.PoolClient, userId: string | null) {
     if (userId) {
-      await client.query(`SET LOCAL "request.jwt.claim.sub" = '${userId}'`);
-      await client.query('SET LOCAL ROLE authenticated');
+      await client.query(`set "request.jwt.claim.sub" = '${userId}'`);
     } else {
-      await client.query('RESET ROLE');
-      await client.query('SET LOCAL "request.jwt.claim.sub" = \'\'');
+      await client.query(`set "request.jwt.claim.sub" = ''`);
     }
   }
 
@@ -286,7 +283,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
         client.query('SELECT public.get_builder_website_publish_plan($1::uuid)', [websiteId])
       ).rejects.toThrow(/Authentication required|permission denied/);
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -301,7 +298,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
         client.query('SELECT public.get_builder_website_publish_plan($1::uuid)', [fixB.websiteId])
       ).rejects.toThrow(/Website not found/);
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -315,7 +312,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
         client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [websiteId, '{}'])
       ).rejects.toThrow(/Authentication required|permission denied/);
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -330,7 +327,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
         client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [fixB.websiteId, '{}'])
       ).rejects.toThrow(/Website not found/);
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -362,7 +359,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       expect(plan2.summary.pages.count).toBe(1);
       expect(plan2.summary.pages.items[0].page_id).toBe(page1Id);
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -399,7 +396,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       expect(targetRes.rows.length).toBe(1);
       expect(targetRes.rows[0].document.sections[0].content.title).toBe('Exclusive Special');
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -429,7 +426,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
         ])
       ).rejects.toThrow(/Website changes were updated elsewhere/);
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -464,7 +461,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       const finalRevCountRes = await client.query('SELECT count(*)::integer as count FROM public.builder_published_revisions WHERE website_id = $1', [websiteId]);
       expect(finalRevCountRes.rows[0].count).toBe(initialRevCount);
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -494,7 +491,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       const finalRevCountRes = await client.query('SELECT count(*)::integer as count FROM public.builder_published_revisions WHERE website_id = $1', [websiteId]);
       expect(finalRevCountRes.rows[0].count).toBe(initialRevCount);
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -541,7 +538,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       const targetCheck = await client.query('SELECT * FROM public.builder_publication_targets WHERE website_id = $1 AND page_id = $2', [websiteId, page3Id]);
       expect(targetCheck.rows.length).toBe(1);
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -574,7 +571,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
         ])
       ).rejects.toThrow(/Website changes were updated elsewhere/);
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -607,7 +604,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       const redirCheck = await client.query('SELECT * FROM public.website_route_redirects WHERE website_id = $1', [websiteId]);
       expect(redirCheck.rows.length).toBe(0);
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -651,7 +648,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
         { from_path: '/company', to_path: '/our-story' }
       ]);
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -703,7 +700,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       const pubCountRes = await client.query('SELECT count(*)::integer as count FROM public.builder_website_publications WHERE website_id = $1', [websiteId]);
       expect(pubCountRes.rows[0].count).toBe(0);
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
@@ -738,7 +735,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       const auditCount = await client.query('SELECT count(*)::integer as count FROM public.builder_website_publications WHERE website_id = $1', [websiteId]);
       expect(auditCount.rows[0].count).toBe(1); // Only 1 audit record exists
     } finally {
-      await client.query('RESET ROLE');
+      await setAuth(client, null);
       client.release();
     }
   });
