@@ -59,6 +59,10 @@ export class BuilderSiteNavigationController {
     return this.scopeCache.get(`${websiteId}:${menuScope}`);
   }
 
+  public invalidateScopeCache(websiteId: string, menuScope: NavigationMenuScope) {
+    this.scopeCache.delete(`${websiteId}:${menuScope}`);
+  }
+
   public getScopeSummary(websiteId: string): { primaryHasDraft: boolean; footerHasDraft: boolean; draftCount: number } {
     const primary = this.scopeCache.get(`${websiteId}:primary`);
     const footer = this.scopeCache.get(`${websiteId}:footer`);
@@ -129,20 +133,58 @@ export class BuilderSiteNavigationController {
       return;
     }
 
-    // Retrieve true live baseline if draft exists and liveRevision > 0
+    // Fail-closed live baseline loading
     let liveItems: SiteNavigationItem[] = [];
     if (res.data.is_draft) {
       if (res.data.live_revision > 0) {
         const liveRes = await this.repo.getLiveNavigation(websiteId, menuScope);
         if (
-          this.requestGeneration === currentGeneration &&
-          this.activeWebsiteId === opWebsiteId &&
-          this.activeMenuScope === opMenuScope &&
-          liveRes.success &&
-          liveRes.data
+          this.requestGeneration !== currentGeneration ||
+          this.activeWebsiteId !== opWebsiteId ||
+          this.activeMenuScope !== opMenuScope
         ) {
-          liveItems = liveRes.data.items;
+          return;
         }
+
+        if (!liveRes.success) {
+          this.state = {
+            status: 'error',
+            websiteId,
+            menuScope,
+            error: `Failed to load live navigation baseline: ${liveRes.error}`,
+            code: liveRes.code
+          };
+          this.notify();
+          return;
+        }
+
+        if (!liveRes.data) {
+          this.state = {
+            status: 'error',
+            websiteId,
+            menuScope,
+            error: 'Live navigation snapshot consistency error: missing live record while live revision > 0.',
+            code: 'CONSISTENCY_ERROR'
+          };
+          this.notify();
+          return;
+        }
+
+        if (liveRes.data.revision !== res.data.live_revision) {
+          this.state = {
+            status: 'error',
+            websiteId,
+            menuScope,
+            error: 'Live navigation revision mismatch. Please reload the latest navigation.',
+            code: 'CONFLICT'
+          };
+          this.notify();
+          return;
+        }
+
+        liveItems = liveRes.data.items;
+      } else {
+        liveItems = [];
       }
     } else {
       liveItems = res.data.raw_items;
@@ -340,5 +382,45 @@ export class BuilderSiteNavigationController {
     }
 
     return { success: true };
+  }
+
+  /**
+   * Safe post-publish refresh that refreshes the published scope without switching active menu scope or website.
+   */
+  public async refreshScopeAfterPublish(
+    websiteId: string,
+    menuScope: NavigationMenuScope,
+    publishedItems: SiteNavigationItem[],
+    liveRevision: number,
+    context: {
+      effectiveRoutes: readonly EffectiveRoute[];
+      homepageFunnelId?: string | null;
+    }
+  ): Promise<void> {
+    const resolved = resolveEffectiveNavigation(publishedItems, context);
+
+    const updatedReadyState: SiteNavigationReadyState = {
+      status: 'ready',
+      websiteId,
+      menuScope,
+      items: resolved,
+      rawItems: publishedItems,
+      liveItems: publishedItems,
+      isDraft: false,
+      baseRevision: liveRevision,
+      draftRevision: 0,
+      liveRevision,
+      isSaving: false,
+      isConflict: false,
+      errorMessage: null
+    };
+
+    this.scopeCache.set(`${websiteId}:${menuScope}`, updatedReadyState);
+
+    // Only update visible active state if user is STILL viewing this exact website and scope
+    if (this.activeWebsiteId === websiteId && this.activeMenuScope === menuScope && this.state.status === 'ready') {
+      this.state = updatedReadyState;
+      this.notify();
+    }
   }
 }

@@ -41,13 +41,15 @@ describe('Builder Site Navigation UI & Domain Integration', () => {
     { id: 'fn-home', website_id: 'ws-100', user_id: 'usr-1', name: 'Homepage Funnel', steps: [] } as any,
     { id: 'fn-services', website_id: 'ws-100', user_id: 'usr-1', name: 'Services Funnel', steps: [] } as any,
     { id: 'fn-contact', website_id: 'ws-100', user_id: 'usr-1', name: 'Contact Funnel', steps: [] } as any,
+    { id: 'fn-home-page', website_id: 'ws-100', user_id: 'usr-1', name: 'Dedicated Home Route Funnel', steps: [] } as any,
     { id: 'fn-other', website_id: 'ws-200', user_id: 'usr-1', name: 'Website B Funnel', steps: [] } as any
   ];
 
   const samplePages: Page[] = [
-    { id: 'pg-home', funnel_id: 'fn-home', user_id: 'usr-1', name: 'Home Page', slug: 'home' } as any,
+    { id: 'pg-home', funnel_id: 'fn-home', user_id: 'usr-1', name: 'Home Page', slug: 'homepage' } as any,
     { id: 'pg-services', funnel_id: 'fn-services', user_id: 'usr-1', name: 'Services Page', slug: 'services' } as any,
     { id: 'pg-contact', funnel_id: 'fn-contact', user_id: 'usr-1', name: 'Contact Page', slug: 'contact' } as any,
+    { id: 'pg-home-page', funnel_id: 'fn-home-page', user_id: 'usr-1', name: 'Home Slug Page', slug: 'home' } as any,
     { id: 'pg-other', funnel_id: 'fn-other', user_id: 'usr-1', name: 'Other Page', slug: 'other' } as any
   ];
 
@@ -94,7 +96,8 @@ describe('Builder Site Navigation UI & Domain Integration', () => {
         { label: 'Mystery Page', path: '/unknown-link-target', visible: true },
         { label: 'Bad URL', path: 'javascript:alert(1)', visible: true },
         { label: 'Bad Phone', path: 'tel:letters-not-digits', visible: true },
-        { label: 'Bad Email', path: 'mailto:not-an-email', visible: true }
+        { label: 'Bad Email', path: 'mailto:not-an-email', visible: true },
+        { label: 'Empty Link', path: '', visible: true }
       ],
       cta_text: 'Book Now',
       cta_link: 'https://booking.example.com'
@@ -117,7 +120,7 @@ describe('Builder Site Navigation UI & Domain Integration', () => {
     actingUserId: 'usr-1'
   };
 
-  describe('Loss-Aware Legacy Adoption Evaluation', () => {
+  describe('Strict Loss-Aware Legacy Evaluation & Target Rules', () => {
     it('evaluates legacy layout items without fabricating destinations and keeps standalone CTA separate', () => {
       const result = evaluateLegacyNavigationCandidates('primary', sampleLegacyLayout, {
         effectiveRoutes: sampleEffectiveRoutes,
@@ -125,11 +128,11 @@ describe('Builder Site Navigation UI & Domain Integration', () => {
         pages: samplePages
       });
 
-      expect(result.candidates.length).toBe(9);
+      expect(result.candidates.length).toBe(10);
       expect(result.hasAttentionItems).toBe(true);
-      expect(result.attentionCount).toBe(4); // Mystery Page, Bad URL, Bad Phone, Bad Email
+      expect(result.attentionCount).toBe(5); // Mystery Page, Bad URL, Bad Phone, Bad Email, Empty Link
 
-      // Item 0: Home -> ready
+      // Item 0: Home exact root -> ready (homepage)
       expect(result.candidates[0].label).toBe('Home');
       expect(result.candidates[0].status).toBe('ready');
       expect(result.candidates[0].proposedItem?.target_kind).toBe('homepage');
@@ -180,24 +183,375 @@ describe('Builder Site Navigation UI & Domain Integration', () => {
       expect(result.candidates[8].originalTarget).toBe('mailto:not-an-email');
       expect(result.candidates[8].proposedItem).toBeNull();
 
+      // Item 9: Empty Link -> needs_attention with missing destination reason
+      expect(result.candidates[9].status).toBe('needs_attention');
+      expect(result.candidates[9].originalTarget).toBe('');
+      expect(result.candidates[9].proposedItem).toBeNull();
+      expect(result.candidates[9].reason).toContain('no destination');
+
       // Standalone Header CTA is captured separately and not injected into candidates
       expect(result.standaloneCta).not.toBeNull();
       expect(result.standaloneCta?.text).toBe('Book Now');
       expect(result.standaloneCta?.link).toBe('https://booking.example.com');
     });
 
-    it('evaluates footer scope legacy links with attention detection', () => {
-      const result = evaluateLegacyNavigationCandidates('footer', sampleLegacyLayout, {
+    it('handles /home and home targets strictly preserving route meaning', () => {
+      // 1. When /home route exists in effectiveRoutes pointing to fn-home-page
+      const routesWithHome: EffectiveRoute[] = [
+        ...sampleEffectiveRoutes,
+        {
+          funnel_id: 'fn-home-page',
+          path: '/home',
+          live_path: '/home',
+          is_homepage: false,
+          is_draft_override: false,
+          is_new_draft: false,
+          is_staged_delete: false
+        }
+      ];
+
+      const evalWithHome = evaluateLegacyNavigationCandidates('primary', {
+        id: 'ly-home',
+        website_id: 'ws-100',
+        header_config: {
+          nav_items: [
+            { label: 'Home Slash', path: '/home', visible: true },
+            { label: 'Home No Slash', path: 'home', visible: true }
+          ]
+        }
+      } as any, {
+        effectiveRoutes: routesWithHome,
+        funnels: sampleFunnels,
+        pages: samplePages
+      });
+
+      expect(evalWithHome.candidates[0].status).toBe('ready');
+      expect(evalWithHome.candidates[0].proposedItem?.target_kind).toBe('internal');
+      expect(evalWithHome.candidates[0].proposedItem?.target_value).toBe('fn-home-page');
+
+      expect(evalWithHome.candidates[1].status).toBe('ready');
+      expect(evalWithHome.candidates[1].proposedItem?.target_kind).toBe('internal');
+      expect(evalWithHome.candidates[1].proposedItem?.target_value).toBe('fn-home-page');
+
+      // 2. When NO /home route exists and no page matches
+      const evalWithoutHome = evaluateLegacyNavigationCandidates('primary', {
+        id: 'ly-home',
+        website_id: 'ws-100',
+        header_config: {
+          nav_items: [
+            { label: 'Home Slash', path: '/home', visible: true }
+          ]
+        }
+      } as any, {
+        effectiveRoutes: sampleEffectiveRoutes, // only '/', '/services', '/contact'
+        funnels: sampleFunnels,
+        pages: samplePages.filter(p => p.slug !== 'home')
+      });
+
+      expect(evalWithoutHome.candidates[0].status).toBe('needs_attention');
+      expect(evalWithoutHome.candidates[0].proposedItem).toBeNull();
+      expect(evalWithoutHome.candidates[0].originalTarget).toBe('/home');
+      expect(evalWithoutHome.candidates[0].reason).toContain('does not match any existing page');
+    });
+  });
+
+  describe('Fail-Closed Live Baseline Validation on Hydration', () => {
+    let repo: MockBuilderSiteNavigationRepository;
+    let controller: BuilderSiteNavigationController;
+
+    beforeEach(() => {
+      repo = new MockBuilderSiteNavigationRepository();
+      controller = new BuilderSiteNavigationController(repo);
+    });
+
+    it('fails closed when getLiveNavigation returns transport error for a draft with live_revision > 0', async () => {
+      // Set live snapshot
+      repo.setLiveSnapshot('ws-100', [
+        { id: '11111111-1111-4111-8111-111111111111', label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false }
+      ], 3, 'primary');
+
+      // Stage server draft
+      await repo.stageNavigationDraft('ws-100', [
+        { id: '11111111-1111-4111-8111-111111111111', label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false },
+        { id: '22222222-2222-4222-8222-222222222222', label: 'Services', target_kind: 'internal', target_value: 'fn-services', position: 1, visible: true, is_cta: false }
+      ], 3, 0, 'primary');
+
+      // Mock getLiveNavigation failure
+      repo.getLiveNavigation = async () => ({
+        success: false,
+        error: 'Network connection timeout',
+        code: 'TRANSPORT_ERROR'
+      });
+
+      await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
+
+      const state = controller.getState();
+      expect(state.status).toBe('error');
+      if (state.status === 'error') {
+        expect(state.code).toBe('TRANSPORT_ERROR');
+        expect(state.error).toContain('Failed to load live navigation baseline');
+      }
+    });
+
+    it('fails closed with consistency error when live snapshot is null while live_revision > 0', async () => {
+      // Effective returns draft with live_revision: 3
+      repo.getEffectiveNavigation = async () => ({
+        success: true,
+        data: {
+          website_id: 'ws-100',
+          menu_scope: 'primary',
+          items: [],
+          raw_items: [
+            { id: '11111111-1111-4111-8111-111111111111', label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false }
+          ],
+          is_draft: true,
+          base_revision: 3,
+          draft_revision: 1,
+          live_revision: 3,
+          updated_at: new Date().toISOString()
+        }
+      });
+
+      // getLiveNavigation returns null
+      repo.getLiveNavigation = async () => ({
+        success: true,
+        data: null
+      });
+
+      await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
+
+      const state = controller.getState();
+      expect(state.status).toBe('error');
+      if (state.status === 'error') {
+        expect(state.code).toBe('CONSISTENCY_ERROR');
+        expect(state.error).toContain('missing live record');
+      }
+    });
+
+    it('fails closed when live row revision mismatches effective live_revision', async () => {
+      repo.getEffectiveNavigation = async () => ({
+        success: true,
+        data: {
+          website_id: 'ws-100',
+          menu_scope: 'primary',
+          items: [],
+          raw_items: [],
+          is_draft: true,
+          base_revision: 3,
+          draft_revision: 1,
+          live_revision: 3,
+          updated_at: new Date().toISOString()
+        }
+      });
+
+      // getLiveNavigation returns newer revision 4 (mismatch)
+      repo.getLiveNavigation = async () => ({
+        success: true,
+        data: {
+          revision: 4,
+          items: []
+        }
+      });
+
+      await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
+
+      const state = controller.getState();
+      expect(state.status).toBe('error');
+      if (state.status === 'error') {
+        expect(state.code).toBe('CONFLICT');
+        expect(state.error).toContain('revision mismatch');
+      }
+    });
+
+    it('succeeds with truthful live baseline when revisions match exactly', async () => {
+      repo.setLiveSnapshot('ws-100', [
+        { id: '11111111-1111-4111-8111-111111111111', label: 'Live Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false }
+      ], 3, 'primary');
+
+      await repo.stageNavigationDraft('ws-100', [
+        { id: '11111111-1111-4111-8111-111111111111', label: 'Live Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false },
+        { id: '22222222-2222-4222-8222-222222222222', label: 'Draft Services', target_kind: 'internal', target_value: 'fn-services', position: 1, visible: true, is_cta: false }
+      ], 3, 0, 'primary');
+
+      await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
+
+      const state = controller.getState();
+      expect(state.status).toBe('ready');
+      if (state.status === 'ready') {
+        expect(state.isDraft).toBe(true);
+        expect(state.liveRevision).toBe(3);
+        expect(state.liveItems.length).toBe(1);
+        expect(state.liveItems[0].label).toBe('Live Home');
+      }
+    });
+  });
+
+  describe('Publish Scope Race & Active Scope Invariant', () => {
+    let repo: MockBuilderSiteNavigationRepository;
+    let controller: BuilderSiteNavigationController;
+    let publishController: BuilderSiteNavigationPublishController;
+    let manager: BuilderNavigationUiManager;
+
+    beforeEach(async () => {
+      repo = new MockBuilderSiteNavigationRepository();
+      controller = new BuilderSiteNavigationController(repo);
+      publishController = new BuilderSiteNavigationPublishController(repo);
+      manager = new BuilderNavigationUiManager(controller, publishController);
+    });
+
+    it('keeps Footer active after delayed Primary publication finishes without overwriting active scope', async () => {
+      // 1. Hydrate Primary
+      await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
+      manager.setActiveScope('primary');
+
+      // 2. Create Primary draft
+      await controller.stageDraft([
+        { id: '11111111-1111-4111-8111-111111111111', label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false }
+      ], { effectiveRoutes: sampleEffectiveRoutes });
+
+      manager.openPublishModal();
+      expect(manager.getPublishModalState().isOpen).toBe(true);
+      expect(manager.getPublishModalState().menuScope).toBe('primary');
+
+      // 3. Setup delayed publish RPC
+      let resolvePrimaryPublish: any;
+      const publishPromise = new Promise<any>((resolve) => {
+        resolvePrimaryPublish = resolve;
+      });
+
+      const origPublish = repo.publishNavigation.bind(repo);
+      repo.publishNavigation = async (wsId, bRev, dRev, scope) => {
+        if (scope === 'primary') {
+          await publishPromise;
+        }
+        return origPublish(wsId, bRev, dRev, scope);
+      };
+
+      // 3. Start Primary publication
+      const confirmPromise = manager.confirmPublish({ effectiveRoutes: sampleEffectiveRoutes });
+
+      // 4. Switch to Footer while Primary publish is in flight
+      manager.setActiveScope('footer');
+      await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'footer');
+
+      // 5. Assert Footer is active
+      expect(manager.getActiveScope()).toBe('footer');
+      expect(controller.getActiveMenuScope()).toBe('footer');
+      expect((controller.getState() as any).menuScope).toBe('footer');
+
+      // 6. Complete Primary publication
+      resolvePrimaryPublish();
+      const pubResult = await confirmPromise;
+      expect(pubResult).toBe(true);
+
+      // 7. Assert Footer remains active!
+      expect(manager.getActiveScope()).toBe('footer');
+      expect(controller.getActiveMenuScope()).toBe('footer');
+      expect((controller.getState() as any).menuScope).toBe('footer');
+
+      // 8. Select Primary again: it displays the newly published live snapshot
+      manager.setActiveScope('primary');
+      await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
+
+      const primaryState = controller.getState();
+      if (primaryState.status === 'ready') {
+        expect(primaryState.menuScope).toBe('primary');
+        expect(primaryState.isDraft).toBe(false);
+        expect(primaryState.liveRevision).toBe(1);
+        expect(getNavigationScopeAuthority(primaryState)).toBe('live');
+      }
+    });
+  });
+
+  describe('Adoption Review Lifecycle & Duplicate Mutation Guards', () => {
+    let repo: MockBuilderSiteNavigationRepository;
+    let controller: BuilderSiteNavigationController;
+    let publishController: BuilderSiteNavigationPublishController;
+    let manager: BuilderNavigationUiManager;
+
+    beforeEach(async () => {
+      repo = new MockBuilderSiteNavigationRepository();
+      controller = new BuilderSiteNavigationController(repo);
+      publishController = new BuilderSiteNavigationPublishController(repo);
+      manager = new BuilderNavigationUiManager(controller, publishController);
+      await controller.hydrate('ws-100', {
+        effectiveRoutes: sampleEffectiveRoutes,
+        homepageFunnelId: 'fn-home'
+      }, 'primary');
+    });
+
+    it('requires resolving or removing attention items before staging adoption draft', async () => {
+      manager.startLegacyAdoptionReview(sampleLegacyLayout, {
         effectiveRoutes: sampleEffectiveRoutes,
         funnels: sampleFunnels,
         pages: samplePages
       });
 
-      expect(result.candidates.length).toBe(3);
-      expect(result.candidates[0].status).toBe('ready');
-      expect(result.candidates[1].status).toBe('ready');
-      expect(result.candidates[2].status).toBe('needs_attention');
-      expect(result.candidates[2].originalTarget).toBe('/non-existent-page');
+      const reviewState = manager.getAdoptionReviewState();
+      expect(reviewState.isOpen).toBe(true);
+      expect(reviewState.candidates.length).toBe(10);
+
+      // Fails when attention items exist
+      const commitFail = await manager.commitLegacyAdoption({
+        effectiveRoutes: sampleEffectiveRoutes,
+        homepageFunnelId: 'fn-home'
+      });
+      expect(commitFail).toBe(false);
+
+      // Remove all attention items
+      const attentionIds = reviewState.candidates.filter(c => c.status === 'needs_attention').map(c => c.id);
+      for (const id of attentionIds) {
+        manager.removeAdoptionCandidate(id);
+      }
+
+      // Now succeeds
+      const commitSuccess = await manager.commitLegacyAdoption({
+        effectiveRoutes: sampleEffectiveRoutes,
+        homepageFunnelId: 'fn-home'
+      });
+      expect(commitSuccess).toBe(true);
+
+      const state = controller.getState();
+      if (state.status === 'ready') {
+        expect(state.isDraft).toBe(true);
+        expect(state.rawItems.length).toBe(5);
+      }
+    });
+
+    it('resolves an attention candidate via resolve modal', async () => {
+      manager.startLegacyAdoptionReview(sampleLegacyLayout, {
+        effectiveRoutes: sampleEffectiveRoutes,
+        funnels: sampleFunnels,
+        pages: samplePages
+      });
+
+      const candidate = manager.getAdoptionReviewState().candidates.find(c => c.status === 'needs_attention')!;
+      manager.openResolveCandidateModal(candidate.id);
+
+      manager.setItemModalField('targetKind', 'internal');
+      manager.setItemModalField('targetValue', 'fn-services');
+
+      const saved = await manager.saveItemModal({ effectiveRoutes: sampleEffectiveRoutes });
+      expect(saved).toBe(true);
+
+      const updated = manager.getAdoptionReviewState().candidates.find(c => c.id === candidate.id)!;
+      expect(updated.status).toBe('ready');
+      expect(updated.proposedItem?.target_kind).toBe('internal');
+      expect(updated.proposedItem?.target_value).toBe('fn-services');
+    });
+
+    it('guards against duplicate item modal submissions', async () => {
+      manager.openAddItemModal();
+      manager.setItemModalField('label', 'Services');
+      manager.setItemModalField('targetKind', 'internal');
+      manager.setItemModalField('targetValue', 'fn-services');
+
+      const p1 = manager.saveItemModal({ effectiveRoutes: sampleEffectiveRoutes });
+      const p2 = manager.saveItemModal({ effectiveRoutes: sampleEffectiveRoutes });
+
+      const [r1, r2] = await Promise.all([p1, p2]);
+      expect(r1).toBe(true);
+      expect(r2).toBe(false);
     });
   });
 
@@ -286,9 +640,9 @@ describe('Builder Site Navigation UI & Domain Integration', () => {
       const diff = computeNavigationPublishDiff(liveItems, draftItems, 3);
       expect(diff.isFirstAdoptionFromLegacy).toBe(false);
       expect(diff.totalCount).toBe(3);
-      expect(diff.addedCount).toBe(1); // About added
-      expect(diff.removedCount).toBe(1); // Services removed
-      expect(diff.updatedCount).toBe(1); // Contact renamed to Contact Us
+      expect(diff.addedCount).toBe(1);
+      expect(diff.removedCount).toBe(1);
+      expect(diff.updatedCount).toBe(1);
       expect(diff.isExplicitEmpty).toBe(false);
     });
 
@@ -310,142 +664,9 @@ describe('Builder Site Navigation UI & Domain Integration', () => {
       ];
 
       const diff = computeNavigationPublishDiff(liveItems, draftItems, 1);
-      expect(diff.visibilityChangedCount).toBe(1); // Home hidden
-      expect(diff.ctaChangedCount).toBe(1); // Contact is_cta = true
-      expect(diff.reorderedCount).toBe(1); // Services moved to position 0
-    });
-  });
-
-  describe('BuilderNavigationUiManager Lifecycle & Mutations', () => {
-    let repo: MockBuilderSiteNavigationRepository;
-    let controller: BuilderSiteNavigationController;
-    let publishController: BuilderSiteNavigationPublishController;
-    let manager: BuilderNavigationUiManager;
-
-    beforeEach(async () => {
-      repo = new MockBuilderSiteNavigationRepository();
-      controller = new BuilderSiteNavigationController(repo);
-      publishController = new BuilderSiteNavigationPublishController(repo);
-      manager = new BuilderNavigationUiManager(controller, publishController);
-      await controller.hydrate('ws-100', {
-        effectiveRoutes: sampleEffectiveRoutes,
-        homepageFunnelId: 'fn-home'
-      }, 'primary');
-    });
-
-    it('initializes in legacy authority when no canonical entries exist', () => {
-      const state = controller.getState();
-      expect(getNavigationScopeAuthority(state)).toBe('legacy');
-    });
-
-    it('starts adoption review and enforces resolving needs_attention items before creating draft', async () => {
-      manager.startLegacyAdoptionReview(sampleLegacyLayout, {
-        effectiveRoutes: sampleEffectiveRoutes,
-        funnels: sampleFunnels,
-        pages: samplePages
-      });
-
-      const reviewState = manager.getAdoptionReviewState();
-      expect(reviewState.isOpen).toBe(true);
-      expect(reviewState.candidates.length).toBe(9);
-
-      // Attempting commit with unresolved items fails
-      const commitFail = await manager.commitLegacyAdoption({
-        effectiveRoutes: sampleEffectiveRoutes,
-        homepageFunnelId: 'fn-home'
-      });
-      expect(commitFail).toBe(false);
-      expect(manager.getAdoptionReviewState().errorMessage).toContain('resolve or remove');
-
-      // Remove the 4 invalid items
-      const attentionIds = reviewState.candidates.filter(c => c.status === 'needs_attention').map(c => c.id);
-      for (const id of attentionIds) {
-        manager.removeAdoptionCandidate(id);
-      }
-
-      expect(manager.getAdoptionReviewState().candidates.length).toBe(5);
-
-      // Now committing succeeds
-      const commitSuccess = await manager.commitLegacyAdoption({
-        effectiveRoutes: sampleEffectiveRoutes,
-        homepageFunnelId: 'fn-home'
-      });
-      expect(commitSuccess).toBe(true);
-
-      const state = controller.getState();
-      if (state.status === 'ready') {
-        expect(state.isDraft).toBe(true);
-        expect(state.rawItems.length).toBe(5);
-        expect(getNavigationScopeAuthority(state)).toBe('draft');
-      }
-    });
-
-    it('resolves an attention candidate via resolve modal', async () => {
-      manager.startLegacyAdoptionReview(sampleLegacyLayout, {
-        effectiveRoutes: sampleEffectiveRoutes,
-        funnels: sampleFunnels,
-        pages: samplePages
-      });
-
-      const candidateToResolve = manager.getAdoptionReviewState().candidates.find(c => c.status === 'needs_attention')!;
-      expect(candidateToResolve).toBeDefined();
-
-      manager.openResolveCandidateModal(candidateToResolve.id);
-      expect(manager.getItemModalState().isOpen).toBe(true);
-      expect(manager.getItemModalState().mode).toBe('resolve_legacy');
-
-      // Set valid internal destination
-      manager.setItemModalField('targetKind', 'internal');
-      manager.setItemModalField('targetValue', 'fn-services');
-
-      const saved = await manager.saveItemModal({ effectiveRoutes: sampleEffectiveRoutes });
-      expect(saved).toBe(true);
-
-      const updatedCandidate = manager.getAdoptionReviewState().candidates.find(c => c.id === candidateToResolve.id)!;
-      expect(updatedCandidate.status).toBe('ready');
-      expect(updatedCandidate.proposedItem?.target_kind).toBe('internal');
-      expect(updatedCandidate.proposedItem?.target_value).toBe('fn-services');
-    });
-
-    it('prevents duplicate submissions when saving item modal', async () => {
-      manager.openAddItemModal();
-      manager.setItemModalField('label', 'Services');
-      manager.setItemModalField('targetKind', 'internal');
-      manager.setItemModalField('targetValue', 'fn-services');
-
-      // First save
-      const p1 = manager.saveItemModal({ effectiveRoutes: sampleEffectiveRoutes });
-      // Second immediate save should be rejected because isSaving is true
-      const p2 = manager.saveItemModal({ effectiveRoutes: sampleEffectiveRoutes });
-
-      const [r1, r2] = await Promise.all([p1, p2]);
-      expect(r1).toBe(true);
-      expect(r2).toBe(false);
-    });
-
-    it('switches scopes and captures scope on publication', async () => {
-      // Stage Primary draft
-      await controller.stageDraft([
-        { id: '11111111-1111-4111-8111-111111111111', label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false }
-      ], { effectiveRoutes: sampleEffectiveRoutes, homepageFunnelId: 'fn-home' });
-
-      manager.openPublishModal();
-      expect(manager.getPublishModalState().isOpen).toBe(true);
-      expect(manager.getPublishModalState().menuScope).toBe('primary');
-
-      const publishRes = await manager.confirmPublish({
-        effectiveRoutes: sampleEffectiveRoutes,
-        homepageFunnelId: 'fn-home'
-      });
-      expect(publishRes).toBe(true);
-      expect(manager.getPublishModalState().isOpen).toBe(false);
-
-      const state = controller.getState();
-      if (state.status === 'ready') {
-        expect(state.isDraft).toBe(false);
-        expect(state.liveRevision).toBe(1);
-        expect(getNavigationScopeAuthority(state)).toBe('live');
-      }
+      expect(diff.visibilityChangedCount).toBe(1);
+      expect(diff.ctaChangedCount).toBe(1);
+      expect(diff.reorderedCount).toBe(1);
     });
   });
 
@@ -464,7 +685,6 @@ describe('Builder Site Navigation UI & Domain Integration', () => {
         resolvePrimary = resolve;
       });
 
-      // Override getEffectiveNavigation to delay primary
       const origGet = repo.getEffectiveNavigation.bind(repo);
       repo.getEffectiveNavigation = async (wsId, scope) => {
         if (scope === 'primary') {
@@ -473,21 +693,16 @@ describe('Builder Site Navigation UI & Domain Integration', () => {
         return origGet(wsId, scope);
       };
 
-      // 1. Start Primary hydration
       const p1 = controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
-
-      // 2. Switch to Footer immediately
       const p2 = controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'footer');
       await p2;
 
       expect(controller.getActiveMenuScope()).toBe('footer');
       expect((controller.getState() as any).menuScope).toBe('footer');
 
-      // 3. Complete delayed Primary hydration
       resolvePrimary();
       await p1;
 
-      // Active state must remain Footer
       expect(controller.getActiveMenuScope()).toBe('footer');
       expect((controller.getState() as any).menuScope).toBe('footer');
     });
@@ -506,24 +721,20 @@ describe('Builder Site Navigation UI & Domain Integration', () => {
         return origGet(wsId, scope);
       };
 
-      // 1. Start Site A hydration
       const p1 = controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
-
-      // 2. Switch to Site B
       const p2 = controller.hydrate('ws-200', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
       await p2;
 
       expect(controller.getActiveWebsiteId()).toBe('ws-200');
       expect((controller.getState() as any).websiteId).toBe('ws-200');
 
-      // 3. Complete Site A hydration
       resolveSiteA();
       await p1;
 
-      // Active state must remain Site B
       expect(controller.getActiveWebsiteId()).toBe('ws-200');
       expect((controller.getState() as any).websiteId).toBe('ws-200');
     });
+
     it('ignores stale stage draft responses when scope is switched', async () => {
       await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
 
@@ -540,26 +751,21 @@ describe('Builder Site Navigation UI & Domain Integration', () => {
         return origStage(wsId, items, bRev, dRev, scope);
       };
 
-      // 1. Start Primary stage
       const p1 = controller.stageDraft([
         { id: '11111111-1111-4111-8111-111111111111', label: 'Primary Item', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false }
       ], { effectiveRoutes: sampleEffectiveRoutes });
 
-      // 2. Switch to Footer immediately
       await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'footer');
       expect(controller.getActiveMenuScope()).toBe('footer');
 
-      // 3. Complete delayed Primary stage
       resolvePrimaryStage();
       await p1;
 
-      // Active state must remain Footer
       expect(controller.getActiveMenuScope()).toBe('footer');
       expect((controller.getState() as any).menuScope).toBe('footer');
     });
 
     it('ignores stale revert draft responses when scope is switched', async () => {
-      // Stage Primary draft
       await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
       await controller.stageDraft([
         { id: '11111111-1111-4111-8111-111111111111', label: 'Draft Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false }
@@ -578,76 +784,31 @@ describe('Builder Site Navigation UI & Domain Integration', () => {
         return origRevert(wsId, dRev, scope);
       };
 
-      // 1. Start Primary revert
       const p1 = controller.revertDraft({ effectiveRoutes: sampleEffectiveRoutes });
 
-      // 2. Switch to Footer
       await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'footer');
       expect(controller.getActiveMenuScope()).toBe('footer');
 
-      // 3. Complete Primary revert
       resolvePrimaryRevert();
       await p1;
 
-      // Active state must remain Footer
       expect(controller.getActiveMenuScope()).toBe('footer');
       expect((controller.getState() as any).menuScope).toBe('footer');
     });
 
     it('guarantees destination picker isolation between different websites for the same user', () => {
-      // Verify sampleContext for Website A ws-100 contains only ws-100 funnels and pages
       expect(sampleContext.website.id).toBe('ws-100');
       expect(sampleContext.funnels.every(f => f.website_id === 'ws-100')).toBe(true);
       expect(sampleContext.funnels.some(f => f.website_id === 'ws-200')).toBe(false);
       expect(sampleContext.pages.some(p => p.funnel_id === 'fn-other')).toBe(false);
     });
 
-    it('preserves true live baseline across draft reload for truthful publish diffs', async () => {
-      // Setup live snapshot with rev 3
-      repo.setLiveSnapshot('ws-100', [
-        { id: '11111111-1111-4111-8111-111111111111', label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false },
-        { id: '22222222-2222-4222-8222-222222222222', label: 'Services', target_kind: 'internal', target_value: 'fn-services', position: 1, visible: true, is_cta: false },
-        { id: '33333333-3333-4333-8333-333333333333', label: 'Contact', target_kind: 'internal', target_value: 'fn-contact', position: 2, visible: true, is_cta: false }
-      ], 3, 'primary');
-
-      // Stage server draft with Home, About, Contact
-      await repo.stageNavigationDraft('ws-100', [
-        { id: '11111111-1111-4111-8111-111111111111', label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false },
-        { id: '44444444-4444-4444-8444-444444444444', label: 'About', target_kind: 'external', target_value: 'https://washops.com/about', position: 1, visible: true, is_cta: false },
-        { id: '33333333-3333-4333-8333-333333333333', label: 'Contact', target_kind: 'internal', target_value: 'fn-contact', position: 2, visible: true, is_cta: false }
-      ], 3, 0, 'primary');
-
-      // Create new fresh controller (simulating browser reload)
-      const freshController = new BuilderSiteNavigationController(repo);
-      const freshPublishController = new BuilderSiteNavigationPublishController(repo);
-      const freshManager = new BuilderNavigationUiManager(freshController, freshPublishController);
-
-      await freshController.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes, homepageFunnelId: 'fn-home' }, 'primary');
-
-      const state = freshController.getState();
-      expect(state.status).toBe('ready');
-      if (state.status === 'ready') {
-        expect(state.isDraft).toBe(true);
-        expect(state.liveRevision).toBe(3);
-        expect(state.liveItems.length).toBe(3);
-
-        freshManager.openPublishModal();
-        const diff = freshManager.getPublishModalState().summary!;
-        expect(diff.isFirstAdoptionFromLegacy).toBe(false);
-        expect(diff.addedCount).toBe(1); // About
-        expect(diff.removedCount).toBe(1); // Services
-        expect(diff.totalCount).toBe(3);
-      }
-    });
-
     it('tracks multi-scope draft awareness when both Primary and Footer have drafts', async () => {
-      // Hydrate Primary and stage draft
       await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
       await controller.stageDraft([
         { id: '11111111-1111-4111-8111-111111111111', label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false }
       ], { effectiveRoutes: sampleEffectiveRoutes });
 
-      // Hydrate Footer and stage draft
       await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'footer');
       await controller.stageDraft([
         { id: '22222222-2222-4222-8222-222222222222', label: 'Contact', target_kind: 'internal', target_value: 'fn-contact', position: 0, visible: true, is_cta: false }

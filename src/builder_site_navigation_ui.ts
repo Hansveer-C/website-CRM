@@ -106,6 +106,7 @@ export function generateNavigationUuid(): string {
 /**
  * Genuinely loss-aware legacy candidate evaluation.
  * Never fabricates replacement destinations.
+ * Strict homepage rule: only exact root "/" is automatically homepage.
  * Standalone legacy header CTA is kept separate and not cloned into nav items.
  */
 export function evaluateLegacyNavigationCandidates(
@@ -142,7 +143,12 @@ export function evaluateLegacyNavigationCandidates(
       let status: 'ready' | 'needs_attention' = 'needs_attention';
       let reason: string | undefined;
 
-      if (!path || path === '/' || path === '/home' || path.toLowerCase() === 'home') {
+      if (!path) {
+        // Missing or empty legacy destination
+        status = 'needs_attention';
+        reason = 'This legacy navigation item has no destination.';
+      } else if (path === '/') {
+        // Only exact root is automatically homepage
         proposedItem = {
           id,
           label,
@@ -205,7 +211,7 @@ export function evaluateLegacyNavigationCandidates(
           reason = emailCheck.error || 'Email address format is not supported';
         }
       } else {
-        // Relative path: match against effective routes or page slugs
+        // Relative path: match against effective routes or page slugs (including /home and home)
         const cleanPath = path.startsWith('/') ? path : `/${path}`;
         const matchingRoute = context.effectiveRoutes.find(r => r.path === cleanPath || r.live_path === cleanPath);
         if (matchingRoute && matchingRoute.funnel_id) {
@@ -282,7 +288,10 @@ export function evaluateLegacyNavigationCandidates(
       let status: 'ready' | 'needs_attention' = 'needs_attention';
       let reason: string | undefined;
 
-      if (!path || path === '/' || path === '/home') {
+      if (!path) {
+        status = 'needs_attention';
+        reason = 'This legacy navigation item has no destination.';
+      } else if (path === '/') {
         proposedItem = {
           id,
           label,
@@ -359,8 +368,23 @@ export function evaluateLegacyNavigationCandidates(
           };
           status = 'ready';
         } else {
-          status = 'needs_attention';
-          reason = `Destination path '${path}' does not match any existing page in this website`;
+          const slug = cleanPath.replace(/^\//, '');
+          const matchingPage = context.pages.find(p => p.slug === slug);
+          if (matchingPage && matchingPage.funnel_id) {
+            proposedItem = {
+              id,
+              label,
+              target_kind: 'internal',
+              target_value: matchingPage.funnel_id,
+              position: candidates.length,
+              visible,
+              is_cta: false
+            };
+            status = 'ready';
+          } else {
+            status = 'needs_attention';
+            reason = `Destination path '${path}' does not match any existing page in this website`;
+          }
         }
       }
 
@@ -1116,8 +1140,14 @@ export class BuilderNavigationUiManager {
     if (res.success) {
       this.publishModalState.isOpen = false;
       this.restoreFocus();
-      // Authoritatively rehydrate using captured parameters
-      await this.controller.hydrate(websiteIdToPublish, context, scopeToPublish);
+      // Safe post-publish refresh that updates cache and only updates active state if scope is STILL active
+      await this.controller.refreshScopeAfterPublish(
+        websiteIdToPublish,
+        scopeToPublish,
+        res.data.items,
+        res.data.live_revision,
+        context
+      );
       this.notify();
       return true;
     } else {
@@ -1129,7 +1159,11 @@ export class BuilderNavigationUiManager {
       } else if (res.code === 'INVALID_INPUT') {
         errorMsg = 'One or more navigation links are not publicly available yet.';
       }
-      this.publishModalState.errorMessage = errorMsg;
+
+      // Only display error on publish modal if user is still on the published scope
+      if (this.publishModalState.isOpen && this.activeScope === scopeToPublish) {
+        this.publishModalState.errorMessage = errorMsg;
+      }
       this.notify();
       return false;
     }
@@ -1290,7 +1324,7 @@ export function renderBuilderNavigationPanel(
               <div style="min-width: 0; flex: 1;">
                 <div style="font-weight: 700; font-size: 0.88rem; color: #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtmlText(c.label)}</div>
                 <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 2px;">
-                  <span style="font-family: monospace;">${escapeHtmlText(c.originalTarget || '/')}</span>
+                  <span style="font-family: monospace;">${escapeHtmlText(c.originalTarget || '(no destination)')}</span>
                 </div>
               </div>
               <span style="font-size: 0.75rem; color: #64748b; white-space: nowrap;">Read-only</span>
@@ -1415,7 +1449,7 @@ function renderLegacyAdoptionReviewPanel(
             </div>
 
             <div style="font-size: 0.78rem; color: #94a3b8;">
-              Original: <code style="background: #111; padding: 2px 5px; border-radius: 4px;">${escapeHtmlText(c.originalTarget || '/')}</code>
+              Original: <code style="background: #111; padding: 2px 5px; border-radius: 4px;">${escapeHtmlText(c.originalTarget || '(empty)')}</code>
             </div>
 
             ${c.reason ? `
