@@ -180,8 +180,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
     const rev2 = randomUUID();
     await client.query('INSERT INTO public.builder_published_revisions (id, website_id, page_id, created_by, schema_version, document, document_fingerprint) VALUES ($1, $2, $3, $4, 1, \'{}\', \'fp1\')', [rev1, websiteId, page1Id, userId]);
     await client.query('INSERT INTO public.builder_published_revisions (id, website_id, page_id, created_by, schema_version, document, document_fingerprint) VALUES ($1, $2, $3, $4, 1, \'{}\', \'fp2\')', [rev2, websiteId, page2Id, userId]);
-    await client.query('INSERT INTO public.builder_publication_targets (website_id, page_id, published_revision_id, published_by) VALUES ($1, $2, $3, $4)', [websiteId, page1Id, rev1, userId]);
-    await client.query('INSERT INTO public.builder_publication_targets (website_id, page_id, published_revision_id, published_by) VALUES ($1, $2, $3, $4)', [websiteId, page2Id, rev2, userId]);
+    await client.query('INSERT INTO public.builder_publication_targets (website_id, page_id, published_revision_id, published_at, published_by) VALUES ($1, $2, $3, now(), $4)', [websiteId, page1Id, rev1, userId]);
+    await client.query('INSERT INTO public.builder_publication_targets (website_id, page_id, published_revision_id, published_at, published_by) VALUES ($1, $2, $3, now(), $4)', [websiteId, page2Id, rev2, userId]);
 
     client.release();
 
