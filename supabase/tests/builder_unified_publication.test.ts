@@ -443,7 +443,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
 
       // Create primary nav draft
       const navItems = [{ id: 'nav-1', label: 'Home', target_kind: 'homepage', target_value: '', visible: true }];
-      await client.query('SELECT public.save_builder_site_navigation_draft($1::uuid, $2, $3::jsonb, 0)', [
+      await client.query('SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb, 0)', [
         websiteId, 'primary', JSON.stringify(navItems)
       ]);
 
@@ -512,7 +512,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
         { id: 'nav-home', label: 'Home', target_kind: 'homepage', target_value: '', visible: true },
         { id: 'nav-serv', label: 'Services', target_kind: 'internal', target_value: funnel3Id, visible: true }
       ];
-      await client.query('SELECT public.save_builder_site_navigation_draft($1::uuid, $2, $3::jsonb, 0)', [
+      await client.query('SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb, 0)', [
         websiteId, 'primary', JSON.stringify(navItems)
       ]);
 
@@ -582,10 +582,12 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     try {
       await setAuth(client, userId);
 
-      // Update existing route /about to point to funnel3 instead of funnel2
-      await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3, $4::uuid)', [
-        websiteId, funnel3Id, '/about', routeAboutId
-      ]);
+      // Directly stage route draft for existing route /about to point to funnel3
+      await client.query(
+        `INSERT INTO public.builder_route_drafts (website_id, route_id, path, funnel_id, action)
+         VALUES ($1, $2, $3, $4, 'upsert')`,
+        [websiteId, routeAboutId, '/about', funnel3Id]
+      );
 
       const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
       const plan = planRes.rows[0].plan;
@@ -675,7 +677,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       const navItems = [
         { id: 'nav-1', label: 'Broken Link', target_kind: 'internal', target_value: 'non-existent-funnel', visible: true }
       ];
-      await client.query('SELECT public.save_builder_site_navigation_draft($1::uuid, $2, $3::jsonb, 0)', [
+      await client.query('SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb, 0)', [
         websiteId, 'primary', JSON.stringify(navItems)
       ]);
 
