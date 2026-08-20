@@ -1,5 +1,5 @@
 -- Migration: 20260817050900_create_builder_unified_website_publication.sql
--- Description: Unified Website Publication Transaction, Server-Authoritative Publish Plan, and Immutable Publication Audit Log (Phase 1B / Task 7)
+-- Description: Unified Website Publication Transaction, Server-Authoritative Publish Plan, Immutable Publication Audit Log, and Server-Authoritative DML Hardening (Phase 1B / Task 7)
 
 -- 1. Add monotonic website-level publication revision to websites
 alter table public.websites
@@ -24,7 +24,7 @@ alter table public.builder_website_publications enable row level security;
 alter table public.builder_website_publications force row level security;
 
 -- Revoke default access and grant SELECT to authenticated, postgres, service_role under RLS
-revoke all on table public.builder_website_publications from public, anon;
+revoke all on table public.builder_website_publications from public, anon, authenticated;
 grant select on table public.builder_website_publications to authenticated, postgres, service_role;
 
 -- RLS: Only website owners can read their publication history
@@ -527,6 +527,8 @@ declare
   v_projected_funnels text[] := array[]::text[];
   v_live_route_rec record;
   v_draft_route_rec record;
+  v_lock_funnel_id text;
+  v_frozen_page_ids text[] := array[]::text[];
   v_lock_page_id text;
 
   -- Page mutation vars
@@ -557,8 +559,10 @@ begin
     raise sqlstate 'PT400' using message = 'Expected state token is required and must be an object';
   end if;
 
-  -- 2. Acquire website lifecycle advisory lock
-  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('builder-website-publish:' || p_website_id, 0));
+  -- 2. Acquire standard website lifecycle advisory lock
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('builder-website-lifecycle:' || v_user_id || ':' || p_website_id::text, 0)
+  );
 
   -- 3. Lock website row
   select id, user_id, name, homepage_funnel_id, draft_homepage_funnel_id, coalesce(publication_revision, 0) as pub_rev
@@ -571,7 +575,7 @@ begin
     raise sqlstate 'PT404' using message = 'Website not found';
   end if;
 
-  -- Derive projected funnels to identify participating pages
+  -- Derive projected funnels to identify participating funnels
   v_effective_homepage := coalesce(v_website.draft_homepage_funnel_id, v_website.homepage_funnel_id);
 
   for v_live_route_rec in (
@@ -607,35 +611,53 @@ begin
   from jsonb_array_elements(v_projected_routes) as r;
   v_projected_funnels := coalesce(v_projected_funnels, array[]::text[]);
 
-  -- 4. Acquire page-section advisory locks for every participating page in deterministic ascending order
-  for v_lock_page_id in (
-    select p.id
-    from public.pages p
-    where p.user_id = v_user_id
-      and p.funnel_id = any(v_projected_funnels)
-    order by p.id asc
+  -- 4. Acquire page lifecycle advisory lock for EVERY projected participating funnel in deterministic ascending order
+  for v_lock_funnel_id in (
+    select distinct f
+    from unnest(v_projected_funnels) as f
+    where f is not null and f <> ''
+    order by f asc
   ) loop
-    perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('page-sections:' || v_lock_page_id, 0));
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended('builder-page-lifecycle:' || v_user_id || ':' || v_lock_funnel_id, 0)
+    );
   end loop;
 
-  -- 5. Lock participating pages rows for update in deterministic ascending order
-  perform 1
+  -- 5. Enumerate and FREEZE exact participating page IDs server-side in deterministic order
+  select array_agg(p.id order by p.id asc)
+  into v_frozen_page_ids
   from public.pages p
   where p.user_id = v_user_id
-    and p.funnel_id = any(v_projected_funnels)
+    and p.funnel_id = any(v_projected_funnels);
+  v_frozen_page_ids := coalesce(v_frozen_page_ids, array[]::text[]);
+
+  -- 6. Acquire page-sections advisory locks for every frozen page ID in deterministic ascending order
+  for v_lock_page_id in (
+    select unnest(v_frozen_page_ids) as id
+    order by id asc
+  ) loop
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended('page-sections:' || v_lock_page_id, 0)
+    );
+  end loop;
+
+  -- 7. Lock participating pages rows for update in deterministic ascending order
+  perform 1
+  from public.pages p
+  where p.id = any(v_frozen_page_ids)
   order by p.id asc
   for update;
 
-  -- 6. Reconstruct server-authoritative publish plan under lock
+  -- 8. Reconstruct server-authoritative publish plan under lock
   v_plan := public.get_builder_website_publish_plan(p_website_id);
   v_current_expected := v_plan->'expected_state';
 
-  -- 7. Strict optimistic concurrency check
+  -- 9. Strict optimistic concurrency check
   if v_current_expected is distinct from p_expected_state then
     raise sqlstate 'PT409' using message = 'Website changes were updated elsewhere. Reload the publish summary before continuing.';
   end if;
 
-  -- 8. No changes check
+  -- 10. No changes check
   if not (v_plan->>'has_pending_changes')::boolean then
     return jsonb_build_object(
       'success', true,
@@ -645,7 +667,7 @@ begin
     );
   end if;
 
-  -- 9. Blocker check (Abort transaction if any blocker exists in projected final state)
+  -- 11. Blocker check (Abort transaction if any blocker exists in projected final state)
   if not (v_plan->>'is_publishable')::boolean or jsonb_array_length(v_plan->'blockers') > 0 then
     raise sqlstate 'PT409' using message = coalesce(
       'Publication blocked: ' || (v_plan->'blockers'->0->>'message'),
@@ -653,14 +675,13 @@ begin
     );
   end if;
 
-  -- 10. EXECUTE ATOMIC PROMOTION MUTATIONS
+  -- 12. EXECUTE ATOMIC PROMOTION MUTATIONS
 
-  -- A. Pages / Content Publication Targets (Publish ONLY changed content)
+  -- A. Pages / Content Publication Targets (Publish ONLY changed content, iterating over FROZEN page IDs)
   for v_page_rec in (
     select p.id, p.user_id, p.funnel_id, p.name, p.slug, p.status, coalesce(p.step_order, 0) as step_order
     from public.pages p
-    where p.user_id = v_user_id
-      and p.funnel_id = any(v_projected_funnels)
+    where p.id = any(v_frozen_page_ids)
     order by p.id asc
   ) loop
     -- Construct canonical BuilderDocument from page_sections
@@ -973,3 +994,46 @@ $$;
 
 revoke all on function public.get_builder_website_publication_history(uuid, integer) from public, anon;
 grant execute on function public.get_builder_website_publication_history(uuid, integer) to authenticated, postgres, service_role;
+
+
+-- ============================================================================
+-- 3. DML Security & Server-Authoritative Privilege Hardening (Phase 1B / Task 7)
+-- ============================================================================
+
+-- A. public.page_sections: Direct write privileges revoked from anon/authenticated
+revoke insert, update, delete on table public.page_sections from public, anon, authenticated;
+grant select on table public.page_sections to authenticated, postgres, service_role;
+
+-- B. Route tables: Direct write privileges revoked from anon/authenticated
+revoke insert, update, delete on table public.builder_route_drafts from public, anon, authenticated;
+grant select on table public.builder_route_drafts to authenticated, postgres, service_role;
+
+revoke insert, update, delete on table public.website_routes from public, anon, authenticated;
+grant select on table public.website_routes to authenticated, anon, postgres, service_role;
+
+revoke insert, update, delete on table public.website_route_redirects from public, anon, authenticated;
+grant select on table public.website_route_redirects to authenticated, anon, postgres, service_role;
+
+-- C. Navigation tables: Direct write privileges revoked from anon/authenticated
+revoke insert, update, delete on table public.builder_site_navigation_drafts from public, anon, authenticated;
+grant select on table public.builder_site_navigation_drafts to authenticated, postgres, service_role;
+
+revoke insert, update, delete on table public.builder_site_navigation_live from public, anon, authenticated;
+grant select on table public.builder_site_navigation_live to authenticated, anon, postgres, service_role;
+
+-- D. public.pages: Revoke direct lifecycle mutations (insert, delete, and restricted columns)
+revoke insert, delete, update on table public.pages from public, anon, authenticated;
+grant select on table public.pages to authenticated, postgres, service_role;
+grant update (name, slug, seo_title, seo_description) on table public.pages to authenticated, postgres, service_role;
+
+-- E. public.websites: Revoke direct publication-field updates
+revoke insert, delete, update on table public.websites from public, anon, authenticated;
+grant select on table public.websites to authenticated, anon, postgres, service_role;
+grant update (name, domain, subdomain) on table public.websites to authenticated, postgres, service_role;
+
+-- F. Publication revision & target tables: Direct write privileges revoked
+revoke insert, update, delete on table public.builder_published_revisions from public, anon, authenticated;
+grant select on table public.builder_published_revisions to authenticated, anon, postgres, service_role;
+
+revoke insert, update, delete on table public.builder_publication_targets from public, anon, authenticated;
+grant select on table public.builder_publication_targets to authenticated, anon, postgres, service_role;

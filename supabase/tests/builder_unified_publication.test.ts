@@ -13,6 +13,9 @@ const DATABASE_URL =
 
 const MIGRATIONS = [
   resolve(__dirname, '../migrations/20260810134911_save_page_sections_document.sql'),
+  resolve(__dirname, '../migrations/20260817050100_duplicate_builder_page.sql'),
+  resolve(__dirname, '../migrations/20260817050200_delete_builder_page.sql'),
+  resolve(__dirname, '../migrations/20260817050300_reorder_builder_pages.sql'),
   resolve(__dirname, '../migrations/20260817050400_set_builder_homepage.sql'),
   resolve(__dirname, '../migrations/20260817050500_create_builder_route_drafts.sql'),
   resolve(__dirname, '../migrations/20260817050600_create_builder_route_redirects_and_publication.sql'),
@@ -65,6 +68,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
           slug text not null,
           status text not null default 'draft',
           step_order integer not null default 0,
+          seo_title text,
+          seo_description text,
           created_at timestamptz not null default now()
         );
 
@@ -125,6 +130,27 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
         create or replace function auth.uid() returns uuid as $$
           select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
         $$ language sql stable;
+
+        alter table public.users enable row level security;
+        alter table public.funnels enable row level security;
+        alter table public.pages enable row level security;
+        alter table public.page_sections enable row level security;
+        alter table public.websites enable row level security;
+        alter table public.website_routes enable row level security;
+        alter table public.builder_published_revisions enable row level security;
+        alter table public.builder_publication_targets enable row level security;
+
+        drop policy if exists "pages_user_policy" on public.pages;
+        create policy "pages_user_policy" on public.pages for all to authenticated using (user_id = (select auth.uid())::text);
+
+        drop policy if exists "page_sections_user_policy" on public.page_sections;
+        create policy "page_sections_user_policy" on public.page_sections for all to authenticated using (user_id = (select auth.uid())::text);
+
+        drop policy if exists "websites_user_policy" on public.websites;
+        create policy "websites_user_policy" on public.websites for all to authenticated using (user_id = (select auth.uid())::text);
+
+        drop policy if exists "funnels_user_policy" on public.funnels;
+        create policy "funnels_user_policy" on public.funnels for all to authenticated using (user_id = (select auth.uid())::text);
 
         grant all on table public.users to authenticated, anon, service_role;
         grant all on table public.funnels to authenticated, anon, service_role;
@@ -267,8 +293,10 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
 
   async function setAuth(client: pg.PoolClient, userId: string | null) {
     if (userId) {
+      await client.query(`set role authenticated`);
       await client.query(`set "request.jwt.claim.sub" = '${userId}'`);
     } else {
+      await client.query(`set role postgres`);
       await client.query(`set "request.jwt.claim.sub" = ''`);
     }
   }
@@ -560,9 +588,9 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
       const staleExpectedState = planRes.rows[0].plan.expected_state;
 
-      // 2. In-place mutation of the same draft row to /pricing-plans -> funnel3
-      await client.query('UPDATE public.builder_route_drafts SET path = $1, funnel_id = $2 WHERE id = $3', [
-        '/pricing-plans', funnel3Id, draftId
+      // 2. Re-stage with changed path via RPC to /pricing-plans -> funnel3
+      await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3)', [
+        websiteId, funnel3Id, '/pricing-plans'
       ]);
 
       // 3. Attempt to publish using stale expected state
@@ -584,12 +612,10 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     try {
       await setAuth(client, userId);
 
-      // Directly stage route draft for existing route /about to point to funnel3
-      await client.query(
-        `INSERT INTO public.builder_route_drafts (website_id, route_id, path, funnel_id, action)
-         VALUES ($1, $2, $3, $4, 'upsert')`,
-        [websiteId, routeAboutId, '/about', funnel3Id]
-      );
+      // Stage route draft for existing route /about to point to funnel3 via RPC
+      await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3, $4::uuid)', [
+        websiteId, funnel3Id, '/about', routeAboutId
+      ]);
 
       const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
       const plan = planRes.rows[0].plan;
@@ -617,13 +643,14 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     const { userId, websiteId, funnel3Id, routeAboutId } = await createTestFixture();
     const client = await pool.connect();
     try {
-      await setAuth(client, userId);
-
-      // Pre-existing redirect /company -> /about
+      await setAuth(client, null);
+      // Pre-existing redirect /company -> /about (inserted as admin)
       await client.query(
         'INSERT INTO public.website_route_redirects (website_id, from_path, to_path) VALUES ($1, $2, $3)',
         [websiteId, '/company', '/about']
       );
+
+      await setAuth(client, userId);
 
       // Rename route /about -> /our-story with funnel3
       await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3, $4::uuid)', [
@@ -683,9 +710,9 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
         websiteId, 'primary', JSON.stringify(navItems)
       ]);
 
-      // 5. Delete the route draft for funnel3 so that the nav item is now UNROUTED
-      await client.query('DELETE FROM public.builder_route_drafts WHERE website_id = $1 AND funnel_id = $2', [
-        websiteId, funnel3Id
+      // 5. Revert the route draft for funnel3 via RPC so that the nav item is now UNROUTED
+      await client.query('SELECT public.revert_builder_route_draft($1::uuid, $2)', [
+        websiteId, '/services-new'
       ]);
 
       const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
@@ -863,7 +890,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
       const oldExpectedState = planRes.rows[0].plan.expected_state;
 
-      // 2. Modify page name in public.pages without modifying sections
+      // 2. Modify page name in public.pages via authorized update
       await client.query('UPDATE public.pages SET name = $1 WHERE id = $2', ['Brand New Home Title', page1Id]);
 
       // 3. Calling publish with old expected state fails with PT409 because canonical document fingerprint changed
@@ -1013,12 +1040,13 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
     const { userId, websiteId, funnel1Id, funnel2Id } = await createTestFixture();
     const client = await pool.connect();
     try {
-      await setAuth(client, userId);
-
+      await setAuth(client, null);
       // Add a secondary route for funnel1 at /archive-home
       await client.query('INSERT INTO public.website_routes (website_id, path, funnel_id) VALUES ($1, $2, $3)', [
         websiteId, '/archive-home', funnel1Id
       ]);
+
+      await setAuth(client, userId);
 
       // Change draft homepage to funnel2
       await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2)', [websiteId, funnel2Id]);
@@ -1042,6 +1070,374 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
         JSON.stringify(plan.expected_state)
       ]);
       expect(pubRes.rows[0].res.success).toBe(true);
+    } finally {
+      await setAuth(client, null);
+      client.release();
+    }
+  });
+
+  it('24. create-page phantom waits on projected funnel lock, then publish detects new page in plan and throws PT409 (F, S.1, S.2)', async () => {
+    const { userId, websiteId, funnel1Id } = await createTestFixture();
+    const clientA = await pool.connect();
+    const clientB = await pool.connect();
+    try {
+      await setAuth(clientA, userId);
+      await setAuth(clientB, userId);
+
+      // Session A obtains publish plan (only page 1 in funnel1)
+      const planRes = await clientA.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const planA = planRes.rows[0].plan;
+
+      // Session B begins txn and calls released create_builder_page RPC in funnel1
+      await clientB.query('BEGIN');
+      const newPageId = `pg-phantom-${randomUUID()}`;
+      await clientB.query("SELECT public.create_builder_page('Phantom Page', $1, $2)", [newPageId, funnel1Id]);
+
+      // Session A calls publish_builder_website with old expected state
+      let publishDone = false;
+      let publishErr: any = null;
+      const publishPromise = clientA.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
+        websiteId,
+        JSON.stringify(planA.expected_state)
+      ]).then(() => {
+        publishDone = true;
+      }).catch((e) => {
+        publishDone = true;
+        publishErr = e;
+      });
+
+      // Session A must be blocked waiting for the funnel lifecycle lock held by Session B
+      await new Promise((r) => setTimeout(r, 100));
+      expect(publishDone).toBe(false);
+
+      // Session B commits, persisting the new page
+      await clientB.query('COMMIT');
+
+      // Session A unblocks, re-evaluates expected state under lock, detects new page in expected state, throws PT409
+      await publishPromise;
+      expect(publishDone).toBe(true);
+      expect(publishErr).toBeTruthy();
+      expect(publishErr.message).toMatch(/Website changes were updated elsewhere/);
+
+      // Verify zero audit publications exist
+      const pubCountRes = await clientA.query('SELECT count(*)::integer as count FROM public.builder_website_publications WHERE website_id = $1', [websiteId]);
+      expect(pubCountRes.rows[0].count).toBe(0);
+    } finally {
+      await setAuth(clientA, null);
+      await setAuth(clientB, null);
+      clientA.release();
+      clientB.release();
+    }
+  });
+
+  it('25. inverse create during unified publication waits on funnel lifecycle lock (G, S.3)', async () => {
+    const { userId, funnel1Id } = await createTestFixture();
+    const clientA = await pool.connect();
+    const clientB = await pool.connect();
+    try {
+      await setAuth(clientA, userId);
+      await setAuth(clientB, userId);
+
+      // Session A begins txn and holds the builder-page-lifecycle lock for funnel1
+      await clientA.query('BEGIN');
+      await clientA.query(`SELECT pg_advisory_xact_lock(hashtextextended('builder-page-lifecycle:' || $1 || ':' || $2, 0))`, [userId, funnel1Id]);
+
+      // Session B calls create_builder_page in funnel1
+      let createDone = false;
+      let createRes: any = null;
+      const newPageId = `pg-inv-${randomUUID()}`;
+      const createPromise = clientB.query("SELECT public.create_builder_page('Inverse Page', $1, $2) as res", [
+        newPageId, funnel1Id
+      ]).then((r) => {
+        createDone = true;
+        createRes = r;
+      });
+
+      // Session B is blocked while Session A holds the lock
+      await new Promise((r) => setTimeout(r, 100));
+      expect(createDone).toBe(false);
+
+      // Session A commits
+      await clientA.query('COMMIT');
+
+      // Session B resumes and succeeds
+      await createPromise;
+      expect(createDone).toBe(true);
+      expect(createRes.rows[0].res.id).toBe(newPageId);
+    } finally {
+      await setAuth(clientA, null);
+      await setAuth(clientB, null);
+      clientA.release();
+      clientB.release();
+    }
+  });
+
+  it('26. delete_builder_page serializes on funnel lifecycle lock (H)', async () => {
+    const { userId, funnel1Id, page1Id } = await createTestFixture();
+    const clientA = await pool.connect();
+    const clientB = await pool.connect();
+    try {
+      await setAuth(clientA, userId);
+      await setAuth(clientB, userId);
+
+      // Session A holds the builder-page-lifecycle lock on funnel1
+      await clientA.query('BEGIN');
+      await clientA.query(`SELECT pg_advisory_xact_lock(hashtextextended('builder-page-lifecycle:' || $1 || ':' || $2, 0))`, [userId, funnel1Id]);
+
+      // Session B calls delete_builder_page for page1
+      let deleteDone = false;
+      let deleteRes: any = null;
+      const deletePromise = clientB.query('SELECT public.delete_builder_page($1) as res', [page1Id]).then((r) => {
+        deleteDone = true;
+        deleteRes = r;
+      });
+
+      // Session B is blocked
+      await new Promise((r) => setTimeout(r, 100));
+      expect(deleteDone).toBe(false);
+
+      // Session A commits
+      await clientA.query('COMMIT');
+
+      // Session B completes
+      await deletePromise;
+      expect(deleteDone).toBe(true);
+      expect(deleteRes.rows[0].res.id).toBe(page1Id);
+    } finally {
+      await setAuth(clientA, null);
+      await setAuth(clientB, null);
+      clientA.release();
+      clientB.release();
+    }
+  });
+
+  it('27. reorder_builder_pages serializes on funnel lifecycle lock (H)', async () => {
+    const { userId, funnel1Id, page1Id } = await createTestFixture();
+    const clientA = await pool.connect();
+    const clientB = await pool.connect();
+    try {
+      await setAuth(clientA, userId);
+      await setAuth(clientB, userId);
+
+      // Create a second page in funnel1 first
+      const p2Res = await clientA.query("SELECT public.create_builder_page('Second Page', $1, $2) as res", [
+        `pg2-${randomUUID()}`, funnel1Id
+      ]);
+      const page2Id = p2Res.rows[0].res.id;
+
+      // Session A holds the builder-page-lifecycle lock on funnel1
+      await clientA.query('BEGIN');
+      await clientA.query(`SELECT pg_advisory_xact_lock(hashtextextended('builder-page-lifecycle:' || $1 || ':' || $2, 0))`, [userId, funnel1Id]);
+
+      // Session B calls reorder_builder_pages
+      let reorderDone = false;
+      let reorderRes: any = null;
+      const reorderPromise = clientB.query('SELECT public.reorder_builder_pages($1, $2::text[], $3::text[]) as res', [
+        funnel1Id, [page2Id, page1Id], [page1Id, page2Id]
+      ]).then((r) => {
+        reorderDone = true;
+        reorderRes = r;
+      });
+
+      // Session B is blocked
+      await new Promise((r) => setTimeout(r, 100));
+      expect(reorderDone).toBe(false);
+
+      // Session A commits
+      await clientA.query('COMMIT');
+
+      // Session B completes
+      await reorderPromise;
+      expect(reorderDone).toBe(true);
+      expect(reorderRes.rows[0].res.success).toBe(true);
+    } finally {
+      await setAuth(clientA, null);
+      await setAuth(clientB, null);
+      clientA.release();
+      clientB.release();
+    }
+  });
+
+  it('28. raw authenticated page_sections INSERT, UPDATE, DELETE denied while save_page_sections_document succeeds (J, S.4, S.5, S.6, S.7)', async () => {
+    const { userId, page1Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Raw direct INSERT denied
+      await expect(
+        client.query("INSERT INTO public.page_sections (id, user_id, page_id, type) VALUES ('sec-raw', $1, $2, 'hero')", [userId, page1Id])
+      ).rejects.toThrow(/permission denied for table page_sections/);
+
+      // Raw direct UPDATE denied
+      await expect(
+        client.query("UPDATE public.page_sections SET content = '{\"title\":\"Hacked\"}' WHERE page_id = $1", [page1Id])
+      ).rejects.toThrow(/permission denied for table page_sections/);
+
+      // Raw direct DELETE denied
+      await expect(
+        client.query("DELETE FROM public.page_sections WHERE page_id = $1", [page1Id])
+      ).rejects.toThrow(/permission denied for table page_sections/);
+
+      // Canonical RPC save_page_sections_document succeeds
+      const secDoc = [{ id: `sec-rpc-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Authorized' }, styles: {} }];
+      const saveRes = await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2) as res', [
+        page1Id, JSON.stringify(secDoc)
+      ]);
+      expect(saveRes.rows[0].res.page_id).toBe(page1Id);
+      expect(saveRes.rows[0].res.revision).toBe(2);
+    } finally {
+      await setAuth(client, null);
+      client.release();
+    }
+  });
+
+  it('29. raw authenticated route tables mutation denied while Task 5 RPCs succeed (K, S.8, S.9, S.10, S.11)', async () => {
+    const { userId, websiteId, funnel2Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Direct write to builder_route_drafts denied
+      await expect(
+        client.query("INSERT INTO public.builder_route_drafts (website_id, path, funnel_id, action) VALUES ($1, '/hack', $2, 'upsert')", [websiteId, funnel2Id])
+      ).rejects.toThrow(/permission denied for table builder_route_drafts/);
+
+      // Direct write to website_routes denied
+      await expect(
+        client.query("INSERT INTO public.website_routes (website_id, path, funnel_id) VALUES ($1, '/hack', $2)", [websiteId, funnel2Id])
+      ).rejects.toThrow(/permission denied for table website_routes/);
+
+      // Direct write to website_route_redirects denied
+      await expect(
+        client.query("INSERT INTO public.website_route_redirects (website_id, from_path, to_path) VALUES ($1, '/hack', '/about')", [websiteId])
+      ).rejects.toThrow(/permission denied for table website_route_redirects/);
+
+      // Task 5 RPCs succeed
+      const stageRes = await client.query('SELECT public.set_builder_route_draft($1::uuid, $2, $3) as res', [
+        websiteId, funnel2Id, '/authorized-route'
+      ]);
+      expect(stageRes.rows[0].res.success).toBe(true);
+
+      const revertRes = await client.query('SELECT public.revert_builder_route_draft($1::uuid, $2) as res', [
+        websiteId, '/authorized-route'
+      ]);
+      expect(revertRes.rows[0].res.success).toBe(true);
+    } finally {
+      await setAuth(client, null);
+      client.release();
+    }
+  });
+
+  it('30. direct forbidden pages lifecycle mutations denied while safe Page Settings updates succeed (L, S.12, S.13)', async () => {
+    const { userId, page1Id, funnel2Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Direct page INSERT denied
+      await expect(
+        client.query("INSERT INTO public.pages (id, user_id, funnel_id, name, slug) VALUES ('p-raw', $1, $2, 'Raw', 'raw')", [userId, funnel2Id])
+      ).rejects.toThrow(/permission denied for table pages/);
+
+      // Direct page DELETE denied
+      await expect(
+        client.query("DELETE FROM public.pages WHERE id = $1", [page1Id])
+      ).rejects.toThrow(/permission denied for table pages/);
+
+      // Direct update of forbidden lifecycle columns (funnel_id, status) denied
+      await expect(
+        client.query("UPDATE public.pages SET funnel_id = $1 WHERE id = $2", [funnel2Id, page1Id])
+      ).rejects.toThrow(/permission denied for column funnel_id/);
+
+      await expect(
+        client.query("UPDATE public.pages SET status = 'draft' WHERE id = $1", [page1Id])
+      ).rejects.toThrow(/permission denied for column status/);
+
+      // Safe Page Settings update (name, slug, seo_title, seo_description) succeeds
+      await client.query("UPDATE public.pages SET name = 'Updated Home', slug = 'home-updated', seo_title = 'SEO Home', seo_description = 'Description' WHERE id = $1", [page1Id]);
+      const checkRes = await client.query("SELECT name, slug, seo_title FROM public.pages WHERE id = $1", [page1Id]);
+      expect(checkRes.rows[0].name).toBe('Updated Home');
+      expect(checkRes.rows[0].slug).toBe('home-updated');
+      expect(checkRes.rows[0].seo_title).toBe('SEO Home');
+    } finally {
+      await setAuth(client, null);
+      client.release();
+    }
+  });
+
+  it('31. forbidden websites publication-field update denied while safe metadata update succeeds (M, S.14)', async () => {
+    const { userId, websiteId, funnel2Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Direct update of publication_revision denied
+      await expect(
+        client.query("UPDATE public.websites SET publication_revision = 999 WHERE id = $1", [websiteId])
+      ).rejects.toThrow(/permission denied for column publication_revision/);
+
+      // Direct update of homepage_funnel_id denied
+      await expect(
+        client.query("UPDATE public.websites SET homepage_funnel_id = $1 WHERE id = $2", [funnel2Id, websiteId])
+      ).rejects.toThrow(/permission denied for column homepage_funnel_id/);
+
+      // Direct update of draft_homepage_funnel_id denied
+      await expect(
+        client.query("UPDATE public.websites SET draft_homepage_funnel_id = $1 WHERE id = $2", [funnel2Id, websiteId])
+      ).rejects.toThrow(/permission denied for column draft_homepage_funnel_id/);
+
+      // Safe website metadata update (name, domain, subdomain) succeeds
+      await client.query("UPDATE public.websites SET name = 'My Safe Website Name' WHERE id = $1", [websiteId]);
+      const checkRes = await client.query("SELECT name FROM public.websites WHERE id = $1", [websiteId]);
+      expect(checkRes.rows[0].name).toBe('My Safe Website Name');
+    } finally {
+      await setAuth(client, null);
+      client.release();
+    }
+  });
+
+  it('32. builder_published_revisions and targets direct write denied (N, S.15)', async () => {
+    const { userId, websiteId, page1Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Direct INSERT into builder_published_revisions denied
+      await expect(
+        client.query("INSERT INTO public.builder_published_revisions (website_id, page_id, document) VALUES ($1, $2, '{}'::jsonb)", [websiteId, page1Id])
+      ).rejects.toThrow(/permission denied for table builder_published_revisions/);
+
+      // Direct INSERT into builder_publication_targets denied
+      await expect(
+        client.query("INSERT INTO public.builder_publication_targets (website_id, page_id, published_revision_id) VALUES ($1, $2, $3)", [websiteId, page1Id, randomUUID()])
+      ).rejects.toThrow(/permission denied for table builder_publication_targets/);
+    } finally {
+      await setAuth(client, null);
+      client.release();
+    }
+  });
+
+  it('33. builder_website_publications direct write denied (O, S.16)', async () => {
+    const { userId, websiteId } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Direct INSERT into builder_website_publications denied
+      await expect(
+        client.query("INSERT INTO public.builder_website_publications (website_id, publication_revision, expected_state, summary) VALUES ($1, 1, '{}'::jsonb, '{}'::jsonb)", [websiteId])
+      ).rejects.toThrow(/permission denied for table builder_website_publications/);
+
+      // Direct UPDATE denied
+      await expect(
+        client.query("UPDATE public.builder_website_publications SET publication_revision = 2 WHERE website_id = $1", [websiteId])
+      ).rejects.toThrow(/permission denied for table builder_website_publications/);
+
+      // Direct DELETE denied
+      await expect(
+        client.query("DELETE FROM public.builder_website_publications WHERE website_id = $1", [websiteId])
+      ).rejects.toThrow(/permission denied for table builder_website_publications/);
     } finally {
       await setAuth(client, null);
       client.release();
