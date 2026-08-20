@@ -62,10 +62,18 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
           name text not null,
           slug text not null,
           status text not null default 'draft',
+          seo_title text,
+          seo_description text,
+          seo_keywords text[],
+          step_type text,
           step_order integer not null default 0,
           created_at timestamptz not null default now()
         );
 
+        alter table public.pages add column if not exists seo_title text;
+        alter table public.pages add column if not exists seo_description text;
+        alter table public.pages add column if not exists seo_keywords text[];
+        alter table public.pages add column if not exists step_type text;
         alter table public.pages add column if not exists step_order integer not null default 0;
 
         create table if not exists public.websites (
@@ -73,7 +81,7 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
           user_id text not null references public.users(id) on delete cascade,
           name text not null,
           domain text unique,
-          subdomain text not null unique,
+          subdomain text unique,
           homepage_funnel_id text references public.funnels(id) on delete set null,
           draft_homepage_funnel_id text,
           created_at timestamptz not null default now(),
