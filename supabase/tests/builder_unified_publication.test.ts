@@ -673,18 +673,17 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
         websiteId, funnel3Id, '/services-new'
       ]);
 
-      // 4. Create an unrouted funnel and add a primary nav item pointing to it (UNROUTED target)
-      const unroutedFunnelId = `fn-unrouted-${randomUUID()}`;
-      await client.query('INSERT INTO public.funnels (id, user_id, name) VALUES ($1, $2, $3)', [unroutedFunnelId, userId, 'Unrouted Funnel']);
-      await client.query('INSERT INTO public.pages (id, user_id, funnel_id, name, slug) VALUES ($1, $2, $3, $4, $5)', [
-        `pg-unrouted-${randomUUID()}`, userId, unroutedFunnelId, 'Unrouted Page', 'unrouted'
-      ]);
-
+      // 4. Primary nav pointing to funnel3 (valid while route draft exists)
       const navItems = [
-        { id: randomUUID(), label: 'Broken Link', target_kind: 'internal', target_value: unroutedFunnelId, visible: true }
+        { id: randomUUID(), label: 'Services Link', target_kind: 'internal', target_value: funnel3Id, visible: true }
       ];
       await client.query('SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb, 0)', [
         websiteId, 'primary', JSON.stringify(navItems)
+      ]);
+
+      // 5. Delete the route draft for funnel3 so that the nav item is now UNROUTED
+      await client.query('DELETE FROM public.builder_route_drafts WHERE website_id = $1 AND funnel_id = $2', [
+        websiteId, funnel3Id
       ]);
 
       const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
