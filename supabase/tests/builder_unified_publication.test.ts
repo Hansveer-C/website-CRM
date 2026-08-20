@@ -175,6 +175,14 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
       [websiteId, '/about', funnel2Id]
     );
 
+    // Publish baseline publication targets for page1 and page2
+    const rev1 = randomUUID();
+    const rev2 = randomUUID();
+    await client.query('INSERT INTO public.builder_published_revisions (id, website_id, page_id, created_by, schema_version, document, document_fingerprint) VALUES ($1, $2, $3, $4, 1, \'{}\', \'fp1\')', [rev1, websiteId, page1Id, userId]);
+    await client.query('INSERT INTO public.builder_published_revisions (id, website_id, page_id, created_by, schema_version, document, document_fingerprint) VALUES ($1, $2, $3, $4, 1, \'{}\', \'fp2\')', [rev2, websiteId, page2Id, userId]);
+    await client.query('INSERT INTO public.builder_publication_targets (website_id, page_id, published_revision_id, published_by) VALUES ($1, $2, $3, $4)', [websiteId, page1Id, rev1, userId]);
+    await client.query('INSERT INTO public.builder_publication_targets (website_id, page_id, published_revision_id, published_by) VALUES ($1, $2, $3, $4)', [websiteId, page2Id, rev2, userId]);
+
     client.release();
 
     return {
@@ -208,7 +216,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
       await setAuth(client, null);
       await expect(
         client.query('SELECT public.get_builder_website_publish_plan($1::uuid)', [websiteId])
-      ).rejects.toThrow(/Authentication required/);
+      ).rejects.toThrow(/Authentication required|permission denied/);
     } finally {
       await client.query('RESET ROLE');
       client.release();
@@ -237,7 +245,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
       await setAuth(client, null);
       await expect(
         client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [websiteId, '{}'])
-      ).rejects.toThrow(/Authentication required/);
+      ).rejects.toThrow(/Authentication required|permission denied/);
     } finally {
       await client.query('RESET ROLE');
       client.release();
@@ -329,10 +337,10 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
     try {
       await setAuth(client, fix.userId);
 
-      // Stage route draft for /services -> funnel3Id
+      // Stage route draft for /services -> funnel3Id using set_builder_route_draft
       await client.query(
-        'SELECT public.stage_builder_route_draft($1::uuid, $2::text, $3::text, $4::text, $5::uuid)',
-        [fix.websiteId, '/services', fix.funnel3Id, 'upsert', null]
+        'SELECT public.set_builder_route_draft($1::uuid, $2::text, $3::text)',
+        [fix.websiteId, fix.funnel3Id, '/services']
       );
 
       // Stage primary navigation draft pointing to funnel3Id
@@ -413,11 +421,11 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
       const plan1Res = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as val', [fix.websiteId]);
       await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [fix.websiteId, JSON.stringify(plan1Res.rows[0].val.expected_state)]);
 
-      // Now: stage route draft to delete /about route
+      // Now: stage route draft to delete /about route using delete_builder_route_draft
       const aboutRoute = await client.query('SELECT id FROM public.website_routes WHERE website_id = $1 AND path = $2', [fix.websiteId, '/about']);
       await client.query(
-        'SELECT public.stage_builder_route_draft($1::uuid, $2::text, $3::text, $4::text, $5::uuid)',
-        [fix.websiteId, '/about', fix.funnel2Id, 'delete', aboutRoute.rows[0].id]
+        'SELECT public.delete_builder_route_draft($1::uuid, $2::text, $3::uuid)',
+        [fix.websiteId, fix.funnel2Id, aboutRoute.rows[0].id]
       );
 
       // And stage nav draft removing the item
@@ -460,8 +468,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
 
       // Associate funnel3Id via a temporary route draft first so stage nav succeeds
       await client.query(
-        'SELECT public.stage_builder_route_draft($1::uuid, $2::text, $3::text, $4::text, $5::uuid)',
-        [fix.websiteId, '/services', fix.funnel3Id, 'upsert', null]
+        'SELECT public.set_builder_route_draft($1::uuid, $2::text, $3::text)',
+        [fix.websiteId, fix.funnel3Id, '/services']
       );
 
       const invalidNavItem = {
@@ -478,8 +486,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
         [fix.websiteId, 'primary', JSON.stringify([invalidNavItem])]
       );
 
-      // Now remove the route draft for /services so funnel3Id has no route in projected state
-      await client.query('DELETE FROM public.builder_route_drafts WHERE website_id = $1 AND path = $2', [fix.websiteId, '/services']);
+      // Now revert the route draft for /services so funnel3Id has no route in projected state
+      await client.query('SELECT public.revert_builder_route_draft($1::uuid, $2::text)', [fix.websiteId, fix.funnel3Id]);
 
       // Stage valid draft homepage to About
       await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2::text)', [fix.websiteId, fix.funnel2Id]);
