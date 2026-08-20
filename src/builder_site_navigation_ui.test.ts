@@ -461,6 +461,227 @@ describe('Builder Site Navigation UI & Domain Integration', () => {
         expect(getNavigationScopeAuthority(primaryState)).toBe('live');
       }
     });
+
+    it('keeps Website B active after delayed Website A publication finishes without overwriting active website', async () => {
+      // 1. Website A Primary hydrates
+      await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
+      manager.setActiveScope('primary');
+
+      // 2. Website A Primary draft is staged
+      await controller.stageDraft([
+        { id: '11111111-1111-4111-8111-111111111111', label: 'Site A Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false }
+      ], { effectiveRoutes: sampleEffectiveRoutes });
+
+      manager.openPublishModal();
+      expect(manager.getPublishModalState().isOpen).toBe(true);
+
+      // 3. Setup delayed publish RPC
+      let resolveSiteAPublish: any;
+      const siteAPublishPromise = new Promise<any>((resolve) => {
+        resolveSiteAPublish = resolve;
+      });
+
+      const origPublish = repo.publishNavigation.bind(repo);
+      repo.publishNavigation = async (wsId, bRev, dRev, scope) => {
+        if (wsId === 'ws-100') {
+          await siteAPublishPromise;
+        }
+        return origPublish(wsId, bRev, dRev, scope);
+      };
+
+      // 3. Start Website A Primary publish
+      const confirmPromise = manager.confirmPublish({ effectiveRoutes: sampleEffectiveRoutes });
+
+      // 4. Switch to Website B before publication resolves
+      await controller.hydrate('ws-200', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
+
+      // 5. Assert Website B is active
+      expect(controller.getActiveWebsiteId()).toBe('ws-200');
+      expect((controller.getState() as any).websiteId).toBe('ws-200');
+
+      // 6. Complete Website A publication
+      resolveSiteAPublish();
+      const pubResult = await confirmPromise;
+      expect(pubResult).toBe(true);
+
+      // 7. Assert Website B remains active
+      expect(controller.getActiveWebsiteId()).toBe('ws-200');
+      expect((controller.getState() as any).websiteId).toBe('ws-200');
+
+      // 8. Website A's cached state is updated with live revision
+      const cachedA = controller.getCachedScopeState('ws-100', 'primary');
+      expect(cachedA?.isDraft).toBe(false);
+      expect(cachedA?.liveRevision).toBe(1);
+
+      // 9. Switch back to Website A and hydrate -> sees published live navigation
+      await controller.hydrate('ws-100', { effectiveRoutes: sampleEffectiveRoutes }, 'primary');
+      const stateA = controller.getState();
+      expect(stateA.status).toBe('ready');
+      if (stateA.status === 'ready') {
+        expect(stateA.websiteId).toBe('ws-100');
+        expect(stateA.isDraft).toBe(false);
+        expect(stateA.liveRevision).toBe(1);
+        expect(getNavigationScopeAuthority(stateA)).toBe('live');
+      }
+    });
+  });
+
+  describe('Navigation Scope Authority Classification & Non-Ready Truth', () => {
+    let repo: MockBuilderSiteNavigationRepository;
+    let controller: BuilderSiteNavigationController;
+    let publishController: BuilderSiteNavigationPublishController;
+    let manager: BuilderNavigationUiManager;
+
+    beforeEach(() => {
+      repo = new MockBuilderSiteNavigationRepository();
+      controller = new BuilderSiteNavigationController(repo);
+      publishController = new BuilderSiteNavigationPublishController(repo);
+      manager = new BuilderNavigationUiManager(controller, publishController);
+    });
+
+    it('classifies uninitialized and loading states as unknown authority and renders no legacy claims', () => {
+      expect(getNavigationScopeAuthority(undefined)).toBe('unknown');
+      expect(getNavigationScopeAuthority(null)).toBe('unknown');
+      expect(getNavigationScopeAuthority({ status: 'uninitialized' })).toBe('unknown');
+
+      const loadingState = { status: 'loading' as const, websiteId: 'ws-100', menuScope: 'primary' as const };
+      expect(getNavigationScopeAuthority(loadingState)).toBe('unknown');
+
+      const html = renderBuilderNavigationPanel(loadingState, manager, sampleContext);
+      expect(html).toContain('Loading navigation...');
+      expect(html).not.toContain('Legacy Layout Active');
+      expect(html).not.toContain('Your public site currently uses the fallback navigation layout');
+      expect(html).not.toContain('Convert to Editable Navigation');
+      expect(html).not.toContain('pb-nav-badge-legacy');
+      expect(html).not.toContain('pb-nav-badge-live');
+    });
+
+    it('classifies transport error as unknown authority and renders retry without legacy claims', () => {
+      const errorState = {
+        status: 'error' as const,
+        websiteId: 'ws-100',
+        menuScope: 'primary' as const,
+        error: 'Network connection timeout',
+        code: 'TRANSPORT_ERROR'
+      };
+
+      expect(getNavigationScopeAuthority(errorState)).toBe('unknown');
+
+      const html = renderBuilderNavigationPanel(errorState, manager, sampleContext);
+      expect(html).toContain('Failed to Load Navigation');
+      expect(html).toContain('Network connection timeout');
+      expect(html).toContain('Retry');
+      expect(html).not.toContain('Legacy Layout Active');
+      expect(html).not.toContain('Legacy navigation');
+      expect(html).not.toContain('Convert to Editable Navigation');
+    });
+
+    it('classifies consistency error as unknown authority without claiming legacy', () => {
+      const consistencyErrorState = {
+        status: 'error' as const,
+        websiteId: 'ws-100',
+        menuScope: 'primary' as const,
+        error: 'Live navigation snapshot consistency error: missing live record while live revision > 0.',
+        code: 'CONSISTENCY_ERROR'
+      };
+
+      expect(getNavigationScopeAuthority(consistencyErrorState)).toBe('unknown');
+
+      const html = renderBuilderNavigationPanel(consistencyErrorState, manager, sampleContext);
+      expect(html).toContain('Live navigation snapshot consistency error');
+      expect(html).not.toContain('Legacy Layout Active');
+      expect(html).not.toContain('pb-nav-badge-legacy');
+    });
+
+    it('classifies conflict error as unknown authority without claiming legacy', () => {
+      const conflictErrorState = {
+        status: 'error' as const,
+        websiteId: 'ws-100',
+        menuScope: 'primary' as const,
+        error: 'Live navigation revision mismatch. Please reload the latest navigation.',
+        code: 'CONFLICT'
+      };
+
+      expect(getNavigationScopeAuthority(conflictErrorState)).toBe('unknown');
+
+      const html = renderBuilderNavigationPanel(conflictErrorState, manager, sampleContext);
+      expect(html).toContain('Live navigation revision mismatch');
+      expect(html).not.toContain('Legacy Layout Active');
+      expect(html).not.toContain('pb-nav-badge-legacy');
+    });
+
+    it('preserves legacy authority when ready with liveRevision 0 and no draft', () => {
+      const readyLegacyState = {
+        status: 'ready' as const,
+        websiteId: 'ws-100',
+        menuScope: 'primary' as const,
+        items: [],
+        rawItems: [],
+        liveItems: [],
+        isDraft: false,
+        baseRevision: 0,
+        draftRevision: 0,
+        liveRevision: 0,
+        isSaving: false,
+        isConflict: false,
+        errorMessage: null
+      };
+
+      expect(getNavigationScopeAuthority(readyLegacyState)).toBe('legacy');
+
+      const html = renderBuilderNavigationPanel(readyLegacyState, manager, sampleContext);
+      expect(html).toContain('Legacy Layout Active');
+      expect(html).toContain('Legacy navigation');
+      expect(html).toContain('Convert to Editable Navigation');
+    });
+
+    it('preserves live authority when ready with liveRevision > 0 and no draft', () => {
+      const readyLiveState = {
+        status: 'ready' as const,
+        websiteId: 'ws-100',
+        menuScope: 'primary' as const,
+        items: [],
+        rawItems: [],
+        liveItems: [],
+        isDraft: false,
+        baseRevision: 2,
+        draftRevision: 0,
+        liveRevision: 2,
+        isSaving: false,
+        isConflict: false,
+        errorMessage: null
+      };
+
+      expect(getNavigationScopeAuthority(readyLiveState)).toBe('live');
+
+      const html = renderBuilderNavigationPanel(readyLiveState, manager, sampleContext);
+      expect(html).toContain('Live Navigation');
+      expect(html).toContain('rev 2');
+    });
+
+    it('preserves draft authority when ready with isDraft true', () => {
+      const readyDraftState = {
+        status: 'ready' as const,
+        websiteId: 'ws-100',
+        menuScope: 'primary' as const,
+        items: [],
+        rawItems: [],
+        liveItems: [],
+        isDraft: true,
+        baseRevision: 1,
+        draftRevision: 1,
+        liveRevision: 1,
+        isSaving: false,
+        isConflict: false,
+        errorMessage: null
+      };
+
+      expect(getNavigationScopeAuthority(readyDraftState)).toBe('draft');
+
+      const html = renderBuilderNavigationPanel(readyDraftState, manager, sampleContext);
+      expect(html).toContain('Draft in Progress');
+      expect(html).toContain('Unpublished changes');
+    });
   });
 
   describe('Adoption Review Lifecycle & Duplicate Mutation Guards', () => {

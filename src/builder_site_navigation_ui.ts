@@ -16,8 +16,6 @@ import { escapeHtmlText } from './crm_html_output';
 import { BuilderSiteNavigationController, SiteNavigationUiState } from './builder_site_navigation_controller';
 import { BuilderSiteNavigationPublishController, NavigationPublishState } from './builder_site_navigation_publish_controller';
 
-export type NavigationScopeAuthority = 'legacy' | 'live' | 'draft';
-
 export interface LegacyNavigationAdoptionCandidate {
   id: string;
   label: string;
@@ -631,13 +629,15 @@ export function computeNavigationPublishDiff(
   };
 }
 
+export type NavigationScopeAuthority = 'legacy' | 'live' | 'draft' | 'unknown';
+
 /**
  * Determine authority state for a given menu scope.
  */
 export function getNavigationScopeAuthority(
   state: SiteNavigationUiState | null | undefined
 ): NavigationScopeAuthority {
-  if (!state || state.status !== 'ready') return 'legacy';
+  if (!state || state.status !== 'ready') return 'unknown';
   if (state.isDraft) return 'draft';
   if (state.liveRevision > 0) return 'live';
   return 'legacy';
@@ -1219,7 +1219,7 @@ export function renderBuilderNavigationPanel(
         <div>${escapeHtmlText(draftExplanation)} Preview reflects your unpublished draft.</div>
       </div>
     `;
-  } else {
+  } else if (authority === 'live') {
     authorityBadgeHtml = `<span class="pb-nav-badge pb-nav-badge-live">Live</span>`;
     authorityCalloutHtml = `
       <div class="pb-nav-callout pb-nav-callout-live" role="status">
