@@ -111,11 +111,31 @@ export function validateExternalUrl(url: unknown): { valid: boolean; normalized?
     return { valid: false, error: 'Internationalized/non-ASCII domain names are not supported for external navigation' };
   }
 
-  // Validate ASCII DNS hostname or IPv4
+  // Validate ASCII DNS hostname or canonical 4-octet IPv4
   const host = parsed.hostname.toLowerCase();
-  const isDnsHost = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host);
-  if (!isDnsHost || host === '') {
+  if (!host) {
     return { valid: false, error: 'External URL contains invalid host' };
+  }
+
+  if (/^[0-9.]+$/.test(host)) {
+    const octets = host.split('.');
+    if (octets.length !== 4) {
+      return { valid: false, error: 'IPv4 host must have exactly 4 octets' };
+    }
+    for (const oct of octets) {
+      if (!/^\d{1,3}$/.test(oct)) {
+        return { valid: false, error: 'Invalid IPv4 octet format' };
+      }
+      const num = Number(oct);
+      if (num < 0 || num > 255 || (oct.length > 1 && oct.startsWith('0'))) {
+        return { valid: false, error: 'IPv4 octets must be between 0 and 255 without leading zeros' };
+      }
+    }
+  } else {
+    const isDnsHost = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host);
+    if (!isDnsHost) {
+      return { valid: false, error: 'External URL contains invalid host' };
+    }
   }
 
   return { valid: true, normalized: parsed.href };

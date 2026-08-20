@@ -51,11 +51,12 @@ describe('builder_site_navigation_domain', () => {
       expect(validateExternalUrl('http://example.org/about').valid).toBe(true);
       expect(validateExternalUrl('https://example.com').normalized).toBe('https://example.com/');
       expect(validateExternalUrl('HTTPS://EXAMPLE.COM').normalized).toBe('https://example.com/');
-      expect(validateExternalUrl('https://example.com:443').normalized).toBe('https://example.com/');
-      expect(validateExternalUrl('https://example.com:0443').normalized).toBe('https://example.com/');
-      expect(validateExternalUrl('http://example.com:80').normalized).toBe('http://example.com/');
-      expect(validateExternalUrl('https://example.com:8080/docs').normalized).toBe('https://example.com:8080/docs');
-      expect(validateExternalUrl('https://example.com/search?q=test#results').normalized).toBe('https://example.com/search?q=test#results');
+      expect(validateExternalUrl('http://example.com:0080/').normalized).toBe('http://example.com/');
+      expect(validateExternalUrl('https://example.com:00443/').normalized).toBe('https://example.com/');
+      expect(validateExternalUrl('https://example.com:0/').normalized).toBe('https://example.com:0/');
+      expect(validateExternalUrl('https://example.com:65535/').normalized).toBe('https://example.com:65535/');
+      expect(validateExternalUrl('https://1.2.3.4/').normalized).toBe('https://1.2.3.4/');
+      expect(validateExternalUrl('https://127.0.0.1/').normalized).toBe('https://127.0.0.1/');
     });
 
     it('rejects unsafe schemes', () => {
@@ -64,17 +65,22 @@ describe('builder_site_navigation_domain', () => {
       expect(validateExternalUrl('file:///etc/passwd').valid).toBe(false);
     });
 
-    it('rejects malformed URLs', () => {
+    it('rejects malformed URLs and out-of-range ports', () => {
       expect(validateExternalUrl('not-a-url').valid).toBe(false);
       expect(validateExternalUrl('https://').valid).toBe(false);
+      expect(validateExternalUrl('https://example.com:65536/').valid).toBe(false);
+      expect(validateExternalUrl('https://example.com:999999999/').valid).toBe(false);
     });
 
-    it('rejects unsupported URL profile features (credentials, IPv6, IDN, raw whitespace)', () => {
+    it('rejects unsupported URL profile features (credentials, IPv6, IDN, raw whitespace, invalid IPv4)', () => {
       expect(validateExternalUrl('https://user:pass@example.com').valid).toBe(false);
       expect(validateExternalUrl('https://[2001:db8::1]/').valid).toBe(false);
       expect(validateExternalUrl('https://münich.example/').valid).toBe(false);
       expect(validateExternalUrl('https://xn--mnich-kva.example/').valid).toBe(false);
       expect(validateExternalUrl('https://example .com').valid).toBe(false);
+      expect(validateExternalUrl('https://999.999.999.999/').valid).toBe(false);
+      expect(validateExternalUrl('https://127.1/').valid).toBe(false);
+      expect(validateExternalUrl('https://127.0.0.01/').valid).toBe(false);
     });
   });
 

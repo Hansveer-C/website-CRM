@@ -70,6 +70,8 @@ declare
   v_scheme text;
   v_host text;
   v_port text;
+  v_port_int integer;
+  v_octets text[];
   v_path text;
 begin
   if v_user_id is null or v_user_id = '' then
@@ -251,25 +253,52 @@ begin
       v_port := v_url_parts[3];
       v_path := coalesce(v_url_parts[4], '');
 
-      -- Validate ASCII DNS host format (reject IDN punycode xn--, non-ASCII, leading/trailing hyphens/dots)
+      -- Validate port range if present
+      if v_port is not null and v_port <> '' then
+        if length(v_port) > 5 or (v_port::bigint) > 65535 or (v_port::bigint) < 0 then
+          raise sqlstate 'PT400' using message = 'External URL port must be between 0 and 65535';
+        end if;
+        v_port_int := v_port::integer;
+      else
+        v_port_int := null;
+      end if;
+
+      -- Validate host: reject IDN, non-ASCII, leading/trailing hyphens/dots
       if v_host = ''
          or v_host ~ '^xn--'
-         or v_host ~ '\.xn--'
-         or not (v_host ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$') then
+         or v_host ~ '\.xn--' then
         raise sqlstate 'PT400' using message = 'External URL contains invalid host';
+      end if;
+
+      if v_host ~ '^[0-9.]+$' then
+        -- Purely numeric host: validate canonical 4-octet IPv4 (0..255 without leading zero)
+        v_octets := pg_catalog.string_to_array(v_host, '.');
+        if pg_catalog.cardinality(v_octets) <> 4 then
+          raise sqlstate 'PT400' using message = 'IPv4 host must have exactly 4 octets';
+        end if;
+        if (v_octets[1] !~ '^[0-9]+$' or v_octets[1]::integer < 0 or v_octets[1]::integer > 255 or (length(v_octets[1]) > 1 and v_octets[1] like '0%'))
+           or (v_octets[2] !~ '^[0-9]+$' or v_octets[2]::integer < 0 or v_octets[2]::integer > 255 or (length(v_octets[2]) > 1 and v_octets[2] like '0%'))
+           or (v_octets[3] !~ '^[0-9]+$' or v_octets[3]::integer < 0 or v_octets[3]::integer > 255 or (length(v_octets[3]) > 1 and v_octets[3] like '0%'))
+           or (v_octets[4] !~ '^[0-9]+$' or v_octets[4]::integer < 0 or v_octets[4]::integer > 255 or (length(v_octets[4]) > 1 and v_octets[4] like '0%')) then
+          raise sqlstate 'PT400' using message = 'IPv4 octets must be between 0 and 255 without leading zeros';
+        end if;
+      else
+        -- Standard ASCII DNS host
+        if not (v_host ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$') then
+          raise sqlstate 'PT400' using message = 'External URL contains invalid host';
+        end if;
       end if;
 
       if not (v_path like '/%') then
         v_path := '/' || v_path;
       end if;
 
-      if (v_scheme = 'https://' and (v_port = '443' or v_port = '0443'))
-         or (v_scheme = 'http://' and (v_port = '80' or v_port = '080'))
-         or v_port is null
-         or v_port = '' then
+      if (v_scheme = 'https://' and v_port_int = 443)
+         or (v_scheme = 'http://' and v_port_int = 80)
+         or v_port_int is null then
         v_target_value := v_scheme || v_host || v_path;
       else
-        v_target_value := v_scheme || v_host || ':' || (v_port::integer)::text || v_path;
+        v_target_value := v_scheme || v_host || ':' || v_port_int::text || v_path;
       end if;
     elsif v_target_kind = 'phone' then
       if not (v_target_value ~ '^[+]?[\d\s().-]{3,30}$') then

@@ -985,6 +985,40 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
             ])
           ])
         ).rejects.toMatchObject({ code: 'PT400' });
+
+        // 9. Out of range ports
+        await expect(
+          client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+            f.siteId, 'primary', JSON.stringify([
+              { id: u1, label: 'Bad Link', target_kind: 'external', target_value: 'https://example.com:65536/', position: 0, visible: true, is_cta: false }
+            ])
+          ])
+        ).rejects.toMatchObject({ code: 'PT400' });
+
+        // 10. Invalid IPv4 octets / non-4 octets
+        await expect(
+          client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+            f.siteId, 'primary', JSON.stringify([
+              { id: u1, label: 'Bad Link', target_kind: 'external', target_value: 'https://999.999.999.999/', position: 0, visible: true, is_cta: false }
+            ])
+          ])
+        ).rejects.toMatchObject({ code: 'PT400' });
+
+        await expect(
+          client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+            f.siteId, 'primary', JSON.stringify([
+              { id: u1, label: 'Bad Link', target_kind: 'external', target_value: 'https://127.1/', position: 0, visible: true, is_cta: false }
+            ])
+          ])
+        ).rejects.toMatchObject({ code: 'PT400' });
+
+        await expect(
+          client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+            f.siteId, 'primary', JSON.stringify([
+              { id: u1, label: 'Bad Link', target_kind: 'external', target_value: 'https://127.0.0.01/', position: 0, visible: true, is_cta: false }
+            ])
+          ])
+        ).rejects.toMatchObject({ code: 'PT400' });
       } finally {
         client.release();
       }
