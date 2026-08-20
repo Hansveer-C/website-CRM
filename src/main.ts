@@ -129,6 +129,9 @@ import {
   MockBuilderSiteNavigationRepository
 } from './builder_site_navigation_repository';
 import { SupabaseBuilderSiteNavigationRepository } from './builder_site_navigation_repository_supabase';
+import { BuilderUnifiedPublicationController } from './builder_unified_publication_controller';
+import { SupabaseBuilderUnifiedPublicationRepository } from './builder_unified_publication_repository_supabase';
+import { renderUnifiedPublishModal } from './builder_unified_publication_ui';
 import type { NavigationMenuScope } from './builder_site_navigation_domain';
 import { WebsiteDashboardController, type WebsiteDashboardCoreData } from './website_dashboard_controller';
 import { getWebsiteScopedPages, resolveWebsiteHomepage, type WebsiteDashboardModel, type WebsiteDashboardSummaryInput } from './website_dashboard_model';
@@ -3396,6 +3399,11 @@ function closeBuilderPublishModal(): void {
 
 (window as any).openBuilderPublishModal = async () => {
   if (builderMode !== 'edit') return;
+  const website = getActiveBuilderWebsite();
+  if (editorUsesSupabase() && website?.id) {
+    (window as any).openBuilderUnifiedPublishModal(website.id);
+    return;
+  }
   const pageSettings = builderPageSettingsController?.pageId === builderPageId
     ? builderPageSettingsController
     : null;
@@ -5168,6 +5176,96 @@ function renderBuilderNavigationDialogs(): string {
   renderBuilder();
 };
 
+let builderUnifiedPublicationController: BuilderUnifiedPublicationController | null = null;
+let builderUnifiedPublicationIdentity = '';
+
+function getBuilderUnifiedPublicationController(): BuilderUnifiedPublicationController {
+  const website = getActiveBuilderWebsite();
+  const userId = getActingUserId();
+  const identity = `${userId}:${website?.id ?? ''}`;
+  if (builderUnifiedPublicationController && builderUnifiedPublicationIdentity === identity) {
+    return builderUnifiedPublicationController;
+  }
+  builderUnifiedPublicationIdentity = identity;
+
+  const repo = new SupabaseBuilderUnifiedPublicationRepository(getBuilderPublicationSupabaseClient);
+  builderUnifiedPublicationController = new BuilderUnifiedPublicationController(repo);
+  builderUnifiedPublicationController.subscribe(() => {
+    if (currentView === 'builder') {
+      renderBuilder();
+    }
+  });
+
+  return builderUnifiedPublicationController;
+}
+
+function renderBuilderUnifiedPublishModalHtml(): string {
+  const controller = getBuilderUnifiedPublicationController();
+  return renderUnifiedPublishModal(controller.getState());
+}
+
+(window as any).openBuilderUnifiedPublishModal = (websiteId?: string) => {
+  const targetWebsiteId = websiteId || getActiveBuilderWebsite()?.id;
+  if (!targetWebsiteId) {
+    (window as any).showToast('No active website to publish.', 'error');
+    return;
+  }
+  const controller = getBuilderUnifiedPublicationController();
+  controller.openModal(targetWebsiteId);
+};
+
+(window as any).closeBuilderUnifiedPublishModal = () => {
+  const controller = getBuilderUnifiedPublicationController();
+  controller.closeModal();
+};
+
+(window as any).confirmBuilderUnifiedPublish = async () => {
+  const controller = getBuilderUnifiedPublicationController();
+  const res = await controller.publish();
+  if (res?.success) {
+    (window as any).showToast(
+      res.status === 'NO_CHANGES'
+        ? 'Everything is already published.'
+        : `Website published successfully (Revision ${res.publication_revision}).`,
+      'success'
+    );
+    // Re-hydrate navigation and route controllers
+    const website = getActiveBuilderWebsite();
+    if (website?.id && builderSiteNavigationController) {
+      const context = getNavUiContext();
+      if (context) {
+        await builderSiteNavigationController.hydrate(website.id, {
+          effectiveRoutes: context.effectiveRoutes,
+          homepageFunnelId: website.homepage_funnel_id
+        }, getBuilderSiteNavigationManager().getActiveScope());
+      }
+    }
+  }
+};
+
+window.addEventListener('click', (event) => {
+  const target = event.target as HTMLElement | null;
+  if (!target) return;
+
+  if (target.closest('#pb-unified-publish-confirm-btn')) {
+    event.preventDefault();
+    void (window as any).confirmBuilderUnifiedPublish();
+  } else if (
+    target.closest('#pb-unified-publish-cancel-btn') ||
+    target.closest('#pb-unified-publish-close-btn') ||
+    target.closest('#pb-unified-publish-close-icon')
+  ) {
+    event.preventDefault();
+    (window as any).closeBuilderUnifiedPublishModal();
+  } else if (target.closest('#pb-unified-publish-reload-btn')) {
+    event.preventDefault();
+    const websiteId = getActiveBuilderWebsite()?.id;
+    if (websiteId) {
+      void getBuilderUnifiedPublicationController().loadPlan(websiteId);
+    }
+  }
+});
+
 function getBuilderWebsitePageEntries(): BuilderWebsitePageEntry[] {
   const website = getActiveBuilderWebsite();
   if (!website) return [];
@@ -6675,6 +6773,7 @@ function _renderBuilder() {
         ${builderMode === 'edit' ? renderBuilderInspectorPanel(sections) : ''}
       </div>
       ${renderBuilderPublishModal(page, sections, publicationStatus)}
+      ${renderBuilderUnifiedPublishModalHtml()}
       ${renderBuilderNewPageDialog()}
       ${renderBuilderSetupDialog()}
       ${renderBuilderPageRouteEditorDialog()}

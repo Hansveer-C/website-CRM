@@ -463,8 +463,8 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
           ('sec-u2-1', '${u2}', 'p-u2-keep', 'hero', '{"heading":"U2 Hero"}'::jsonb, 0)
         on conflict do nothing;
 
-        insert into private.page_section_save_revisions(page_id, user_id, revision) values
-          ('p-del-1', '${u1}', 1)
+        insert into private.page_section_save_revisions(page_id, user_id, revision, document_hash) values
+          ('p-del-1', '${u1}', 1, 'hash-del-1')
         on conflict do nothing;
       `);
 
