@@ -225,7 +225,23 @@ begin
         raise sqlstate 'PT400' using message = 'External URL cannot contain whitespace or control characters';
       end if;
 
-      v_url_parts := pg_catalog.regexp_match(v_target_value, '^([hH][tT][tT][pP][sS]?:\/\/)([^\/:\?#]+)(?::(\d+))?([\/\?#].*)?$');
+      -- Reject credentials (@ before first path separator or in authority)
+      if v_target_value ~* '^https?://[^/]*@' then
+        raise sqlstate 'PT400' using message = 'External URL cannot contain username or password credentials';
+      end if;
+
+      -- Reject IPv6 hostnames
+      if v_target_value ~* '^https?://\[' then
+        raise sqlstate 'PT400' using message = 'IPv6 hostnames are not supported for external navigation';
+      end if;
+
+      -- Reject dot-segments (/../ or /./) in path
+      if v_target_value ~ '(^|\/)\.\.?(\/|$|\?|#)' then
+        raise sqlstate 'PT400' using message = 'External URL cannot contain unnormalized dot segments';
+      end if;
+
+      -- Match safe supported profile: http/https, ASCII host, optional port, path/query/fragment
+      v_url_parts := pg_catalog.regexp_match(v_target_value, '^([hH][tT][tT][pP][sS]?:\/\/)([a-zA-Z0-9.-]+)(?::(\d+))?([\/\?#].*)?$');
       if v_url_parts is null then
         raise sqlstate 'PT400' using message = 'External URL must be a valid http:// or https:// URL';
       end if;
@@ -235,7 +251,11 @@ begin
       v_port := v_url_parts[3];
       v_path := coalesce(v_url_parts[4], '');
 
-      if v_host = '' or v_host ~ '[^a-z0-9.-]' then
+      -- Validate ASCII DNS host format (reject IDN punycode xn--, non-ASCII, leading/trailing hyphens/dots)
+      if v_host = ''
+         or v_host ~ '^xn--'
+         or v_host ~ '\.xn--'
+         or not (v_host ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$') then
         raise sqlstate 'PT400' using message = 'External URL contains invalid host';
       end if;
 
@@ -243,10 +263,13 @@ begin
         v_path := '/' || v_path;
       end if;
 
-      if (v_scheme = 'https://' and v_port = '443') or (v_scheme = 'http://' and v_port = '80') or v_port is null or v_port = '' then
+      if (v_scheme = 'https://' and (v_port = '443' or v_port = '0443'))
+         or (v_scheme = 'http://' and (v_port = '80' or v_port = '080'))
+         or v_port is null
+         or v_port = '' then
         v_target_value := v_scheme || v_host || v_path;
       else
-        v_target_value := v_scheme || v_host || ':' || v_port || v_path;
+        v_target_value := v_scheme || v_host || ':' || (v_port::integer)::text || v_path;
       end if;
     elsif v_target_kind = 'phone' then
       if not (v_target_value ~ '^[+]?[\d\s().-]{3,30}$') then

@@ -49,6 +49,13 @@ describe('builder_site_navigation_domain', () => {
     it('accepts valid https and http URLs', () => {
       expect(validateExternalUrl('https://example.com/pricing').valid).toBe(true);
       expect(validateExternalUrl('http://example.org/about').valid).toBe(true);
+      expect(validateExternalUrl('https://example.com').normalized).toBe('https://example.com/');
+      expect(validateExternalUrl('HTTPS://EXAMPLE.COM').normalized).toBe('https://example.com/');
+      expect(validateExternalUrl('https://example.com:443').normalized).toBe('https://example.com/');
+      expect(validateExternalUrl('https://example.com:0443').normalized).toBe('https://example.com/');
+      expect(validateExternalUrl('http://example.com:80').normalized).toBe('http://example.com/');
+      expect(validateExternalUrl('https://example.com:8080/docs').normalized).toBe('https://example.com:8080/docs');
+      expect(validateExternalUrl('https://example.com/search?q=test#results').normalized).toBe('https://example.com/search?q=test#results');
     });
 
     it('rejects unsafe schemes', () => {
@@ -60,6 +67,14 @@ describe('builder_site_navigation_domain', () => {
     it('rejects malformed URLs', () => {
       expect(validateExternalUrl('not-a-url').valid).toBe(false);
       expect(validateExternalUrl('https://').valid).toBe(false);
+    });
+
+    it('rejects unsupported URL profile features (credentials, IPv6, IDN, raw whitespace)', () => {
+      expect(validateExternalUrl('https://user:pass@example.com').valid).toBe(false);
+      expect(validateExternalUrl('https://[2001:db8::1]/').valid).toBe(false);
+      expect(validateExternalUrl('https://münich.example/').valid).toBe(false);
+      expect(validateExternalUrl('https://xn--mnich-kva.example/').valid).toBe(false);
+      expect(validateExternalUrl('https://example .com').valid).toBe(false);
     });
   });
 

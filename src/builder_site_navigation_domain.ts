@@ -81,8 +81,8 @@ export function validateExternalUrl(url: unknown): { valid: boolean; normalized?
   if (trimmed.length === 0) {
     return { valid: false, error: 'External URL cannot be empty' };
   }
-  if (/[\u0000-\u001F\u007F-\u009F]/.test(trimmed)) {
-    return { valid: false, error: 'External URL contains invalid characters' };
+  if (/[\u0000-\u001F\u007F-\u009F\s]/.test(trimmed)) {
+    return { valid: false, error: 'External URL cannot contain whitespace or control characters' };
   }
 
   let parsed: URL;
@@ -94,6 +94,28 @@ export function validateExternalUrl(url: unknown): { valid: boolean; normalized?
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return { valid: false, error: 'External URL must use http:// or https://' };
+  }
+
+  // Reject credentials
+  if (parsed.username || parsed.password || /^https?:\/\/[^/]*@/i.test(trimmed)) {
+    return { valid: false, error: 'External URL cannot contain username or password credentials' };
+  }
+
+  // Reject IPv6 hostnames
+  if (parsed.hostname.startsWith('[') || parsed.hostname.endsWith(']')) {
+    return { valid: false, error: 'IPv6 hostnames are not supported for external navigation' };
+  }
+
+  // Reject IDN / non-ASCII domains (including punycode xn--)
+  if (/[^\x20-\x7E]/.test(trimmed) || /^xn--/i.test(parsed.hostname) || parsed.hostname.includes('.xn--')) {
+    return { valid: false, error: 'Internationalized/non-ASCII domain names are not supported for external navigation' };
+  }
+
+  // Validate ASCII DNS hostname or IPv4
+  const host = parsed.hostname.toLowerCase();
+  const isDnsHost = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host);
+  if (!isDnsHost || host === '') {
+    return { valid: false, error: 'External URL contains invalid host' };
   }
 
   return { valid: true, normalized: parsed.href };
