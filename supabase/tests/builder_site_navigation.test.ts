@@ -284,7 +284,7 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
       // 6. Label with control characters
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
-          siteId, 'primary', JSON.stringify([{ id: '1', label: "Bad\x00Name", target_kind: 'external', target_value: 'https://example.com', position: 0, visible: true, is_cta: false }]), null, null
+          siteId, 'primary', JSON.stringify([{ id: '1', label: "Bad\x01Name", target_kind: 'external', target_value: 'https://example.com', position: 0, visible: true, is_cta: false }]), null, null
         ])
       ).rejects.toThrow(/invalid control characters/);
 
