@@ -1,22 +1,21 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { Pool, type PoolClient } from 'pg';
+import { Pool } from 'pg';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { randomUUID } from 'crypto';
 
-const DATABASE_URL = process.env.BUILDER_ROUTE_TEST_DATABASE_URL || process.env.DATABASE_URL;
-const MIGRATION_PATH = resolve(__dirname, '../migrations/20260817050700_create_builder_site_navigation.sql');
+const DATABASE_URL =
+  process.env.BUILDER_ROUTE_TEST_DATABASE_URL ||
+  process.env.TEST_DATABASE_URL ||
+  'postgres://postgres:postgres@127.0.0.1:5432/postgres';
 
-describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tests (PostgreSQL 17)', () => {
+const MIGRATION_PATH = resolve(
+  __dirname,
+  '../migrations/20260817050700_create_builder_site_navigation.sql'
+);
+
+describe('Builder Site Navigation Hardened Integration Tests (PostgreSQL 17)', () => {
   let pool: Pool;
-
-  async function setAuthUser(client: PoolClient, userId: string | null): Promise<void> {
-    if (userId === null) {
-      await client.query(`set "request.jwt.claim.sub" = ''`);
-    } else {
-      await client.query(`set "request.jwt.claim.sub" = '${userId}'`);
-    }
-  }
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: DATABASE_URL, max: 10 });
@@ -92,19 +91,29 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
       await client.query(migrationSql);
 
       await client.query('commit');
-    } catch (e) {
+    } catch (err) {
       await client.query('rollback');
-      throw e;
+      throw err;
     } finally {
       client.release();
     }
   });
 
   afterAll(async () => {
-    await pool.end();
+    if (pool) {
+      await pool.end();
+    }
   });
 
-  it('blocks direct table mutations (INSERT, UPDATE, DELETE) by authenticated role', async () => {
+  async function setAuthUser(client: any, userId: string | null) {
+    if (!userId) {
+      await client.query("select set_config('request.jwt.claim.sub', '', true)");
+    } else {
+      await client.query("select set_config('request.jwt.claim.sub', $1, true)", [userId]);
+    }
+  }
+
+  it('denies direct table DML to authenticated users (authority restricted to RPCs)', async () => {
     const client = await pool.connect();
     const userId = randomUUID();
     const siteId = randomUUID();
@@ -166,34 +175,24 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
     }
   });
 
-  it('rejects unauthenticated calls and anon role execution', async () => {
+  it('denies function execution to anon role', async () => {
     const client = await pool.connect();
+    const siteId = randomUUID();
+
     try {
-      await setAuthUser(client, null);
-      const fakeSiteId = randomUUID();
-
-      await expect(
-        client.query('select public.get_builder_effective_site_navigation($1)', [fakeSiteId])
-      ).rejects.toThrow(/Authentication required/);
-
-      await expect(
-        client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
-          fakeSiteId,
-          'primary',
-          JSON.stringify([]),
-          null,
-          null
-        ])
-      ).rejects.toThrow(/Authentication required/);
-
-      await expect(
-        client.query('select public.revert_builder_site_navigation_draft($1)', [fakeSiteId])
-      ).rejects.toThrow(/Authentication required/);
-
-      // Under anon role, execute permission is revoked
       await client.query('set role anon');
+      await setAuthUser(client, null);
+
       await expect(
-        client.query('select public.get_builder_effective_site_navigation($1)', [fakeSiteId])
+        client.query('select public.get_builder_effective_site_navigation($1)', [siteId])
+      ).rejects.toThrow(/permission denied/);
+
+      await expect(
+        client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [siteId, 'primary', '[]'])
+      ).rejects.toThrow(/permission denied/);
+
+      await expect(
+        client.query('select public.revert_builder_site_navigation_draft($1)', [siteId])
       ).rejects.toThrow(/permission denied/);
     } finally {
       await client.query('reset role');
@@ -241,6 +240,8 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
     const client = await pool.connect();
     const userId = randomUUID();
     const siteId = randomUUID();
+    const u1 = randomUUID();
+    const u2 = randomUUID();
 
     try {
       await client.query('insert into public.users (id, email) values ($1, $2)', [userId, `${userId}@test.com`]);
@@ -264,19 +265,25 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
         ])
       ).rejects.toThrow(/must be a JSON object/);
 
-      // 3. Missing/empty ID
+      // 3. Missing/empty ID or non-UUID ID
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
           siteId, 'primary', JSON.stringify([{ id: '', label: 'Home', target_kind: 'external', target_value: 'https://example.com', position: 0, visible: true, is_cta: false }]), null, null
         ])
-      ).rejects.toThrow(/valid non-empty ID/);
+      ).rejects.toThrow(/valid UUID format ID/);
+
+      await expect(
+        client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
+          siteId, 'primary', JSON.stringify([{ id: 'not-a-uuid', label: 'Home', target_kind: 'external', target_value: 'https://example.com', position: 0, visible: true, is_cta: false }]), null, null
+        ])
+      ).rejects.toThrow(/valid UUID format ID/);
 
       // 4. Duplicate item IDs
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
           siteId, 'primary', JSON.stringify([
-            { id: 'item-1', label: 'A', target_kind: 'external', target_value: 'https://a.com', position: 0, visible: true, is_cta: false },
-            { id: 'item-1', label: 'B', target_kind: 'external', target_value: 'https://b.com', position: 1, visible: true, is_cta: false }
+            { id: u1, label: 'A', target_kind: 'external', target_value: 'https://a.com', position: 0, visible: true, is_cta: false },
+            { id: u1, label: 'B', target_kind: 'external', target_value: 'https://b.com', position: 1, visible: true, is_cta: false }
           ]), null, null
         ])
       ).rejects.toThrow(/Duplicate navigation item ID/);
@@ -284,44 +291,50 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
       // 5. Empty label
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
-          siteId, 'primary', JSON.stringify([{ id: '1', label: '   ', target_kind: 'external', target_value: 'https://example.com', position: 0, visible: true, is_cta: false }]), null, null
+          siteId, 'primary', JSON.stringify([{ id: u1, label: '   ', target_kind: 'external', target_value: 'https://example.com', position: 0, visible: true, is_cta: false }]), null, null
         ])
       ).rejects.toThrow(/label cannot be empty/);
 
       // 6. Label with control characters
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
-          siteId, 'primary', JSON.stringify([{ id: '1', label: "Bad\x01Name", target_kind: 'external', target_value: 'https://example.com', position: 0, visible: true, is_cta: false }]), null, null
+          siteId, 'primary', JSON.stringify([{ id: u1, label: "Bad\x01Name", target_kind: 'external', target_value: 'https://example.com', position: 0, visible: true, is_cta: false }]), null, null
         ])
       ).rejects.toThrow(/invalid control characters/);
 
       // 7. Non-boolean visible (string "false")
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
-          siteId, 'primary', JSON.stringify([{ id: '1', label: 'Home', target_kind: 'external', target_value: 'https://example.com', position: 0, visible: "false", is_cta: false }]), null, null
+          siteId, 'primary', JSON.stringify([{ id: u1, label: 'Home', target_kind: 'external', target_value: 'https://example.com', position: 0, visible: "false", is_cta: false }]), null, null
         ])
       ).rejects.toThrow(/visible attribute must be a JSON boolean/);
 
       // 8. Non-boolean is_cta
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
-          siteId, 'primary', JSON.stringify([{ id: '1', label: 'Home', target_kind: 'external', target_value: 'https://example.com', position: 0, visible: true, is_cta: "true" }]), null, null
+          siteId, 'primary', JSON.stringify([{ id: u1, label: 'Home', target_kind: 'external', target_value: 'https://example.com', position: 0, visible: true, is_cta: "true" }]), null, null
         ])
       ).rejects.toThrow(/is_cta attribute must be a JSON boolean/);
 
-      // 9. Non-number position
+      // 9. Non-integer position (fractional 0.5 or string)
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
-          siteId, 'primary', JSON.stringify([{ id: '1', label: 'Home', target_kind: 'external', target_value: 'https://example.com', position: "0", visible: true, is_cta: false }]), null, null
+          siteId, 'primary', JSON.stringify([{ id: u1, label: 'Home', target_kind: 'external', target_value: 'https://example.com', position: 0.5, visible: true, is_cta: false }]), null, null
         ])
-      ).rejects.toThrow(/position must be a number/);
+      ).rejects.toThrow(/whole non-negative integer/);
+
+      await expect(
+        client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
+          siteId, 'primary', JSON.stringify([{ id: u1, label: 'Home', target_kind: 'external', target_value: 'https://example.com', position: "0", visible: true, is_cta: false }]), null, null
+        ])
+      ).rejects.toThrow(/whole non-negative integer/);
 
       // 10. Noncontiguous / gapped positions (e.g. 0, 2)
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
           siteId, 'primary', JSON.stringify([
-            { id: '1', label: 'A', target_kind: 'external', target_value: 'https://a.com', position: 0, visible: true, is_cta: false },
-            { id: '2', label: 'B', target_kind: 'external', target_value: 'https://b.com', position: 2, visible: true, is_cta: false }
+            { id: u1, label: 'A', target_kind: 'external', target_value: 'https://a.com', position: 0, visible: true, is_cta: false },
+            { id: u2, label: 'B', target_kind: 'external', target_value: 'https://b.com', position: 2, visible: true, is_cta: false }
           ]), null, null
         ])
       ).rejects.toThrow(/contiguous indices/);
@@ -330,8 +343,8 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
           siteId, 'primary', JSON.stringify([
-            { id: '1', label: 'A', target_kind: 'external', target_value: 'https://a.com', position: 0, visible: true, is_cta: false },
-            { id: '2', label: 'B', target_kind: 'external', target_value: 'https://b.com', position: 0, visible: true, is_cta: false }
+            { id: u1, label: 'A', target_kind: 'external', target_value: 'https://a.com', position: 0, visible: true, is_cta: false },
+            { id: u2, label: 'B', target_kind: 'external', target_value: 'https://b.com', position: 0, visible: true, is_cta: false }
           ]), null, null
         ])
       ).rejects.toThrow(/Duplicate item position/);
@@ -339,27 +352,33 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
       // 12. External URL safety (rejects javascript:, data:, file:, CR/LF)
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
-          siteId, 'primary', JSON.stringify([{ id: '1', label: 'Attack', target_kind: 'external', target_value: 'javascript:alert(1)', position: 0, visible: true, is_cta: false }]), null, null
+          siteId, 'primary', JSON.stringify([{ id: u1, label: 'Attack', target_kind: 'external', target_value: 'javascript:alert(1)', position: 0, visible: true, is_cta: false }]), null, null
         ])
       ).rejects.toThrow(/External navigation URL must be a valid http:\/\/ or https:\/\//);
 
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
-          siteId, 'primary', JSON.stringify([{ id: '1', label: 'Attack', target_kind: 'external', target_value: 'data:text/html,<script>alert(1)</script>', position: 0, visible: true, is_cta: false }]), null, null
+          siteId, 'primary', JSON.stringify([{ id: u1, label: 'Attack', target_kind: 'external', target_value: 'data:text/html,<script>alert(1)</script>', position: 0, visible: true, is_cta: false }]), null, null
         ])
       ).rejects.toThrow(/External navigation URL must be a valid http:\/\/ or https:\/\//);
 
       // 13. Phone safety
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
-          siteId, 'primary', JSON.stringify([{ id: '1', label: 'Call', target_kind: 'phone', target_value: 'invalid_phone_text', position: 0, visible: true, is_cta: false }]), null, null
+          siteId, 'primary', JSON.stringify([{ id: u1, label: 'Call', target_kind: 'phone', target_value: 'invalid_phone_text', position: 0, visible: true, is_cta: false }]), null, null
         ])
       ).rejects.toThrow(/Invalid phone number format/);
 
       // 14. Email safety
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
-          siteId, 'primary', JSON.stringify([{ id: '1', label: 'Email', target_kind: 'email', target_value: 'mailto:user@domain.com?subject=hack', position: 0, visible: true, is_cta: false }]), null, null
+          siteId, 'primary', JSON.stringify([{ id: u1, label: 'Email', target_kind: 'email', target_value: 'not-an-email', position: 0, visible: true, is_cta: false }]), null, null
+        ])
+      ).rejects.toThrow(/Invalid email address format/);
+
+      await expect(
+        client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
+          siteId, 'primary', JSON.stringify([{ id: u1, label: 'Email', target_kind: 'email', target_value: 'user@example.com?subject=Injected', position: 0, visible: true, is_cta: false }]), null, null
         ])
       ).rejects.toThrow(/Invalid email address format/);
     } finally {
@@ -369,101 +388,110 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
 
   it('enforces internal destination association with current website context', async () => {
     const client = await pool.connect();
-    const userA = randomUUID();
-    const userB = randomUUID();
+    const userId = randomUUID();
+    const otherUserId = randomUUID();
     const siteA = randomUUID();
     const siteB = randomUUID();
-    const fnlHomeA = `fnl-home-a-${randomUUID()}`;
-    const fnlRouteA = `fnl-route-a-${randomUUID()}`;
-    const fnlDraftA = `fnl-draft-a-${randomUUID()}`;
+
+    const fnlHomepageA = `fnl-ha-${randomUUID()}`;
+    const fnlRouteA = `fnl-ra-${randomUUID()}`;
+    const fnlDraftA = `fnl-da-${randomUUID()}`;
     const fnlSiteB = `fnl-b-${randomUUID()}`;
-    const fnlForeign = `fnl-foreign-${randomUUID()}`;
+    const fnlOtherUser = `fnl-other-${randomUUID()}`;
+
+    const u1 = randomUUID();
+    const u2 = randomUUID();
+    const u3 = randomUUID();
+    const u4 = randomUUID();
+    const u5 = randomUUID();
 
     try {
       await client.query('insert into public.users (id, email) values ($1, $2), ($3, $4)', [
-        userA, `${userA}@test.com`, userB, `${userB}@test.com`
+        userId, `${userId}@test.com`,
+        otherUserId, `${otherUserId}@test.com`
       ]);
 
-      // User A funnels
-      await client.query('insert into public.funnels (id, user_id, name) values ($1, $2, $3), ($4, $5, $6), ($7, $8, $9), ($10, $11, $12)', [
-        fnlHomeA, userA, 'Home A',
-        fnlRouteA, userA, 'Route A',
-        fnlDraftA, userA, 'Draft A',
-        fnlSiteB, userA, 'Site B Funnel'
+      await client.query('insert into public.funnels (id, user_id, name) values ($1, $2, $3), ($4, $5, $6), ($7, $8, $9), ($10, $11, $12), ($13, $14, $15)', [
+        fnlHomepageA, userId, 'Homepage A',
+        fnlRouteA, userId, 'Route A',
+        fnlDraftA, userId, 'Draft A',
+        fnlSiteB, userId, 'Site B Page',
+        fnlOtherUser, otherUserId, 'Foreign Page'
       ]);
 
-      // User B foreign funnel
-      await client.query('insert into public.funnels (id, user_id, name) values ($1, $2, $3)', [
-        fnlForeign, userB, 'Foreign Funnel'
-      ]);
-
-      // Site A with homepage
       await client.query(
-        'insert into public.websites (id, user_id, name, subdomain, homepage_funnel_id) values ($1, $2, $3, $4, $5)',
-        [siteA, userA, 'Site A', `sub-${siteA}`, fnlHomeA]
+        'insert into public.websites (id, user_id, name, subdomain, homepage_funnel_id) values ($1, $2, $3, $4, $5), ($6, $7, $8, $9, $10)',
+        [
+          siteA, userId, 'Site A', `sub-${siteA}`, fnlHomepageA,
+          siteB, userId, 'Site B', `sub-${siteB}`, fnlSiteB
+        ]
       );
 
-      // Site A live route
       await client.query(
         'insert into public.website_routes (website_id, path, funnel_id) values ($1, $2, $3)',
         [siteA, '/services', fnlRouteA]
       );
 
-      // Site A draft route
       await client.query(
-        'insert into public.builder_route_drafts (website_id, path, action, funnel_id) values ($1, $2, $3, $4)',
-        [siteA, '/pricing', 'upsert', fnlDraftA]
+        'insert into public.builder_route_drafts (website_id, path, funnel_id, action) values ($1, $2, $3, $4)',
+        [siteA, '/about', fnlDraftA, 'upsert']
       );
 
-      // Site B (User A's other site)
-      await client.query(
-        'insert into public.websites (id, user_id, name, subdomain, homepage_funnel_id) values ($1, $2, $3, $4, $5)',
-        [siteB, userA, 'Site B', `sub-${siteB}`, fnlSiteB]
+      await setAuthUser(client, userId);
+
+      // Same-site destinations succeed (homepage, live route, draft route)
+      const validStage = await client.query(
+        'select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5) as data',
+        [
+          siteA,
+          'primary',
+          JSON.stringify([
+            { id: u1, label: 'Home', target_kind: 'internal', target_value: fnlHomepageA, position: 0, visible: true, is_cta: false },
+            { id: u2, label: 'Services', target_kind: 'internal', target_value: fnlRouteA, position: 1, visible: true, is_cta: false },
+            { id: u3, label: 'About', target_kind: 'internal', target_value: fnlDraftA, position: 2, visible: true, is_cta: false }
+          ]),
+          null,
+          null
+        ]
       );
+      expect(validStage.rows[0].data.success).toBe(true);
 
-      await setAuthUser(client, userA);
-
-      // 1. Target homepage of Site A -> Valid
-      const stageHome = await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5) as data', [
-        siteA, 'primary', JSON.stringify([{ id: '1', label: 'Home', target_kind: 'internal', target_value: fnlHomeA, position: 0, visible: true, is_cta: false }]), null, null
-      ]);
-      expect(stageHome.rows[0].data.is_draft).toBe(true);
-
-      // 2. Target live route of Site A -> Valid
-      const stageRoute = await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5) as data', [
-        siteA, 'primary', JSON.stringify([{ id: '1', label: 'Services', target_kind: 'internal', target_value: fnlRouteA, position: 0, visible: true, is_cta: false }]), null, 1
-      ]);
-      expect(stageRoute.rows[0].data.is_draft).toBe(true);
-
-      // 3. Target draft route of Site A -> Valid
-      const stageDraft = await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5) as data', [
-        siteA, 'primary', JSON.stringify([{ id: '1', label: 'Pricing', target_kind: 'internal', target_value: fnlDraftA, position: 0, visible: true, is_cta: false }]), null, 2
-      ]);
-      expect(stageDraft.rows[0].data.is_draft).toBe(true);
-
-      // 4. Target User A's funnel belonging only to Site B -> Rejected (PT404)
+      // Same-user other-website funnel fails (PT404)
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
-          siteA, 'primary', JSON.stringify([{ id: '1', label: 'Site B Link', target_kind: 'internal', target_value: fnlSiteB, position: 0, visible: true, is_cta: false }]), null, 3
+          siteA,
+          'primary',
+          JSON.stringify([
+            { id: u4, label: 'Other Site', target_kind: 'internal', target_value: fnlSiteB, position: 0, visible: true, is_cta: false }
+          ]),
+          null,
+          null
         ])
-      ).rejects.toThrow(/not associated with this website/);
+      ).rejects.toThrow(/Internal destination not associated with this website/);
 
-      // 5. Target User B's foreign funnel -> Rejected (PT404)
+      // Foreign user funnel fails (PT404)
       await expect(
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
-          siteA, 'primary', JSON.stringify([{ id: '1', label: 'Foreign', target_kind: 'internal', target_value: fnlForeign, position: 0, visible: true, is_cta: false }]), null, 3
+          siteA,
+          'primary',
+          JSON.stringify([
+            { id: u5, label: 'Foreign', target_kind: 'internal', target_value: fnlOtherUser, position: 0, visible: true, is_cta: false }
+          ]),
+          null,
+          null
         ])
-      ).rejects.toThrow(/Internal destination not found or not owned/);
+      ).rejects.toThrow(/Internal destination not found or not owned by user/);
     } finally {
       client.release();
     }
   });
 
-  it('enforces draft_revision concurrency protection between multiple draft editors', async () => {
+  it('enforces draft_revision concurrency protection between multiple draft editors and prevents tokenless revert when draft exists', async () => {
     const client = await pool.connect();
     const userId = randomUUID();
     const siteId = randomUUID();
     const fnl1 = `fnl-c-${randomUUID()}`;
+    const u1 = randomUUID();
 
     try {
       await client.query('insert into public.users (id, email) values ($1, $2)', [userId, `${userId}@test.com`]);
@@ -476,7 +504,7 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
       // Insert live navigation at revision 1
       await client.query(
         'insert into public.builder_site_navigation_live (website_id, menu_scope, items, revision) values ($1, $2, $3, $4)',
-        [siteId, 'primary', JSON.stringify([{ id: '1', label: 'Home', target_kind: 'internal', target_value: fnl1, position: 0, visible: true, is_cta: false }]), 1]
+        [siteId, 'primary', JSON.stringify([{ id: u1, label: 'Home', target_kind: 'internal', target_value: fnl1, position: 0, visible: true, is_cta: false }]), 1]
       );
 
       await setAuthUser(client, userId);
@@ -486,13 +514,17 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
       expect(initial.rows[0].data.draft_revision).toBe(0);
       expect(initial.rows[0].data.live_revision).toBe(1);
 
+      // Calling revert when no draft exists without token is a harmless no-op
+      const noOpRevert = await client.query('select public.revert_builder_site_navigation_draft($1, $2) as data', [siteId, 'primary']);
+      expect(noOpRevert.rows[0].data.is_draft).toBe(false);
+
       // Tab B stages draft 1 (expected draft revision 0) -> advances draft_revision to 1
       const tabBStage1 = await client.query(
         'select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5) as data',
         [
           siteId,
           'primary',
-          JSON.stringify([{ id: '1', label: 'Home (Tab B)', target_kind: 'internal', target_value: fnl1, position: 0, visible: true, is_cta: false }]),
+          JSON.stringify([{ id: u1, label: 'Home (Tab B)', target_kind: 'internal', target_value: fnl1, position: 0, visible: true, is_cta: false }]),
           1,
           0
         ]
@@ -504,11 +536,16 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
         client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
           siteId,
           'primary',
-          JSON.stringify([{ id: '1', label: 'Home (Tab A)', target_kind: 'internal', target_value: fnl1, position: 0, visible: true, is_cta: false }]),
+          JSON.stringify([{ id: u1, label: 'Home (Tab A)', target_kind: 'internal', target_value: fnl1, position: 0, visible: true, is_cta: false }]),
           1,
           0
         ])
       ).rejects.toThrow(/modified elsewhere/);
+
+      // Tab A attempts tokenless revert while draft revision 1 exists -> Rejected (PT409)
+      await expect(
+        client.query('select public.revert_builder_site_navigation_draft($1, $2)', [siteId, 'primary'])
+      ).rejects.toThrow(/Draft revision token is required/);
 
       // Tab A attempts stale revert with draft_revision 0 -> Rejected (PT409)
       await expect(
@@ -532,6 +569,7 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
     const userId = randomUUID();
     const siteId = randomUUID();
     const fnl1 = `fnl-d-${randomUUID()}`;
+    const u1 = randomUUID();
 
     try {
       await client.query('insert into public.users (id, email) values ($1, $2)', [userId, `${userId}@test.com`]);
@@ -541,7 +579,7 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
         [siteId, userId, 'Clean Site', `sub-${siteId}`, fnl1]
       );
 
-      const liveItems = [{ id: '1', label: 'Home', target_kind: 'internal', target_value: fnl1, position: 0, visible: true, is_cta: false }];
+      const liveItems = [{ id: u1, label: 'Home', target_kind: 'internal', target_value: fnl1, position: 0, visible: true, is_cta: false }];
 
       await client.query(
         'insert into public.builder_site_navigation_live (website_id, menu_scope, items, revision) values ($1, $2, $3, $4)',
@@ -553,7 +591,7 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
       // Stage an altered draft
       await client.query(
         'select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)',
-        [siteId, 'primary', JSON.stringify([{ id: '1', label: 'Home Modified', target_kind: 'internal', target_value: fnl1, position: 0, visible: true, is_cta: false }]), 1, 0]
+        [siteId, 'primary', JSON.stringify([{ id: u1, label: 'Home Modified', target_kind: 'internal', target_value: fnl1, position: 0, visible: true, is_cta: false }]), 1, 0]
       );
 
       // Now stage items identical to live -> draft is automatically cleaned

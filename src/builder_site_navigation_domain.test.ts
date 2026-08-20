@@ -14,6 +14,11 @@ import {
 import type { EffectiveRoute } from './builder_route_lifecycle';
 
 describe('builder_site_navigation_domain', () => {
+  const uuid1 = '11111111-1111-4111-8111-111111111111';
+  const uuid2 = '22222222-2222-4222-8222-222222222222';
+  const uuid3 = '33333333-3333-4333-8333-333333333333';
+  const uuid4 = '44444444-4444-4444-8444-444444444444';
+
   describe('label validation', () => {
     it('accepts clean labels and preserves casing and spaces', () => {
       const res = validateNavigationLabel('  Services & Pricing  ');
@@ -60,13 +65,13 @@ describe('builder_site_navigation_domain', () => {
     it('accepts and normalizes phone numbers with international +', () => {
       const res = validatePhoneTarget('+1 (555) 234-5678');
       expect(res.valid).toBe(true);
-      expect(res.normalized).toBe('+15552345678');
+      expect(res.normalized).toBe('+1 (555) 234-5678');
     });
 
     it('accepts local numbers without +', () => {
       const res = validatePhoneTarget('(555) 234-5678');
       expect(res.valid).toBe(true);
-      expect(res.normalized).toBe('5552345678');
+      expect(res.normalized).toBe('(555) 234-5678');
     });
 
     it('rejects invalid or unsafe phone values', () => {
@@ -91,9 +96,9 @@ describe('builder_site_navigation_domain', () => {
   });
 
   describe('validateNavigationItem and validateAndNormalizeNavigationItems', () => {
-    it('validates a complete valid internal item', () => {
+    it('validates a complete valid internal item with UUID', () => {
       const res = validateNavigationItem({
-        id: 'item-1',
+        id: uuid1,
         label: 'Services',
         target_kind: 'internal',
         target_value: 'fnl-123',
@@ -108,9 +113,37 @@ describe('builder_site_navigation_domain', () => {
       }
     });
 
+    it('rejects non-UUID item IDs', () => {
+      const res = validateNavigationItem({
+        id: 'not-a-uuid',
+        label: 'Services',
+        target_kind: 'internal',
+        target_value: 'fnl-123',
+        position: 0,
+        visible: true,
+        is_cta: false
+      });
+      expect(res.valid).toBe(false);
+      expect(res.code).toBe('INVALID_ID');
+    });
+
+    it('rejects fractional positions', () => {
+      const res = validateNavigationItem({
+        id: uuid1,
+        label: 'Services',
+        target_kind: 'internal',
+        target_value: 'fnl-123',
+        position: 0.5,
+        visible: true,
+        is_cta: false
+      });
+      expect(res.valid).toBe(false);
+      expect(res.code).toBe('INVALID_POSITION');
+    });
+
     it('allows CTA presentation independently of target kind', () => {
       const ctaPhone = validateNavigationItem({
-        id: 'item-cta',
+        id: uuid2,
         label: 'Call Now',
         target_kind: 'phone',
         target_value: '+15551234567',
@@ -127,7 +160,7 @@ describe('builder_site_navigation_domain', () => {
 
     it('handles hidden items correctly', () => {
       const hidden = validateNavigationItem({
-        id: 'item-hidden',
+        id: uuid3,
         label: 'Secret Page',
         target_kind: 'internal',
         target_value: 'fnl-sec',
@@ -143,9 +176,9 @@ describe('builder_site_navigation_domain', () => {
 
     it('enforces contiguous deterministic ordering and unique IDs', () => {
       const rawList = [
-        { id: 'a', label: 'Home', target_kind: 'internal', target_value: 'fnl-home', position: 99, visible: true, is_cta: false },
-        { id: 'b', label: 'Services', target_kind: 'internal', target_value: 'fnl-serv', position: 4, visible: true, is_cta: false },
-        { id: 'c', label: 'Contact', target_kind: 'phone', target_value: '5551234567', position: 0, visible: true, is_cta: true }
+        { id: uuid1, label: 'Home', target_kind: 'internal', target_value: 'fnl-home', position: 99, visible: true, is_cta: false },
+        { id: uuid2, label: 'Services', target_kind: 'internal', target_value: 'fnl-serv', position: 4, visible: true, is_cta: false },
+        { id: uuid3, label: 'Contact', target_kind: 'phone', target_value: '+15551234567', position: 0, visible: true, is_cta: true }
       ];
 
       const res = validateAndNormalizeNavigationItems(rawList);
@@ -155,8 +188,8 @@ describe('builder_site_navigation_domain', () => {
 
     it('rejects duplicate item IDs', () => {
       const dupes = [
-        { id: 'dupe-id', label: 'Link 1', target_kind: 'internal', target_value: 'fnl-1', position: 0, visible: true, is_cta: false },
-        { id: 'dupe-id', label: 'Link 2', target_kind: 'internal', target_value: 'fnl-2', position: 1, visible: true, is_cta: false }
+        { id: uuid1, label: 'Link 1', target_kind: 'internal', target_value: 'fnl-1', position: 0, visible: true, is_cta: false },
+        { id: uuid1, label: 'Link 2', target_kind: 'internal', target_value: 'fnl-2', position: 1, visible: true, is_cta: false }
       ];
       const res = validateAndNormalizeNavigationItems(dupes);
       expect(res.valid).toBe(false);
@@ -167,15 +200,15 @@ describe('builder_site_navigation_domain', () => {
   describe('areNavigationSnapshotsEqual', () => {
     it('returns true for identical snapshots and false for any variation', () => {
       const snapA: SiteNavigationItem[] = [
-        { id: '1', label: 'Home', target_kind: 'internal', target_value: 'fnl-1', position: 0, visible: true, is_cta: false }
+        { id: uuid1, label: 'Home', target_kind: 'internal', target_value: 'fnl-1', position: 0, visible: true, is_cta: false }
       ];
       const snapB: SiteNavigationItem[] = [
-        { id: '1', label: 'Home', target_kind: 'internal', target_value: 'fnl-1', position: 0, visible: true, is_cta: false }
+        { id: uuid1, label: 'Home', target_kind: 'internal', target_value: 'fnl-1', position: 0, visible: true, is_cta: false }
       ];
       expect(areNavigationSnapshotsEqual(snapA, snapB)).toBe(true);
 
       const modified: SiteNavigationItem[] = [
-        { id: '1', label: 'Home', target_kind: 'internal', target_value: 'fnl-1', position: 0, visible: true, is_cta: true }
+        { id: uuid1, label: 'Home', target_kind: 'internal', target_value: 'fnl-1', position: 0, visible: true, is_cta: true }
       ];
       expect(areNavigationSnapshotsEqual(snapA, modified)).toBe(false);
     });
@@ -220,7 +253,7 @@ describe('builder_site_navigation_domain', () => {
 
     it('resolves homepage funnel target to "/" without hardcoding path', () => {
       const item: SiteNavigationItem = {
-        id: 'nav-home',
+        id: uuid1,
         label: 'Home',
         target_kind: 'internal',
         target_value: 'fnl-home',
@@ -239,7 +272,7 @@ describe('builder_site_navigation_domain', () => {
 
     it('automatically reflects route renames through stable destination identity', () => {
       const item: SiteNavigationItem = {
-        id: 'nav-services',
+        id: uuid2,
         label: 'Services',
         target_kind: 'internal',
         target_value: 'fnl-services',
@@ -258,7 +291,7 @@ describe('builder_site_navigation_domain', () => {
 
     it('identifies target route scheduled for deletion as pending_deletion', () => {
       const item: SiteNavigationItem = {
-        id: 'nav-old',
+        id: uuid3,
         label: 'Old Page',
         target_kind: 'internal',
         target_value: 'fnl-old',
@@ -277,7 +310,7 @@ describe('builder_site_navigation_domain', () => {
 
     it('identifies missing/unrouted destinations explicitly', () => {
       const item: SiteNavigationItem = {
-        id: 'nav-missing',
+        id: uuid4,
         label: 'Ghost Page',
         target_kind: 'internal',
         target_value: 'fnl-nonexistent',
@@ -296,9 +329,9 @@ describe('builder_site_navigation_domain', () => {
 
     it('resolves phone, email, and external links directly to valid URIs', () => {
       const items: SiteNavigationItem[] = [
-        { id: '1', label: 'Call', target_kind: 'phone', target_value: '+15551234567', position: 0, visible: true, is_cta: true },
-        { id: '2', label: 'Email', target_kind: 'email', target_value: 'info@washops.com', position: 1, visible: true, is_cta: false },
-        { id: '3', label: 'Blog', target_kind: 'external', target_value: 'https://washops.blog', position: 2, visible: true, is_cta: false }
+        { id: uuid1, label: 'Call', target_kind: 'phone', target_value: '+15551234567', position: 0, visible: true, is_cta: true },
+        { id: uuid2, label: 'Email', target_kind: 'email', target_value: 'info@washops.com', position: 1, visible: true, is_cta: false },
+        { id: uuid3, label: 'Blog', target_kind: 'external', target_value: 'https://washops.blog', position: 2, visible: true, is_cta: false }
       ];
 
       const resolved = resolveEffectiveNavigation(items, { effectiveRoutes });

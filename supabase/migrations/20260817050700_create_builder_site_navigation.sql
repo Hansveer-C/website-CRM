@@ -271,8 +271,8 @@ begin
     v_target_value := trim(v_item->>'target_value');
 
     -- Validate ID
-    if v_item_id is null or v_item_id = '' or length(v_item_id) > 100 then
-      raise sqlstate 'PT400' using message = 'Each navigation item must have a valid non-empty ID';
+    if v_item_id is null or v_item_id !~* '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
+      raise sqlstate 'PT400' using message = 'Each navigation item must have a valid UUID format ID';
     end if;
 
     if v_item_id = any(v_seen_ids) then
@@ -313,8 +313,8 @@ begin
     end if;
 
     -- Validate position as integer matching contiguous 0..N-1
-    if jsonb_typeof(v_item->'position') <> 'number' then
-      raise sqlstate 'PT400' using message = 'Item position must be a number';
+    if jsonb_typeof(v_item->'position') <> 'number' or (v_item->>'position') !~ '^[0-9]+$' then
+      raise sqlstate 'PT400' using message = 'Item position must be a whole non-negative integer';
     end if;
 
     v_position := (v_item->>'position')::integer;
@@ -491,8 +491,13 @@ begin
   where website_id = p_website_id and menu_scope = v_menu_scope
   for update;
 
-  if found and p_expected_draft_revision is not null and p_expected_draft_revision <> v_draft.draft_revision then
-    raise sqlstate 'PT409' using message = 'The navigation draft was modified elsewhere. Reload and try again.';
+  if found then
+    if p_expected_draft_revision is null then
+      raise sqlstate 'PT409' using message = 'Draft revision token is required when a draft exists. Reload and try again.';
+    end if;
+    if p_expected_draft_revision <> v_draft.draft_revision then
+      raise sqlstate 'PT409' using message = 'The navigation draft was modified elsewhere. Reload and try again.';
+    end if;
   end if;
 
   -- Delete draft row

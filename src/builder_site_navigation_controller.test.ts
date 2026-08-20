@@ -5,6 +5,10 @@ import type { SiteNavigationItem } from './builder_site_navigation_domain';
 import type { EffectiveRoute } from './builder_route_lifecycle';
 
 describe('BuilderSiteNavigationController', () => {
+  const uuid1 = '11111111-1111-4111-8111-111111111111';
+  const uuid2 = '22222222-2222-4222-8222-222222222222';
+  const uuid3 = '33333333-3333-4333-8333-333333333333';
+
   const routes: EffectiveRoute[] = [
     {
       id: 'r-home',
@@ -61,9 +65,9 @@ describe('BuilderSiteNavigationController', () => {
     await controller.hydrate('site-1', context);
 
     const itemsToStage: SiteNavigationItem[] = [
-      { id: '1', label: 'Home', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false },
-      { id: '2', label: 'Services', target_kind: 'internal', target_value: 'fnl-serv', position: 1, visible: true, is_cta: false },
-      { id: '3', label: 'Call Us', target_kind: 'phone', target_value: '+15551234567', position: 2, visible: true, is_cta: true }
+      { id: uuid1, label: 'Home', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false },
+      { id: uuid2, label: 'Services', target_kind: 'internal', target_value: 'fnl-serv', position: 1, visible: true, is_cta: false },
+      { id: uuid3, label: 'Call Us', target_kind: 'phone', target_value: '+15551234567', position: 2, visible: true, is_cta: true }
     ];
 
     const result = await controller.stageDraft(itemsToStage, context);
@@ -83,7 +87,7 @@ describe('BuilderSiteNavigationController', () => {
 
     // Subsequent draft stage increments draft revision
     const stage2Result = await controller.stageDraft([
-      { id: '1', label: 'Home Page', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }
+      { id: uuid1, label: 'Home Page', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }
     ], context);
     expect(stage2Result.success).toBe(true);
     if (controller.getState().status === 'ready') {
@@ -95,7 +99,7 @@ describe('BuilderSiteNavigationController', () => {
     const repo = new MockBuilderSiteNavigationRepository();
     repo.registerFunnel('fnl-home');
     const liveItems: SiteNavigationItem[] = [
-      { id: '1', label: 'Home', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }
+      { id: uuid1, label: 'Home', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }
     ];
     repo.setLiveSnapshot('site-1', liveItems, 1);
 
@@ -104,8 +108,8 @@ describe('BuilderSiteNavigationController', () => {
 
     // Stage draft with extra item
     const draftItems: SiteNavigationItem[] = [
-      { id: '1', label: 'Home', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false },
-      { id: '2', label: 'Call Us', target_kind: 'phone', target_value: '+15551234567', position: 1, visible: true, is_cta: true }
+      { id: uuid1, label: 'Home', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false },
+      { id: uuid2, label: 'Call Us', target_kind: 'phone', target_value: '+15551234567', position: 1, visible: true, is_cta: true }
     ];
     await controller.stageDraft(draftItems, context);
 
@@ -129,7 +133,7 @@ describe('BuilderSiteNavigationController', () => {
     const repo = new MockBuilderSiteNavigationRepository();
     repo.registerFunnel('fnl-home');
     const liveItems: SiteNavigationItem[] = [
-      { id: '1', label: 'Home', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }
+      { id: uuid1, label: 'Home', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }
     ];
     repo.setLiveSnapshot('site-1', liveItems, 1);
 
@@ -140,7 +144,7 @@ describe('BuilderSiteNavigationController', () => {
     repo.setLiveSnapshot('site-1', liveItems, 2);
 
     const res = await controller.stageDraft(
-      [{ id: '1', label: 'Home Edited', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }],
+      [{ id: uuid1, label: 'Home Edited', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }],
       context
     );
 
@@ -153,7 +157,7 @@ describe('BuilderSiteNavigationController', () => {
     repo.registerFunnel('fnl-home');
     repo.registerFunnel('fnl-serv');
     const liveItems: SiteNavigationItem[] = [
-      { id: '1', label: 'Home', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }
+      { id: uuid1, label: 'Home', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }
     ];
     repo.setLiveSnapshot('site-1', liveItems, 1);
 
@@ -167,14 +171,14 @@ describe('BuilderSiteNavigationController', () => {
 
     // Tab B saves a draft (advancing draft revision to 1)
     const resB = await tabB.stageDraft(
-      [{ id: '1', label: 'Home (Tab B)', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }],
+      [{ id: uuid1, label: 'Home (Tab B)', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }],
       context
     );
     expect(resB.success).toBe(true);
 
     // Tab A attempts to save against stale draftRevision 0
     const resA = await tabA.stageDraft(
-      [{ id: '1', label: 'Home (Tab A)', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }],
+      [{ id: uuid1, label: 'Home (Tab A)', target_kind: 'internal', target_value: 'fnl-home', position: 0, visible: true, is_cta: false }],
       context
     );
 

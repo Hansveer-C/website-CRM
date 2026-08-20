@@ -200,12 +200,21 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
     const key = `${websiteId}:${menuScope}`;
     const draft = this.draftStore.get(key);
 
-    if (draft && typeof expectedDraftRevision === 'number' && expectedDraftRevision !== draft.draft_revision) {
-      return {
-        success: false,
-        error: 'The navigation draft was modified elsewhere. Reload and try again.',
-        code: 'CONFLICT'
-      };
+    if (draft) {
+      if (typeof expectedDraftRevision !== 'number') {
+        return {
+          success: false,
+          error: 'Draft revision token is required when a draft exists. Reload and try again.',
+          code: 'CONFLICT'
+        };
+      }
+      if (expectedDraftRevision !== draft.draft_revision) {
+        return {
+          success: false,
+          error: 'The navigation draft was modified elsewhere. Reload and try again.',
+          code: 'CONFLICT'
+        };
+      }
     }
 
     this.draftStore.delete(key);

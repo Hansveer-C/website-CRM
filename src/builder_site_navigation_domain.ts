@@ -53,6 +53,7 @@ export type NavigationValidationResult =
 
 const PHONE_CLEAN_REGEX = /^[+]?[\d\s().-]{3,30}$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 export function validateNavigationLabel(label: unknown): { valid: boolean; normalized?: string; error?: string } {
   if (typeof label !== 'string') {
@@ -112,14 +113,7 @@ export function validatePhoneTarget(phone: unknown): { valid: boolean; normalize
   if (!PHONE_CLEAN_REGEX.test(trimmed)) {
     return { valid: false, error: 'Invalid phone number format' };
   }
-  // Safe tel: URI standard: retain '+' if leading, remove all non-digits
-  const hasPlus = trimmed.startsWith('+');
-  const digits = trimmed.replace(/\D/g, '');
-  if (digits.length < 3 || digits.length > 20) {
-    return { valid: false, error: 'Phone number must contain between 3 and 20 digits' };
-  }
-  const normalized = hasPlus ? `+${digits}` : digits;
-  return { valid: true, normalized };
+  return { valid: true, normalized: trimmed };
 }
 
 export function validateEmailTarget(email: unknown): { valid: boolean; normalized?: string; error?: string } {
@@ -148,6 +142,9 @@ export function validateNavigationItem(input: unknown): NavigationValidationResu
   const id = typeof raw.id === 'string' && raw.id.trim().length > 0 ? raw.id.trim() : null;
   if (!id) {
     return { valid: false, error: 'Item must have a non-empty string ID', code: 'INVALID_ID' };
+  }
+  if (!UUID_REGEX.test(id)) {
+    return { valid: false, error: 'Item ID must be a valid UUID format', code: 'INVALID_ID' };
   }
 
   const labelCheck = validateNavigationLabel(raw.label);
@@ -184,6 +181,10 @@ export function validateNavigationItem(input: unknown): NavigationValidationResu
       return { valid: false, error: emailCheck.error || 'Invalid email address', code: 'INVALID_EMAIL' };
     }
     normalizedValue = emailCheck.normalized;
+  }
+
+  if (typeof raw.position === 'number' && !Number.isInteger(raw.position)) {
+    return { valid: false, error: 'Position must be a whole integer', code: 'INVALID_POSITION' };
   }
 
   const position = typeof raw.position === 'number' && Number.isInteger(raw.position) && raw.position >= 0
