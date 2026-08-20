@@ -4115,10 +4115,12 @@ function renderBuilderInspectorPanel(sections: PageSection[]): string {
     const website = getActiveBuilderWebsite();
     if (website?.id && builderSiteNavigationController) {
       const context = getNavUiContext();
-      void builderSiteNavigationController.hydrate(website.id, {
-        effectiveRoutes: context.effectiveRoutes,
-        homepageFunnelId: website.homepage_funnel_id
-      }, manager.getActiveScope());
+      if (context) {
+        void builderSiteNavigationController.hydrate(website.id, {
+          effectiveRoutes: context.effectiveRoutes,
+          homepageFunnelId: website.homepage_funnel_id
+        }, manager.getActiveScope());
+      }
     }
   }
   renderBuilder();
@@ -4860,15 +4862,31 @@ let builderSiteNavigationPublishController: BuilderSiteNavigationPublishControll
 let builderNavigationUiManager: BuilderNavigationUiManager | null = null;
 let builderSiteNavigationIdentity = '';
 
-function getNavUiContext(): NavigationUiContext {
-  const website = getActiveBuilderWebsite() || mockWebsites[0];
+function getNavUiContext(): NavigationUiContext | null {
+  const website = getActiveBuilderWebsite();
+  if (!website) return null;
+
   const routeController = getBuilderPageRouteController();
   const effectiveRoutes = routeController.getState().effectiveRoutes;
-  const layout = website ? mockWebsiteLayouts.find(l => l.website_id === website.id) : null;
+  const websiteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
+  const associatedFunnelIds = new Set<string>();
+  if (website.homepage_funnel_id) associatedFunnelIds.add(website.homepage_funnel_id);
+  if (website.draft_homepage_funnel_id) associatedFunnelIds.add(website.draft_homepage_funnel_id);
+  for (const r of websiteRoutes) {
+    if (r.funnel_id) associatedFunnelIds.add(r.funnel_id);
+  }
+  for (const er of effectiveRoutes) {
+    if (er.funnel_id) associatedFunnelIds.add(er.funnel_id);
+  }
+
+  const siteFunnels = mockFunnels.filter(f => f.user_id === website.user_id && associatedFunnelIds.has(f.id));
+  const sitePages = mockPages.filter(p => p.user_id === website.user_id && !!p.funnel_id && associatedFunnelIds.has(p.funnel_id));
+  const layout = mockWebsiteLayouts.find(l => l.website_id === website.id) || null;
+
   return {
     website,
-    pages: mockPages.filter(p => p.user_id === website.user_id),
-    funnels: mockFunnels.filter(f => f.user_id === website.user_id),
+    pages: sitePages,
+    funnels: siteFunnels,
     effectiveRoutes,
     layout,
     actingUserId: getActingUserId()
@@ -4929,6 +4947,9 @@ function renderBuilderSiteNavigationPanel(): string {
   const manager = getBuilderSiteNavigationManager();
   const state = builderSiteNavigationController?.getState() ?? { status: 'uninitialized' as const };
   const context = getNavUiContext();
+  if (!context) {
+    return `<div style="padding: 24px; color: #94a3b8; text-align: center;">Website not loaded.</div>`;
+  }
   return renderBuilderNavigationPanel(state, manager, context);
 }
 
@@ -4946,10 +4967,12 @@ function renderBuilderNavigationDialogs(): string {
   const website = getActiveBuilderWebsite();
   if (website?.id && builderSiteNavigationController) {
     const context = getNavUiContext();
-    builderSiteNavigationController.hydrate(website.id, {
-      effectiveRoutes: context.effectiveRoutes,
-      homepageFunnelId: website.homepage_funnel_id
-    }, scope);
+    if (context) {
+      builderSiteNavigationController.hydrate(website.id, {
+        effectiveRoutes: context.effectiveRoutes,
+        homepageFunnelId: website.homepage_funnel_id
+      }, scope);
+    }
   }
   renderBuilder();
 };
@@ -4985,11 +5008,11 @@ function renderBuilderNavigationDialogs(): string {
 
 (window as any).saveBuilderNavItemModal = async () => {
   const manager = getBuilderSiteNavigationManager();
-  const website = getActiveBuilderWebsite();
   const context = getNavUiContext();
+  if (!context) return;
   const success = await manager.saveItemModal({
     effectiveRoutes: context.effectiveRoutes,
-    homepageFunnelId: website?.homepage_funnel_id
+    homepageFunnelId: context.website.homepage_funnel_id
   });
   if (success) {
     (window as any).showToast('Navigation item saved', 'success');
@@ -4999,11 +5022,11 @@ function renderBuilderNavigationDialogs(): string {
 
 (window as any).removeBuilderNavItem = async (itemId: string) => {
   const manager = getBuilderSiteNavigationManager();
-  const website = getActiveBuilderWebsite();
   const context = getNavUiContext();
+  if (!context) return;
   const success = await manager.removeItem(itemId, {
     effectiveRoutes: context.effectiveRoutes,
-    homepageFunnelId: website?.homepage_funnel_id
+    homepageFunnelId: context.website.homepage_funnel_id
   });
   if (success) {
     (window as any).showToast('Navigation item removed', 'success');
@@ -5013,11 +5036,11 @@ function renderBuilderNavigationDialogs(): string {
 
 (window as any).toggleBuilderNavItemVisibility = async (itemId: string) => {
   const manager = getBuilderSiteNavigationManager();
-  const website = getActiveBuilderWebsite();
   const context = getNavUiContext();
+  if (!context) return;
   const success = await manager.toggleItemVisibility(itemId, {
     effectiveRoutes: context.effectiveRoutes,
-    homepageFunnelId: website?.homepage_funnel_id
+    homepageFunnelId: context.website.homepage_funnel_id
   });
   if (success) {
     (window as any).showToast('Visibility updated', 'success');
@@ -5027,24 +5050,53 @@ function renderBuilderNavigationDialogs(): string {
 
 (window as any).moveBuilderNavItem = async (itemId: string, direction: 'up' | 'down') => {
   const manager = getBuilderSiteNavigationManager();
-  const website = getActiveBuilderWebsite();
   const context = getNavUiContext();
-  const success = await manager.moveItem(itemId, direction, {
+  if (!context) return;
+  await manager.moveItem(itemId, direction, {
     effectiveRoutes: context.effectiveRoutes,
-    homepageFunnelId: website?.homepage_funnel_id
+    homepageFunnelId: context.website.homepage_funnel_id
   });
   renderBuilder();
 };
 
-(window as any).adoptBuilderLegacyNav = async () => {
+(window as any).startBuilderLegacyAdoption = () => {
   const manager = getBuilderSiteNavigationManager();
-  const website = getActiveBuilderWebsite();
   const context = getNavUiContext();
-  const success = await manager.adoptLegacy(context.layout, {
+  if (context) {
+    manager.startLegacyAdoptionReview(context.layout, {
+      effectiveRoutes: context.effectiveRoutes,
+      funnels: context.funnels,
+      pages: context.pages
+    });
+  }
+  renderBuilder();
+};
+
+(window as any).closeBuilderLegacyAdoptionReview = () => {
+  const manager = getBuilderSiteNavigationManager();
+  manager.closeLegacyAdoptionReview();
+  renderBuilder();
+};
+
+(window as any).openResolveCandidateModal = (candidateId: string) => {
+  const manager = getBuilderSiteNavigationManager();
+  manager.openResolveCandidateModal(candidateId);
+  renderBuilder();
+};
+
+(window as any).removeAdoptionCandidate = (candidateId: string) => {
+  const manager = getBuilderSiteNavigationManager();
+  manager.removeAdoptionCandidate(candidateId);
+  renderBuilder();
+};
+
+(window as any).commitBuilderLegacyAdoption = async () => {
+  const manager = getBuilderSiteNavigationManager();
+  const context = getNavUiContext();
+  if (!context) return;
+  const success = await manager.commitLegacyAdoption({
     effectiveRoutes: context.effectiveRoutes,
-    funnels: context.funnels,
-    pages: context.pages,
-    homepageFunnelId: website?.homepage_funnel_id
+    homepageFunnelId: context.website.homepage_funnel_id
   });
   if (success) {
     (window as any).showToast('Converted legacy layout to editable navigation draft', 'success');
@@ -5054,14 +5106,14 @@ function renderBuilderNavigationDialogs(): string {
 
 (window as any).revertBuilderNavDraft = async () => {
   if (!builderSiteNavigationController) return;
-  const website = getActiveBuilderWebsite();
   const context = getNavUiContext();
+  if (!context) return;
   const state = builderSiteNavigationController.getState();
   if (state.status !== 'ready' || !state.isDraft) return;
 
   const res = await builderSiteNavigationController.revertDraft({
     effectiveRoutes: context.effectiveRoutes,
-    homepageFunnelId: website?.homepage_funnel_id
+    homepageFunnelId: context.website.homepage_funnel_id
   });
   if (res.success) {
     (window as any).showToast('Navigation draft reverted', 'success');
@@ -5089,11 +5141,11 @@ function renderBuilderNavigationDialogs(): string {
 
 (window as any).confirmPublishBuilderNav = async () => {
   const manager = getBuilderSiteNavigationManager();
-  const website = getActiveBuilderWebsite();
   const context = getNavUiContext();
+  if (!context) return;
   const success = await manager.confirmPublish({
     effectiveRoutes: context.effectiveRoutes,
-    homepageFunnelId: website?.homepage_funnel_id
+    homepageFunnelId: context.website.homepage_funnel_id
   });
   if (success) {
     (window as any).showToast('Navigation published successfully', 'success');
@@ -5106,10 +5158,12 @@ function renderBuilderNavigationDialogs(): string {
   const website = getActiveBuilderWebsite();
   if (website?.id && builderSiteNavigationController) {
     const context = getNavUiContext();
-    await builderSiteNavigationController.hydrate(website.id, {
-      effectiveRoutes: context.effectiveRoutes,
-      homepageFunnelId: website.homepage_funnel_id
-    }, manager.getActiveScope());
+    if (context) {
+      await builderSiteNavigationController.hydrate(website.id, {
+        effectiveRoutes: context.effectiveRoutes,
+        homepageFunnelId: website.homepage_funnel_id
+      }, manager.getActiveScope());
+    }
   }
   renderBuilder();
 };
@@ -6272,6 +6326,49 @@ window.addEventListener('keydown', event => {
   const last = focusable[focusable.length - 1];
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
+
+window.addEventListener('keydown', event => {
+  if (currentView !== 'builder') return;
+  if (!builderNavigationUiManager) return;
+
+  const itemModal = builderNavigationUiManager.getItemModalState();
+  const publishModal = builderNavigationUiManager.getPublishModalState();
+
+  if (!itemModal.isOpen && !publishModal.isOpen) return;
+
+  if (event.key === 'Escape') {
+    if (itemModal.isOpen && !itemModal.isSaving) {
+      event.preventDefault();
+      builderNavigationUiManager.closeItemModal();
+      renderBuilder();
+      return;
+    }
+    if (publishModal.isOpen && !publishModal.isPublishing) {
+      event.preventDefault();
+      builderNavigationUiManager.closePublishModal();
+      renderBuilder();
+      return;
+    }
+  }
+
+  if (event.key === 'Tab') {
+    const dialog = document.querySelector<HTMLElement>('.pb-modal-overlay');
+    if (!dialog) return;
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )).filter(el => el.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
 });
 
 function _renderBuilder() {

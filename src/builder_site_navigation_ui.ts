@@ -18,15 +18,40 @@ import { BuilderSiteNavigationPublishController, NavigationPublishState } from '
 
 export type NavigationScopeAuthority = 'legacy' | 'live' | 'draft';
 
+export interface LegacyNavigationAdoptionCandidate {
+  id: string;
+  label: string;
+  originalTarget: string;
+  visible: boolean;
+  sourceType: 'header_item' | 'footer_item';
+  proposedItem: SiteNavigationItem | null;
+  status: 'ready' | 'needs_attention';
+  reason?: string;
+}
+
+export interface LegacyAdoptionReviewState {
+  isOpen: boolean;
+  scope: NavigationMenuScope;
+  candidates: LegacyNavigationAdoptionCandidate[];
+  standaloneCta: {
+    text: string;
+    link: string;
+  } | null;
+  isSubmitting: boolean;
+  errorMessage: string | null;
+}
+
 export interface NavigationItemModalState {
   isOpen: boolean;
-  mode: 'add' | 'edit';
+  mode: 'add' | 'edit' | 'resolve_legacy';
   itemId: string;
+  candidateId?: string | null;
   label: string;
   targetKind: NavigationTargetKind;
   targetValue: string;
   visible: boolean;
   isCta: boolean;
+  isSaving: boolean;
   errorMessage: string | null;
 }
 
@@ -49,19 +74,6 @@ export interface NavigationPublishModalState {
   summary: NavigationPublishDiffSummary | null;
   isPublishing: boolean;
   errorMessage: string | null;
-}
-
-export interface LegacyConvertedItem {
-  item: SiteNavigationItem;
-  needsAttention: boolean;
-  attentionReason?: string;
-}
-
-export interface LegacyConversionResult {
-  items: SiteNavigationItem[];
-  hasAttentionItems: boolean;
-  attentionCount: number;
-  convertedCtaItem: SiteNavigationItem | null;
 }
 
 export interface NavigationPublicationReadiness {
@@ -92,10 +104,11 @@ export function generateNavigationUuid(): string {
 }
 
 /**
- * Maps a legacy layout's nav_items and header CTA to canonical draft navigation items.
- * Loss-aware: preserves every link, flags unresolvable destinations as needsAttention.
+ * Genuinely loss-aware legacy candidate evaluation.
+ * Never fabricates replacement destinations.
+ * Standalone legacy header CTA is kept separate and not cloned into nav items.
  */
-export function convertLegacyLayoutToCanonicalDraft(
+export function evaluateLegacyNavigationCandidates(
   scope: NavigationMenuScope,
   layout: WebsiteLayout | null | undefined,
   context: {
@@ -104,11 +117,16 @@ export function convertLegacyLayoutToCanonicalDraft(
     pages: readonly Page[];
   },
   uuidFactory: () => string = generateNavigationUuid
-): LegacyConversionResult {
-  const convertedItems: SiteNavigationItem[] = [];
+): {
+  candidates: LegacyNavigationAdoptionCandidate[];
+  standaloneCta: { text: string; link: string } | null;
+  hasAttentionItems: boolean;
+  attentionCount: number;
+} {
+  const candidates: LegacyNavigationAdoptionCandidate[] = [];
   let hasAttentionItems = false;
   let attentionCount = 0;
-  let convertedCtaItem: SiteNavigationItem | null = null;
+  let standaloneCta: { text: string; link: string } | null = null;
 
   if (scope === 'primary') {
     const headerConfig = layout?.header_config as any;
@@ -120,130 +138,130 @@ export function convertLegacyLayoutToCanonicalDraft(
       const path = typeof raw.path === 'string' ? raw.path.trim() : '';
       const visible = raw.visible !== false;
 
-      let target_kind: NavigationTargetKind = 'homepage';
-      let target_value = '__homepage__';
-      let needsAttention = false;
+      let proposedItem: SiteNavigationItem | null = null;
+      let status: 'ready' | 'needs_attention' = 'needs_attention';
+      let reason: string | undefined;
 
       if (!path || path === '/' || path === '/home' || path.toLowerCase() === 'home') {
-        target_kind = 'homepage';
-        target_value = '__homepage__';
+        proposedItem = {
+          id,
+          label,
+          target_kind: 'homepage',
+          target_value: '__homepage__',
+          position: candidates.length,
+          visible,
+          is_cta: false
+        };
+        status = 'ready';
       } else if (path.startsWith('http://') || path.startsWith('https://')) {
         const extCheck = validateExternalUrl(path);
         if (extCheck.valid && extCheck.normalized) {
-          target_kind = 'external';
-          target_value = extCheck.normalized;
+          proposedItem = {
+            id,
+            label,
+            target_kind: 'external',
+            target_value: extCheck.normalized,
+            position: candidates.length,
+            visible,
+            is_cta: false
+          };
+          status = 'ready';
         } else {
-          target_kind = 'external';
-          target_value = 'https://example.com/';
-          needsAttention = true;
+          status = 'needs_attention';
+          reason = extCheck.error || 'External URL format is not supported';
         }
       } else if (path.startsWith('tel:')) {
         const phoneCheck = validatePhoneTarget(path.slice(4));
         if (phoneCheck.valid && phoneCheck.normalized) {
-          target_kind = 'phone';
-          target_value = phoneCheck.normalized;
+          proposedItem = {
+            id,
+            label,
+            target_kind: 'phone',
+            target_value: phoneCheck.normalized,
+            position: candidates.length,
+            visible,
+            is_cta: false
+          };
+          status = 'ready';
         } else {
-          target_kind = 'phone';
-          target_value = '+15550000000';
-          needsAttention = true;
+          status = 'needs_attention';
+          reason = phoneCheck.error || 'Phone number format is not supported';
         }
       } else if (path.startsWith('mailto:')) {
         const emailCheck = validateEmailTarget(path.slice(7));
         if (emailCheck.valid && emailCheck.normalized) {
-          target_kind = 'email';
-          target_value = emailCheck.normalized;
+          proposedItem = {
+            id,
+            label,
+            target_kind: 'email',
+            target_value: emailCheck.normalized,
+            position: candidates.length,
+            visible,
+            is_cta: false
+          };
+          status = 'ready';
         } else {
-          target_kind = 'email';
-          target_value = 'invalid@example.com';
-          needsAttention = true;
+          status = 'needs_attention';
+          reason = emailCheck.error || 'Email address format is not supported';
         }
       } else {
         // Relative path: match against effective routes or page slugs
         const cleanPath = path.startsWith('/') ? path : `/${path}`;
         const matchingRoute = context.effectiveRoutes.find(r => r.path === cleanPath || r.live_path === cleanPath);
         if (matchingRoute && matchingRoute.funnel_id) {
-          target_kind = 'internal';
-          target_value = matchingRoute.funnel_id;
+          proposedItem = {
+            id,
+            label,
+            target_kind: 'internal',
+            target_value: matchingRoute.funnel_id,
+            position: candidates.length,
+            visible,
+            is_cta: false
+          };
+          status = 'ready';
         } else {
-          // Check pages by slug
           const slug = cleanPath.replace(/^\//, '');
           const matchingPage = context.pages.find(p => p.slug === slug);
           if (matchingPage && matchingPage.funnel_id) {
-            target_kind = 'internal';
-            target_value = matchingPage.funnel_id;
+            proposedItem = {
+              id,
+              label,
+              target_kind: 'internal',
+              target_value: matchingPage.funnel_id,
+              position: candidates.length,
+              visible,
+              is_cta: false
+            };
+            status = 'ready';
           } else {
-            target_kind = 'external';
-            target_value = 'https://example.com' + cleanPath;
-            needsAttention = true;
+            status = 'needs_attention';
+            reason = `Destination path '${path}' does not match any existing page in this website`;
           }
         }
       }
 
-      if (needsAttention) {
+      if (status === 'needs_attention') {
         hasAttentionItems = true;
         attentionCount++;
       }
 
-      convertedItems.push({
+      candidates.push({
         id,
         label,
-        target_kind,
-        target_value,
-        position: convertedItems.length,
+        originalTarget: path,
         visible,
-        is_cta: false
+        sourceType: 'header_item',
+        proposedItem,
+        status,
+        reason
       });
     });
 
-    // Step 9: Legacy Header CTA audit
-    // Check if legacy header has separate cta_text and cta_link
+    // Check standalone legacy header CTA
     const ctaText = typeof headerConfig?.cta_text === 'string' ? headerConfig.cta_text.trim() : '';
     const ctaLink = typeof headerConfig?.cta_link === 'string' ? headerConfig.cta_link.trim() : '';
-
     if (ctaText && ctaLink) {
-      // Check if CTA is already represented in nav items
-      const alreadyPresent = convertedItems.some(i => i.label.toLowerCase() === ctaText.toLowerCase());
-      if (!alreadyPresent) {
-        const ctaId = uuidFactory();
-        let target_kind: NavigationTargetKind = 'homepage';
-        let target_value = '__homepage__';
-
-        if (ctaLink === '/' || ctaLink === '/home') {
-          target_kind = 'homepage';
-          target_value = '__homepage__';
-        } else if (ctaLink.startsWith('http://') || ctaLink.startsWith('https://')) {
-          const extCheck = validateExternalUrl(ctaLink);
-          target_kind = 'external';
-          target_value = extCheck.valid && extCheck.normalized ? extCheck.normalized : ctaLink;
-        } else if (ctaLink.startsWith('tel:')) {
-          target_kind = 'phone';
-          target_value = ctaLink.slice(4);
-        } else if (ctaLink.startsWith('mailto:')) {
-          target_kind = 'email';
-          target_value = ctaLink.slice(7);
-        } else {
-          const cleanPath = ctaLink.startsWith('/') ? ctaLink : `/${ctaLink}`;
-          const matchingRoute = context.effectiveRoutes.find(r => r.path === cleanPath || r.live_path === cleanPath);
-          if (matchingRoute && matchingRoute.funnel_id) {
-            target_kind = 'internal';
-            target_value = matchingRoute.funnel_id;
-          } else {
-            target_kind = 'external';
-            target_value = cleanPath;
-          }
-        }
-
-        convertedCtaItem = {
-          id: ctaId,
-          label: ctaText,
-          target_kind,
-          target_value,
-          position: convertedItems.length,
-          visible: true,
-          is_cta: true
-        };
-        convertedItems.push(convertedCtaItem);
-      }
+      standaloneCta = { text: ctaText, link: ctaLink };
     }
   } else {
     // Footer scope
@@ -260,78 +278,148 @@ export function convertLegacyLayoutToCanonicalDraft(
       const path = typeof raw.path === 'string' ? raw.path.trim() : (typeof raw.url === 'string' ? raw.url.trim() : '');
       const visible = raw.visible !== false;
 
-      let target_kind: NavigationTargetKind = 'homepage';
-      let target_value = '__homepage__';
-      let needsAttention = false;
+      let proposedItem: SiteNavigationItem | null = null;
+      let status: 'ready' | 'needs_attention' = 'needs_attention';
+      let reason: string | undefined;
 
       if (!path || path === '/' || path === '/home') {
-        target_kind = 'homepage';
-        target_value = '__homepage__';
+        proposedItem = {
+          id,
+          label,
+          target_kind: 'homepage',
+          target_value: '__homepage__',
+          position: candidates.length,
+          visible,
+          is_cta: false
+        };
+        status = 'ready';
       } else if (path.startsWith('http://') || path.startsWith('https://')) {
         const extCheck = validateExternalUrl(path);
         if (extCheck.valid && extCheck.normalized) {
-          target_kind = 'external';
-          target_value = extCheck.normalized;
+          proposedItem = {
+            id,
+            label,
+            target_kind: 'external',
+            target_value: extCheck.normalized,
+            position: candidates.length,
+            visible,
+            is_cta: false
+          };
+          status = 'ready';
         } else {
-          target_kind = 'external';
-          target_value = 'https://example.com/';
-          needsAttention = true;
+          status = 'needs_attention';
+          reason = extCheck.error || 'External URL format is not supported';
         }
       } else if (path.startsWith('tel:')) {
         const phoneCheck = validatePhoneTarget(path.slice(4));
         if (phoneCheck.valid && phoneCheck.normalized) {
-          target_kind = 'phone';
-          target_value = phoneCheck.normalized;
+          proposedItem = {
+            id,
+            label,
+            target_kind: 'phone',
+            target_value: phoneCheck.normalized,
+            position: candidates.length,
+            visible,
+            is_cta: false
+          };
+          status = 'ready';
         } else {
-          target_kind = 'phone';
-          target_value = '+15550000000';
-          needsAttention = true;
+          status = 'needs_attention';
+          reason = phoneCheck.error || 'Phone number format is not supported';
         }
       } else if (path.startsWith('mailto:')) {
         const emailCheck = validateEmailTarget(path.slice(7));
         if (emailCheck.valid && emailCheck.normalized) {
-          target_kind = 'email';
-          target_value = emailCheck.normalized;
+          proposedItem = {
+            id,
+            label,
+            target_kind: 'email',
+            target_value: emailCheck.normalized,
+            position: candidates.length,
+            visible,
+            is_cta: false
+          };
+          status = 'ready';
         } else {
-          target_kind = 'email';
-          target_value = 'invalid@example.com';
-          needsAttention = true;
+          status = 'needs_attention';
+          reason = emailCheck.error || 'Email address format is not supported';
         }
       } else {
         const cleanPath = path.startsWith('/') ? path : `/${path}`;
         const matchingRoute = context.effectiveRoutes.find(r => r.path === cleanPath || r.live_path === cleanPath);
         if (matchingRoute && matchingRoute.funnel_id) {
-          target_kind = 'internal';
-          target_value = matchingRoute.funnel_id;
+          proposedItem = {
+            id,
+            label,
+            target_kind: 'internal',
+            target_value: matchingRoute.funnel_id,
+            position: candidates.length,
+            visible,
+            is_cta: false
+          };
+          status = 'ready';
         } else {
-          target_kind = 'external';
-          target_value = 'https://example.com' + cleanPath;
-          needsAttention = true;
+          status = 'needs_attention';
+          reason = `Destination path '${path}' does not match any existing page in this website`;
         }
       }
 
-      if (needsAttention) {
+      if (status === 'needs_attention') {
         hasAttentionItems = true;
         attentionCount++;
       }
 
-      convertedItems.push({
+      candidates.push({
         id,
         label,
-        target_kind,
-        target_value,
-        position: convertedItems.length,
+        originalTarget: path,
         visible,
-        is_cta: false
+        sourceType: 'footer_item',
+        proposedItem,
+        status,
+        reason
       });
     });
   }
 
   return {
-    items: convertedItems,
+    candidates,
+    standaloneCta,
     hasAttentionItems,
-    attentionCount,
-    convertedCtaItem
+    attentionCount
+  };
+}
+
+/**
+ * Legacy conversion wrapper returning clean converted items (or null proposedItem for attention items).
+ */
+export function convertLegacyLayoutToCanonicalDraft(
+  scope: NavigationMenuScope,
+  layout: WebsiteLayout | null | undefined,
+  context: {
+    effectiveRoutes: readonly EffectiveRoute[];
+    funnels: readonly Funnel[];
+    pages: readonly Page[];
+  },
+  uuidFactory: () => string = generateNavigationUuid
+): {
+  items: SiteNavigationItem[];
+  candidates: LegacyNavigationAdoptionCandidate[];
+  hasAttentionItems: boolean;
+  attentionCount: number;
+  standaloneCta: { text: string; link: string } | null;
+} {
+  const result = evaluateLegacyNavigationCandidates(scope, layout, context, uuidFactory);
+  const items = result.candidates
+    .map((c, idx) => c.proposedItem ? { ...c.proposedItem, position: idx } : null)
+    .filter((item): item is SiteNavigationItem => item !== null);
+
+  return {
+    items,
+    candidates: result.candidates,
+    hasAttentionItems: result.hasAttentionItems,
+    attentionCount: result.attentionCount,
+    standaloneCta: result.standaloneCta
   };
 }
 
@@ -426,13 +514,36 @@ export function checkNavigationPublicationReadiness(
 }
 
 /**
- * Computes difference summary between live (or legacy) and draft items for publication confirmation.
+ * Computes difference summary between live and draft items for publication confirmation.
+ * Compares against actual live items if liveRevision > 0; acknowledges first adoption if liveRevision == 0.
  */
 export function computeNavigationPublishDiff(
   liveItems: readonly SiteNavigationItem[],
   draftItems: readonly SiteNavigationItem[],
-  isFirstAdoptionFromLegacy = false
+  liveRevision = 0
 ): NavigationPublishDiffSummary {
+  const isFirstAdoptionFromLegacy = liveRevision === 0;
+
+  if (isFirstAdoptionFromLegacy) {
+    const isExplicitEmpty = draftItems.length === 0;
+    const changeDescriptions = draftItems.map(
+      item => `Include "${item.label}" (${item.target_kind === 'homepage' ? '/' : item.target_value})`
+    );
+
+    return {
+      totalCount: draftItems.length,
+      addedCount: draftItems.length,
+      removedCount: 0,
+      updatedCount: 0,
+      reorderedCount: 0,
+      visibilityChangedCount: 0,
+      ctaChangedCount: 0,
+      isExplicitEmpty,
+      isFirstAdoptionFromLegacy: true,
+      changeDescriptions
+    };
+  }
+
   const liveMap = new Map(liveItems.map(i => [i.id, i]));
   const draftMap = new Map(draftItems.map(i => [i.id, i]));
 
@@ -491,7 +602,7 @@ export function computeNavigationPublishDiff(
     visibilityChangedCount,
     ctaChangedCount,
     isExplicitEmpty,
-    isFirstAdoptionFromLegacy,
+    isFirstAdoptionFromLegacy: false,
     changeDescriptions
   };
 }
@@ -513,15 +624,25 @@ export function getNavigationScopeAuthority(
  */
 export class BuilderNavigationUiManager {
   private activeScope: NavigationMenuScope = 'primary';
+  private adoptionReviewState: LegacyAdoptionReviewState = {
+    isOpen: false,
+    scope: 'primary',
+    candidates: [],
+    standaloneCta: null,
+    isSubmitting: false,
+    errorMessage: null
+  };
   private itemModalState: NavigationItemModalState = {
     isOpen: false,
     mode: 'add',
     itemId: '',
+    candidateId: null,
     label: '',
     targetKind: 'homepage',
     targetValue: '',
     visible: true,
     isCta: false,
+    isSaving: false,
     errorMessage: null
   };
   private publishModalState: NavigationPublishModalState = {
@@ -532,6 +653,7 @@ export class BuilderNavigationUiManager {
     errorMessage: null
   };
 
+  private lastFocusedElement: HTMLElement | null = null;
   private listeners: Array<() => void> = [];
 
   constructor(
@@ -546,8 +668,13 @@ export class BuilderNavigationUiManager {
   public setActiveScope(scope: NavigationMenuScope) {
     if (this.activeScope !== scope) {
       this.activeScope = scope;
+      this.adoptionReviewState.isOpen = false;
       this.notify();
     }
+  }
+
+  public getAdoptionReviewState(): LegacyAdoptionReviewState {
+    return { ...this.adoptionReviewState };
   }
 
   public getItemModalState(): NavigationItemModalState {
@@ -571,42 +698,124 @@ export class BuilderNavigationUiManager {
     }
   }
 
+  private captureFocus() {
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      this.lastFocusedElement = document.activeElement;
+    }
+  }
+
+  private restoreFocus() {
+    if (this.lastFocusedElement && typeof this.lastFocusedElement.focus === 'function') {
+      try {
+        this.lastFocusedElement.focus();
+      } catch {
+        // Ignore focus restore error
+      }
+      this.lastFocusedElement = null;
+    }
+  }
+
+  public startLegacyAdoptionReview(
+    layout: WebsiteLayout | null | undefined,
+    context: {
+      effectiveRoutes: readonly EffectiveRoute[];
+      funnels: readonly Funnel[];
+      pages: readonly Page[];
+    }
+  ) {
+    this.captureFocus();
+    const evaluated = evaluateLegacyNavigationCandidates(this.activeScope, layout, context);
+    this.adoptionReviewState = {
+      isOpen: true,
+      scope: this.activeScope,
+      candidates: evaluated.candidates,
+      standaloneCta: evaluated.standaloneCta,
+      isSubmitting: false,
+      errorMessage: null
+    };
+    this.notify();
+  }
+
+  public closeLegacyAdoptionReview() {
+    this.adoptionReviewState = {
+      ...this.adoptionReviewState,
+      isOpen: false,
+      errorMessage: null
+    };
+    this.restoreFocus();
+    this.notify();
+  }
+
+  public removeAdoptionCandidate(candidateId: string) {
+    this.adoptionReviewState.candidates = this.adoptionReviewState.candidates.filter(c => c.id !== candidateId);
+    this.notify();
+  }
+
+  public openResolveCandidateModal(candidateId: string) {
+    const candidate = this.adoptionReviewState.candidates.find(c => c.id === candidateId);
+    if (!candidate) return;
+
+    this.captureFocus();
+    this.itemModalState = {
+      isOpen: true,
+      mode: 'resolve_legacy',
+      itemId: candidate.id,
+      candidateId: candidate.id,
+      label: candidate.label,
+      targetKind: 'homepage',
+      targetValue: '',
+      visible: candidate.visible,
+      isCta: false,
+      isSaving: false,
+      errorMessage: null
+    };
+    this.notify();
+  }
+
   public openAddItemModal() {
+    this.captureFocus();
     this.itemModalState = {
       isOpen: true,
       mode: 'add',
       itemId: generateNavigationUuid(),
+      candidateId: null,
       label: '',
       targetKind: 'homepage',
       targetValue: '',
       visible: true,
       isCta: false,
+      isSaving: false,
       errorMessage: null
     };
     this.notify();
   }
 
   public openEditItemModal(item: SiteNavigationItem) {
+    this.captureFocus();
     this.itemModalState = {
       isOpen: true,
       mode: 'edit',
       itemId: item.id,
+      candidateId: null,
       label: item.label,
       targetKind: item.target_kind,
       targetValue: item.target_kind === 'homepage' ? '' : item.target_value,
       visible: item.visible,
       isCta: item.is_cta,
+      isSaving: false,
       errorMessage: null
     };
     this.notify();
   }
 
   public closeItemModal() {
+    if (this.itemModalState.isSaving) return;
     this.itemModalState = {
       ...this.itemModalState,
       isOpen: false,
       errorMessage: null
     };
+    this.restoreFocus();
     this.notify();
   }
 
@@ -623,7 +832,9 @@ export class BuilderNavigationUiManager {
     effectiveRoutes: readonly EffectiveRoute[];
     homepageFunnelId?: string | null;
   }): Promise<boolean> {
-    const { mode, itemId, label, targetKind, targetValue, visible, isCta } = this.itemModalState;
+    if (this.itemModalState.isSaving) return false;
+
+    const { mode, itemId, candidateId, label, targetKind, targetValue, visible, isCta } = this.itemModalState;
 
     const labelCheck = validateNavigationLabel(label);
     if (!labelCheck.valid) {
@@ -668,8 +879,39 @@ export class BuilderNavigationUiManager {
       normalizedValue = email.normalized!;
     }
 
+    // If resolving a candidate during legacy adoption review
+    if (mode === 'resolve_legacy' && candidateId) {
+      const idx = this.adoptionReviewState.candidates.findIndex(c => c.id === candidateId);
+      if (idx >= 0) {
+        const updatedCandidate: LegacyNavigationAdoptionCandidate = {
+          ...this.adoptionReviewState.candidates[idx],
+          label: labelCheck.normalized!,
+          visible,
+          status: 'ready',
+          reason: undefined,
+          proposedItem: {
+            id: candidateId,
+            label: labelCheck.normalized!,
+            target_kind: targetKind,
+            target_value: normalizedValue,
+            position: idx,
+            visible,
+            is_cta: isCta
+          }
+        };
+        this.adoptionReviewState.candidates[idx] = updatedCandidate;
+      }
+      this.itemModalState.isOpen = false;
+      this.restoreFocus();
+      this.notify();
+      return true;
+    }
+
     const state = this.controller.getState();
     if (state.status !== 'ready') return false;
+
+    this.itemModalState.isSaving = true;
+    this.notify();
 
     const currentItems = [...state.rawItems];
     if (mode === 'add') {
@@ -697,11 +939,51 @@ export class BuilderNavigationUiManager {
     }
 
     const res = await this.controller.stageDraft(currentItems, context);
+    this.itemModalState.isSaving = false;
+
     if (res.success) {
-      this.closeItemModal();
+      this.itemModalState.isOpen = false;
+      this.restoreFocus();
+      this.notify();
       return true;
     } else {
       this.itemModalState.errorMessage = res.error || 'Failed to save navigation item';
+      this.notify();
+      return false;
+    }
+  }
+
+  public async commitLegacyAdoption(context: {
+    effectiveRoutes: readonly EffectiveRoute[];
+    homepageFunnelId?: string | null;
+  }): Promise<boolean> {
+    if (this.adoptionReviewState.isSubmitting) return false;
+
+    // Verify no unresolved candidates remain
+    const unresolved = this.adoptionReviewState.candidates.filter(c => c.status === 'needs_attention');
+    if (unresolved.length > 0) {
+      this.adoptionReviewState.errorMessage = 'Please resolve or remove all items needing attention before creating the draft.';
+      this.notify();
+      return false;
+    }
+
+    this.adoptionReviewState.isSubmitting = true;
+    this.adoptionReviewState.errorMessage = null;
+    this.notify();
+
+    const proposedItems: SiteNavigationItem[] = this.adoptionReviewState.candidates
+      .map((c, idx) => ({ ...c.proposedItem!, position: idx }));
+
+    const res = await this.controller.stageDraft(proposedItems, context);
+    this.adoptionReviewState.isSubmitting = false;
+
+    if (res.success) {
+      this.adoptionReviewState.isOpen = false;
+      this.restoreFocus();
+      this.notify();
+      return true;
+    } else {
+      this.adoptionReviewState.errorMessage = res.error || 'Failed to create navigation draft.';
       this.notify();
       return false;
     }
@@ -715,7 +997,7 @@ export class BuilderNavigationUiManager {
     }
   ): Promise<boolean> {
     const state = this.controller.getState();
-    if (state.status !== 'ready') return false;
+    if (state.status !== 'ready' || state.isSaving) return false;
 
     const filtered = state.rawItems.filter(i => i.id !== itemId);
     const res = await this.controller.stageDraft(filtered, context);
@@ -730,7 +1012,7 @@ export class BuilderNavigationUiManager {
     }
   ): Promise<boolean> {
     const state = this.controller.getState();
-    if (state.status !== 'ready') return false;
+    if (state.status !== 'ready' || state.isSaving) return false;
 
     const updated = state.rawItems.map(item => {
       if (item.id === itemId) {
@@ -752,7 +1034,7 @@ export class BuilderNavigationUiManager {
     }
   ): Promise<boolean> {
     const state = this.controller.getState();
-    if (state.status !== 'ready') return false;
+    if (state.status !== 'ready' || state.isSaving) return false;
 
     const items = [...state.rawItems];
     const index = items.findIndex(i => i.id === itemId);
@@ -765,23 +1047,8 @@ export class BuilderNavigationUiManager {
     items[index] = items[targetIndex];
     items[targetIndex] = temp;
 
-    // Renumber positions
     const normalized = items.map((item, idx) => ({ ...item, position: idx }));
     const res = await this.controller.stageDraft(normalized, context);
-    return res.success;
-  }
-
-  public async adoptLegacy(
-    layout: WebsiteLayout | null | undefined,
-    context: {
-      effectiveRoutes: readonly EffectiveRoute[];
-      funnels: readonly Funnel[];
-      pages: readonly Page[];
-      homepageFunnelId?: string | null;
-    }
-  ): Promise<boolean> {
-    const conversion = convertLegacyLayoutToCanonicalDraft(this.activeScope, layout, context);
-    const res = await this.controller.stageDraft(conversion.items, context);
     return res.success;
   }
 
@@ -789,9 +1056,8 @@ export class BuilderNavigationUiManager {
     const state = this.controller.getState();
     if (state.status !== 'ready' || !state.isDraft) return;
 
-    // Compute diff summary against live snapshot or legacy
-    const isFirstAdoption = state.liveRevision === 0;
-    const summary = computeNavigationPublishDiff([], state.rawItems, isFirstAdoption);
+    this.captureFocus();
+    const summary = computeNavigationPublishDiff(state.liveItems, state.rawItems, state.liveRevision);
 
     this.publishModalState = {
       isOpen: true,
@@ -804,11 +1070,13 @@ export class BuilderNavigationUiManager {
   }
 
   public closePublishModal() {
+    if (this.publishModalState.isPublishing) return;
     this.publishModalState = {
       ...this.publishModalState,
       isOpen: false,
       errorMessage: null
     };
+    this.restoreFocus();
     this.notify();
   }
 
@@ -817,9 +1085,8 @@ export class BuilderNavigationUiManager {
     homepageFunnelId?: string | null;
   }): Promise<boolean> {
     const state = this.controller.getState();
-    if (state.status !== 'ready' || !state.isDraft) return false;
+    if (state.status !== 'ready' || !state.isDraft || this.publishModalState.isPublishing) return false;
 
-    // Verify readiness
     const readiness = checkNavigationPublicationReadiness(state.rawItems, context);
     if (!readiness.ready) {
       this.publishModalState.errorMessage = readiness.message || 'Navigation links cannot be published yet.';
@@ -827,23 +1094,31 @@ export class BuilderNavigationUiManager {
       return false;
     }
 
+    // Capture scope and website before awaiting async operation
+    const scopeToPublish = this.activeScope;
+    const websiteIdToPublish = state.websiteId;
+    const baseRevisionToPublish = state.baseRevision;
+    const draftRevisionToPublish = state.draftRevision;
+
     this.publishModalState.isPublishing = true;
     this.publishModalState.errorMessage = null;
     this.notify();
 
     const res = await this.publishController.publish(
-      state.websiteId,
-      state.baseRevision,
-      state.draftRevision,
-      this.activeScope
+      websiteIdToPublish,
+      baseRevisionToPublish,
+      draftRevisionToPublish,
+      scopeToPublish
     );
 
     this.publishModalState.isPublishing = false;
 
     if (res.success) {
-      this.closePublishModal();
-      // Rehydrate state after publication
-      await this.controller.hydrate(state.websiteId, context, this.activeScope);
+      this.publishModalState.isOpen = false;
+      this.restoreFocus();
+      // Authoritatively rehydrate using captured parameters
+      await this.controller.hydrate(websiteIdToPublish, context, scopeToPublish);
+      this.notify();
       return true;
     } else {
       let errorMsg = res.error;
@@ -871,6 +1146,21 @@ export function renderBuilderNavigationPanel(
 ): string {
   const activeScope = manager.getActiveScope();
   const authority = getNavigationScopeAuthority(state);
+  const reviewState = manager.getAdoptionReviewState();
+
+  // Multi-scope summary awareness
+  const scopeSummary = context.website
+    ? (manager as any).controller?.getScopeSummary?.(context.website.id)
+    : null;
+
+  let multiScopeBannerHtml = '';
+  if (scopeSummary && scopeSummary.draftCount === 2) {
+    multiScopeBannerHtml = `
+      <div style="margin: 8px 16px 0 16px; padding: 6px 12px; background: #172554; border-radius: 6px; border: 1px solid #1e40af; color: #bfdbfe; font-size: 0.75rem; font-weight: 600;">
+        ℹ️ Both Primary and Footer navigation menus have unpublished changes.
+      </div>
+    `;
+  }
 
   // Authority Badge and Explanation
   let authorityBadgeHtml = '';
@@ -905,15 +1195,36 @@ export function renderBuilderNavigationPanel(
     `;
   }
 
+  // Standalone Header CTA Duplication Warning
+  let ctaDuplicationWarningHtml = '';
+  if (activeScope === 'primary' && state.status === 'ready' && state.items) {
+    const hasCanonicalCta = state.items.some(i => i.visible && i.is_cta);
+    const legacyCtaText = context.layout?.header_config?.cta_text?.trim();
+    const legacyCtaLink = context.layout?.header_config?.cta_link?.trim();
+    if (hasCanonicalCta && legacyCtaText && legacyCtaLink) {
+      ctaDuplicationWarningHtml = `
+        <div class="pb-nav-cta-warning" role="alert" style="margin: 10px 16px; padding: 10px 14px; border-radius: 8px; background: #451a03; border: 1px solid #b45309; color: #fde68a; font-size: 0.8rem; line-height: 1.4;">
+          ⚠️ <b>Header CTA notice:</b> Your header layout also has a standalone CTA button ("${escapeHtmlText(legacyCtaText)}"). Publishing this menu may display both CTA buttons on your website.
+        </div>
+      `;
+    }
+  }
+
   // Conflict / Error Alert
   let errorBannerHtml = '';
-  if (state.status === 'ready' && state.errorMessage) {
-    const isConflict = state.errorMessage.includes('modified elsewhere') || state.errorMessage.includes('stale');
+  if (state.status === 'ready' && (state.isConflict || (state.errorMessage && (state.errorMessage.includes('modified elsewhere') || state.errorMessage.includes('stale'))))) {
     errorBannerHtml = `
       <div class="pb-nav-error-banner" role="alert" style="margin: 12px 16px; padding: 12px; border-radius: 8px; background: #450a0a; border: 1px solid #991b1b; color: #fecaca; font-size: 0.85rem;">
-        <div style="font-weight: 700; margin-bottom: 4px;">${isConflict ? '⚠️ Concurrency Conflict' : 'Navigation Error'}</div>
+        <div style="font-weight: 700; margin-bottom: 4px;">⚠️ Concurrency Conflict</div>
+        <div>Navigation changed in another tab. Reload the latest navigation before continuing.</div>
+        <button type="button" class="btn-outline" style="margin-top: 8px; min-height: 38px; padding: 6px 14px; font-size: 0.8rem; font-weight: 700; background: #7f1d1d; color: white; border: none; border-radius: 6px; cursor: pointer;" onclick="window.reloadBuilderNavigation()">Reload Latest</button>
+      </div>
+    `;
+  } else if (state.status === 'ready' && state.errorMessage) {
+    errorBannerHtml = `
+      <div class="pb-nav-error-banner" role="alert" style="margin: 12px 16px; padding: 12px; border-radius: 8px; background: #450a0a; border: 1px solid #991b1b; color: #fecaca; font-size: 0.85rem;">
+        <div style="font-weight: 700; margin-bottom: 4px;">Navigation Error</div>
         <div>${escapeHtmlText(state.errorMessage)}</div>
-        ${isConflict ? `<button type="button" class="btn-outline" style="margin-top: 8px; padding: 6px 12px; font-size: 0.75rem; background: #7f1d1d; color: white; border: none; border-radius: 6px; cursor: pointer;" onclick="window.reloadBuilderNavigation()">Reload Latest</button>` : ''}
       </div>
     `;
   } else if (state.status === 'error') {
@@ -921,9 +1232,14 @@ export function renderBuilderNavigationPanel(
       <div class="pb-nav-error-banner" role="alert" style="margin: 12px 16px; padding: 12px; border-radius: 8px; background: #450a0a; border: 1px solid #991b1b; color: #fecaca; font-size: 0.85rem;">
         <div style="font-weight: 700; margin-bottom: 4px;">Failed to Load Navigation</div>
         <div>${escapeHtmlText(state.error)}</div>
-        <button type="button" class="btn-outline" style="margin-top: 8px; padding: 6px 12px; font-size: 0.75rem; background: #7f1d1d; color: white; border: none; border-radius: 6px; cursor: pointer;" onclick="window.reloadBuilderNavigation()">Retry</button>
+        <button type="button" class="btn-outline" style="margin-top: 8px; min-height: 38px; padding: 6px 14px; font-size: 0.8rem; font-weight: 700; background: #7f1d1d; color: white; border: none; border-radius: 6px; cursor: pointer;" onclick="window.reloadBuilderNavigation()">Retry</button>
       </div>
     `;
+  }
+
+  // Adoption Review View (if user is actively reviewing legacy conversion)
+  if (reviewState.isOpen) {
+    return renderLegacyAdoptionReviewPanel(reviewState, manager, context);
   }
 
   // Action Buttons Bar
@@ -932,17 +1248,17 @@ export function renderBuilderNavigationPanel(
     if (authority === 'legacy') {
       actionsBarHtml = `
         <div class="pb-nav-actions" style="padding: 12px 16px; border-bottom: 1px solid #222; display: flex; gap: 8px;">
-          <button type="button" class="btn-primary pb-nav-adopt-btn" style="flex: 1; padding: 10px; font-size: 0.85rem; font-weight: 700; background: #2563eb; color: white; border: none; border-radius: 8px; cursor: pointer;" onclick="window.adoptBuilderLegacyNav()">Convert to Editable Navigation</button>
+          <button type="button" class="btn-primary pb-nav-adopt-btn" style="flex: 1; min-height: 44px; padding: 10px; font-size: 0.85rem; font-weight: 700; background: #2563eb; color: white; border: none; border-radius: 8px; cursor: pointer;" onclick="window.startBuilderLegacyAdoption()">Convert to Editable Navigation</button>
         </div>
       `;
     } else {
       actionsBarHtml = `
         <div class="pb-nav-actions" style="padding: 12px 16px; border-bottom: 1px solid #222; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
-          <button type="button" class="btn-primary" style="padding: 8px 14px; font-size: 0.8rem; font-weight: 700; background: #2563eb; color: white; border: none; border-radius: 8px; cursor: pointer;" onclick="window.openAddBuilderNavItemModal()">+ Add Item</button>
+          <button type="button" class="btn-primary" style="min-height: 40px; padding: 8px 14px; font-size: 0.8rem; font-weight: 700; background: #2563eb; color: white; border: none; border-radius: 8px; cursor: pointer;" onclick="window.openAddBuilderNavItemModal()">+ Add Item</button>
           ${state.isDraft ? `
-            <button type="button" class="btn-outline" style="padding: 8px 12px; font-size: 0.8rem; font-weight: 700; background: #1e1e1e; border: 1px solid #333; color: #cbd5e1; border-radius: 8px; cursor: pointer;" onclick="window.previewBuilderNavChanges()">Preview</button>
-            <button type="button" class="btn-outline" style="padding: 8px 12px; font-size: 0.8rem; font-weight: 700; background: #1e1e1e; border: 1px solid #333; color: #f87171; border-radius: 8px; cursor: pointer;" onclick="window.revertBuilderNavDraft()">Revert</button>
-            <button type="button" class="btn-primary" style="padding: 8px 14px; font-size: 0.8rem; font-weight: 700; background: #16a34a; color: white; border: none; border-radius: 8px; cursor: pointer;" onclick="window.openPublishBuilderNavModal()">Publish ${activeScope === 'primary' ? 'Primary' : 'Footer'}</button>
+            <button type="button" class="btn-outline" style="min-height: 40px; padding: 8px 12px; font-size: 0.8rem; font-weight: 700; background: #1e1e1e; border: 1px solid #333; color: #cbd5e1; border-radius: 8px; cursor: pointer;" onclick="window.previewBuilderNavChanges()">Preview</button>
+            <button type="button" class="btn-outline" style="min-height: 40px; padding: 8px 12px; font-size: 0.8rem; font-weight: 700; background: #1e1e1e; border: 1px solid #333; color: #f87171; border-radius: 8px; cursor: pointer;" onclick="window.revertBuilderNavDraft()" ${state.isSaving ? 'disabled aria-busy="true"' : ''}>Revert</button>
+            <button type="button" class="btn-primary" style="min-height: 40px; padding: 8px 14px; font-size: 0.8rem; font-weight: 700; background: #16a34a; color: white; border: none; border-radius: 8px; cursor: pointer;" onclick="window.openPublishBuilderNavModal()" ${state.isSaving ? 'disabled aria-busy="true"' : ''}>Publish ${activeScope === 'primary' ? 'Primary' : 'Footer'}</button>
           ` : ''}
         </div>
       `;
@@ -960,36 +1276,32 @@ export function renderBuilderNavigationPanel(
     `;
   } else if (state.status === 'ready') {
     if (authority === 'legacy') {
-      // Legacy Read-Only View
-      const legacyConversion = convertLegacyLayoutToCanonicalDraft(activeScope, context.layout, context);
-      const legacyItems = legacyConversion.items;
+      const evalResult = evaluateLegacyNavigationCandidates(activeScope, context.layout, context);
+      const candidates = evalResult.candidates;
 
       itemsListHtml = `
         <div class="pb-nav-legacy-list" style="padding: 16px; display: flex; flex-direction: column; gap: 10px;">
-          ${legacyItems.length === 0 ? `
+          ${candidates.length === 0 ? `
             <div style="padding: 24px; text-align: center; background: #161616; border: 1px dashed #333; border-radius: 10px; color: #64748b; font-size: 0.85rem;">
               No links defined in legacy layout.
             </div>
-          ` : legacyItems.map((item, idx) => `
-            <div class="pb-nav-item-card pb-nav-item-legacy" style="background: #181818; border: 1px solid #2a2a2a; border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between;">
+          ` : candidates.map(c => `
+            <div class="pb-nav-item-card pb-nav-item-legacy" style="background: #181818; border: 1px solid #2a2a2a; border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
               <div style="min-width: 0; flex: 1;">
-                <div style="font-weight: 700; font-size: 0.88rem; color: #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtmlText(item.label)}</div>
+                <div style="font-weight: 700; font-size: 0.88rem; color: #f1f5f9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtmlText(c.label)}</div>
                 <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 2px;">
-                  <span class="pb-nav-kind-tag" style="background: #262626; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; text-transform: uppercase;">${escapeHtmlText(item.target_kind)}</span>
-                  <span style="margin-left: 6px;">${escapeHtmlText(item.target_value === '__homepage__' ? '/' : item.target_value)}</span>
-                  ${item.is_cta ? `<span style="margin-left: 6px; background: #1e3a8a; color: #93c5fd; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; font-weight: 700;">CTA</span>` : ''}
+                  <span style="font-family: monospace;">${escapeHtmlText(c.originalTarget || '/')}</span>
                 </div>
               </div>
-              <span style="font-size: 0.75rem; color: #64748b;">Read-only</span>
+              <span style="font-size: 0.75rem; color: #64748b; white-space: nowrap;">Read-only</span>
             </div>
           `).join('')}
           <div style="margin-top: 10px; text-align: center;">
-            <button type="button" class="btn-primary" style="width: 100%; padding: 10px; font-size: 0.85rem; font-weight: 700; background: #2563eb; color: white; border: none; border-radius: 8px; cursor: pointer;" onclick="window.adoptBuilderLegacyNav()">Convert to Editable Navigation</button>
+            <button type="button" class="btn-primary" style="width: 100%; min-height: 44px; padding: 10px; font-size: 0.85rem; font-weight: 700; background: #2563eb; color: white; border: none; border-radius: 8px; cursor: pointer;" onclick="window.startBuilderLegacyAdoption()">Convert to Editable Navigation</button>
           </div>
         </div>
       `;
     } else {
-      // Canonical Items List (Draft or Live)
       const items = state.items;
       if (items.length === 0) {
         itemsListHtml = `
@@ -997,7 +1309,7 @@ export function renderBuilderNavigationPanel(
             <div style="font-size: 1.8rem; margin-bottom: 8px;">📭</div>
             <div style="font-weight: 700; font-size: 0.95rem; color: #f1f5f9; margin-bottom: 4px;">Explicit Empty Menu</div>
             <p style="font-size: 0.8rem; line-height: 1.4; margin: 0 0 16px 0; color: #64748b;">This ${activeScope} menu contains 0 links. On the live site, no navigation links will be rendered.</p>
-            <button type="button" class="btn-primary" style="padding: 8px 16px; font-size: 0.85rem; font-weight: 700; background: #2563eb; color: white; border: none; border-radius: 8px; cursor: pointer;" onclick="window.openAddBuilderNavItemModal()">+ Add First Link</button>
+            <button type="button" class="btn-primary" style="min-height: 40px; padding: 8px 16px; font-size: 0.85rem; font-weight: 700; background: #2563eb; color: white; border: none; border-radius: 8px; cursor: pointer;" onclick="window.openAddBuilderNavItemModal()">+ Add First Link</button>
           </div>
         `;
       } else {
@@ -1010,7 +1322,7 @@ export function renderBuilderNavigationPanel(
     }
   }
 
-  // Footer Scope Note if activeScope === 'footer'
+  // Footer Scope Note
   let footerNoteHtml = '';
   if (activeScope === 'footer') {
     footerNoteHtml = `
@@ -1028,15 +1340,17 @@ export function renderBuilderNavigationPanel(
           <h3 style="font-size: 0.75rem; color: #888; text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin: 0;">Site Navigation</h3>
           ${authorityBadgeHtml}
         </div>
-        
+
         <!-- Scope Segmented Control -->
         <div class="pb-nav-scope-tabs" role="tablist" aria-label="Menu Scope" style="display: flex; background: #1a1a1a; padding: 3px; border-radius: 8px; border: 1px solid #262626;">
-          <button type="button" role="tab" aria-selected="${activeScope === 'primary'}" class="${activeScope === 'primary' ? 'active' : ''}" style="flex: 1; padding: 8px; font-size: 0.8rem; font-weight: 700; border-radius: 6px; border: none; cursor: pointer; transition: all 150ms ease; ${activeScope === 'primary' ? 'background: #2563eb; color: white;' : 'background: transparent; color: #94a3b8;'}" onclick="window.setBuilderNavScope('primary')">Primary Menu</button>
-          <button type="button" role="tab" aria-selected="${activeScope === 'footer'}" class="${activeScope === 'footer' ? 'active' : ''}" style="flex: 1; padding: 8px; font-size: 0.8rem; font-weight: 700; border-radius: 6px; border: none; cursor: pointer; transition: all 150ms ease; ${activeScope === 'footer' ? 'background: #2563eb; color: white;' : 'background: transparent; color: #94a3b8;'}" onclick="window.setBuilderNavScope('footer')">Footer Menu</button>
+          <button type="button" role="tab" aria-selected="${activeScope === 'primary'}" class="${activeScope === 'primary' ? 'active' : ''}" style="flex: 1; min-height: 38px; padding: 8px; font-size: 0.8rem; font-weight: 700; border-radius: 6px; border: none; cursor: pointer; transition: all 150ms ease; ${activeScope === 'primary' ? 'background: #2563eb; color: white;' : 'background: transparent; color: #94a3b8;'}" onclick="window.setBuilderNavScope('primary')">Primary Menu</button>
+          <button type="button" role="tab" aria-selected="${activeScope === 'footer'}" class="${activeScope === 'footer' ? 'active' : ''}" style="flex: 1; min-height: 38px; padding: 8px; font-size: 0.8rem; font-weight: 700; border-radius: 6px; border: none; cursor: pointer; transition: all 150ms ease; ${activeScope === 'footer' ? 'background: #2563eb; color: white;' : 'background: transparent; color: #94a3b8;'}" onclick="window.setBuilderNavScope('footer')">Footer Menu</button>
         </div>
       </div>
 
+      ${multiScopeBannerHtml}
       ${authorityCalloutHtml}
+      ${ctaDuplicationWarningHtml}
       ${errorBannerHtml}
       ${footerNoteHtml}
       ${actionsBarHtml}
@@ -1044,6 +1358,91 @@ export function renderBuilderNavigationPanel(
       <!-- Items Section -->
       <div style="flex: 1; min-height: 0;">
         ${itemsListHtml}
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Render the dedicated Adoption Review screen before creating canonical draft.
+ */
+function renderLegacyAdoptionReviewPanel(
+  reviewState: LegacyAdoptionReviewState,
+  manager: BuilderNavigationUiManager,
+  context: NavigationUiContext
+): string {
+  const unresolvedCount = reviewState.candidates.filter(c => c.status === 'needs_attention').length;
+  const canSubmit = unresolvedCount === 0;
+
+  return `
+    <div class="pb-navigation-panel pb-adoption-review-panel" style="flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: #111; color: #eee; padding: 16px;">
+      <div style="border-bottom: 1px solid #282828; padding-bottom: 12px; margin-bottom: 14px;">
+        <h3 style="font-size: 1rem; color: #f8fafc; font-weight: 700; margin: 0 0 6px 0;">Convert Legacy Navigation</h3>
+        <p style="font-size: 0.8rem; color: #94a3b8; line-height: 1.4; margin: 0;">
+          Review the converted navigation items. Every link must point to a valid destination before creating the editable draft.
+        </p>
+      </div>
+
+      ${reviewState.errorMessage ? `
+        <div role="alert" style="margin-bottom: 12px; padding: 10px 14px; background: #450a0a; border: 1px solid #991b1b; color: #fecaca; border-radius: 8px; font-size: 0.85rem;">
+          ${escapeHtmlText(reviewState.errorMessage)}
+        </div>
+      ` : ''}
+
+      ${reviewState.standaloneCta ? `
+        <div style="margin-bottom: 14px; padding: 12px; background: #18181b; border: 1px solid #27272a; border-radius: 8px; font-size: 0.8rem; color: #cbd5e1; line-height: 1.4;">
+          ℹ️ <b>Existing Header CTA:</b> "${escapeHtmlText(reviewState.standaloneCta.text)}"<br>
+          Your existing standalone header CTA remains active separately from the navigation menu.
+        </div>
+      ` : ''}
+
+      ${unresolvedCount > 0 ? `
+        <div role="alert" style="margin-bottom: 14px; padding: 10px 12px; background: #451a03; border: 1px solid #b45309; color: #fde68a; border-radius: 8px; font-size: 0.82rem;">
+          ⚠️ <b>${unresolvedCount} item${unresolvedCount > 1 ? 's need' : ' needs'} attention:</b> Choose a destination or remove the item to proceed.
+        </div>
+      ` : ''}
+
+      <!-- Candidates List -->
+      <div style="display: flex; flex-direction: column; gap: 10px; flex: 1;">
+        ${reviewState.candidates.map((c, idx) => `
+          <div class="pb-nav-candidate-card" style="background: ${c.status === 'needs_attention' ? '#241414' : '#181818'}; border: 1px solid ${c.status === 'needs_attention' ? '#7f1d1d' : '#2a2a2a'}; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <div style="font-weight: 700; font-size: 0.9rem; color: #f8fafc;">${escapeHtmlText(c.label)}</div>
+              ${c.status === 'needs_attention'
+                ? `<span style="background: #7f1d1d; color: #fecaca; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 700;">Needs attention</span>`
+                : `<span style="background: #064e3b; color: #a7f3d0; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 700;">Ready</span>`
+              }
+            </div>
+
+            <div style="font-size: 0.78rem; color: #94a3b8;">
+              Original: <code style="background: #111; padding: 2px 5px; border-radius: 4px;">${escapeHtmlText(c.originalTarget || '/')}</code>
+            </div>
+
+            ${c.reason ? `
+              <div style="font-size: 0.75rem; color: #fca5a5; margin-top: 2px;">
+                ${escapeHtmlText(c.reason)}
+              </div>
+            ` : ''}
+
+            <!-- Candidate Actions -->
+            <div style="display: flex; gap: 8px; margin-top: 6px; justify-content: flex-end; flex-wrap: wrap;">
+              <button type="button" class="btn-outline" style="min-height: 38px; padding: 6px 12px; font-size: 0.78rem; background: #222; color: #93c5fd; border: 1px solid #1e3a8a; border-radius: 6px; cursor: pointer;" onclick="window.openResolveCandidateModal('${escapeHtmlText(c.id)}')">
+                ${c.status === 'needs_attention' ? 'Choose Destination' : 'Edit'}
+              </button>
+              <button type="button" class="btn-outline" style="min-height: 38px; padding: 6px 12px; font-size: 0.78rem; background: #222; color: #f87171; border: 1px solid #7f1d1d; border-radius: 6px; cursor: pointer;" onclick="window.removeAdoptionCandidate('${escapeHtmlText(c.id)}')">
+                Remove
+              </button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+
+      <!-- Action Buttons -->
+      <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; padding-top: 12px; border-top: 1px solid #282828; flex-wrap: wrap;">
+        <button type="button" class="btn-outline" style="min-height: 44px; padding: 10px 16px; background: #222; color: #cbd5e1; border: 1px solid #333; border-radius: 8px; font-weight: 700; font-size: 0.85rem; cursor: pointer;" onclick="window.closeBuilderLegacyAdoptionReview()">Cancel</button>
+        <button type="button" class="btn-primary" style="min-height: 44px; padding: 10px 18px; background: ${canSubmit ? '#2563eb' : '#374151'}; color: ${canSubmit ? 'white' : '#9ca3af'}; border: none; border-radius: 8px; font-weight: 700; font-size: 0.85rem; cursor: ${canSubmit ? 'pointer' : 'not-allowed'};" onclick="window.commitBuilderLegacyAdoption()" ${!canSubmit || reviewState.isSubmitting ? 'disabled aria-busy="true"' : ''}>
+          ${reviewState.isSubmitting ? 'Creating draft...' : 'Create Editable Navigation Draft'}
+        </button>
       </div>
     </div>
   `;
@@ -1058,7 +1457,6 @@ export function renderNavigationItemCard(
   totalItems: number,
   isSaving: boolean
 ): string {
-  // Target description formatting
   let targetSummary = '';
   let targetTypeBadge = '';
   if (item.target_kind === 'homepage') {
@@ -1078,7 +1476,6 @@ export function renderNavigationItemCard(
     targetSummary = item.target_value;
   }
 
-  // Warning badges for route dependencies
   let warningBadgeHtml = '';
   if (item.resolution_status === 'unrouted') {
     warningBadgeHtml = `<div style="margin-top: 4px; font-size: 0.75rem; color: #fbbf24; font-weight: 600;">⚠️ Unrouted Destination</div>`;
@@ -1088,15 +1485,14 @@ export function renderNavigationItemCard(
 
   return `
     <div class="pb-nav-item-card ${!item.visible ? 'pb-nav-item-hidden' : ''}" style="background: ${item.visible ? '#1a1a1a' : '#141414'}; border: 1px solid ${item.visible ? '#2a2a2a' : '#222'}; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; opacity: ${item.visible ? '1' : '0.6'}; transition: all 150ms ease;">
-      <!-- Row Top: Drag/Reorder buttons + Title + Badges -->
-      <div style="display: flex; align-items: center; gap: 10px; justify-content: space-between;">
-        <!-- Reorder buttons -->
+      <div style="display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap;">
+        <!-- Reorder buttons with accessible touch targets -->
         <div style="display: flex; gap: 4px;">
-          <button type="button" aria-label="Move item up" class="btn-outline" style="padding: 4px 8px; font-size: 0.7rem; background: #222; color: #cbd5e1; border: 1px solid #333; border-radius: 4px; cursor: pointer;" onclick="window.moveBuilderNavItem('${escapeHtmlText(item.id)}', 'up')" ${index === 0 || isSaving ? 'disabled' : ''}>▲</button>
-          <button type="button" aria-label="Move item down" class="btn-outline" style="padding: 4px 8px; font-size: 0.7rem; background: #222; color: #cbd5e1; border: 1px solid #333; border-radius: 4px; cursor: pointer;" onclick="window.moveBuilderNavItem('${escapeHtmlText(item.id)}', 'down')" ${index === totalItems - 1 || isSaving ? 'disabled' : ''}>▼</button>
+          <button type="button" aria-label="Move item up" class="btn-outline" style="min-height: 38px; min-width: 38px; padding: 6px 10px; font-size: 0.8rem; font-weight: 700; background: #222; color: #cbd5e1; border: 1px solid #333; border-radius: 6px; cursor: pointer;" onclick="window.moveBuilderNavItem('${escapeHtmlText(item.id)}', 'up')" ${index === 0 || isSaving ? 'disabled' : ''}>▲</button>
+          <button type="button" aria-label="Move item down" class="btn-outline" style="min-height: 38px; min-width: 38px; padding: 6px 10px; font-size: 0.8rem; font-weight: 700; background: #222; color: #cbd5e1; border: 1px solid #333; border-radius: 6px; cursor: pointer;" onclick="window.moveBuilderNavItem('${escapeHtmlText(item.id)}', 'down')" ${index === totalItems - 1 || isSaving ? 'disabled' : ''}>▼</button>
         </div>
 
-        <div style="flex: 1; min-width: 0;">
+        <div style="flex: 1; min-width: 140px;">
           <div style="display: flex; align-items: center; gap: 6px;">
             <span style="font-weight: 800; font-size: 0.88rem; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtmlText(item.label)}</span>
             ${item.is_cta ? `<span style="background: #1d4ed8; color: #dbeafe; padding: 1px 5px; border-radius: 4px; font-size: 0.68rem; font-weight: 800;">CTA</span>` : ''}
@@ -1109,11 +1505,11 @@ export function renderNavigationItemCard(
           ${warningBadgeHtml}
         </div>
 
-        <!-- Row Actions: Hide/Show, Edit, Remove -->
-        <div style="display: flex; gap: 6px; align-items: center;">
-          <button type="button" aria-label="${item.visible ? 'Hide item' : 'Show item'}" class="btn-outline" style="padding: 6px 10px; font-size: 0.75rem; background: #222; color: #cbd5e1; border: 1px solid #333; border-radius: 6px; cursor: pointer;" onclick="window.toggleBuilderNavItemVisibility('${escapeHtmlText(item.id)}')" ${isSaving ? 'disabled' : ''}>${item.visible ? 'Hide' : 'Show'}</button>
-          <button type="button" aria-label="Edit item" class="btn-outline" style="padding: 6px 10px; font-size: 0.75rem; background: #222; color: #93c5fd; border: 1px solid #1e3a8a; border-radius: 6px; cursor: pointer;" onclick="window.openEditBuilderNavItemModal('${escapeHtmlText(item.id)}')" ${isSaving ? 'disabled' : ''}>Edit</button>
-          <button type="button" aria-label="Remove item" class="btn-outline" style="padding: 6px 10px; font-size: 0.75rem; background: #222; color: #f87171; border: 1px solid #7f1d1d; border-radius: 6px; cursor: pointer;" onclick="window.removeBuilderNavItem('${escapeHtmlText(item.id)}')" ${isSaving ? 'disabled' : ''}>Remove</button>
+        <!-- Row Actions -->
+        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+          <button type="button" aria-label="${item.visible ? 'Hide item' : 'Show item'}" class="btn-outline" style="min-height: 38px; min-width: 44px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; background: #222; color: #cbd5e1; border: 1px solid #333; border-radius: 6px; cursor: pointer;" onclick="window.toggleBuilderNavItemVisibility('${escapeHtmlText(item.id)}')" ${isSaving ? 'disabled' : ''}>${item.visible ? 'Hide' : 'Show'}</button>
+          <button type="button" aria-label="Edit item" class="btn-outline" style="min-height: 38px; min-width: 44px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; background: #222; color: #93c5fd; border: 1px solid #1e3a8a; border-radius: 6px; cursor: pointer;" onclick="window.openEditBuilderNavItemModal('${escapeHtmlText(item.id)}')" ${isSaving ? 'disabled' : ''}>Edit</button>
+          <button type="button" aria-label="Remove item" class="btn-outline" style="min-height: 38px; min-width: 44px; padding: 6px 12px; font-size: 0.75rem; font-weight: 600; background: #222; color: #f87171; border: 1px solid #7f1d1d; border-radius: 6px; cursor: pointer;" onclick="window.removeBuilderNavItem('${escapeHtmlText(item.id)}')" ${isSaving ? 'disabled' : ''}>Remove</button>
         </div>
       </div>
     </div>
@@ -1125,13 +1521,12 @@ export function renderNavigationItemCard(
  */
 export function renderNavigationItemModal(
   modalState: NavigationItemModalState,
-  context: NavigationUiContext
+  context: NavigationUiContext | null
 ): string {
-  if (!modalState.isOpen) return '';
+  if (!modalState.isOpen || !context) return '';
 
-  const { mode, label, targetKind, targetValue, visible, isCta, errorMessage } = modalState;
+  const { mode, label, targetKind, targetValue, visible, isCta, isSaving, errorMessage } = modalState;
 
-  // Available routeable destinations
   const pages = context.pages;
   const funnels = context.funnels;
   const routes = context.effectiveRoutes;
@@ -1147,18 +1542,20 @@ export function renderNavigationItemModal(
   }).join('');
 
   return `
-    <div class="pb-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="nav-item-modal-title" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); display: flex; align-items: center; justify-content: center; z-index: 10000; padding: 20px;">
-      <div class="pb-modal-card" style="background: #181818; border: 1px solid #333; border-radius: 12px; width: 100%; max-width: 480px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); overflow: hidden; display: flex; flex-direction: column;">
+    <div class="pb-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="nav-item-modal-title" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); display: flex; align-items: center; justify-content: center; z-index: 10000; padding: 16px;">
+      <div class="pb-modal-card" style="background: #181818; border: 1px solid #333; border-radius: 12px; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); display: flex; flex-direction: column;">
         <!-- Modal Header -->
         <div style="padding: 16px 20px; border-bottom: 1px solid #282828; display: flex; align-items: center; justify-content: space-between;">
-          <h3 id="nav-item-modal-title" style="margin: 0; font-size: 1.1rem; color: #f8fafc; font-weight: 700;">${mode === 'add' ? 'Add Navigation Item' : 'Edit Navigation Item'}</h3>
-          <button type="button" aria-label="Close dialog" onclick="window.closeBuilderNavItemModal()" style="background: none; border: none; color: #94a3b8; font-size: 1.2rem; cursor: pointer; padding: 4px;">✕</button>
+          <h3 id="nav-item-modal-title" style="margin: 0; font-size: 1.1rem; color: #f8fafc; font-weight: 700;">
+            ${mode === 'add' ? 'Add Navigation Item' : mode === 'resolve_legacy' ? 'Choose Destination' : 'Edit Navigation Item'}
+          </h3>
+          <button type="button" aria-label="Close dialog" onclick="window.closeBuilderNavItemModal()" ${isSaving ? 'disabled' : ''} style="background: none; border: none; color: #94a3b8; font-size: 1.2rem; cursor: pointer; min-height: 38px; min-width: 38px; padding: 4px;">✕</button>
         </div>
 
         <!-- Modal Body -->
         <form onsubmit="event.preventDefault(); window.saveBuilderNavItemModal();" style="padding: 20px; display: flex; flex-direction: column; gap: 16px;">
           ${errorMessage ? `
-            <div role="alert" style="padding: 10px 14px; background: #450a0a; border: 1px solid #991b1b; color: #fecaca; border-radius: 8px; font-size: 0.85rem;">
+            <div role="alert" id="nav-item-error-msg" style="padding: 10px 14px; background: #450a0a; border: 1px solid #991b1b; color: #fecaca; border-radius: 8px; font-size: 0.85rem;">
               ${escapeHtmlText(errorMessage)}
             </div>
           ` : ''}
@@ -1166,13 +1563,13 @@ export function renderNavigationItemModal(
           <!-- Label -->
           <div>
             <label for="nav-item-label-input" style="display: block; font-size: 0.8rem; font-weight: 700; color: #cbd5e1; margin-bottom: 6px;">Menu Label *</label>
-            <input id="nav-item-label-input" type="text" value="${escapeHtmlText(label)}" required placeholder="e.g. Services, About Us, Book Now" oninput="window.setBuilderNavItemModalField('label', this.value)" style="width: 100%; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 8px; color: #f8fafc; font-size: 0.9rem;">
+            <input id="nav-item-label-input" type="text" value="${escapeHtmlText(label)}" required placeholder="e.g. Services, About Us, Book Now" oninput="window.setBuilderNavItemModalField('label', this.value)" style="width: 100%; min-height: 42px; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 8px; color: #f8fafc; font-size: 0.9rem;" autofocus>
           </div>
 
           <!-- Link Type -->
           <div>
             <label for="nav-item-kind-select" style="display: block; font-size: 0.8rem; font-weight: 700; color: #cbd5e1; margin-bottom: 6px;">Link Type</label>
-            <select id="nav-item-kind-select" onchange="window.setBuilderNavItemModalField('targetKind', this.value)" style="width: 100%; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 8px; color: #f8fafc; font-size: 0.9rem; cursor: pointer;">
+            <select id="nav-item-kind-select" onchange="window.setBuilderNavItemModalField('targetKind', this.value)" style="width: 100%; min-height: 42px; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 8px; color: #f8fafc; font-size: 0.9rem; cursor: pointer;">
               <option value="homepage" ${targetKind === 'homepage' ? 'selected' : ''}>Home (/)</option>
               <option value="internal" ${targetKind === 'internal' ? 'selected' : ''}>Page (Internal Route)</option>
               <option value="external" ${targetKind === 'external' ? 'selected' : ''}>External URL (https://...)</option>
@@ -1189,7 +1586,7 @@ export function renderNavigationItemModal(
           ` : targetKind === 'internal' ? `
             <div>
               <label for="nav-item-target-select" style="display: block; font-size: 0.8rem; font-weight: 700; color: #cbd5e1; margin-bottom: 6px;">Destination Page *</label>
-              <select id="nav-item-target-select" onchange="window.setBuilderNavItemModalField('targetValue', this.value)" style="width: 100%; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 8px; color: #f8fafc; font-size: 0.9rem; cursor: pointer;">
+              <select id="nav-item-target-select" onchange="window.setBuilderNavItemModalField('targetValue', this.value)" style="width: 100%; min-height: 42px; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 8px; color: #f8fafc; font-size: 0.9rem; cursor: pointer;">
                 <option value="">-- Select a page destination --</option>
                 ${internalOptions}
               </select>
@@ -1197,38 +1594,40 @@ export function renderNavigationItemModal(
           ` : targetKind === 'external' ? `
             <div>
               <label for="nav-item-external-input" style="display: block; font-size: 0.8rem; font-weight: 700; color: #cbd5e1; margin-bottom: 6px;">External URL *</label>
-              <input id="nav-item-external-input" type="url" value="${escapeHtmlText(targetValue)}" placeholder="https://example.com/pricing" oninput="window.setBuilderNavItemModalField('targetValue', this.value)" style="width: 100%; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 8px; color: #f8fafc; font-size: 0.9rem;">
+              <input id="nav-item-external-input" type="url" value="${escapeHtmlText(targetValue)}" placeholder="https://example.com/pricing" oninput="window.setBuilderNavItemModalField('targetValue', this.value)" style="width: 100%; min-height: 42px; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 8px; color: #f8fafc; font-size: 0.9rem;">
               <small style="display: block; margin-top: 4px; color: #64748b; font-size: 0.75rem;">Must be a standard http:// or https:// URL.</small>
             </div>
           ` : targetKind === 'phone' ? `
             <div>
               <label for="nav-item-phone-input" style="display: block; font-size: 0.8rem; font-weight: 700; color: #cbd5e1; margin-bottom: 6px;">Phone Number *</label>
-              <input id="nav-item-phone-input" type="tel" value="${escapeHtmlText(targetValue)}" placeholder="+1 (555) 234-5678" oninput="window.setBuilderNavItemModalField('targetValue', this.value)" style="width: 100%; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 8px; color: #f8fafc; font-size: 0.9rem;">
+              <input id="nav-item-phone-input" type="tel" value="${escapeHtmlText(targetValue)}" placeholder="+1 (555) 234-5678" oninput="window.setBuilderNavItemModalField('targetValue', this.value)" style="width: 100%; min-height: 42px; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 8px; color: #f8fafc; font-size: 0.9rem;">
             </div>
           ` : `
             <div>
               <label for="nav-item-email-input" style="display: block; font-size: 0.8rem; font-weight: 700; color: #cbd5e1; margin-bottom: 6px;">Email Address *</label>
-              <input id="nav-item-email-input" type="email" value="${escapeHtmlText(targetValue)}" placeholder="contact@washops.com" oninput="window.setBuilderNavItemModalField('targetValue', this.value)" style="width: 100%; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 8px; color: #f8fafc; font-size: 0.9rem;">
+              <input id="nav-item-email-input" type="email" value="${escapeHtmlText(targetValue)}" placeholder="contact@washops.com" oninput="window.setBuilderNavItemModalField('targetValue', this.value)" style="width: 100%; min-height: 42px; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 8px; color: #f8fafc; font-size: 0.9rem;">
             </div>
           `}
 
           <!-- Presentation & Visibility Toggles -->
-          <div style="display: flex; gap: 20px; padding: 10px 0; border-top: 1px solid #262626;">
-            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #cbd5e1; cursor: pointer;">
-              <input type="checkbox" ${isCta ? 'checked' : ''} onchange="window.setBuilderNavItemModalField('isCta', this.checked)" style="width: 18px; height: 18px; accent-color: #2563eb; cursor: pointer;">
+          <div style="display: flex; gap: 20px; padding: 10px 0; border-top: 1px solid #262626; flex-wrap: wrap;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #cbd5e1; cursor: pointer; min-height: 38px;">
+              <input type="checkbox" ${isCta ? 'checked' : ''} onchange="window.setBuilderNavItemModalField('isCta', this.checked)" style="width: 20px; height: 20px; accent-color: #2563eb; cursor: pointer;">
               Show as CTA button
             </label>
 
-            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #cbd5e1; cursor: pointer;">
-              <input type="checkbox" ${visible ? 'checked' : ''} onchange="window.setBuilderNavItemModalField('visible', this.checked)" style="width: 18px; height: 18px; accent-color: #2563eb; cursor: pointer;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #cbd5e1; cursor: pointer; min-height: 38px;">
+              <input type="checkbox" ${visible ? 'checked' : ''} onchange="window.setBuilderNavItemModalField('visible', this.checked)" style="width: 20px; height: 20px; accent-color: #2563eb; cursor: pointer;">
               Visible in menu
             </label>
           </div>
 
           <!-- Footer Buttons -->
-          <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px;">
-            <button type="button" class="btn-outline" onclick="window.closeBuilderNavItemModal()" style="padding: 10px 16px; background: #222; color: #cbd5e1; border: 1px solid #333; border-radius: 8px; font-weight: 700; font-size: 0.85rem; cursor: pointer;">Cancel</button>
-            <button type="submit" class="btn-primary" style="padding: 10px 20px; background: #2563eb; color: white; border: none; border-radius: 8px; font-weight: 700; font-size: 0.85rem; cursor: pointer;">${mode === 'add' ? 'Add Item' : 'Save Changes'}</button>
+          <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; flex-wrap: wrap;">
+            <button type="button" class="btn-outline" onclick="window.closeBuilderNavItemModal()" ${isSaving ? 'disabled' : ''} style="min-height: 42px; padding: 10px 16px; background: #222; color: #cbd5e1; border: 1px solid #333; border-radius: 8px; font-weight: 700; font-size: 0.85rem; cursor: pointer;">Cancel</button>
+            <button type="submit" class="btn-primary" ${isSaving ? 'disabled aria-busy="true"' : ''} style="min-height: 42px; padding: 10px 20px; background: #2563eb; color: white; border: none; border-radius: 8px; font-weight: 700; font-size: 0.85rem; cursor: pointer;">
+              ${isSaving ? 'Saving...' : mode === 'add' ? 'Add Item' : mode === 'resolve_legacy' ? 'Set Destination' : 'Save Changes'}
+            </button>
           </div>
         </form>
       </div>
@@ -1248,12 +1647,12 @@ export function renderNavigationPublishModal(
   const scopeLabel = menuScope === 'primary' ? 'Primary Menu' : 'Footer Menu';
 
   return `
-    <div class="pb-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="nav-publish-modal-title" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); display: flex; align-items: center; justify-content: center; z-index: 10000; padding: 20px;">
-      <div class="pb-modal-card" style="background: #181818; border: 1px solid #333; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); overflow: hidden; display: flex; flex-direction: column;">
+    <div class="pb-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="nav-publish-modal-title" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); display: flex; align-items: center; justify-content: center; z-index: 10000; padding: 16px;">
+      <div class="pb-modal-card" style="background: #181818; border: 1px solid #333; border-radius: 12px; width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); display: flex; flex-direction: column;">
         <!-- Header -->
         <div style="padding: 16px 20px; border-bottom: 1px solid #282828; display: flex; align-items: center; justify-content: space-between;">
           <h3 id="nav-publish-modal-title" style="margin: 0; font-size: 1.1rem; color: #f8fafc; font-weight: 700;">Publish ${escapeHtmlText(scopeLabel)}</h3>
-          <button type="button" aria-label="Close dialog" onclick="window.closePublishBuilderNavModal()" style="background: none; border: none; color: #94a3b8; font-size: 1.2rem; cursor: pointer; padding: 4px;">✕</button>
+          <button type="button" aria-label="Close dialog" onclick="window.closePublishBuilderNavModal()" ${isPublishing ? 'disabled' : ''} style="background: none; border: none; color: #94a3b8; font-size: 1.2rem; cursor: pointer; min-height: 38px; min-width: 38px; padding: 4px;">✕</button>
         </div>
 
         <!-- Body -->
@@ -1293,9 +1692,9 @@ export function renderNavigationPublishModal(
           </p>
 
           <!-- Footer Buttons -->
-          <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px;">
-            <button type="button" class="btn-outline" onclick="window.closePublishBuilderNavModal()" ${isPublishing ? 'disabled' : ''} style="padding: 10px 16px; background: #222; color: #cbd5e1; border: 1px solid #333; border-radius: 8px; font-weight: 700; font-size: 0.85rem; cursor: pointer;">Cancel</button>
-            <button type="button" class="btn-primary" onclick="window.confirmPublishBuilderNav()" ${isPublishing ? 'disabled' : ''} style="padding: 10px 20px; background: #16a34a; color: white; border: none; border-radius: 8px; font-weight: 700; font-size: 0.85rem; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+          <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 10px; flex-wrap: wrap;">
+            <button type="button" class="btn-outline" onclick="window.closePublishBuilderNavModal()" ${isPublishing ? 'disabled' : ''} style="min-height: 44px; padding: 10px 16px; background: #222; color: #cbd5e1; border: 1px solid #333; border-radius: 8px; font-weight: 700; font-size: 0.85rem; cursor: pointer;">Cancel</button>
+            <button type="button" class="btn-primary" onclick="window.confirmPublishBuilderNav()" ${isPublishing ? 'disabled aria-busy="true"' : ''} style="min-height: 44px; padding: 10px 20px; background: #16a34a; color: white; border: none; border-radius: 8px; font-weight: 700; font-size: 0.85rem; cursor: pointer; display: flex; align-items: center; gap: 6px;">
               ${isPublishing ? 'Publishing...' : `Publish ${scopeLabel}`}
             </button>
           </div>
