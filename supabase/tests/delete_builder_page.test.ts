@@ -883,7 +883,7 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
 
       // 2. Transaction B attempts inserting lead request for p-del-lead-1 while c1 open
       await c2.query('begin');
-      const leadPromise = c2.query(`insert into public.public_lead_intake_requests(id, website_id, page_id) values ('${leadId}', '${siteId}', 'p-del-lead-1')`);
+      const leadPromise = c2.query(`insert into public.public_lead_intake_requests(id, website_id, page_id) values ('${leadId}', '${siteId}', 'p-del-lead-1')`).catch(err => err);
 
       // 3. Confirm c2 waits
       await assertBackendWaiting(pool, (c2 as any).processID);
@@ -892,7 +892,9 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       await c1.query('commit');
 
       // 5. c2 unblocks and fails with FK violation 23503
-      await expect(leadPromise).rejects.toThrow(/foreign key constraint/);
+      const err = await leadPromise;
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toMatch(/foreign key constraint/);
       await c2.query('rollback');
     } finally {
       await c1.query('rollback').catch(() => {});
