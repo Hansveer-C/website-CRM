@@ -31,6 +31,11 @@ export interface BuilderSiteNavigationRepository {
     menuScope?: NavigationMenuScope
   ): Promise<SiteNavigationRepositoryResult<EffectiveSiteNavigation>>;
 
+  getLiveNavigation(
+    websiteId: string,
+    menuScope?: NavigationMenuScope
+  ): Promise<SiteNavigationRepositoryResult<{ revision: number; items: SiteNavigationItem[] } | null>>;
+
   publishNavigation(
     websiteId: string,
     expectedBaseRevision: number,
@@ -104,6 +109,27 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
         draft_revision: 0,
         live_revision: liveRevision,
         updated_at: live?.updated_at ?? new Date().toISOString()
+      }
+    };
+  }
+
+  async getLiveNavigation(
+    websiteId: string,
+    menuScope: NavigationMenuScope = 'primary'
+  ): Promise<SiteNavigationRepositoryResult<{ revision: number; items: SiteNavigationItem[] } | null>> {
+    if (!websiteId) {
+      return { success: false, error: 'Website ID is required', code: 'INVALID_INPUT' };
+    }
+    const key = `${websiteId}:${menuScope}`;
+    const live = this.liveStore.get(key);
+    if (!live) {
+      return { success: true, data: null };
+    }
+    return {
+      success: true,
+      data: {
+        revision: live.revision,
+        items: [...live.items]
       }
     };
   }

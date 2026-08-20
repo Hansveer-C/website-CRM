@@ -313,23 +313,25 @@ button:active {
 
 .pb-left-tabs {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 4px;
-    padding: 8px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 3px;
+    padding: 6px 4px;
     border-bottom: 1px solid #222;
     background: #0d0d0d;
 }
 
 .pb-left-tabs button {
-    min-height: 38px;
+    min-height: 36px;
     border: 0;
     border-radius: 7px;
     outline: none;
     background: transparent;
     color: #64748b;
     cursor: pointer;
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     font-weight: 800;
+    padding: 2px 4px;
+    white-space: nowrap;
 }
 
 .pb-left-tabs button:hover {
@@ -340,6 +342,60 @@ button:active {
 .pb-left-tabs button.active {
     color: #fff;
     background: #2563eb;
+}
+
+.pb-nav-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.pb-nav-badge-legacy {
+    background: #27272a;
+    color: #a1a1aa;
+    border: 1px solid #3f3f46;
+}
+
+.pb-nav-badge-draft {
+    background: #1e3a8a;
+    color: #93c5fd;
+    border: 1px solid #2563eb;
+}
+
+.pb-nav-badge-live {
+    background: #064e3b;
+    color: #6ee7b7;
+    border: 1px solid #059669;
+}
+
+.pb-nav-callout {
+    margin: 12px 16px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    line-height: 1.4;
+}
+
+.pb-nav-callout-legacy {
+    background: #18181b;
+    border: 1px solid #27272a;
+    color: #a1a1aa;
+}
+
+.pb-nav-callout-draft {
+    background: #0f172a;
+    border: 1px solid #1e3a8a;
+    color: #93c5fd;
+}
+
+.pb-nav-callout-live {
+    background: #022c22;
+    border: 1px solid #065f46;
+    color: #a7f3d0;
 }
 
 .pb-left-tabs button:focus-visible,

@@ -5,6 +5,7 @@ export const BUILDER_NAVIGATION_ACTIONS = [
   'pages',
   'settings',
   'assets',
+  'navigation',
   'guided-setup',
   'preview',
   'publish'
