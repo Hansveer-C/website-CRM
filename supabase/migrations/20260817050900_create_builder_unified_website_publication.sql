@@ -785,9 +785,9 @@ begin
 
         -- Create redirect from old path to new path
         insert into public.website_route_redirects (
-          website_id, from_path, to_path, status_code, created_at, updated_at
+          website_id, from_path, to_path, created_at, updated_at
         ) values (
-          p_website_id, v_old_live_path, v_draft_route.path, 308, v_now, v_now
+          p_website_id, v_old_live_path, v_draft_route.path, v_now, v_now
         )
         on conflict (website_id, from_path)
         do update set

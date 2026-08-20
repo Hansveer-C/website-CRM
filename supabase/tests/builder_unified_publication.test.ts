@@ -843,7 +843,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
       // Session B resumes and completes
       await savePromise;
       expect(saveDone).toBe(true);
-      expect(saveRes.rows[0].res.success).toBe(true);
+      expect(saveRes.rows[0].res.page_id).toBe(page1Id);
+      expect(saveRes.rows[0].res.revision).toBe(2);
     } finally {
       await setAuth(clientA, null);
       await setAuth(clientB, null);
