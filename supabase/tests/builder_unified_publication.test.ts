@@ -87,12 +87,6 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
           created_at timestamptz not null default now()
         );
 
-        create table if not exists public.public_lead_intake_requests (
-          id uuid primary key default gen_random_uuid(),
-          website_id uuid references public.websites(id) on delete cascade,
-          page_id text not null references public.pages(id) on delete restrict
-        );
-
         create table if not exists public.websites (
           id uuid primary key default gen_random_uuid(),
           user_id text not null references public.users(id) on delete cascade,
@@ -104,6 +98,12 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
           publication_revision integer not null default 0,
           created_at timestamptz not null default now(),
           updated_at timestamptz not null default now()
+        );
+
+        create table if not exists public.public_lead_intake_requests (
+          id uuid primary key default gen_random_uuid(),
+          website_id uuid references public.websites(id) on delete cascade,
+          page_id text not null references public.pages(id) on delete restrict
         );
 
         create table if not exists public.website_routes (
