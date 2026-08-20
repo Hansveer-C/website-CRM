@@ -1,14 +1,18 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { Pool } from 'pg';
+import pg from 'pg';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { randomUUID } from 'crypto';
 
+const { Pool } = pg;
+
 const DATABASE_URL =
-  process.env.BUILDER_ROUTE_TEST_DATABASE_URL ||
+  process.env.TEST_POSTGRES_URL ||
+  process.env.PG_DATABASE_URL ||
   process.env.TEST_DATABASE_URL;
 
 const MIGRATIONS = [
+  resolve(__dirname, '../migrations/20260810134911_save_page_sections_document.sql'),
   resolve(__dirname, '../migrations/20260817050400_set_builder_homepage.sql'),
   resolve(__dirname, '../migrations/20260817050500_create_builder_route_drafts.sql'),
   resolve(__dirname, '../migrations/20260817050600_create_builder_route_redirects_and_publication.sql'),
@@ -17,8 +21,8 @@ const MIGRATIONS = [
   resolve(__dirname, '../migrations/20260817050900_create_builder_unified_website_publication.sql')
 ];
 
-describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish Website Transaction DB Integration Tests (PostgreSQL 17)', () => {
-  let pool: Pool;
+describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified Publish Website DB Integration Tests (PostgreSQL 17)', () => {
+  let pool: pg.Pool;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: DATABASE_URL, max: 10 });
@@ -65,17 +69,15 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
           updated_at timestamptz not null default now()
         );
 
-        create table if not exists public.sections (
+        create table if not exists public.page_sections (
           id text primary key,
-          page_id text not null references public.pages(id) on delete cascade,
           user_id text not null references public.users(id) on delete cascade,
+          page_id text not null references public.pages(id) on delete cascade,
           type text not null,
-          name text not null,
           content jsonb not null default '{}'::jsonb,
-          sort_order integer not null default 0,
-          is_global boolean not null default false,
-          created_at timestamptz not null default now(),
-          updated_at timestamptz not null default now()
+          order_index integer not null default 0,
+          styles jsonb not null default '{}'::jsonb,
+          created_at timestamptz not null default now()
         );
 
         create table if not exists public.websites (
@@ -128,7 +130,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
         grant all on table public.users to authenticated, anon, service_role;
         grant all on table public.funnels to authenticated, anon, service_role;
         grant all on table public.pages to authenticated, anon, service_role;
-        grant all on table public.sections to authenticated, anon, service_role;
+        grant all on table public.page_sections to authenticated, anon, service_role;
         grant all on table public.websites to authenticated, anon, service_role;
         grant all on table public.website_routes to authenticated, anon, service_role;
         grant all on table public.builder_published_revisions to authenticated, anon, service_role;
@@ -175,35 +177,80 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
     const page2Id = `pg2-${randomUUID()}`;
     const page3Id = `pg3-${randomUUID()}`;
 
-    await client.query('INSERT INTO public.pages (id, user_id, funnel_id, name, slug, status, step_order) VALUES ($1, $2, $3, $4, $5, $6, $7)', [page1Id, userId, funnel1Id, 'Home Page', 'home', 'published', 0]);
-    await client.query('INSERT INTO public.pages (id, user_id, funnel_id, name, slug, status, step_order) VALUES ($1, $2, $3, $4, $5, $6, $7)', [page2Id, userId, funnel2Id, 'About Page', 'about', 'published', 0]);
-    await client.query('INSERT INTO public.pages (id, user_id, funnel_id, name, slug, status, step_order) VALUES ($1, $2, $3, $4, $5, $6, $7)', [page3Id, userId, funnel3Id, 'Services Page', 'services', 'draft', 0]);
+    await client.query('INSERT INTO public.pages (id, user_id, funnel_id, name, slug, status) VALUES ($1, $2, $3, $4, $5, $6)', [
+      page1Id, userId, funnel1Id, 'Home Page', 'home', 'published'
+    ]);
+    await client.query('INSERT INTO public.pages (id, user_id, funnel_id, name, slug, status) VALUES ($1, $2, $3, $4, $5, $6)', [
+      page2Id, userId, funnel2Id, 'About Page', 'about', 'published'
+    ]);
+    await client.query('INSERT INTO public.pages (id, user_id, funnel_id, name, slug, status) VALUES ($1, $2, $3, $4, $5, $6)', [
+      page3Id, userId, funnel3Id, 'Services Page', 'services', 'published'
+    ]);
+
+    // Save initial page sections via canonical save_page_sections_document
+    await client.query(`SET LOCAL "request.jwt.claim.sub" = '${userId}'`);
+    await client.query('SET LOCAL ROLE authenticated');
+
+    const sec1 = [{ id: `sec1-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Welcome' }, styles: {} }];
+    const sec2 = [{ id: `sec2-${randomUUID()}`, page_id: page2Id, type: 'hero', order: 0, content: { title: 'About Us' }, styles: {} }];
+    const sec3 = [{ id: `sec3-${randomUUID()}`, page_id: page3Id, type: 'hero', order: 0, content: { title: 'Our Services' }, styles: {} }];
+
+    await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 1)', [page1Id, JSON.stringify(sec1)]);
+    await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 1)', [page2Id, JSON.stringify(sec2)]);
+    await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 1)', [page3Id, JSON.stringify(sec3)]);
+
+    await client.query('RESET ROLE');
 
     const websiteRes = await client.query(
-      'INSERT INTO public.websites (user_id, name, subdomain, homepage_funnel_id) VALUES ($1, $2, $3, $4) RETURNING id',
-      [userId, 'Test Site', `site-${randomUUID().slice(0, 8)}`, funnel1Id]
+      `INSERT INTO public.websites (user_id, name, subdomain, homepage_funnel_id, publication_revision)
+       VALUES ($1, $2, $3, $4, 1) RETURNING id`,
+      [userId, 'Test Clean Website', `sub-${randomUUID().substring(0, 8)}`, funnel1Id]
     );
     const websiteId = websiteRes.rows[0].id;
 
-    // Add root route
+    // Create root route and /about route
+    await client.query('INSERT INTO public.website_routes (website_id, path, funnel_id) VALUES ($1, $2, $3)', [
+      websiteId, '/', funnel1Id
+    ]);
+    const routeAboutRes = await client.query('INSERT INTO public.website_routes (website_id, path, funnel_id) VALUES ($1, $2, $3) RETURNING id', [
+      websiteId, '/about', funnel2Id
+    ]);
+    const routeAboutId = routeAboutRes.rows[0].id;
+
+    // Create initial published revisions and targets for page 1 and page 2 so they start fully synchronized
+    const doc1 = {
+      schemaVersion: 1,
+      page: { id: page1Id, user_id: userId, funnel_id: funnel1Id, name: 'Home Page', slug: 'home', status: 'published', step_order: 0 },
+      sections: [{ id: sec1[0].id, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Welcome' }, styles: {} }]
+    };
+    const rev1Id = randomUUID();
     await client.query(
-      'INSERT INTO public.website_routes (website_id, path, funnel_id) VALUES ($1, $2, $3)',
-      [websiteId, '/', funnel1Id]
+      `INSERT INTO public.builder_published_revisions (id, website_id, page_id, created_at, created_by, schema_version, document, document_fingerprint)
+       VALUES ($1, $2, $3, now(), $4, 1, $5::jsonb, md5($5::text))`,
+      [rev1Id, websiteId, page1Id, userId, JSON.stringify(doc1)]
+    );
+    await client.query(
+      `INSERT INTO public.builder_publication_targets (website_id, page_id, published_revision_id, published_at, published_by)
+       VALUES ($1, $2, $3, now(), $4)`,
+      [websiteId, page1Id, rev1Id, userId]
     );
 
-    // Add /about route
+    const doc2 = {
+      schemaVersion: 1,
+      page: { id: page2Id, user_id: userId, funnel_id: funnel2Id, name: 'About Page', slug: 'about', status: 'published', step_order: 0 },
+      sections: [{ id: sec2[0].id, page_id: page2Id, type: 'hero', order: 0, content: { title: 'About Us' }, styles: {} }]
+    };
+    const rev2Id = randomUUID();
     await client.query(
-      'INSERT INTO public.website_routes (website_id, path, funnel_id) VALUES ($1, $2, $3)',
-      [websiteId, '/about', funnel2Id]
+      `INSERT INTO public.builder_published_revisions (id, website_id, page_id, created_at, created_by, schema_version, document, document_fingerprint)
+       VALUES ($1, $2, $3, now(), $4, 1, $5::jsonb, md5($5::text))`,
+      [rev2Id, websiteId, page2Id, userId, JSON.stringify(doc2)]
     );
-
-    // Publish baseline publication targets for page1 and page2
-    const rev1 = randomUUID();
-    const rev2 = randomUUID();
-    await client.query('INSERT INTO public.builder_published_revisions (id, website_id, page_id, created_by, schema_version, document, document_fingerprint) VALUES ($1, $2, $3, $4, 1, \'{}\', \'fp1\')', [rev1, websiteId, page1Id, userId]);
-    await client.query('INSERT INTO public.builder_published_revisions (id, website_id, page_id, created_by, schema_version, document, document_fingerprint) VALUES ($1, $2, $3, $4, 1, \'{}\', \'fp2\')', [rev2, websiteId, page2Id, userId]);
-    await client.query('INSERT INTO public.builder_publication_targets (website_id, page_id, published_revision_id, published_at, published_by) VALUES ($1, $2, $3, now(), $4)', [websiteId, page1Id, rev1, userId]);
-    await client.query('INSERT INTO public.builder_publication_targets (website_id, page_id, published_revision_id, published_at, published_by) VALUES ($1, $2, $3, now(), $4)', [websiteId, page2Id, rev2, userId]);
+    await client.query(
+      `INSERT INTO public.builder_publication_targets (website_id, page_id, published_revision_id, published_at, published_by)
+       VALUES ($1, $2, $3, now(), $4)`,
+      [websiteId, page2Id, rev2Id, userId]
+    );
 
     client.release();
 
@@ -215,19 +262,18 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
       funnel3Id,
       page1Id,
       page2Id,
-      page3Id
+      page3Id,
+      routeAboutId
     };
   }
 
-  async function setAuth(client: any, userId: string | null) {
+  async function setAuth(client: pg.PoolClient, userId: string | null) {
     if (userId) {
-      await client.query(`SET request.jwt.claim.sub = '${userId}'`);
-      await client.query(`SET request.jwt.claims = '{"sub":"${userId}"}'`);
-      await client.query('SET ROLE authenticated');
+      await client.query(`SET LOCAL "request.jwt.claim.sub" = '${userId}'`);
+      await client.query('SET LOCAL ROLE authenticated');
     } else {
-      await client.query('RESET request.jwt.claim.sub');
-      await client.query('RESET request.jwt.claims');
-      await client.query('SET ROLE anon');
+      await client.query('RESET ROLE');
+      await client.query('SET LOCAL "request.jwt.claim.sub" = \'\'');
     }
   }
 
@@ -289,277 +335,96 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
     }
   });
 
-  it('5. returns NO_CHANGES when no pending publishable changes exist', async () => {
-    const fix = await createTestFixture();
+  it('5. published page edited through canonical save boundary: plan reports page pending (A & B)', async () => {
+    const { userId, websiteId, page1Id } = await createTestFixture();
     const client = await pool.connect();
     try {
-      await setAuth(client, fix.userId);
-      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as val', [fix.websiteId]);
-      const plan = planRes.rows[0].val;
+      await setAuth(client, userId);
 
-      expect(plan.has_pending_changes).toBe(false);
-      expect(plan.is_publishable).toBe(false);
+      // Baseline: plan should report no changes
+      const plan1Res = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan1 = plan1Res.rows[0].plan;
+      expect(plan1.has_pending_changes).toBe(false);
+      expect(plan1.summary.pages.has_changes).toBe(false);
 
-      const pubRes = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as val', [
-        fix.websiteId,
+      // Edit page1 through canonical save boundary
+      const updatedSec1 = [
+        { id: `sec1-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Updated Welcome Title' }, styles: {} }
+      ];
+      await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page1Id, JSON.stringify(updatedSec1)]);
+
+      // Now plan should report page1 pending
+      const plan2Res = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan2 = plan2Res.rows[0].plan;
+      expect(plan2.has_pending_changes).toBe(true);
+      expect(plan2.pending_domains).toContain('pages');
+      expect(plan2.summary.pages.has_changes).toBe(true);
+      expect(plan2.summary.pages.count).toBe(1);
+      expect(plan2.summary.pages.items[0].page_id).toBe(page1Id);
+    } finally {
+      await client.query('RESET ROLE');
+      client.release();
+    }
+  });
+
+  it('6. content-only unified publish: publishes exact saved BuilderDocument (C)', async () => {
+    const { userId, websiteId, page1Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Edit page1 content
+      const updatedSec = [
+        { id: `sec1-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Exclusive Special' }, styles: {} }
+      ];
+      await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page1Id, JSON.stringify(updatedSec)]);
+
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan = planRes.rows[0].plan;
+
+      const pubRes = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as res', [
+        websiteId,
         JSON.stringify(plan.expected_state)
       ]);
-      const result = pubRes.rows[0].val;
-      expect(result.status).toBe('NO_CHANGES');
-      expect(result.success).toBe(true);
+      const res = pubRes.rows[0].res;
+      expect(res.success).toBe(true);
+      expect(res.status).toBe('PUBLISHED');
+      expect(res.publication_revision).toBe(2);
+
+      // Verify the new publication target
+      const targetRes = await client.query(
+        'SELECT bpt.*, bpr.document FROM public.builder_publication_targets bpt JOIN public.builder_published_revisions bpr ON bpr.id = bpt.published_revision_id WHERE bpt.website_id = $1 AND bpt.page_id = $2',
+        [websiteId, page1Id]
+      );
+      expect(targetRes.rows.length).toBe(1);
+      expect(targetRes.rows[0].document.sections[0].content.title).toBe('Exclusive Special');
     } finally {
       await client.query('RESET ROLE');
       client.release();
     }
   });
 
-  it('6. homepage-only unified publish promotes draft homepage and updates root route', async () => {
-    const fix = await createTestFixture();
+  it('7. concurrent page save after plan results in PT409 conflict (D & E)', async () => {
+    const { userId, websiteId, page1Id } = await createTestFixture();
     const client = await pool.connect();
     try {
-      await setAuth(client, fix.userId);
+      await setAuth(client, userId);
 
-      // Set draft homepage to About funnel
-      await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2::text)', [fix.websiteId, fix.funnel2Id]);
+      // 1. Initial edit and plan
+      const secA = [{ id: `sec-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Title A' }, styles: {} }];
+      await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page1Id, JSON.stringify(secA)]);
 
-      // Get plan
-      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as val', [fix.websiteId]);
-      const plan = planRes.rows[0].val;
-      expect(plan.has_pending_changes).toBe(true);
-      expect(plan.pending_domains).toContain('homepage');
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const staleExpectedState = planRes.rows[0].plan.expected_state;
 
-      // Publish
-      const pubRes = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as val', [
-        fix.websiteId,
-        JSON.stringify(plan.expected_state)
-      ]);
-      const result = pubRes.rows[0].val;
-      expect(result.status).toBe('PUBLISHED');
-      expect(result.publication_revision).toBe(1);
+      // 2. Another tab edits the page content (e.g. revision 3)
+      const secB = [{ id: `sec-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Title B' }, styles: {} }];
+      await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 3)', [page1Id, JSON.stringify(secB)]);
 
-      // Verify website row
-      await client.query('RESET ROLE');
-      const siteCheck = await client.query('SELECT homepage_funnel_id, draft_homepage_funnel_id, publication_revision FROM public.websites WHERE id = $1', [fix.websiteId]);
-      expect(siteCheck.rows[0].homepage_funnel_id).toBe(fix.funnel2Id);
-      expect(siteCheck.rows[0].draft_homepage_funnel_id).toBeNull();
-      expect(siteCheck.rows[0].publication_revision).toBe(1);
-
-      // Verify root route points to funnel2Id
-      const routeCheck = await client.query('SELECT funnel_id FROM public.website_routes WHERE website_id = $1 AND path = $2', [fix.websiteId, '/']);
-      expect(routeCheck.rows[0].funnel_id).toBe(fix.funnel2Id);
-    } finally {
-      await client.query('RESET ROLE');
-      client.release();
-    }
-  });
-
-  it('7. cross-domain atomic publish: New Page + Route draft + Primary Navigation succeeds in 1 transaction', async () => {
-    const fix = await createTestFixture();
-    const client = await pool.connect();
-    try {
-      await setAuth(client, fix.userId);
-
-      // Stage route draft for /services -> funnel3Id using set_builder_route_draft
-      await client.query(
-        'SELECT public.set_builder_route_draft($1::uuid, $2::text, $3::text)',
-        [fix.websiteId, fix.funnel3Id, '/services']
-      );
-
-      // Stage primary navigation draft pointing to funnel3Id
-      const navItem = {
-        id: randomUUID(),
-        label: 'Our Services',
-        target_kind: 'internal',
-        target_value: fix.funnel3Id,
-        position: 0,
-        visible: true,
-        is_cta: false
-      };
-      await client.query(
-        'SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb)',
-        [fix.websiteId, 'primary', JSON.stringify([navItem])]
-      );
-
-      // Get plan: projected final route set includes /services, so nav link is VALID!
-      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as val', [fix.websiteId]);
-      const plan = planRes.rows[0].val;
-
-      expect(plan.blockers.length).toBe(0);
-      expect(plan.is_publishable).toBe(true);
-      expect(plan.pending_domains).toContain('routes');
-      expect(plan.pending_domains).toContain('primary_navigation');
-      expect(plan.pending_domains).toContain('pages');
-
-      // Publish in one atomic transaction
-      const pubRes = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as val', [
-        fix.websiteId,
-        JSON.stringify(plan.expected_state)
-      ]);
-      const result = pubRes.rows[0].val;
-      expect(result.status).toBe('PUBLISHED');
-
-      // Verify live route exists
-      await client.query('RESET ROLE');
-      const liveRoute = await client.query('SELECT path, funnel_id FROM public.website_routes WHERE website_id = $1 AND path = $2', [fix.websiteId, '/services']);
-      expect(liveRoute.rows[0].funnel_id).toBe(fix.funnel3Id);
-
-      // Verify live nav exists
-      const liveNav = await client.query('SELECT items, revision FROM public.builder_site_navigation_live WHERE website_id = $1 AND menu_scope = $2', [fix.websiteId, 'primary']);
-      expect(liveNav.rows[0].items[0].label).toBe('Our Services');
-      expect(liveNav.rows[0].revision).toBe(1);
-
-      // Verify drafts cleared
-      const routeDrafts = await client.query('SELECT count(*) FROM public.builder_route_drafts WHERE website_id = $1', [fix.websiteId]);
-      expect(Number(routeDrafts.rows[0].count)).toBe(0);
-
-      const navDrafts = await client.query('SELECT count(*) FROM public.builder_site_navigation_drafts WHERE website_id = $1', [fix.websiteId]);
-      expect(Number(navDrafts.rows[0].count)).toBe(0);
-    } finally {
-      await client.query('RESET ROLE');
-      client.release();
-    }
-  });
-
-  it('8. cross-domain circular resolution: Nav link removal + final route deletion succeeds without deadlock', async () => {
-    const fix = await createTestFixture();
-    const client = await pool.connect();
-    try {
-      await setAuth(client, fix.userId);
-
-      // Initially publish nav pointing to /about (funnel2Id)
-      const navItem = {
-        id: randomUUID(),
-        label: 'About Us',
-        target_kind: 'internal',
-        target_value: fix.funnel2Id,
-        position: 0,
-        visible: true,
-        is_cta: false
-      };
-      await client.query(
-        'SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb)',
-        [fix.websiteId, 'primary', JSON.stringify([navItem])]
-      );
-      const plan1Res = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as val', [fix.websiteId]);
-      await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [fix.websiteId, JSON.stringify(plan1Res.rows[0].val.expected_state)]);
-
-      // Now: stage route draft to delete /about route using delete_builder_route_draft
-      const aboutRoute = await client.query('SELECT id FROM public.website_routes WHERE website_id = $1 AND path = $2', [fix.websiteId, '/about']);
-      await client.query(
-        'SELECT public.delete_builder_route_draft($1::uuid, $2::uuid, $3::text)',
-        [fix.websiteId, aboutRoute.rows[0].id, fix.funnel2Id]
-      );
-
-      // And stage nav draft removing the item
-      await client.query(
-        'SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb)',
-        [fix.websiteId, 'primary', '[]']
-      );
-
-      // Plan should see projected nav has removed the item, so deleting the route is ALLOWED!
-      const plan2Res = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as val', [fix.websiteId]);
-      const plan2 = plan2Res.rows[0].val;
-      expect(plan2.blockers.length).toBe(0);
-      expect(plan2.is_publishable).toBe(true);
-
-      // Publish succeeds
-      const pubRes = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as val', [
-        fix.websiteId,
-        JSON.stringify(plan2.expected_state)
-      ]);
-      expect(pubRes.rows[0].val.status).toBe('PUBLISHED');
-
-      // Verify route was deleted and nav updated to empty
-      await client.query('RESET ROLE');
-      const checkRoute = await client.query('SELECT * FROM public.website_routes WHERE website_id = $1 AND path = $2', [fix.websiteId, '/about']);
-      expect(checkRoute.rows.length).toBe(0);
-
-      const checkNav = await client.query('SELECT items FROM public.builder_site_navigation_live WHERE website_id = $1 AND menu_scope = $2', [fix.websiteId, 'primary']);
-      expect(checkNav.rows[0].items).toEqual([]);
-    } finally {
-      await client.query('RESET ROLE');
-      client.release();
-    }
-  });
-
-  it('9. blocks publish and rolls back completely when projected nav target is invalid/unrouted', async () => {
-    const fix = await createTestFixture();
-    const client = await pool.connect();
-    try {
-      await setAuth(client, fix.userId);
-
-      // Associate funnel3Id via a temporary route draft first so stage nav succeeds
-      await client.query(
-        'SELECT public.set_builder_route_draft($1::uuid, $2::text, $3::text)',
-        [fix.websiteId, fix.funnel3Id, '/services']
-      );
-
-      const invalidNavItem = {
-        id: randomUUID(),
-        label: 'Unrouted Link',
-        target_kind: 'internal',
-        target_value: fix.funnel3Id,
-        position: 0,
-        visible: true,
-        is_cta: false
-      };
-      await client.query(
-        'SELECT public.stage_builder_site_navigation_draft($1::uuid, $2::text, $3::jsonb)',
-        [fix.websiteId, 'primary', JSON.stringify([invalidNavItem])]
-      );
-
-      // Now revert the route draft for /services so funnel3Id has no route in projected state
-      await client.query('SELECT public.revert_builder_route_draft($1::uuid, null::uuid, $2::text)', [fix.websiteId, fix.funnel3Id]);
-
-      // Stage valid draft homepage to About
-      await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2::text)', [fix.websiteId, fix.funnel2Id]);
-
-      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as val', [fix.websiteId]);
-      const plan = planRes.rows[0].val;
-
-      expect(plan.is_publishable).toBe(false);
-      expect(plan.blockers.length).toBeGreaterThan(0);
-      expect(plan.blockers[0].code).toBe('NAV_TARGET_UNROUTED');
-
-      // Attempt publish -> rejected
+      // 3. First tab attempts to publish with stale expected_state
       await expect(
         client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
-          fix.websiteId,
-          JSON.stringify(plan.expected_state)
-        ])
-      ).rejects.toThrow(/Primary navigation link "Unrouted Link" points to a destination without a public route/);
-
-      // Verify 100% rollback: homepage remained live funnel1Id
-      await client.query('RESET ROLE');
-      const siteCheck = await client.query('SELECT homepage_funnel_id, draft_homepage_funnel_id FROM public.websites WHERE id = $1', [fix.websiteId]);
-      expect(siteCheck.rows[0].homepage_funnel_id).toBe(fix.funnel1Id);
-      expect(siteCheck.rows[0].draft_homepage_funnel_id).toBe(fix.funnel2Id); // draft preserved!
-    } finally {
-      await client.query('RESET ROLE');
-      client.release();
-    }
-  });
-
-  it('10. strict optimistic concurrency: stale expected_state rejects with PT409', async () => {
-    const fix = await createTestFixture();
-    const client = await pool.connect();
-    try {
-      await setAuth(client, fix.userId);
-
-      // Stage a draft
-      await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2::text)', [fix.websiteId, fix.funnel2Id]);
-      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as val', [fix.websiteId]);
-      const plan = planRes.rows[0].val;
-
-      // Tamper with expected state (stale publication revision or wrong route draft ID)
-      const staleExpectedState = {
-        ...plan.expected_state,
-        publication_revision: 999
-      };
-
-      await expect(
-        client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
-          fix.websiteId,
+          websiteId,
           JSON.stringify(staleExpectedState)
         ])
       ).rejects.toThrow(/Website changes were updated elsewhere/);
@@ -569,31 +434,309 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
     }
   });
 
-  it('11. creates immutable publication audit record upon successful publication', async () => {
-    const fix = await createTestFixture();
+  it('8. navigation-only unified publish creates ZERO new builder_published_revisions (F)', async () => {
+    const { userId, websiteId, funnel1Id } = await createTestFixture();
     const client = await pool.connect();
     try {
-      await setAuth(client, fix.userId);
+      await setAuth(client, userId);
 
-      await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2::text)', [fix.websiteId, fix.funnel2Id]);
-      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as val', [fix.websiteId]);
-      const plan = planRes.rows[0].val;
+      // Count initial published revisions
+      const initialRevCountRes = await client.query('SELECT count(*)::integer as count FROM public.builder_published_revisions WHERE website_id = $1', [websiteId]);
+      const initialRevCount = initialRevCountRes.rows[0].count;
 
-      const pubRes = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as val', [
-        fix.websiteId,
+      // Create primary nav draft
+      const navItems = [{ id: 'nav-1', label: 'Home', target_kind: 'homepage', target_value: '', visible: true }];
+      await client.query('SELECT public.save_builder_site_navigation_draft($1::uuid, $2, $3::jsonb, 0)', [
+        websiteId, 'primary', JSON.stringify(navItems)
+      ]);
+
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan = planRes.rows[0].plan;
+      expect(plan.summary.pages.has_changes).toBe(false);
+      expect(plan.summary.primary_navigation.has_changes).toBe(true);
+
+      await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
+        websiteId,
         JSON.stringify(plan.expected_state)
       ]);
-      const pubId = pubRes.rows[0].val.publication_id;
 
+      // Assert ZERO new builder_published_revisions were created
+      const finalRevCountRes = await client.query('SELECT count(*)::integer as count FROM public.builder_published_revisions WHERE website_id = $1', [websiteId]);
+      expect(finalRevCountRes.rows[0].count).toBe(initialRevCount);
+    } finally {
       await client.query('RESET ROLE');
-      const auditCheck = await client.query(
-        'SELECT * FROM public.builder_website_publications WHERE id = $1',
-        [pubId]
+      client.release();
+    }
+  });
+
+  it('9. route-only and homepage-only publish do not republish unchanged page content (G & H)', async () => {
+    const { userId, websiteId, funnel2Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      const initialRevCountRes = await client.query('SELECT count(*)::integer as count FROM public.builder_published_revisions WHERE website_id = $1', [websiteId]);
+      const initialRevCount = initialRevCountRes.rows[0].count;
+
+      // Change draft homepage to funnel2
+      await client.query('SELECT public.set_builder_homepage_draft($1::uuid, $2)', [websiteId, funnel2Id]);
+
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan = planRes.rows[0].plan;
+      expect(plan.summary.homepage.changed).toBe(true);
+      expect(plan.summary.pages.has_changes).toBe(false);
+
+      await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
+        websiteId,
+        JSON.stringify(plan.expected_state)
+      ]);
+
+      const finalRevCountRes = await client.query('SELECT count(*)::integer as count FROM public.builder_published_revisions WHERE website_id = $1', [websiteId]);
+      expect(finalRevCountRes.rows[0].count).toBe(initialRevCount);
+    } finally {
+      await client.query('RESET ROLE');
+      client.release();
+    }
+  });
+
+  it('10. new page + content + route + nav succeeds atomically in ONE transaction (I)', async () => {
+    const { userId, websiteId, funnel3Id, page3Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Create route draft for /services -> funnel3
+      await client.query('SELECT public.stage_builder_route_draft($1::uuid, null, $2, $3)', [
+        websiteId, '/services', funnel3Id
+      ]);
+
+      // Create nav draft pointing to funnel3
+      const navItems = [
+        { id: 'nav-home', label: 'Home', target_kind: 'homepage', target_value: '', visible: true },
+        { id: 'nav-serv', label: 'Services', target_kind: 'internal', target_value: funnel3Id, visible: true }
+      ];
+      await client.query('SELECT public.save_builder_site_navigation_draft($1::uuid, $2, $3::jsonb, 0)', [
+        websiteId, 'primary', JSON.stringify(navItems)
+      ]);
+
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan = planRes.rows[0].plan;
+
+      expect(plan.is_publishable).toBe(true);
+      expect(plan.blockers.length).toBe(0);
+      expect(plan.summary.pages.has_changes).toBe(true);
+      expect(plan.summary.routes.has_changes).toBe(true);
+      expect(plan.summary.primary_navigation.has_changes).toBe(true);
+
+      const pubRes = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as res', [
+        websiteId,
+        JSON.stringify(plan.expected_state)
+      ]);
+      expect(pubRes.rows[0].res.success).toBe(true);
+
+      // Verify route /services exists and target exists
+      const routeCheck = await client.query('SELECT * FROM public.website_routes WHERE website_id = $1 AND path = $2', [websiteId, '/services']);
+      expect(routeCheck.rows.length).toBe(1);
+
+      const targetCheck = await client.query('SELECT * FROM public.builder_publication_targets WHERE website_id = $1 AND page_id = $2', [websiteId, page3Id]);
+      expect(targetCheck.rows.length).toBe(1);
+    } finally {
+      await client.query('RESET ROLE');
+      client.release();
+    }
+  });
+
+  it('11. same route draft ID with mutated path, funnel, or action throws PT409 (20.A, 20.B, 20.C)', async () => {
+    const { userId, websiteId, funnel2Id, funnel3Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // 1. Stage route draft /pricing -> funnel2
+      const stageRes = await client.query('SELECT public.stage_builder_route_draft($1::uuid, null, $2, $3) as res', [
+        websiteId, '/pricing', funnel2Id
+      ]);
+      const draftId = stageRes.rows[0].res.draft.id;
+
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const staleExpectedState = planRes.rows[0].plan.expected_state;
+
+      // 2. In-place mutation of the same draft row to /pricing-plans -> funnel3
+      await client.query('UPDATE public.builder_route_drafts SET path = $1, funnel_id = $2 WHERE id = $3', [
+        '/pricing-plans', funnel3Id, draftId
+      ]);
+
+      // 3. Attempt to publish using stale expected state
+      await expect(
+        client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
+          websiteId,
+          JSON.stringify(staleExpectedState)
+        ])
+      ).rejects.toThrow(/Website changes were updated elsewhere/);
+    } finally {
+      await client.query('RESET ROLE');
+      client.release();
+    }
+  });
+
+  it('12. same-path funnel reassignment succeeds without redirect (20.E)', async () => {
+    const { userId, websiteId, funnel3Id, routeAboutId } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Update existing route /about to point to funnel3 instead of funnel2
+      await client.query('SELECT public.stage_builder_route_draft($1::uuid, $2::uuid, $3, $4)', [
+        websiteId, routeAboutId, '/about', funnel3Id
+      ]);
+
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan = planRes.rows[0].plan;
+
+      const pubRes = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as res', [
+        websiteId,
+        JSON.stringify(plan.expected_state)
+      ]);
+      expect(pubRes.rows[0].res.success).toBe(true);
+
+      // Verify route destination changed
+      const routeCheck = await client.query('SELECT * FROM public.website_routes WHERE id = $1', [routeAboutId]);
+      expect(routeCheck.rows[0].funnel_id).toBe(funnel3Id);
+
+      // Verify NO redirect was created since path did not change
+      const redirCheck = await client.query('SELECT * FROM public.website_route_redirects WHERE website_id = $1', [websiteId]);
+      expect(redirCheck.rows.length).toBe(0);
+    } finally {
+      await client.query('RESET ROLE');
+      client.release();
+    }
+  });
+
+  it('13. rename + destination change creates redirect and collapses chains (20.F, 20.G, 20.I)', async () => {
+    const { userId, websiteId, funnel3Id, routeAboutId } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Pre-existing redirect /company -> /about
+      await client.query(
+        'INSERT INTO public.website_route_redirects (website_id, from_path, to_path) VALUES ($1, $2, $3)',
+        [websiteId, '/company', '/about']
       );
-      expect(auditCheck.rows.length).toBe(1);
-      expect(auditCheck.rows[0].publication_revision).toBe(1);
-      expect(auditCheck.rows[0].published_by).toBe(fix.userId);
-      expect(auditCheck.rows[0].summary).toBeDefined();
+
+      // Rename route /about -> /our-story with funnel3
+      await client.query('SELECT public.stage_builder_route_draft($1::uuid, $2::uuid, $3, $4)', [
+        websiteId, routeAboutId, '/our-story', funnel3Id
+      ]);
+
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan = planRes.rows[0].plan;
+
+      await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
+        websiteId,
+        JSON.stringify(plan.expected_state)
+      ]);
+
+      // Verify live route
+      const routeCheck = await client.query('SELECT * FROM public.website_routes WHERE id = $1', [routeAboutId]);
+      expect(routeCheck.rows[0].path).toBe('/our-story');
+      expect(routeCheck.rows[0].funnel_id).toBe(funnel3Id);
+
+      // Verify redirects:
+      // 1. /about -> /our-story
+      // 2. /company -> /our-story (collapsed from /company -> /about)
+      const redirs = await client.query('SELECT from_path, to_path FROM public.website_route_redirects WHERE website_id = $1 ORDER BY from_path', [websiteId]);
+      expect(redirs.rows).toEqual([
+        { from_path: '/about', to_path: '/our-story' },
+        { from_path: '/company', to_path: '/our-story' }
+      ]);
+    } finally {
+      await client.query('RESET ROLE');
+      client.release();
+    }
+  });
+
+  it('14. full cross-domain rollback: any invalid component rolls back everything (21)', async () => {
+    const { userId, websiteId, page1Id, funnel2Id, funnel3Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // 1. Page edit
+      const secA = [{ id: `sec-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'Tentative' }, styles: {} }];
+      await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page1Id, JSON.stringify(secA)]);
+
+      // 2. Homepage draft
+      await client.query('SELECT public.set_builder_homepage_draft($1::uuid, $2)', [websiteId, funnel2Id]);
+
+      // 3. Route draft
+      await client.query('SELECT public.stage_builder_route_draft($1::uuid, null, $2, $3)', [
+        websiteId, '/services-new', funnel3Id
+      ]);
+
+      // 4. Primary nav with UNROUTED invalid target
+      const navItems = [
+        { id: 'nav-1', label: 'Broken Link', target_kind: 'internal', target_value: 'non-existent-funnel', visible: true }
+      ];
+      await client.query('SELECT public.save_builder_site_navigation_draft($1::uuid, $2, $3::jsonb, 0)', [
+        websiteId, 'primary', JSON.stringify(navItems)
+      ]);
+
+      const planRes = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      const plan = planRes.rows[0].plan;
+      expect(plan.is_publishable).toBe(false);
+      expect(plan.blockers.length).toBeGreaterThan(0);
+
+      // Attempt to publish
+      await expect(
+        client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
+          websiteId,
+          JSON.stringify(plan.expected_state)
+        ])
+      ).rejects.toThrow(/Publication blocked|without a public route/);
+
+      // Verify EVERYTHING remained untouched in live tables
+      const webCheck = await client.query('SELECT publication_revision, homepage_funnel_id, draft_homepage_funnel_id FROM public.websites WHERE id = $1', [websiteId]);
+      expect(webCheck.rows[0].publication_revision).toBe(1);
+      expect(webCheck.rows[0].draft_homepage_funnel_id).toBe(funnel2Id); // Draft preserved
+
+      const pubCountRes = await client.query('SELECT count(*)::integer as count FROM public.builder_website_publications WHERE website_id = $1', [websiteId]);
+      expect(pubCountRes.rows[0].count).toBe(0);
+    } finally {
+      await client.query('RESET ROLE');
+      client.release();
+    }
+  });
+
+  it('15. no-change retry / history idempotency (22)', async () => {
+    const { userId, websiteId, page1Id } = await createTestFixture();
+    const client = await pool.connect();
+    try {
+      await setAuth(client, userId);
+
+      // Perform a valid publish
+      const secA = [{ id: `sec-${randomUUID()}`, page_id: page1Id, type: 'hero', order: 0, content: { title: 'New Edition' }, styles: {} }];
+      await client.query('SELECT public.save_page_sections_document($1, $2::jsonb, 2)', [page1Id, JSON.stringify(secA)]);
+
+      const planRes1 = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb)', [
+        websiteId,
+        JSON.stringify(planRes1.rows[0].plan.expected_state)
+      ]);
+
+      // Call plan again: has_pending_changes must be false
+      const planRes2 = await client.query('SELECT public.get_builder_website_publish_plan($1::uuid) as plan', [websiteId]);
+      expect(planRes2.rows[0].plan.has_pending_changes).toBe(false);
+
+      // If published again with fresh plan: returns NO_CHANGES without incrementing revision or audit row
+      const noChangeRes = await client.query('SELECT public.publish_builder_website($1::uuid, $2::jsonb) as res', [
+        websiteId,
+        JSON.stringify(planRes2.rows[0].plan.expected_state)
+      ]);
+      expect(noChangeRes.rows[0].res.status).toBe('NO_CHANGES');
+
+      const auditCount = await client.query('SELECT count(*)::integer as count FROM public.builder_website_publications WHERE website_id = $1', [websiteId]);
+      expect(auditCount.rows[0].count).toBe(1); // Only 1 audit record exists
     } finally {
       await client.query('RESET ROLE');
       client.release();

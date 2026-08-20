@@ -12,10 +12,10 @@ describe('BuilderUnifiedPublicationController', () => {
     expected_state: {
       publication_revision: 1,
       homepage: { draft_funnel_id: 'fn-2', live_funnel_id: 'fn-1' },
-      route_draft_ids: ['rd-1'],
+      route_drafts: [{ id: 'rd-1', route_id: null, action: 'upsert', path: '/services', funnel_id: 'fn-3' }],
       primary_navigation: { is_draft: false, base_revision: 0, draft_revision: 0, live_revision: 1 },
       footer_navigation: { is_draft: false, base_revision: 0, draft_revision: 0, live_revision: 0 },
-      page_drafts: []
+      pages: []
     },
     summary: {
       homepage: { changed: true, current_live: 'Old Home', next_live: 'New Home' },

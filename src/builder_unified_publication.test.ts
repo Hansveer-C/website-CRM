@@ -59,10 +59,10 @@ describe('Builder Unified Publication UI', () => {
       expected_state: {
         publication_revision: 2,
         homepage: { draft_funnel_id: 'fn-2', live_funnel_id: 'fn-1' },
-        route_draft_ids: ['rd-1'],
+        route_drafts: [{ id: 'rd-1', route_id: null, action: 'upsert', path: '/services', funnel_id: 'fn-3' }],
         primary_navigation: { is_draft: true, base_revision: 1, draft_revision: 2, live_revision: 1 },
         footer_navigation: { is_draft: false, base_revision: 0, draft_revision: 0, live_revision: 1 },
-        page_drafts: []
+        pages: []
       },
       summary: {
         homepage: { changed: true, current_live: 'Old Home', next_live: 'New Home' },
@@ -108,10 +108,10 @@ describe('Builder Unified Publication UI', () => {
       expected_state: {
         publication_revision: 1,
         homepage: { draft_funnel_id: null, live_funnel_id: 'fn-1' },
-        route_draft_ids: [],
+        route_drafts: [],
         primary_navigation: { is_draft: true, base_revision: 0, draft_revision: 1, live_revision: 0 },
         footer_navigation: { is_draft: false, base_revision: 0, draft_revision: 0, live_revision: 0 },
-        page_drafts: []
+        pages: []
       },
       summary: {
         homepage: { changed: false, current_live: 'Home', next_live: 'Home' },

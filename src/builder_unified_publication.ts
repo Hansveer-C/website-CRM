@@ -62,16 +62,31 @@ export interface WebsitePublishExpectedNavigationState {
   live_revision: number;
 }
 
+export interface WebsitePublishExpectedRouteDraft {
+  id: string;
+  route_id?: string | null;
+  action: string;
+  path: string;
+  funnel_id: string;
+}
+
+export interface WebsitePublishExpectedPageState {
+  page_id: string;
+  save_revision: number;
+  document_hash: string;
+  current_published_revision_id: string | null;
+}
+
 export interface WebsitePublishExpectedState {
   publication_revision: number;
   homepage: {
     draft_funnel_id: string | null;
     live_funnel_id: string | null;
   };
-  route_draft_ids: string[];
+  route_drafts: WebsitePublishExpectedRouteDraft[];
   primary_navigation: WebsitePublishExpectedNavigationState;
   footer_navigation: WebsitePublishExpectedNavigationState;
-  page_drafts: Array<{ page_id: string; name?: string; slug?: string }>;
+  pages: WebsitePublishExpectedPageState[];
 }
 
 export interface WebsitePublishPlan {

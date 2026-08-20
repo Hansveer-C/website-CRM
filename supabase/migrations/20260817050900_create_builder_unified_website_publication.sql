@@ -62,8 +62,8 @@ declare
   v_live_homepage_label text := '';
 
   -- Route drafts
-  v_route_drafts record;
-  v_route_draft_ids text[] := array[]::text[];
+  v_draft_route_rec record;
+  v_expected_route_drafts jsonb := '[]'::jsonb;
   v_route_creates jsonb := '[]'::jsonb;
   v_route_updates jsonb := '[]'::jsonb;
   v_route_deletes jsonb := '[]'::jsonb;
@@ -83,15 +83,21 @@ declare
 
   -- Pages / Content
   v_pending_pages jsonb := '[]'::jsonb;
+  v_expected_pages jsonb := '[]'::jsonb;
   v_has_page_changes boolean := false;
   v_page_rec record;
+  v_save_rev bigint;
+  v_doc_hash text;
+  v_target_pub_rev_id uuid;
+  v_target_doc_fp text;
+  v_page_doc jsonb;
+  v_saved_fp text;
 
   -- Projected State Collections
   v_projected_routes jsonb := '[]'::jsonb;
   v_projected_funnels text[] := array[]::text[];
   v_projected_paths text[] := array[]::text[];
   v_live_route_rec record;
-  v_draft_route_rec record;
 
   -- Blockers & Warnings
   v_blockers jsonb := '[]'::jsonb;
@@ -106,8 +112,6 @@ declare
   v_target_kind text;
   v_target_val text;
   v_item_vis boolean;
-  v_matched_route boolean;
-  v_dest_funnel text;
   v_expected_state jsonb;
   v_summary jsonb;
 begin
@@ -151,15 +155,22 @@ begin
     select name into v_live_homepage_label from public.funnels where id = v_live_homepage and user_id = v_user_id;
   end if;
 
-  -- 4. Evaluate Route Drafts
+  -- 4. Evaluate Route Drafts (Ordered deterministically by ID)
   for v_draft_route_rec in (
     select id, route_id, path, funnel_id, action
     from public.builder_route_drafts
     where website_id = p_website_id
-    order by created_at asc, id asc
+    order by id asc
   ) loop
     v_has_route_changes := true;
-    v_route_draft_ids := array_append(v_route_draft_ids, v_draft_route_rec.id::text);
+    v_expected_route_drafts := v_expected_route_drafts || jsonb_build_object(
+      'id', v_draft_route_rec.id,
+      'route_id', v_draft_route_rec.route_id,
+      'action', v_draft_route_rec.action,
+      'path', v_draft_route_rec.path,
+      'funnel_id', v_draft_route_rec.funnel_id
+    );
+
     if v_draft_route_rec.action = 'delete' then
       v_route_deletes := v_route_deletes || jsonb_build_object('id', v_draft_route_rec.id, 'route_id', v_draft_route_rec.route_id, 'path', v_draft_route_rec.path, 'funnel_id', v_draft_route_rec.funnel_id);
     elsif v_draft_route_rec.route_id is not null then
@@ -234,9 +245,9 @@ begin
     );
   end if;
 
-  -- 7. Evaluate Pages / Content Drafts
+  -- 7. Evaluate Pages / Content Drafts from Canonical page_sections & save_revisions
   for v_page_rec in (
-    select p.id, p.name, p.slug, p.status, p.funnel_id
+    select p.id, p.user_id, p.funnel_id, p.name, p.slug, p.status, coalesce(p.step_order, 0) as step_order
     from public.pages p
     where p.user_id = v_user_id
       and (
@@ -248,15 +259,75 @@ begin
           select 1 from public.builder_route_drafts brd where brd.website_id = p_website_id and brd.funnel_id = p.funnel_id and brd.action = 'upsert'
         )
       )
+    order by p.id asc
   ) loop
-    -- Check if page has no published target or is in draft status
-    if v_page_rec.status <> 'published' or not exists (
-      select 1 from public.builder_publication_targets bpt
-      where bpt.website_id = p_website_id and bpt.page_id = v_page_rec.id
-    ) then
+    -- Fetch authoritative save revision from private.page_section_save_revisions
+    select revision, document_hash
+    into v_save_rev, v_doc_hash
+    from private.page_section_save_revisions
+    where page_id = v_page_rec.id;
+
+    v_save_rev := coalesce(v_save_rev, 0);
+    v_doc_hash := coalesce(v_doc_hash, pg_catalog.md5('[]'));
+
+    -- Fetch current publication target and revision fingerprint
+    select bpt.published_revision_id, bpr.document_fingerprint
+    into v_target_pub_rev_id, v_target_doc_fp
+    from public.builder_publication_targets bpt
+    left join public.builder_published_revisions bpr
+      on bpr.id = bpt.published_revision_id and bpr.website_id = p_website_id and bpr.page_id = v_page_rec.id
+    where bpt.website_id = p_website_id and bpt.page_id = v_page_rec.id;
+
+    -- Construct canonical saved BuilderDocument
+    select jsonb_build_object(
+      'schemaVersion', 1,
+      'page', jsonb_build_object(
+        'id', v_page_rec.id,
+        'user_id', v_page_rec.user_id,
+        'funnel_id', v_page_rec.funnel_id,
+        'name', v_page_rec.name,
+        'slug', v_page_rec.slug,
+        'status', 'published',
+        'step_order', v_page_rec.step_order
+      ),
+      'sections', coalesce(
+        (
+          select jsonb_agg(
+            jsonb_build_object(
+              'id', s.id,
+              'page_id', s.page_id,
+              'type', s.type,
+              'order', s.order_index,
+              'content', s.content,
+              'styles', coalesce(s.styles, '{}'::jsonb)
+            ) order by s.order_index asc, s.id asc
+          )
+          from public.page_sections s
+          where s.page_id = v_page_rec.id and s.user_id = v_user_id
+        ),
+        '[]'::jsonb
+      )
+    ) into v_page_doc;
+
+    v_saved_fp := pg_catalog.md5(v_page_doc::text);
+
+    -- Check if content actually changed or page was never published
+    if v_target_pub_rev_id is null or v_saved_fp is distinct from v_target_doc_fp then
       v_has_page_changes := true;
-      v_pending_pages := v_pending_pages || jsonb_build_object('page_id', v_page_rec.id, 'name', v_page_rec.name, 'slug', v_page_rec.slug);
+      v_pending_pages := v_pending_pages || jsonb_build_object(
+        'page_id', v_page_rec.id,
+        'name', v_page_rec.name,
+        'slug', v_page_rec.slug
+      );
     end if;
+
+    -- Record authoritative content save token in expected_state
+    v_expected_pages := v_expected_pages || jsonb_build_object(
+      'page_id', v_page_rec.id,
+      'save_revision', v_save_rev,
+      'document_hash', v_doc_hash,
+      'current_published_revision_id', v_target_pub_rev_id
+    );
   end loop;
 
   if v_has_page_changes then
@@ -368,10 +439,10 @@ begin
       'draft_funnel_id', v_draft_homepage,
       'live_funnel_id', v_live_homepage
     ),
-    'route_draft_ids', to_jsonb(v_route_draft_ids),
+    'route_drafts', v_expected_route_drafts,
     'primary_navigation', v_primary_expected,
     'footer_navigation', v_footer_expected,
-    'page_drafts', v_pending_pages
+    'pages', v_expected_pages
   );
 
   -- 11. Construct Summary Object
@@ -443,12 +514,15 @@ declare
   v_draft_homepage text;
   v_draft_route record;
   v_old_live_path text;
+  v_old_live_funnel text;
   v_primary_draft record;
   v_footer_draft record;
   v_page_rec record;
   v_page_doc jsonb;
   v_doc_fp text;
   v_revision_id uuid;
+  v_target_pub_rev_id uuid;
+  v_target_doc_fp text;
 begin
   -- 1. Authentication
   if v_user_id is null or v_user_id = '' then
@@ -479,16 +553,28 @@ begin
     raise sqlstate 'PT404' using message = 'Website not found';
   end if;
 
-  -- 4. Reconstruct server-authoritative publish plan under lock
+  -- 4. Lock participating pages and save revisions in deterministic order
+  perform 1
+  from public.pages p
+  where p.user_id = v_user_id
+    and (
+      p.funnel_id = coalesce(v_website.draft_homepage_funnel_id, v_website.homepage_funnel_id)
+      or exists (select 1 from public.website_routes wr where wr.website_id = p_website_id and wr.funnel_id = p.funnel_id)
+      or exists (select 1 from public.builder_route_drafts brd where brd.website_id = p_website_id and brd.funnel_id = p.funnel_id and brd.action = 'upsert')
+    )
+  order by p.id asc
+  for update;
+
+  -- 5. Reconstruct server-authoritative publish plan under lock
   v_plan := public.get_builder_website_publish_plan(p_website_id);
   v_current_expected := v_plan->'expected_state';
 
-  -- 5. Strict optimistic concurrency check
+  -- 6. Strict optimistic concurrency check
   if v_current_expected is distinct from p_expected_state then
     raise sqlstate 'PT409' using message = 'Website changes were updated elsewhere. Reload the publish summary before continuing.';
   end if;
 
-  -- 6. No changes check
+  -- 7. No changes check
   if not (v_plan->>'has_pending_changes')::boolean then
     return jsonb_build_object(
       'success', true,
@@ -498,7 +584,7 @@ begin
     );
   end if;
 
-  -- 7. Blocker check (Abort transaction if any blocker exists in projected final state)
+  -- 8. Blocker check (Abort transaction if any blocker exists in projected final state)
   if not (v_plan->>'is_publishable')::boolean or jsonb_array_length(v_plan->'blockers') > 0 then
     raise sqlstate 'PT400' using message = coalesce(
       (v_plan->'blockers'->0->>'message'),
@@ -506,11 +592,11 @@ begin
     );
   end if;
 
-  -- 8. EXECUTE ATOMIC PROMOTION MUTATIONS
+  -- 9. EXECUTE ATOMIC PROMOTION MUTATIONS
 
-  -- A. Pages / Content Publication Targets
+  -- A. Pages / Content Publication Targets (Publish ONLY changed content)
   for v_page_rec in (
-    select p.id as page_id
+    select p.id, p.user_id, p.funnel_id, p.name, p.slug, p.status, coalesce(p.step_order, 0) as step_order
     from public.pages p
     where p.user_id = v_user_id
       and (
@@ -518,52 +604,77 @@ begin
         or exists (select 1 from public.website_routes wr where wr.website_id = p_website_id and wr.funnel_id = p.funnel_id)
         or exists (select 1 from public.builder_route_drafts brd where brd.website_id = p_website_id and brd.funnel_id = p.funnel_id and brd.action = 'upsert')
       )
+    order by p.id asc
   ) loop
-    -- Construct document snapshot from latest sections
+    -- Construct canonical BuilderDocument from page_sections
     select jsonb_build_object(
       'schemaVersion', 1,
-      'pageId', v_page_rec.page_id,
+      'page', jsonb_build_object(
+        'id', v_page_rec.id,
+        'user_id', v_page_rec.user_id,
+        'funnel_id', v_page_rec.funnel_id,
+        'name', v_page_rec.name,
+        'slug', v_page_rec.slug,
+        'status', 'published',
+        'step_order', v_page_rec.step_order
+      ),
       'sections', coalesce(
-        (select jsonb_agg(
-          jsonb_build_object(
-            'id', s.id,
-            'type', s.type,
-            'name', s.name,
-            'sortOrder', s.sort_order,
-            'content', s.content,
-            'isGlobal', s.is_global
-          ) order by s.sort_order asc, s.id asc
-        ) from public.sections s where s.page_id = v_page_rec.page_id),
+        (
+          select jsonb_agg(
+            jsonb_build_object(
+              'id', s.id,
+              'page_id', s.page_id,
+              'type', s.type,
+              'order', s.order_index,
+              'content', s.content,
+              'styles', coalesce(s.styles, '{}'::jsonb)
+            ) order by s.order_index asc, s.id asc
+          )
+          from public.page_sections s
+          where s.page_id = v_page_rec.id and s.user_id = v_user_id
+        ),
         '[]'::jsonb
       )
     ) into v_page_doc;
 
     v_doc_fp := pg_catalog.md5(v_page_doc::text);
-    v_revision_id := pg_catalog.gen_random_uuid();
 
-    -- Create published revision record
-    insert into public.builder_published_revisions (
-      id, website_id, page_id, created_at, created_by, schema_version, document, document_fingerprint
-    ) values (
-      v_revision_id, p_website_id, v_page_rec.page_id, v_now, v_user_id, 1, v_page_doc, v_doc_fp
-    );
+    -- Fetch current publication target and fingerprint
+    select bpt.published_revision_id, bpr.document_fingerprint
+    into v_target_pub_rev_id, v_target_doc_fp
+    from public.builder_publication_targets bpt
+    left join public.builder_published_revisions bpr
+      on bpr.id = bpt.published_revision_id and bpr.website_id = p_website_id and bpr.page_id = v_page_rec.id
+    where bpt.website_id = p_website_id and bpt.page_id = v_page_rec.id;
 
-    -- Upsert publication target
-    insert into public.builder_publication_targets (
-      website_id, page_id, published_revision_id, published_at, published_by
-    ) values (
-      p_website_id, v_page_rec.page_id, v_revision_id, v_now, v_user_id
-    )
-    on conflict (website_id, page_id)
-    do update set
-      published_revision_id = excluded.published_revision_id,
-      published_at = excluded.published_at,
-      published_by = excluded.published_by;
+    -- Publish ONLY if content actually changed or never published before
+    if v_target_pub_rev_id is null or v_doc_fp is distinct from v_target_doc_fp then
+      v_revision_id := pg_catalog.gen_random_uuid();
 
-    -- Set page status published
-    update public.pages
-    set status = 'published'
-    where id = v_page_rec.page_id and user_id = v_user_id;
+      -- Create published revision record
+      insert into public.builder_published_revisions (
+        id, website_id, page_id, created_at, created_by, schema_version, document, document_fingerprint
+      ) values (
+        v_revision_id, p_website_id, v_page_rec.id, v_now, v_user_id, 1, v_page_doc, v_doc_fp
+      );
+
+      -- Upsert publication target
+      insert into public.builder_publication_targets (
+        website_id, page_id, published_revision_id, published_at, published_by
+      ) values (
+        p_website_id, v_page_rec.id, v_revision_id, v_now, v_user_id
+      )
+      on conflict (website_id, page_id)
+      do update set
+        published_revision_id = excluded.published_revision_id,
+        published_at = excluded.published_at,
+        published_by = excluded.published_by;
+
+      -- Set page status published
+      update public.pages
+      set status = 'published', updated_at = v_now
+      where id = v_page_rec.id and user_id = v_user_id;
+    end if;
   end loop;
 
   -- B. Homepage Promotion
@@ -603,43 +714,51 @@ begin
     end if;
   end loop;
 
-  -- Staged renames/updates
+  -- Staged updates/renames
   for v_draft_route in (
     select id, route_id, path, funnel_id
     from public.builder_route_drafts
     where website_id = p_website_id and action = 'upsert' and route_id is not null
   ) loop
-    select path into v_old_live_path
+    select path, funnel_id into v_old_live_path, v_old_live_funnel
     from public.website_routes
     where id = v_draft_route.route_id and website_id = p_website_id;
 
-    if v_old_live_path is not null and v_old_live_path is distinct from v_draft_route.path then
-      -- Remove reclaimed redirect if path previously existed as redirect source
-      delete from public.website_route_redirects
-      where website_id = p_website_id and from_path = v_draft_route.path;
+    if v_old_live_path is not null then
+      if v_old_live_path is distinct from v_draft_route.path then
+        -- Path changed (Rename + optional destination change):
+        -- Remove reclaimed redirect if path previously existed as redirect source
+        delete from public.website_route_redirects
+        where website_id = p_website_id and from_path = v_draft_route.path;
 
-      -- Insert redirect from old to new path
-      insert into public.website_route_redirects (
-        id, website_id, from_path, to_path, created_at, updated_at
-      ) values (
-        pg_catalog.gen_random_uuid(), p_website_id, v_old_live_path, v_draft_route.path, v_now, v_now
-      )
-      on conflict (website_id, from_path)
-      do update set
-        to_path = excluded.to_path,
-        updated_at = excluded.updated_at;
+        -- Insert redirect from old to new path
+        insert into public.website_route_redirects (
+          id, website_id, from_path, to_path, created_at, updated_at
+        ) values (
+          pg_catalog.gen_random_uuid(), p_website_id, v_old_live_path, v_draft_route.path, v_now, v_now
+        )
+        on conflict (website_id, from_path)
+        do update set
+          to_path = excluded.to_path,
+          updated_at = excluded.updated_at;
 
-      -- Collapse sequential redirect chains
-      update public.website_route_redirects
-      set to_path = v_draft_route.path, updated_at = v_now
-      where website_id = p_website_id
-        and to_path = v_old_live_path
-        and from_path <> v_draft_route.path;
+        -- Collapse sequential redirect chains
+        update public.website_route_redirects
+        set to_path = v_draft_route.path, updated_at = v_now
+        where website_id = p_website_id
+          and to_path = v_old_live_path
+          and from_path <> v_draft_route.path;
 
-      -- Update live route
-      update public.website_routes
-      set path = v_draft_route.path, funnel_id = v_draft_route.funnel_id
-      where id = v_draft_route.route_id and website_id = p_website_id;
+        -- Update live route path and funnel
+        update public.website_routes
+        set path = v_draft_route.path, funnel_id = v_draft_route.funnel_id
+        where id = v_draft_route.route_id and website_id = p_website_id;
+      else
+        -- Same path, destination funnel change only:
+        update public.website_routes
+        set funnel_id = v_draft_route.funnel_id
+        where id = v_draft_route.route_id and website_id = p_website_id;
+      end if;
     end if;
   end loop;
 
