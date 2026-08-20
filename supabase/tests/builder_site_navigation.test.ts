@@ -116,7 +116,7 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
       await expect(
         client.query(
           'insert into public.builder_site_navigation_live (website_id, menu_scope, items, revision) values ($1, $2, $3, $4)',
-          [siteId, 'primary', '[]'::any, 1]
+          [siteId, 'primary', '[]', 1]
         )
       ).rejects.toThrow(/permission denied/);
 
@@ -124,7 +124,7 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
       await expect(
         client.query(
           'update public.builder_site_navigation_live set items = $1 where website_id = $2',
-          ['[]'::any, siteId]
+          ['[]', siteId]
         )
       ).rejects.toThrow(/permission denied/);
 
@@ -137,7 +137,7 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
       await expect(
         client.query(
           'insert into public.builder_site_navigation_drafts (website_id, menu_scope, items, base_revision, draft_revision) values ($1, $2, $3, $4, $5)',
-          [siteId, 'primary', '[]'::any, 1, 1]
+          [siteId, 'primary', '[]', 1, 1]
         )
       ).rejects.toThrow(/permission denied/);
 
@@ -145,7 +145,7 @@ describe.skipIf(!DATABASE_URL)('Builder Site Navigation Hardened Integration Tes
       await expect(
         client.query(
           'update public.builder_site_navigation_drafts set items = $1 where website_id = $2',
-          ['[]'::any, siteId]
+          ['[]', siteId]
         )
       ).rejects.toThrow(/permission denied/);
 
