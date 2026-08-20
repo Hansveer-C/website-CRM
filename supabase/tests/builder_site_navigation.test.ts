@@ -465,7 +465,7 @@ describe('Builder Site Navigation Hardened Integration Tests (PostgreSQL 17)', (
             { id: u4, label: 'Other Site', target_kind: 'internal', target_value: fnlSiteB, position: 0, visible: true, is_cta: false }
           ]),
           null,
-          null
+          1
         ])
       ).rejects.toThrow(/Internal destination not associated with this website/);
 
@@ -478,7 +478,7 @@ describe('Builder Site Navigation Hardened Integration Tests (PostgreSQL 17)', (
             { id: u5, label: 'Foreign', target_kind: 'internal', target_value: fnlOtherUser, position: 0, visible: true, is_cta: false }
           ]),
           null,
-          null
+          1
         ])
       ).rejects.toThrow(/Internal destination not found or not owned by user/);
     } finally {
