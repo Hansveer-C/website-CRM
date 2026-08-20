@@ -34,7 +34,7 @@ function inspectDom<T>(body: string, probe: string): T {
       '--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run',
       `--user-data-dir=${join(directory, 'profile')}`,
       '--virtual-time-budget=500', '--dump-dom', pathToFileURL(file).href
-    ], { encoding: 'utf8', timeout: 15_000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    ], { encoding: 'utf8', timeout: 30_000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
     const encoded = dumped.match(/<title>([^<]+)<\/title>/)?.[1];
     if (!encoded || encoded === 'pending') throw new Error('Chromium DOM security probe did not complete.');
     return JSON.parse(Buffer.from(encoded, 'base64').toString('utf8')) as T;
