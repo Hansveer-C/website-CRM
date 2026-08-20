@@ -3,7 +3,8 @@ import {
   NavigationMenuScope,
   SiteNavigationItem,
   SiteNavigationSnapshot,
-  areNavigationSnapshotsEqual
+  areNavigationSnapshotsEqual,
+  validateExternalUrl
 } from './builder_site_navigation_domain';
 
 export type SiteNavigationRepositoryResult<T> =
@@ -159,7 +160,9 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
         ? '__homepage__'
         : item.target_kind === 'email'
           ? item.target_value.trim().toLowerCase()
-          : item.target_value.trim(),
+          : item.target_kind === 'external'
+            ? (validateExternalUrl(item.target_value).normalized ?? item.target_value.trim())
+            : item.target_value.trim(),
       position: typeof item.position === 'number' ? item.position : idx,
       visible: typeof item.visible === 'boolean' ? item.visible : true,
       is_cta: Boolean(item.is_cta)

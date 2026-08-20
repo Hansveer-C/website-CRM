@@ -66,6 +66,11 @@ declare
   v_accumulated_items jsonb := '[]'::jsonb;
   v_normalized_items jsonb := '[]'::jsonb;
   v_normalized_item jsonb;
+  v_url_parts text[];
+  v_scheme text;
+  v_host text;
+  v_port text;
+  v_path text;
 begin
   if v_user_id is null or v_user_id = '' then
     raise sqlstate 'PT401' using message = 'Authentication required';
@@ -216,8 +221,32 @@ begin
       -- Always store canonical sentinel '__homepage__' regardless of caller input
       v_target_value := '__homepage__';
     elsif v_target_kind = 'external' then
-      if not (v_target_value ~* '^https?://[^\s/$.?#].[^\s]*$') then
+      if v_target_value ~ '[\u0000-\u001F\u007F-\u009F\s]' then
+        raise sqlstate 'PT400' using message = 'External URL cannot contain whitespace or control characters';
+      end if;
+
+      v_url_parts := pg_catalog.regexp_match(v_target_value, '^([hH][tT][tT][pP][sS]?:\/\/)([^\/:\?#]+)(?::(\d+))?([\/\?#].*)?$');
+      if v_url_parts is null then
         raise sqlstate 'PT400' using message = 'External URL must be a valid http:// or https:// URL';
+      end if;
+
+      v_scheme := lower(v_url_parts[1]);
+      v_host := lower(v_url_parts[2]);
+      v_port := v_url_parts[3];
+      v_path := coalesce(v_url_parts[4], '');
+
+      if v_host = '' or v_host ~ '[^a-z0-9.-]' then
+        raise sqlstate 'PT400' using message = 'External URL contains invalid host';
+      end if;
+
+      if not (v_path like '/%') then
+        v_path := '/' || v_path;
+      end if;
+
+      if (v_scheme = 'https://' and v_port = '443') or (v_scheme = 'http://' and v_port = '80') or v_port is null or v_port = '' then
+        v_target_value := v_scheme || v_host || v_path;
+      else
+        v_target_value := v_scheme || v_host || ':' || v_port || v_path;
       end if;
     elsif v_target_kind = 'phone' then
       if not (v_target_value ~ '^[+]?[\d\s().-]{3,30}$') then

@@ -816,6 +816,116 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
         client.release();
       }
     });
+
+    it('canonicalizes external URLs matching WHATWG URL standard and performs auto-clean across variants', async () => {
+      const client = await pool.connect();
+      try {
+        const f = await createFixture(client);
+        await setAuthUser(client, f.userId);
+
+        const u1 = randomUUID();
+        const u2 = randomUUID();
+        const u3 = randomUUID();
+        const u4 = randomUUID();
+
+        const rawItems = [
+          { id: u1, label: 'Root Host', target_kind: 'external', target_value: 'HTTPS://EXAMPLE.COM', position: 0, visible: true, is_cta: false },
+          { id: u2, label: 'Default Https Port', target_kind: 'external', target_value: 'https://example.com:443', position: 1, visible: true, is_cta: false },
+          { id: u3, label: 'Default Http Port', target_kind: 'external', target_value: 'http://example.com:80/docs', position: 2, visible: true, is_cta: false },
+          { id: u4, label: 'Query & Hash', target_kind: 'external', target_value: 'HTTPS://Example.COM:8080/pricing?plan=pro#faq', position: 3, visible: true, is_cta: true }
+        ];
+
+        await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+          f.siteId, 'primary', JSON.stringify(rawItems)
+        ]);
+
+        const storedDraft = (await client.query(
+          'select items from public.builder_site_navigation_drafts where website_id = $1 and menu_scope = $2',
+          [f.siteId, 'primary']
+        )).rows[0].items;
+
+        expect(storedDraft).toEqual([
+          { id: u1, label: 'Root Host', target_kind: 'external', target_value: 'https://example.com/', position: 0, visible: true, is_cta: false },
+          { id: u2, label: 'Default Https Port', target_kind: 'external', target_value: 'https://example.com/', position: 1, visible: true, is_cta: false },
+          { id: u3, label: 'Default Http Port', target_kind: 'external', target_value: 'http://example.com/docs', position: 2, visible: true, is_cta: false },
+          { id: u4, label: 'Query & Hash', target_kind: 'external', target_value: 'https://example.com:8080/pricing?plan=pro#faq', position: 3, visible: true, is_cta: true }
+        ]);
+
+        // Publish live
+        await client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [
+          f.siteId, 'primary', 0, 1
+        ]);
+
+        // Staging equivalent external URL variants should auto-clean (redundant draft cleared)
+        const variantItems = [
+          { id: u1, label: 'Root Host', target_kind: 'external', target_value: 'https://example.com/', position: 0, visible: true, is_cta: false },
+          { id: u2, label: 'Default Https Port', target_kind: 'external', target_value: 'HTTPS://Example.COM:443/', position: 1, visible: true, is_cta: false },
+          { id: u3, label: 'Default Http Port', target_kind: 'external', target_value: 'HTTP://EXAMPLE.COM:80/docs', position: 2, visible: true, is_cta: false },
+          { id: u4, label: 'Query & Hash', target_kind: 'external', target_value: 'https://example.com:8080/pricing?plan=pro#faq', position: 3, visible: true, is_cta: true }
+        ];
+
+        const cleanRes = await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5) as data', [
+          f.siteId, 'primary', JSON.stringify(variantItems), 1, null
+        ]);
+        expect(cleanRes.rows[0].data.is_draft).toBe(false);
+
+        const draftsRemaining = (await client.query(
+          'select * from public.builder_site_navigation_drafts where website_id = $1 and menu_scope = $2',
+          [f.siteId, 'primary']
+        )).rows;
+        expect(draftsRemaining.length).toBe(0);
+      } finally {
+        client.release();
+      }
+    });
+
+    it('rejects unsafe external URL schemes, whitespace, and control characters with PT400', async () => {
+      const client = await pool.connect();
+      try {
+        const f = await createFixture(client);
+        await setAuthUser(client, f.userId);
+
+        const u1 = randomUUID();
+
+        // 1. JavaScript scheme
+        await expect(
+          client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+            f.siteId, 'primary', JSON.stringify([
+              { id: u1, label: 'Bad Link', target_kind: 'external', target_value: 'javascript:alert(1)', position: 0, visible: true, is_cta: false }
+            ])
+          ])
+        ).rejects.toMatchObject({ code: 'PT400' });
+
+        // 2. Data scheme
+        await expect(
+          client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+            f.siteId, 'primary', JSON.stringify([
+              { id: u1, label: 'Bad Link', target_kind: 'external', target_value: 'data:text/html,<script>alert(1)</script>', position: 0, visible: true, is_cta: false }
+            ])
+          ])
+        ).rejects.toMatchObject({ code: 'PT400' });
+
+        // 3. Whitespace within URL
+        await expect(
+          client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+            f.siteId, 'primary', JSON.stringify([
+              { id: u1, label: 'Bad Link', target_kind: 'external', target_value: 'https://example .com', position: 0, visible: true, is_cta: false }
+            ])
+          ])
+        ).rejects.toMatchObject({ code: 'PT400' });
+
+        // 4. CRLF within URL
+        await expect(
+          client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+            f.siteId, 'primary', JSON.stringify([
+              { id: u1, label: 'Bad Link', target_kind: 'external', target_value: 'https://example.com\r\ninvalid', position: 0, visible: true, is_cta: false }
+            ])
+          ])
+        ).rejects.toMatchObject({ code: 'PT400' });
+      } finally {
+        client.release();
+      }
+    });
   });
 
   describe('route dependency safety covering destination reassignment (Section 8 & 16)', () => {
