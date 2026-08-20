@@ -97,7 +97,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Hardened Unified P
           user_id text not null references public.users(id) on delete cascade,
           name text not null,
           domain text unique,
-          subdomain text not null unique,
+          subdomain text unique,
           homepage_funnel_id text references public.funnels(id) on delete set null,
           draft_homepage_funnel_id text,
           publication_revision integer not null default 0,
