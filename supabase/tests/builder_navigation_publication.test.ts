@@ -158,9 +158,9 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
     const fnlAbout = `fnl-abt-${randomUUID()}`;
     const fnlOther = `fnl-oth-${randomUUID()}`;
 
-    await client.query('insert into public.users (id, email, password_hash) values ($1, $2, $3), ($4, $5, $6)', [
-      userId, `${userId}@example.com`, 'hash_123',
-      otherUserId, `${otherUserId}@example.com`, 'hash_123'
+    await client.query('insert into public.users (id, email) values ($1, $2), ($3, $4)', [
+      userId, `${userId}@example.com`,
+      otherUserId, `${otherUserId}@example.com`
     ]);
 
     await client.query(
