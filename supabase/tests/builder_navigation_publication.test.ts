@@ -92,14 +92,6 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
         alter table public.websites add column if not exists homepage_funnel_id text;
         alter table public.websites add column if not exists draft_homepage_funnel_id text;
 
-        create table if not exists public.builder_publication_targets (
-          website_id uuid not null references public.websites(id) on delete cascade,
-          page_id text not null references public.pages(id) on delete cascade,
-          published_revision_id text not null,
-          published_at timestamptz not null default now(),
-          primary key (website_id, page_id)
-        );
-
         create table if not exists public.website_routes (
           id uuid primary key default gen_random_uuid(),
           website_id uuid not null references public.websites(id) on delete cascade,
