@@ -206,7 +206,7 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
 
       await expect(
         client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [f.siteId, 'primary', 0, 1])
-      ).rejects.toThrow(/PT401/);
+      ).rejects.toMatchObject({ code: 'PT401' });
     } finally {
       client.release();
     }
@@ -220,7 +220,7 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
 
       await expect(
         client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [f.otherSiteId, 'primary', 0, 1])
-      ).rejects.toThrow(/PT404/);
+      ).rejects.toMatchObject({ code: 'PT404' });
     } finally {
       client.release();
     }
@@ -234,7 +234,7 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
 
       await expect(
         client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [f.siteId, 'primary', 0, 1])
-      ).rejects.toThrow(/PT404/);
+      ).rejects.toMatchObject({ code: 'PT404' });
     } finally {
       client.release();
     }
@@ -259,7 +259,7 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
       // Publish with mismatched base revision (expected 5 vs current 0)
       await expect(
         client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [f.siteId, 'primary', 5, 1])
-      ).rejects.toThrow(/PT409/);
+      ).rejects.toMatchObject({ code: 'PT409' });
     } finally {
       client.release();
     }
@@ -288,7 +288,7 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
       // Publish with stale draft revision 1 vs current 2
       await expect(
         client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [f.siteId, 'primary', 0, 1])
-      ).rejects.toThrow(/PT409/);
+      ).rejects.toMatchObject({ code: 'PT409' });
     } finally {
       client.release();
     }
@@ -365,7 +365,7 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
       // Publishing navigation fails with PT422 because /about route is not yet published in live routes!
       await expect(
         client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [f.siteId, 'primary', 0, 1])
-      ).rejects.toThrow(/PT422/);
+      ).rejects.toMatchObject({ code: 'PT422' });
     } finally {
       client.release();
     }
@@ -463,7 +463,7 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
       // Attempting to publish route deletion must fail with PT422!
       await expect(
         client.query('select public.publish_builder_routes($1)', [f.siteId])
-      ).rejects.toThrow(/PT422/);
+      ).rejects.toMatchObject({ code: 'PT422' });
 
       // Verify route was not deleted
       const routeCount = (await client.query('select count(*) as count from public.website_routes where id = $1', [routeId])).rows[0].count;
