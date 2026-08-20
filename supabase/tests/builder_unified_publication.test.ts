@@ -424,8 +424,8 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
       // Now: stage route draft to delete /about route using delete_builder_route_draft
       const aboutRoute = await client.query('SELECT id FROM public.website_routes WHERE website_id = $1 AND path = $2', [fix.websiteId, '/about']);
       await client.query(
-        'SELECT public.delete_builder_route_draft($1::uuid, $2::text, $3::uuid)',
-        [fix.websiteId, fix.funnel2Id, aboutRoute.rows[0].id]
+        'SELECT public.delete_builder_route_draft($1::uuid, $2::uuid, $3::text)',
+        [fix.websiteId, aboutRoute.rows[0].id, fix.funnel2Id]
       );
 
       // And stage nav draft removing the item
@@ -487,7 +487,7 @@ describe.skipIf(!DATABASE_URL)('Builder Phase 1B / Task 7 — Unified Publish We
       );
 
       // Now revert the route draft for /services so funnel3Id has no route in projected state
-      await client.query('SELECT public.revert_builder_route_draft($1::uuid, $2::text)', [fix.websiteId, fix.funnel3Id]);
+      await client.query('SELECT public.revert_builder_route_draft($1::uuid, null::uuid, $2::text)', [fix.websiteId, fix.funnel3Id]);
 
       // Stage valid draft homepage to About
       await client.query('SELECT public.set_builder_draft_homepage($1::uuid, $2::text)', [fix.websiteId, fix.funnel2Id]);
