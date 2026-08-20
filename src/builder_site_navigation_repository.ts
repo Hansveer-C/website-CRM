@@ -133,7 +133,7 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
     }
 
     if (draft) {
-      if (typeof expectedDraftRevision === 'number' && expectedDraftRevision !== draft.draft_revision) {
+      if (typeof expectedDraftRevision !== 'number' || expectedDraftRevision !== draft.draft_revision) {
         return {
           success: false,
           error: 'The navigation draft was modified elsewhere. Reload and try again.',
@@ -163,8 +163,8 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
       }
     }
 
-    // Check if draft equals live snapshot
-    if (areNavigationSnapshotsEqual(items, liveItems)) {
+    // Check if draft equals live snapshot (only if live snapshot exists)
+    if (live && areNavigationSnapshotsEqual(items, liveItems)) {
       this.draftStore.delete(key);
       return {
         success: true,
@@ -248,6 +248,14 @@ export class MockBuilderSiteNavigationRepository implements BuilderSiteNavigatio
         success: false,
         error: 'No navigation draft found to publish',
         code: 'NOT_FOUND'
+      };
+    }
+
+    if (draft.base_revision !== liveRevision) {
+      return {
+        success: false,
+        error: 'The draft is based on a stale navigation revision. Re-stage or discard draft before publishing.',
+        code: 'CONFLICT'
       };
     }
 

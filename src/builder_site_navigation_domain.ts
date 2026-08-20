@@ -303,16 +303,7 @@ export function resolveNavigationItem(
   // Internal link resolution via funnel_id
   const funnelId = item.target_value;
 
-  // 1. Check if it targets the homepage funnel
-  if (context.homepageFunnelId && context.homepageFunnelId === funnelId) {
-    return {
-      ...item,
-      resolved_href: '/',
-      resolution_status: 'resolved'
-    };
-  }
-
-  // 2. Check effective routes for this funnel
+  // Check effective routes for this funnel
   const matchingRoute = context.effectiveRoutes.find(r => r.funnel_id === funnelId);
   if (!matchingRoute) {
     return {
@@ -383,11 +374,6 @@ export function resolvePublicNavigation(
     }
 
     if (item.target_kind === 'homepage' || item.target_value === '__homepage__') {
-      result.push({ label: item.label, path: '/', ...(item.is_cta ? { is_cta: true } : {}) });
-      continue;
-    }
-
-    if (context.homepageFunnelId && item.target_value === context.homepageFunnelId) {
       result.push({ label: item.label, path: '/', ...(item.is_cta ? { is_cta: true } : {}) });
       continue;
     }

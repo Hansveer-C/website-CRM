@@ -244,6 +244,7 @@ function sanitizeNavigation(value: unknown): readonly PublicSiteNavigationItem[]
       label,
       path,
       ...(typeof item.visible === 'boolean' ? { visible: item.visible } : {}),
+      ...(item.is_cta === true || item.isCta === true ? { isCta: true } : {}),
       ...(Array.isArray(item.children) ? { children: sanitizeNavigation(item.children) } : {})
     }];
   });
@@ -251,8 +252,7 @@ function sanitizeNavigation(value: unknown): readonly PublicSiteNavigationItem[]
 
 function sanitizeCanonicalNavigation(
   rawItems: unknown[],
-  liveRoutes: readonly PublicWebsiteRouteRecord[],
-  homepageFunnelId: string | null
+  liveRoutes: readonly PublicWebsiteRouteRecord[]
 ): readonly PublicSiteNavigationItem[] {
   if (!Array.isArray(rawItems)) return [];
   const result: PublicSiteNavigationItem[] = [];
@@ -267,19 +267,16 @@ function sanitizeCanonicalNavigation(
 
     const targetKind = optionalText(item.target_kind);
     const targetValue = optionalText(item.target_value);
+    const isCta = item.is_cta === true || item.isCta === true;
 
     let path: string | undefined;
 
     if (targetKind === 'homepage' || targetValue === '__homepage__') {
       path = '/';
     } else if (targetKind === 'internal' && targetValue) {
-      if (homepageFunnelId && targetValue === homepageFunnelId) {
-        path = '/';
-      } else {
-        const matchingRoute = liveRoutes.find(r => r.funnelId === targetValue);
-        if (matchingRoute) {
-          path = matchingRoute.path;
-        }
+      const matchingRoute = liveRoutes.find(r => r.funnelId === targetValue);
+      if (matchingRoute) {
+        path = matchingRoute.path;
       }
     } else if (targetKind === 'external' && targetValue) {
       if (/^https?:\/\//i.test(targetValue)) {
@@ -295,7 +292,58 @@ function sanitizeCanonicalNavigation(
       result.push({
         label,
         path,
-        visible: true
+        visible: true,
+        ...(isCta ? { isCta: true } : {})
+      });
+    }
+  }
+
+  return result;
+}
+
+function sanitizeCanonicalFooterLinks(
+  rawItems: unknown[],
+  liveRoutes: readonly PublicWebsiteRouteRecord[]
+): readonly PublicSiteFooterLink[] {
+  if (!Array.isArray(rawItems)) return [];
+  const result: PublicSiteFooterLink[] = [];
+
+  for (const item of rawItems) {
+    if (!isPlainRecord(item)) continue;
+    const visible = typeof item.visible === 'boolean' ? item.visible : true;
+    if (!visible) continue;
+
+    const label = optionalText(item.label);
+    if (!label) continue;
+
+    const targetKind = optionalText(item.target_kind);
+    const targetValue = optionalText(item.target_value);
+    const isCta = item.is_cta === true || item.isCta === true;
+
+    let path: string | undefined;
+
+    if (targetKind === 'homepage' || targetValue === '__homepage__') {
+      path = '/';
+    } else if (targetKind === 'internal' && targetValue) {
+      const matchingRoute = liveRoutes.find(r => r.funnelId === targetValue);
+      if (matchingRoute) {
+        path = matchingRoute.path;
+      }
+    } else if (targetKind === 'external' && targetValue) {
+      if (/^https?:\/\//i.test(targetValue)) {
+        path = targetValue;
+      }
+    } else if (targetKind === 'phone' && targetValue) {
+      path = `tel:${targetValue}`;
+    } else if (targetKind === 'email' && targetValue) {
+      path = `mailto:${targetValue}`;
+    }
+
+    if (path) {
+      result.push({
+        label,
+        path,
+        ...(isCta ? { isCta: true } : {})
       });
     }
   }
@@ -305,18 +353,30 @@ function sanitizeCanonicalNavigation(
 
 function sanitizeLayout(
   record: PublicWebsiteLayoutRecord | null,
-  canonicalNavRecord?: PublicCanonicalNavigationRecord | null,
-  liveRoutes: readonly PublicWebsiteRouteRecord[] = [],
-  homepageFunnelId: string | null = null
+  canonicalPrimaryNav?: PublicCanonicalNavigationRecord | null,
+  canonicalFooterNav?: PublicCanonicalNavigationRecord | null,
+  liveRoutes: readonly PublicWebsiteRouteRecord[] = []
 ): PublicSiteLayout {
   const rawHeader = isPlainRecord(record?.headerConfig) ? record.headerConfig : {};
   const rawFooter = isPlainRecord(record?.footerConfig) ? record.footerConfig : {};
 
   let navigation: readonly PublicSiteNavigationItem[];
-  if (canonicalNavRecord !== null && canonicalNavRecord !== undefined) {
-    navigation = sanitizeCanonicalNavigation(canonicalNavRecord.items, liveRoutes, homepageFunnelId);
+  if (canonicalPrimaryNav !== null && canonicalPrimaryNav !== undefined) {
+    navigation = sanitizeCanonicalNavigation(canonicalPrimaryNav.items, liveRoutes);
   } else {
     navigation = sanitizeNavigation(rawHeader.nav_items ?? rawHeader.navigation);
+  }
+
+  let links: readonly PublicSiteFooterLink[];
+  if (canonicalFooterNav !== null && canonicalFooterNav !== undefined) {
+    links = sanitizeCanonicalFooterLinks(canonicalFooterNav.items, liveRoutes);
+  } else {
+    links = Array.isArray(rawFooter.links) ? rawFooter.links.flatMap(item => {
+      if (!isPlainRecord(item)) return [];
+      const label = optionalText(item.label);
+      const path = optionalText(item.path) ?? optionalText(item.url) ?? optionalText(item.href);
+      return label && path ? [{ label, path }] : [];
+    }) : [];
   }
 
   const header: PublicSiteHeader = {
@@ -326,12 +386,6 @@ function sanitizeLayout(
     ...(optionalText(rawHeader.cta_text) ? { ctaText: optionalText(rawHeader.cta_text) } : {}),
     ...(optionalText(rawHeader.cta_link) ? { ctaLink: optionalText(rawHeader.cta_link) } : {})
   };
-  const links = Array.isArray(rawFooter.links) ? rawFooter.links.flatMap(item => {
-    if (!isPlainRecord(item)) return [];
-    const label = optionalText(item.label);
-    const path = optionalText(item.path) ?? optionalText(item.url) ?? optionalText(item.href);
-    return label && path ? [{ label, path }] : [];
-  }) : [];
   const footer: PublicSiteFooter = {
     ...(optionalText(rawFooter.business_name) ? { businessName: optionalText(rawFooter.business_name) } : {}),
     ...(optionalText(rawFooter.phone_number ?? rawFooter.phone) ? { phone: optionalText(rawFooter.phone_number ?? rawFooter.phone) } : {}),
@@ -514,17 +568,19 @@ export async function handlePublicSiteRequest(
       return publicError('Site not found.', 404);
     }
 
-    const [settingsRecord, layoutRecord, target, canonicalNavRecord] = await Promise.all([
+    const [settingsRecord, layoutRecord, target, canonicalPrimaryNav, canonicalFooterNav] = await Promise.all([
       options.dataSource.getPublicWebsiteSettings(website.id),
       options.dataSource.getPublicWebsiteLayout(website.id),
       options.dataSource.getPublicationTarget(website.id, page.id),
-      options.dataSource.getPublicCanonicalNavigation ? options.dataSource.getPublicCanonicalNavigation(website.id, 'primary') : Promise.resolve(null)
+      options.dataSource.getPublicCanonicalNavigation ? options.dataSource.getPublicCanonicalNavigation(website.id, 'primary') : Promise.resolve(null),
+      options.dataSource.getPublicCanonicalNavigation ? options.dataSource.getPublicCanonicalNavigation(website.id, 'footer') : Promise.resolve(null)
     ]);
-    const liveRoutes = (canonicalNavRecord && canonicalNavRecord.items.length > 0 && options.dataSource.listRoutesForWebsite)
+    const hasCanonicalItems = (canonicalPrimaryNav && canonicalPrimaryNav.items.length > 0) || (canonicalFooterNav && canonicalFooterNav.items.length > 0);
+    const liveRoutes = (hasCanonicalItems && options.dataSource.listRoutesForWebsite)
       ? await options.dataSource.listRoutesForWebsite(website.id)
       : [route];
     const settings = sanitizeSettings(settingsRecord, website.name);
-    const layout = sanitizeLayout(layoutRecord, canonicalNavRecord, liveRoutes, website.homepageFunnelId);
+    const layout = sanitizeLayout(layoutRecord, canonicalPrimaryNav, canonicalFooterNav, liveRoutes);
 
     let publicPage: PublicSitePage;
     let sections: readonly PublicSiteSection[];

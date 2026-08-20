@@ -7649,15 +7649,35 @@ function renderPublicHeader(config: any, settings: any) {
          <span style="font-weight: 800; font-size: 1.25rem; color: #1e293b; overflow-wrap: anywhere;">${displayName}</span>
       </div>
       <nav style="display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: center; justify-content: flex-end; min-width: 0; max-width: 100%;">
-         ${(config.nav_items || []).map((item: any) => `
-           <a href="/site${item.path.startsWith('/') ? item.path : '/' + item.path}"
-              onclick="event.preventDefault(); window.navigateTo('site', '${item.path}')"
-              style="text-decoration: none; color: #475569; font-weight: 600; font-size: 0.95rem; transition: color 0.2s;"
-              onmouseover="this.style.color='var(--primary-color)'"
-              onmouseout="this.style.color='#475569'">
-              ${item.label}
-           </a>
-         `).join('')}
+         ${(config.nav_items || []).map((item: any) => {
+           const isCta = Boolean(item.is_cta || item.isCta);
+           const isSpecialScheme = item.path.startsWith('http://') || item.path.startsWith('https://') || item.path.startsWith('tel:') || item.path.startsWith('mailto:');
+           const href = isSpecialScheme
+             ? item.path
+             : `/site${item.path.startsWith('/') ? item.path : '/' + item.path}`;
+           const clickHandler = isSpecialScheme
+             ? ''
+             : `onclick="event.preventDefault(); window.navigateTo('site', '${item.path}')"`;
+           if (isCta) {
+             return `
+               <a href="${href}"
+                  ${clickHandler}
+                  class="btn-primary"
+                  style="padding: 8px 16px; font-size: 0.9rem; border-radius: 8px; text-decoration: none; font-weight: 700;">
+                  ${item.label}
+               </a>
+             `;
+           }
+           return `
+             <a href="${href}"
+                ${clickHandler}
+                style="text-decoration: none; color: #475569; font-weight: 600; font-size: 0.95rem; transition: color 0.2s;"
+                onmouseover="this.style.color='var(--primary-color)'"
+                onmouseout="this.style.color='#475569'">
+                ${item.label}
+             </a>
+           `;
+         }).join('')}
          ${config.cta_text ? `
            <a href="#quote-form" class="btn-primary" style="padding: 10px 20px; font-size: 0.9rem; border-radius: 8px; text-decoration: none;" onclick="event.preventDefault(); document.querySelector('#quote-form, .site-form-section')?.scrollIntoView({behavior: 'smooth', block: 'start'});">${config.cta_text}</a>
          ` : `

@@ -87,6 +87,7 @@ class FakeDataSource implements PublicSiteDataSource {
   legacy: readonly PublicLegacySectionRecord[] = structuredClone(legacySections);
   redirect: PublicWebsiteRouteRedirectRecord | null = null;
   canonicalNav: PublicCanonicalNavigationRecord | null = null;
+  canonicalFooterNav: PublicCanonicalNavigationRecord | null = null;
   routesList: readonly PublicWebsiteRouteRecord[] = [{ ...route }];
   failure: Error | null = null;
 
@@ -101,7 +102,10 @@ class FakeDataSource implements PublicSiteDataSource {
   async findPageForRoute(): Promise<PublicPageRecord | null> { this.call('page'); return this.page; }
   async getPublicWebsiteSettings(): Promise<PublicWebsiteSettingsRecord | null> { this.call('settings'); return this.settings; }
   async getPublicWebsiteLayout(): Promise<PublicWebsiteLayoutRecord | null> { this.call('layout'); return this.layout; }
-  async getPublicCanonicalNavigation(): Promise<PublicCanonicalNavigationRecord | null> { this.call('canonicalNav'); return this.canonicalNav; }
+  async getPublicCanonicalNavigation(_websiteId: string, menuScope: 'primary' | 'footer' = 'primary'): Promise<PublicCanonicalNavigationRecord | null> {
+    this.call(`canonicalNav:${menuScope}`);
+    return menuScope === 'footer' ? this.canonicalFooterNav : this.canonicalNav;
+  }
   async getPublicationTarget(): Promise<PublicPublicationTargetRecord | null> { this.call('target'); return this.target; }
   async getRevisionById(): Promise<PublicPublishedRevisionRecord | null> { this.call('revision'); return this.revision; }
   async getLegacySections(): Promise<readonly PublicLegacySectionRecord[]> { this.call('legacy'); return this.legacy; }
@@ -328,7 +332,7 @@ describe('revision-backed publication', () => {
   it('does not query publication history', async () => {
     const source = targetDataSource();
     await handlePublicSiteRequest(request(), { dataSource: source });
-    expect(source.calls).toEqual(['website', 'route', 'page', 'settings', 'layout', 'target', 'canonicalNav', 'revision']);
+    expect(source.calls).toEqual(['website', 'route', 'page', 'settings', 'layout', 'target', 'canonicalNav:primary', 'canonicalNav:footer', 'revision']);
   });
 });
 
@@ -638,7 +642,7 @@ describe('caching, CORS, and failures', () => {
       expect(layoutData.header.navigation).toEqual([
         { label: 'Root Home', path: '/', visible: true },
         { label: 'Our Services', path: '/services', visible: true },
-        { label: 'Call Us', path: 'tel:+15551234567', visible: true }
+        { label: 'Call Us', path: 'tel:+15551234567', visible: true, isCta: true }
       ]);
     });
 
@@ -709,6 +713,73 @@ describe('caching, CORS, and failures', () => {
       expect(layoutData.header.navigation).toEqual([
         { label: 'Home', path: '/', visible: true }
       ]);
+    });
+
+    it('propagates isCta presentation flag on canonical navigation items', async () => {
+      const source = targetDataSource();
+      source.canonicalNav = {
+        websiteId: website.id,
+        menuScope: 'primary',
+        revision: 1,
+        items: [
+          { id: '11111111-1111-4111-8111-111111111111', label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false },
+          { id: '22222222-2222-4222-8222-222222222222', label: 'Get Quote', target_kind: 'external', target_value: 'https://example.com/quote', position: 1, visible: true, is_cta: true }
+        ]
+      };
+
+      const result = await handlePublicSiteRequest(request('/'), { dataSource: source });
+      expect(result.status).toBe(200);
+
+      const data = await json(result);
+      const layoutData = data.layout as any;
+      expect(layoutData.header.navigation).toEqual([
+        { label: 'Home', path: '/', visible: true },
+        { label: 'Get Quote', path: 'https://example.com/quote', visible: true, isCta: true }
+      ]);
+    });
+
+    it('adopts canonical footer navigation when published', async () => {
+      const source = targetDataSource();
+      source.routesList = [
+        { id: 'r-1', websiteId: website.id, path: '/', funnelId: 'funnel-home' },
+        { id: 'r-2', websiteId: website.id, path: '/privacy-policy', funnelId: 'funnel-privacy' }
+      ];
+      source.canonicalFooterNav = {
+        websiteId: website.id,
+        menuScope: 'footer',
+        revision: 1,
+        items: [
+          { id: '11111111-1111-4111-8111-111111111111', label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false },
+          { id: '22222222-2222-4222-8222-222222222222', label: 'Privacy Policy', target_kind: 'internal', target_value: 'funnel-privacy', position: 1, visible: true, is_cta: false }
+        ]
+      };
+
+      const result = await handlePublicSiteRequest(request('/'), { dataSource: source });
+      expect(result.status).toBe(200);
+
+      const data = await json(result);
+      const layoutData = data.layout as any;
+      expect(layoutData.footer.links).toEqual([
+        { label: 'Home', path: '/' },
+        { label: 'Privacy Policy', path: '/privacy-policy' }
+      ]);
+    });
+
+    it('explicit empty canonical footer navigation suppresses legacy footer links', async () => {
+      const source = targetDataSource();
+      source.canonicalFooterNav = {
+        websiteId: website.id,
+        menuScope: 'footer',
+        revision: 1,
+        items: []
+      };
+
+      const result = await handlePublicSiteRequest(request('/'), { dataSource: source });
+      expect(result.status).toBe(200);
+
+      const data = await json(result);
+      const layoutData = data.layout as any;
+      expect(layoutData.footer.links).toEqual([]);
     });
   });
 });

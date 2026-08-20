@@ -520,4 +520,171 @@ describe.skipIf(!DATABASE_URL)('Builder Navigation Publication Integration Tests
       client.release();
     }
   });
+
+  it('restores exact Task 6A draft revision concurrency locking', async () => {
+    const client = await pool.connect();
+    try {
+      const f = await createFixture(client);
+      await setAuthUser(client, f.userId);
+
+      const u1 = randomUUID();
+      const items = [
+        { id: u1, label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false }
+      ];
+
+      // Tab A and B read baseline (no draft, live rev 0)
+      // Tab B stages -> creates draft rev 1
+      const stage1 = await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5) as data', [
+        f.siteId, 'primary', JSON.stringify(items), 0, null
+      ]);
+      expect(stage1.rows[0].data.draft_revision).toBe(1);
+
+      // Tab B stages again -> creates draft rev 2
+      const stage2 = await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5) as data', [
+        f.siteId, 'primary', JSON.stringify(items), 0, 1
+      ]);
+      expect(stage2.rows[0].data.draft_revision).toBe(2);
+
+      // Tab A tries to stage with stale expected draft revision 1 -> PT409
+      await expect(
+        client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
+          f.siteId, 'primary', JSON.stringify(items), 0, 1
+        ])
+      ).rejects.toMatchObject({ code: 'PT409' });
+
+      // Tab A tries to stage without draft revision token when draft exists -> PT409
+      await expect(
+        client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5)', [
+          f.siteId, 'primary', JSON.stringify(items), 0, null
+        ])
+      ).rejects.toMatchObject({ code: 'PT409' });
+
+      // Tab B stages with correct expected draft revision 2 -> succeeds, rev 3
+      const stage3 = await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3, $4, $5) as data', [
+        f.siteId, 'primary', JSON.stringify(items), 0, 2
+      ]);
+      expect(stage3.rows[0].data.draft_revision).toBe(3);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('rejects non-contiguous positions, gaps, duplicates, and fractional positions with PT400', async () => {
+    const client = await pool.connect();
+    try {
+      const f = await createFixture(client);
+      await setAuthUser(client, f.userId);
+
+      const u1 = randomUUID();
+      const u2 = randomUUID();
+
+      // Gap: positions 0 and 2 for 2 items
+      await expect(
+        client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+          f.siteId, 'primary', JSON.stringify([
+            { id: u1, label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false },
+            { id: u2, label: 'Services', target_kind: 'internal', target_value: f.fnlServices, position: 2, visible: true, is_cta: false }
+          ])
+        ])
+      ).rejects.toMatchObject({ code: 'PT400' });
+
+      // Duplicate: positions 0 and 0
+      await expect(
+        client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+          f.siteId, 'primary', JSON.stringify([
+            { id: u1, label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false },
+            { id: u2, label: 'Services', target_kind: 'internal', target_value: f.fnlServices, position: 0, visible: true, is_cta: false }
+          ])
+        ])
+      ).rejects.toMatchObject({ code: 'PT400' });
+
+      // Fractional: position 0.5
+      await expect(
+        client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+          f.siteId, 'primary', JSON.stringify([
+            { id: u1, label: 'Home', target_kind: 'homepage', target_value: '__homepage__', position: 0.5, visible: true, is_cta: false }
+          ])
+        ])
+      ).rejects.toMatchObject({ code: 'PT400' });
+    } finally {
+      client.release();
+    }
+  });
+
+  it('allows route deletion if destination still has another live route in post-publication route set', async () => {
+    const client = await pool.connect();
+    try {
+      const f = await createFixture(client);
+      await setAuthUser(client, f.userId);
+
+      // Create a second live route pointing to fnlServices
+      const r2Id = randomUUID();
+      await client.query(
+        'insert into public.website_routes (id, website_id, path, funnel_id) values ($1, $2, $3, $4)',
+        [r2Id, f.siteId, '/pressure-washing', f.fnlServices]
+      );
+
+      const u1 = randomUUID();
+      const items = [
+        { id: u1, label: 'Services Link', target_kind: 'internal', target_value: f.fnlServices, position: 0, visible: true, is_cta: false }
+      ];
+
+      // Publish navigation targeting fnlServices
+      await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3)', [
+        f.siteId, 'primary', JSON.stringify(items)
+      ]);
+      await client.query('select public.publish_builder_site_navigation($1, $2, $3, $4)', [
+        f.siteId, 'primary', 0, 1
+      ]);
+
+      // Stage delete draft for /services only (leaving /pressure-washing intact)
+      const r1Id = (await client.query('select id from public.website_routes where website_id = $1 and path = $2', [f.siteId, '/services'])).rows[0].id;
+      await client.query(
+        'insert into public.builder_route_drafts (website_id, route_id, path, funnel_id, action) values ($1, $2, $3, $4, $5)',
+        [f.siteId, r1Id, '/services', f.fnlServices, 'delete']
+      );
+
+      // Publishing route delete succeeds because /pressure-washing still resolves fnlServices!
+      const pubRes = await client.query('select public.publish_builder_routes($1) as data', [f.siteId]);
+      expect(pubRes.rows[0].data.success).toBe(true);
+    } finally {
+      client.release();
+    }
+  });
+
+  it('supports independent footer menu scope publication and revisions', async () => {
+    const client = await pool.connect();
+    try {
+      const f = await createFixture(client);
+      await setAuthUser(client, f.userId);
+
+      const u1 = randomUUID();
+      const footerItems = [
+        { id: u1, label: 'Privacy', target_kind: 'homepage', target_value: '__homepage__', position: 0, visible: true, is_cta: false }
+      ];
+
+      // Stage footer draft
+      const stageRes = await client.query('select public.stage_builder_site_navigation_draft($1, $2, $3) as data', [
+        f.siteId, 'footer', JSON.stringify(footerItems)
+      ]);
+      expect(stageRes.rows[0].data.is_draft).toBe(true);
+
+      // Publish footer draft
+      const pubRes = await client.query('select public.publish_builder_site_navigation($1, $2, $3, $4) as data', [
+        f.siteId, 'footer', 0, 1
+      ]);
+      expect(pubRes.rows[0].data.success).toBe(true);
+      expect(pubRes.rows[0].data.menu_scope).toBe('footer');
+      expect(pubRes.rows[0].data.live_revision).toBe(1);
+
+      // Verify primary scope is unaffected
+      const primaryLive = (await client.query(
+        'select * from public.builder_site_navigation_live where website_id = $1 and menu_scope = $2',
+        [f.siteId, 'primary']
+      )).rows;
+      expect(primaryLive.length).toBe(0);
+    } finally {
+      client.release();
+    }
+  });
 });
