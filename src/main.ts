@@ -60,6 +60,7 @@ import {
 import { renderOpportunitiesContent } from './ui/opportunities';
 import { renderNewQuoteContent, renderQuotePreviewContent, renderQuotesContent } from './ui/quotes';
 import { renderInvoicesContent, type InvoiceFilter } from './ui/invoices';
+import { createReportsViewModel, renderReportsContent, type ReportsAvailability } from './ui/reports';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
   BUILDER_PAGE_SLUG_MAX_LENGTH,
@@ -2151,7 +2152,7 @@ function clearProtectedRuntimeData(): void {
 
 const CRM_DATA_VIEWS = new Set([
   'dashboard', 'clients', 'contact-detail', 'opportunities', 'quotes', 'new-quote',
-  'quote-preview', 'invoices'
+  'quote-preview', 'invoices', 'reports'
 ]);
 
 function renderCrmDataLoading(view: string): void {
@@ -8722,28 +8723,20 @@ function renderSectionBody(type: string, content: any, styles: any, id: string, 
 
 
 function renderReports() {
+  const userId = getActingUserId();
+  const availability: ReportsAvailability = editorUsesSupabase()
+    ? {
+      contacts: crmProductionHydrator.state.entities.contacts === 'ready',
+      opportunities: crmProductionHydrator.state.entities.opportunities === 'ready',
+      quotes: crmProductionHydrator.state.entities.quotes === 'ready'
+    }
+    : { contacts: true, opportunities: true, quotes: true };
+  const model = createReportsViewModel({ userId, contacts: mockContacts, opportunities: mockOpportunities, quotes: mockQuotes, availability });
   renderAppWithShell({
     activeView: 'reports',
     title: 'Reports & Insights',
     contentVariant: 'wide',
-    contentHtml: `
-      <div class="stats-grid">
-        <div class="card">
-          <h3>Lead Sources</h3>
-          <div class="chart-placeholder">Lead Distribution Chart</div>
-          <div class="report-item"><span>Google Search</span> <span>45%</span></div>
-          <div class="report-item"><span>Facebook Ads</span> <span>30%</span></div>
-          <div class="report-item"><span>Referrals</span> <span>25%</span></div>
-        </div>
-        <div class="card">
-          <h3>Revenue Breakdown</h3>
-          <div class="chart-placeholder">Revenue Over Time</div>
-          <div class="report-item"><span>House Washing</span> <span>$5,200</span></div>
-          <div class="report-item"><span>Gutter Cleaning</span> <span>$1,800</span></div>
-          <div class="report-item"><span>Roof Cleaning</span> <span>$3,400</span></div>
-        </div>
-      </div>
-    `
+    contentHtml: renderReportsContent(model)
   });
 }
 
