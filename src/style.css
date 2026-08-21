@@ -1,6 +1,7 @@
 @import './tokens/tokens.css';
 @import './ui/primitives.css';
 @import './ui/shell/application_shell.css';
+@import './ui/dashboard/dashboard.css';
 
 :root {
     /* Legacy Compatibility Aliases -> Canonical WashOps Tokens */
