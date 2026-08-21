@@ -3,6 +3,7 @@
 @import './ui/shell/application_shell.css';
 @import './ui/dashboard/dashboard.css';
 @import './ui/contacts/contacts.css';
+@import './ui/opportunities/opportunities.css';
 
 :root {
     /* Legacy Compatibility Aliases -> Canonical WashOps Tokens */
