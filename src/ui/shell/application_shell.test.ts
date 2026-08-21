@@ -88,6 +88,7 @@ class MockElement {
     if (selector.includes('data-shell-drawer-toggle') && this.hasAttribute('data-shell-drawer-toggle')) return this;
     if (selector.includes('data-shell-drawer-close') && this.hasAttribute('data-shell-drawer-close')) return this;
     if (selector.includes('wo-shell-nav-item') && this.getAttribute('class')?.includes('wo-shell-nav-item')) return this;
+    if (selector.includes('wo-shell-logo') && this.getAttribute('class')?.includes('wo-shell-logo')) return this;
     return this.parentElement ? this.parentElement.closest(selector) : null;
   }
 
@@ -382,10 +383,10 @@ describe('WashOps Permanent Application Shell (Phase 1C / Task 7B.1)', () => {
     navLink.setAttribute('href', '#/clients');
     drawer.appendChild(navLink);
 
-    let navigatedView: string | null = null;
+    let navigatedTarget: any = null;
     let navigateCount = 0;
-    const onNavigate = (view: string) => {
-      navigatedView = view;
+    const onNavigate = (target: any) => {
+      navigatedTarget = target;
       navigateCount += 1;
     };
 
@@ -407,7 +408,7 @@ describe('WashOps Permanent Application Shell (Phase 1C / Task 7B.1)', () => {
     expect(drawerBackdrop.hidden).toBe(true);
     expect(menuToggle.getAttribute('aria-expanded')).toBe('false');
     expect(mainSibling.inert).toBe(false);
-    expect(navigatedView).toBe('clients');
+    expect(navigatedTarget).toEqual({ kind: 'view', view: 'clients' });
     expect(navigateCount).toBe(1);
 
     // 3. Open drawer again
@@ -424,5 +425,91 @@ describe('WashOps Permanent Application Shell (Phase 1C / Task 7B.1)', () => {
 
     // 5. Cleanup / Destroy
     controller.destroy();
+  });
+
+  it('M. ShellNavItem href Contract: no generated href starts with (\\#', () => {
+    const renderedSidebar = renderShellSidebar({ activeView: 'dashboard' });
+    expect(renderedSidebar).not.toMatch(/href=["']\(#/);
+    expect(renderedSidebar).toContain('href="#/dashboard"');
+    expect(renderedSidebar).toContain('href="#/clients"');
+  });
+
+  it('N. Typed Shell Navigation Targets: verify default nav groups specify typed targets for CRM and Website views', () => {
+    const groups = getDefaultNavGroups('dashboard');
+    const allItems = groups.flatMap(g => g.items);
+
+    const dashboardItem = allItems.find(i => i.id === 'dashboard');
+    expect(dashboardItem?.navTarget).toEqual({ kind: 'view', view: 'dashboard' });
+
+    const clientsItem = allItems.find(i => i.id === 'clients');
+    expect(clientsItem?.navTarget).toEqual({ kind: 'view', view: 'clients' });
+
+    const websiteSettingsItem = allItems.find(i => i.id === 'website-settings');
+    expect(websiteSettingsItem?.navTarget).toEqual({ kind: 'website-settings' });
+
+    const funnelsItem = allItems.find(i => i.id === 'funnels');
+    expect(funnelsItem?.navTarget).toEqual({ kind: 'website-management', view: 'funnels' });
+
+    const navItem = allItems.find(i => i.id === 'website-navigation');
+    expect(navItem?.navTarget).toEqual({ kind: 'website-management', view: 'website-navigation' });
+
+    const seoItem = allItems.find(i => i.id === 'seo-pages');
+    expect(seoItem?.navTarget).toEqual({ kind: 'website-management', view: 'seo-pages' });
+  });
+
+  it('O. Desktop Single-Fire Navigation: clicking desktop nav item invokes onNavigate with typed target exactly once', () => {
+    const container = new MockElement('div');
+    const navLink = new MockElement('a');
+    navLink.setAttribute('class', 'wo-shell-nav-item');
+    navLink.setAttribute('data-nav-view', 'quotes');
+    navLink.setAttribute('data-nav-target', JSON.stringify({ kind: 'view', view: 'quotes' }));
+    navLink.setAttribute('href', '#/quotes');
+    container.appendChild(navLink);
+
+    let receivedTarget: any = null;
+    let clickCount = 0;
+
+    const controller = initApplicationShell(container as any, {
+      onNavigate: (target) => {
+        receivedTarget = target;
+        clickCount += 1;
+      }
+    });
+
+    navLink.dispatchEvent({ type: 'click' });
+    expect(clickCount).toBe(1);
+    expect(receivedTarget).toEqual({ kind: 'view', view: 'quotes' });
+
+    controller.destroy();
+  });
+
+  it('P. Brand Logo Navigation: clicking WashOps logo invokes onNavigate with dashboard target', () => {
+    const container = new MockElement('div');
+    const logoLink = new MockElement('a');
+    logoLink.setAttribute('class', 'wo-shell-logo');
+    logoLink.setAttribute('data-nav-target', JSON.stringify({ kind: 'view', view: 'dashboard' }));
+    logoLink.setAttribute('href', '#/dashboard');
+    container.appendChild(logoLink);
+
+    let receivedTarget: any = null;
+    let clickCount = 0;
+
+    const controller = initApplicationShell(container as any, {
+      onNavigate: (target) => {
+        receivedTarget = target;
+        clickCount += 1;
+      }
+    });
+
+    logoLink.dispatchEvent({ type: 'click' });
+    expect(clickCount).toBe(1);
+    expect(receivedTarget).toEqual({ kind: 'view', view: 'dashboard' });
+
+    controller.destroy();
+  });
+
+  it('Q. Touch-Target Contract in CSS: menu button and drawer items use --wo-min-touch-target', () => {
+    expect(cssContent).toMatch(/\.wo-shell-menu-button\s*\{[^}]*min-width:\s*var\(--wo-min-touch-target/);
+    expect(cssContent).toMatch(/\.wo-shell-drawer\s+\.wo-shell-nav-item\s*\{[^}]*min-height:\s*var\(--wo-min-touch-target/);
   });
 });

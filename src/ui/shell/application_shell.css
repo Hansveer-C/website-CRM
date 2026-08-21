@@ -321,8 +321,8 @@
   display: none; /* hidden on desktop */
   align-items: center;
   justify-content: center;
-  min-width: 40px;
-  min-height: 40px;
+  min-width: var(--wo-min-touch-target, 44px);
+  min-height: var(--wo-min-touch-target, 44px);
 }
 
 .wo-shell-menu-button:hover {
@@ -443,6 +443,10 @@
 
   .wo-shell-menu-button {
     display: inline-flex;
+  }
+
+  .wo-shell-drawer .wo-shell-nav-item {
+    min-height: var(--wo-min-touch-target, 44px);
   }
 
   .wo-shell-topbar {

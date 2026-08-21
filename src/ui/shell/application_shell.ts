@@ -6,7 +6,8 @@
  * - Topbar with page title, supporting subtitle, header actions, and responsive menu trigger
  * - Main content container supporting standard and wide content layouts
  * - Accessible mobile drawer with focus trap, backdrop click, Escape dismiss, and background inert isolation
- * - Builder isolation boundary protection
+ * - Builder & public site isolation boundary protection
+ * - Single typed shell navigation authority
  */
 
 import { escapeHtmlText } from '../../crm_html_output';
@@ -41,6 +42,11 @@ export const SHELL_ICONS = {
 // 2. SHELL CONTRACT TYPES
 // ============================================================================
 
+export type ShellNavigationTarget =
+  | { kind: 'view'; view: string; id?: string }
+  | { kind: 'website-settings' }
+  | { kind: 'website-management'; view: 'website-settings' | 'funnels' | 'website-navigation' | 'website-structure' | 'seo-pages' };
+
 export interface ShellUser {
   name: string;
   email?: string;
@@ -61,6 +67,7 @@ export interface ShellNavItem {
   href?: string;
   badge?: ShellNavBadge;
   disabled?: boolean;
+  navTarget?: ShellNavigationTarget;
 }
 
 export interface ShellNavGroup {
@@ -111,7 +118,8 @@ export function getDefaultNavGroups(activeView: string, badgeCounts: Record<stri
           id: 'dashboard',
           label: 'Dashboard',
           iconSvg: SHELL_ICONS.dashboard,
-          href: '#/dashboard'
+          href: '#/dashboard',
+          navTarget: { kind: 'view', view: 'dashboard' }
         }
       ]
     },
@@ -123,25 +131,29 @@ export function getDefaultNavGroups(activeView: string, badgeCounts: Record<stri
           label: 'Clients & Leads',
           iconSvg: SHELL_ICONS.clients,
           href: '#/clients',
-          badge: clientsBadgeCount > 0 ? { count: clientsBadgeCount, variant: 'warning' } : undefined
+          badge: clientsBadgeCount > 0 ? { count: clientsBadgeCount, variant: 'warning' } : undefined,
+          navTarget: { kind: 'view', view: 'clients' }
         },
         {
           id: 'opportunities',
           label: 'Opportunities',
           iconSvg: SHELL_ICONS.opportunities,
-          href: '#/opportunities'
+          href: '#/opportunities',
+          navTarget: { kind: 'view', view: 'opportunities' }
         },
         {
           id: 'quotes',
           label: 'Quotes',
           iconSvg: SHELL_ICONS.quotes,
-          href: '#/quotes'
+          href: '#/quotes',
+          navTarget: { kind: 'view', view: 'quotes' }
         },
         {
           id: 'invoices',
           label: 'Invoices',
           iconSvg: SHELL_ICONS.invoices,
-          href: '#/invoices'
+          href: '#/invoices',
+          navTarget: { kind: 'view', view: 'invoices' }
         }
       ]
     },
@@ -152,13 +164,15 @@ export function getDefaultNavGroups(activeView: string, badgeCounts: Record<stri
           id: 'lead-capture',
           label: 'Lead Capture',
           iconSvg: SHELL_ICONS.leadCapture,
-          href: '#/lead-capture'
+          href: '#/lead-capture',
+          navTarget: { kind: 'view', view: 'lead-capture' }
         },
         {
           id: 'marketing-funnels',
           label: 'Ad Landing Pages',
           iconSvg: SHELL_ICONS.marketingFunnels,
-          href: '#/marketing-funnels'
+          href: '#/marketing-funnels',
+          navTarget: { kind: 'view', view: 'marketing-funnels' }
         }
       ]
     },
@@ -169,31 +183,36 @@ export function getDefaultNavGroups(activeView: string, badgeCounts: Record<stri
           id: 'website-dashboard',
           label: 'My Website',
           iconSvg: SHELL_ICONS.websiteDashboard,
-          href: '#/website-dashboard'
+          href: '#/website-dashboard',
+          navTarget: { kind: 'view', view: 'website-dashboard' }
         },
         {
           id: 'funnels',
           label: 'Site Pages',
           iconSvg: SHELL_ICONS.sitePages,
-          href: '#/funnels'
+          href: '#/funnels',
+          navTarget: { kind: 'website-management', view: 'funnels' }
         },
         {
           id: 'website-navigation',
           label: 'Navigation',
           iconSvg: SHELL_ICONS.navigation,
-          href: '#/website-navigation'
+          href: '#/website-navigation',
+          navTarget: { kind: 'website-management', view: 'website-navigation' }
         },
         {
           id: 'seo-pages',
           label: 'SEO Pages',
           iconSvg: SHELL_ICONS.seoPages,
-          href: '#/seo-pages'
+          href: '#/seo-pages',
+          navTarget: { kind: 'website-management', view: 'seo-pages' }
         },
         {
           id: 'website-settings',
           label: 'Settings',
           iconSvg: SHELL_ICONS.websiteSettings,
-          href: '#/website-settings'
+          href: '#/website-settings',
+          navTarget: { kind: 'website-settings' }
         }
       ]
     },
@@ -204,25 +223,29 @@ export function getDefaultNavGroups(activeView: string, badgeCounts: Record<stri
           id: 'reports',
           label: 'Reports & Insights',
           iconSvg: SHELL_ICONS.reports,
-          href: '#/reports'
+          href: '#/reports',
+          navTarget: { kind: 'view', view: 'reports' }
         },
         {
           id: 'quickstart',
           label: 'Quickstart Guide',
           iconSvg: SHELL_ICONS.quickstart,
-          href: '#/quickstart'
+          href: '#/quickstart',
+          navTarget: { kind: 'view', view: 'quickstart' }
         },
         {
           id: 'event-logs',
           label: 'Event Logs',
           iconSvg: SHELL_ICONS.eventLogs,
-          href: '#/event-logs'
+          href: '#/event-logs',
+          navTarget: { kind: 'view', view: 'event-logs' }
         },
         {
           id: 'qa-tools',
           label: 'QA Tools',
           iconSvg: SHELL_ICONS.qaTools,
-          href: '#/qa-tools'
+          href: '#/qa-tools',
+          navTarget: { kind: 'view', view: 'qa-tools' }
         }
       ]
     }
@@ -248,6 +271,7 @@ export function renderShellSidebar(opts: ShellSidebarOptions): string {
       const activeClass = isActive ? ' wo-shell-nav-item--active' : '';
       const currentAttr = isActive ? ' aria-current="page"' : '';
       const hrefAttr = item.href ?? `(#/${item.id})`;
+      const targetPayload = JSON.stringify(item.navTarget || { kind: 'view', view: item.id });
 
       let badgeHtml = '';
       if (item.badge && item.badge.count > 0) {
@@ -257,7 +281,7 @@ export function renderShellSidebar(opts: ShellSidebarOptions): string {
 
       return `
         <li>
-          <a href="${escapeHtmlText(hrefAttr)}" class="wo-shell-nav-item${activeClass}" data-nav-view="${escapeHtmlText(item.id)}"${currentAttr}>
+          <a href="${escapeHtmlText(hrefAttr)}" class="wo-shell-nav-item${activeClass}" data-nav-target="${escapeHtmlText(targetPayload)}" data-nav-view="${escapeHtmlText(item.id)}"${currentAttr}>
             <span class="wo-shell-nav-item-content">
               ${item.iconSvg}
               <span class="wo-shell-nav-label">${escapeHtmlText(item.label)}</span>
@@ -298,7 +322,7 @@ export function renderShellSidebar(opts: ShellSidebarOptions): string {
 
   let headerHtml = `
     <div class="wo-shell-brand">
-      <a href="#/dashboard" class="wo-shell-logo">
+      <a href="#/dashboard" class="wo-shell-logo" data-nav-target='{"kind":"view","view":"dashboard"}'>
         <span>WashOps</span>
         <span class="wo-shell-logo-badge">CRM</span>
       </a>
@@ -308,7 +332,7 @@ export function renderShellSidebar(opts: ShellSidebarOptions): string {
   if (isDrawer) {
     headerHtml = `
       <div class="wo-shell-drawer-header">
-        <a href="#/dashboard" class="wo-shell-logo">
+        <a href="#/dashboard" class="wo-shell-logo" data-nav-target='{"kind":"view","view":"dashboard"}'>
           <span>WashOps</span>
           <span class="wo-shell-logo-badge">CRM</span>
         </a>
@@ -402,7 +426,7 @@ export function renderApplicationShell(opts: ApplicationShellOptions): string {
 }
 
 // ============================================================================
-// 7. SHELL DOM INTERACTION CONTROLLER (DRAWER / ACCESSIBILITY)
+// 7. SHELL DOM INTERACTION CONTROLLER (DRAWER / ACCESSIBILITY / ROUTING)
 // ============================================================================
 
 interface InertEntry {
@@ -454,7 +478,7 @@ export interface ShellController {
 
 export function initApplicationShell(
   containerEl: HTMLElement,
-  opts: { onNavigate?: (view: string) => void } = {}
+  opts: { onNavigate?: (target: ShellNavigationTarget) => void } = {}
 ): ShellController {
   const drawerBackdrop = containerEl.querySelector<HTMLElement>('#wo-shell-drawer-backdrop');
   const drawer = containerEl.querySelector<HTMLElement>('#wo-shell-drawer');
@@ -563,15 +587,26 @@ export function initApplicationShell(
       return;
     }
 
-    // Nav item clicked inside drawer -> close drawer and single-fire navigation if programmatic handler supplied
-    const navItem = target.closest<HTMLElement>('.wo-shell-nav-item');
-    if (navItem && drawer && drawer.contains(navItem)) {
-      closeDrawer();
+    // Shell nav item or brand logo clicked -> single navigation authority across desktop & drawer
+    const navLink = target.closest<HTMLElement>('.wo-shell-nav-item, .wo-shell-logo');
+    if (navLink && containerEl.contains(navLink)) {
+      if (isOpen) {
+        closeDrawer();
+      }
       if (opts.onNavigate) {
         e.preventDefault();
-        const view = navItem.getAttribute('data-nav-view');
-        if (view) {
-          opts.onNavigate(view);
+        const rawTarget = navLink.getAttribute('data-nav-target');
+        if (rawTarget) {
+          try {
+            const parsed = JSON.parse(rawTarget) as ShellNavigationTarget;
+            opts.onNavigate(parsed);
+          } catch {
+            const view = navLink.getAttribute('data-nav-view') || 'dashboard';
+            opts.onNavigate({ kind: 'view', view });
+          }
+        } else {
+          const view = navLink.getAttribute('data-nav-view') || 'dashboard';
+          opts.onNavigate({ kind: 'view', view });
         }
       }
     }

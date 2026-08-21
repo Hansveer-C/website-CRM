@@ -39,7 +39,9 @@ import {
   getDefaultNavGroups,
   initApplicationShell,
   type ShellController,
-  type ShellUser
+  type ShellUser,
+  type ShellNavigationTarget,
+  type ApplicationShellOptions
 } from './ui';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
@@ -2386,24 +2388,90 @@ function getCurrentShellUser(): ShellUser {
   };
 }
 
-function attachShellController(): void {
+function handleShellNavigation(target: ShellNavigationTarget): void {
+  if (target.kind === 'website-settings') {
+    (window as any).openWebsiteSettings();
+  } else if (target.kind === 'website-management') {
+    (window as any).openWebsiteManagementView(target.view);
+  } else {
+    (window as any).navigateTo(target.view, target.id);
+  }
+}
+
+function renderAppWithShell(options: ApplicationShellOptions): void {
   currentShellController?.destroy();
+  const userId = getActingUserId();
+  const newCount = mockContacts.filter(c => c.user_id === userId && isNew(c.created_at)).length;
+  const navGroups = options.navGroups ?? getDefaultNavGroups(options.activeView, { clients: newCount });
+
+  app.innerHTML = renderApplicationShell({
+    ...options,
+    navGroups,
+    user: options.user ?? getCurrentShellUser()
+  });
+
   currentShellController = initApplicationShell(app, {
-    onNavigate: (view: string) => {
-      window.navigateTo(view);
-    }
+    onNavigate: handleShellNavigation
   });
 }
 
-function renderSidebar(activeView: string) {
+function attachShellController(): void {
+  currentShellController?.destroy();
+  currentShellController = initApplicationShell(app, {
+    onNavigate: handleShellNavigation
+  });
+}
+
+/**
+ * Temporary legacy sidebar renderer for screens not yet migrated to the full WashOps application shell.
+ * @deprecated To be removed in Task 7B.2 when all CRM screens are migrated to renderApplicationShell.
+ */
+function renderLegacySidebar(activeView: string): string {
   const userId = getActingUserId();
   const newCount = mockContacts.filter(c => c.user_id === userId && isNew(c.created_at)).length;
 
-  return renderShellSidebar({
-    activeView,
-    navGroups: getDefaultNavGroups(activeView, { clients: newCount }),
-    user: getCurrentShellUser()
-  });
+  return `
+    <div class="sidebar">
+      <h1>PressurePro</h1>
+      <nav>
+        <ul>
+          <div class="nav-group-title" style="margin-top: 0;">Main Menu</div>
+          <li onclick="window.navigateTo('dashboard')" class="${activeView === 'dashboard' ? 'active' : ''}">Dashboard</li>
+          <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>Clients & Leads</span>
+            ${newCount > 0 ? `<span class="badge" style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 800;">${newCount}</span>` : ''}
+          </li>
+          <li onclick="window.navigateTo('opportunities')" class="${activeView === 'opportunities' ? 'active' : ''}">Opportunities</li>
+          <li onclick="window.navigateTo('quotes')" class="${activeView === 'quotes' ? 'active' : ''}">Quotes</li>
+          <li onclick="window.navigateTo('invoices')" class="${activeView === 'invoices' ? 'active' : ''}">Invoices</li>
+          
+          <div class="nav-group-title">Marketing & Outreach</div>
+          <li onclick="window.navigateTo('lead-capture')" class="${activeView === 'lead-capture' ? 'active' : ''}">Lead Capture</li>
+          <li onclick="window.navigateTo('marketing-funnels')" class="${activeView === 'marketing-funnels' || activeView === 'funnels' && (window as any).funnelMode === 'marketing' ? 'active' : ''}">Ad Landing Pages</li>
+          
+          <div class="nav-group-title">Websites</div>
+          <li onclick="window.navigateTo('website-dashboard')" class="${activeView === 'website-dashboard' ? 'active' : ''}" style="font-weight: 700; color: var(--primary-color);">My Website</li>
+          <li onclick="window.openWebsiteManagementView('funnels')" class="${activeView === 'funnels' && (window as any).funnelMode !== 'marketing' ? 'active' : ''}">Site Pages</li>
+          <li onclick="window.openWebsiteManagementView('website-navigation')" class="${activeView === 'website-navigation' ? 'active' : ''}">Navigation</li>
+          <li onclick="window.openWebsiteManagementView('seo-pages')" class="${activeView === 'seo-pages' ? 'active' : ''}">SEO Pages</li>
+          <li onclick="window.openWebsiteSettings()" class="${activeView === 'website-settings' ? 'active' : ''}">Settings</li>
+          
+          <div class="nav-group-title">System</div>
+          <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
+          <li onclick="window.navigateTo('quickstart')" class="${activeView === 'quickstart' ? 'active' : ''}">Quickstart Guide</li>
+          <li onclick="window.navigateTo('event-logs')" class="${activeView === 'event-logs' ? 'active' : ''}">Event Logs</li>
+          <li onclick="window.navigateTo('qa-tools')" class="${activeView === 'qa-tools' ? 'active' : ''}">QA Tools</li>
+          <li>Payments</li>
+          <li>Settings</li>
+          <li><button type="button" class="sidebar-sign-out" onclick="window.signOutApplication ? window.signOutApplication() : undefined">Sign out</button></li>
+        </ul>
+      </nav>
+    </div>
+  `.trim();
+}
+
+function renderSidebar(activeView: string): string {
+  return renderLegacySidebar(activeView);
 }
 
 function renderDashboard() {
@@ -2594,7 +2662,7 @@ function renderDashboard() {
     ` : ''}
   `;
 
-  app.innerHTML = renderApplicationShell({
+  renderAppWithShell({
     activeView: 'dashboard',
     title: 'Dashboard Overview',
     contentVariant: 'standard',
@@ -2605,7 +2673,7 @@ function renderDashboard() {
 
 async function renderClients() {
   // Show initial structure with sidebar to keep UI responsive
-  app.innerHTML = renderApplicationShell({
+  renderAppWithShell({
     activeView: 'clients',
     title: 'Clients & Leads',
     headerActionsHtml: '<button class="btn-primary" onclick="window.navigateTo(\'lead-capture\')">+ Add Lead</button>',
@@ -2709,7 +2777,7 @@ async function renderClients() {
     </div>
   `;
 
-  app.innerHTML = renderApplicationShell({
+  renderAppWithShell({
     activeView: 'clients',
     title: 'Clients & Leads',
     headerActionsHtml: '<button class="btn-primary" onclick="window.navigateTo(\'lead-capture\')">+ Add Lead</button>',
@@ -9587,7 +9655,7 @@ function renderWebsiteSettingsSelector(websites: readonly Website[], invalid = f
     </section>
   `;
 
-  app.innerHTML = renderApplicationShell({
+  renderAppWithShell({
     activeView: 'website-settings',
     title: 'Website Branding & Tracking',
     contentVariant: 'standard',
@@ -9646,7 +9714,7 @@ function renderWebsiteManagementSelector(view: WebsiteManagementView, websites: 
     </section>
   `;
 
-  app.innerHTML = renderApplicationShell({
+  renderAppWithShell({
     activeView: view,
     title: labels[view],
     contentVariant: 'standard',
@@ -9731,7 +9799,7 @@ function renderWebsiteSettings() {
     </div>
   `;
 
-  app.innerHTML = renderApplicationShell({
+  renderAppWithShell({
     activeView: 'website-settings',
     title: 'Website Branding & Tracking',
     headerActionsHtml: '<div style="display: flex; gap: 10px;"><button class="btn-primary" style="background: var(--primary-color);" onclick="window.saveGlobalSettings()">Save Settings</button></div>',
@@ -11781,7 +11849,7 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
     </section>
   `;
 
-  app.innerHTML = renderApplicationShell({
+  renderAppWithShell({
     activeView: view,
     title: 'Website information could not be loaded.',
     contentVariant: 'standard',
@@ -11946,7 +12014,7 @@ async function executeNavigation(
   navigationOperation?: ProtectedAsyncOperationToken
 ) {
   if (navigationOperation) protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
-  if (['builder', 'site', 'preview'].includes(view)) {
+  if (['builder', 'site', 'preview'].includes(view) || !['dashboard', 'clients', 'website-settings'].includes(view)) {
     currentShellController?.destroy();
     currentShellController = null;
   }
@@ -13088,10 +13156,6 @@ window.addEventListener('popstate', () => {
     bootRouter();
 });
 
-window.addEventListener('hashchange', () => {
-    bootRouter();
-});
-
 // Auto-refresh Sidebar Counts & New Lead Alerts (PROMPT 8, 9, 10)
 setInterval(() => {
   let changeDetected = false;
@@ -13099,7 +13163,7 @@ setInterval(() => {
   // 🌿 1. Detect New Leads (Global Alert - WB.5.4)
   if (mockContacts.length > lastContactCount) {
     const newLeads = mockContacts.slice(lastContactCount);
-    
+
     // Detailed toast for the most recent lead
     if (newLeads.length === 1) {
       const lead = newLeads[0];
@@ -13113,20 +13177,21 @@ setInterval(() => {
   }
 
   // 2. Refresh UI (only in standard app views)
-  const sidebar = document.querySelector('.sidebar');
-  if (sidebar && !['builder', 'preview', 'site'].includes(currentView)) {
-    console.log('[POLLING] Refreshing UI state...');
-
-    // Always refresh sidebar for badge counts
-    sidebar.outerHTML = renderSidebar(currentView);
-
-    // If a new lead was detected, re-render the active view to show it immediately
+  if (['dashboard', 'clients', 'website-settings'].includes(currentView)) {
     if (changeDetected) {
-      if (currentView === 'clients') renderClients();
+      if (currentView === 'clients') void renderClients();
+      if (currentView === 'dashboard') renderDashboard();
+    }
+  } else if (!['builder', 'preview', 'site'].includes(currentView)) {
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) {
+      sidebar.outerHTML = renderLegacySidebar(currentView);
+    }
+    if (changeDetected) {
+      if (currentView === 'clients') void renderClients();
       if (currentView === 'dashboard') renderDashboard();
     }
   }
-
 }, 5000);
 
 // ── WB.6.1 Onboarding Modal & Flow ──────────────────────────────────
