@@ -39,6 +39,7 @@ export const REQUIRED_SEMANTIC_CSS_TOKENS = [
   '--wo-color-surface-elevated',
   '--wo-color-surface-sunken',
   '--wo-color-sidebar-bg',
+  '--wo-color-backdrop-overlay',
   '--wo-color-border',
   '--wo-color-border-subtle',
   '--wo-color-border-strong',

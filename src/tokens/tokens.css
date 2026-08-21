@@ -75,6 +75,7 @@
   --wo-color-surface-elevated: var(--wo-primitive-neutral-0);
   --wo-color-surface-sunken: var(--wo-primitive-neutral-100);
   --wo-color-sidebar-bg: var(--wo-primitive-neutral-800);
+  --wo-color-backdrop-overlay: rgba(0, 0, 0, 0.5);
 
   /* Borders */
   --wo-color-border: var(--wo-primitive-neutral-200);
