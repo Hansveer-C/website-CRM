@@ -57,6 +57,7 @@ import {
   renderContactDetailLoading,
   type ContactFilter
 } from './ui/contacts';
+import { renderOpportunitiesContent } from './ui/opportunities';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
   BUILDER_PAGE_SLUG_MAX_LENGTH,
@@ -10119,50 +10120,11 @@ async function handleLeadCaptureSubmission(e: Event) {
 function renderOpportunities() {
   const userId = getActingUserId();
   const defaultPipeline = mockPipelines[0];
-  const stages = defaultPipeline.stages;
-
-  const columnsHtml = stages.map(stage => {
-    const stageOpportunities = mockOpportunities.filter(opp => opp.user_id === userId && opp.pipeline_stage === stage);
-    const cardsHtml = stageOpportunities.map(opp => {
-      const contact = mockContacts.find(c => c.id === opp.contact_id);
-      return `
-        <div class="kanban-card" draggable="true" ondragstart="drag(event, '${opp.id}')" onclick="window.navigateTo('contact-detail', '${opp.contact_id}')" style="cursor: pointer; display: flex; flex-direction: column; gap: 4px;">
-          <div class="contact-name">${escapeHtmlText(contact ? contact.name : 'Unknown Contact')}</div>
-          <div class="opportunity-value" style="display: flex; align-items: center; gap: 4px;">
-            <span>$</span>
-            <input type="number" 
-                   value="${opp.value}" 
-                   class="inline-input" 
-                   style="font-weight: 600; width: 80px;"
-                   onclick="event.stopPropagation()" 
-                   onchange="window.updateOpportunityField('${opp.id}', 'value', this.value)">
-          </div>
-          <div class="contact-phone">${escapeHtmlText(contact ? formatContactPhone(contact.phone) : 'N/A')}</div>
-          ${opp.notes ? `<div style="font-size: 0.7rem; color: #94a3b8; font-style: italic; border-top: 1px solid #f1f5f9; padding-top: 4px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtmlText(opp.notes.replace(/\n/g, ' '))}</div>` : ''}
-        </div>
-      `;
-    }).join('');
-
-    return `
-      <div class="kanban-column" ondragover="allowDrop(event)" ondrop="drop(event, '${stage}')">
-        <h4>${stage} <span>${stageOpportunities.length}</span></h4>
-        <div class="kanban-cards">
-          ${cardsHtml}
-        </div>
-      </div>
-    `;
-  }).join('');
-
   renderAppWithShell({
     activeView: 'opportunities',
     title: `Sales Pipeline: ${defaultPipeline.name}`,
-    headerActionsHtml: `<button class="btn-primary">+ New Opportunity</button>`,
     contentVariant: 'wide',
-    contentHtml: `
-      <div class="kanban-board">
-        ${columnsHtml}
-      </div>
-    `
+    contentHtml: renderOpportunitiesContent({ userId, pipeline: defaultPipeline, opportunities: mockOpportunities, contacts: mockContacts, editable: !editorUsesSupabase() })
   });
 }
 
@@ -10566,7 +10528,7 @@ function renderNewQuote() {
 
 function updateOpportunityStage(opportunity_id: string, new_stage: string) {
   if (editorUsesSupabase()) { (window as any).showToast('Opportunity updates are temporarily unavailable.', 'error'); return; }
-  const opp = mockOpportunities.find(o => o.id === opportunity_id);
+  const opp = mockOpportunities.find(o => o.user_id === getActingUserId() && o.id === opportunity_id);
   if (opp) {
     opp.pipeline_stage = new_stage;
 
@@ -12261,7 +12223,7 @@ async function renderContactDetail(contactId: string) {
 
 (window as any).updateOpportunityField = (oppId: string, field: string, value: string) => {
   if (editorUsesSupabase()) { (window as any).showToast('Opportunity updates are temporarily unavailable.', 'error'); return; }
-  const opp = mockOpportunities.find(o => o.id === oppId);
+  const opp = mockOpportunities.find(o => o.user_id === getActingUserId() && o.id === oppId);
   if (opp) {
     if (field === 'value') {
       opp.value = parseFloat(value) || 0;
