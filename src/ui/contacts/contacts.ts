@@ -23,9 +23,9 @@ function attentionRequired(contact: Contact): boolean {
   return Boolean(contact.follow_up_required || contact.lead_status === 'urgent');
 }
 
-function activityForContact(activities: Activity[], contactId: string): Activity | undefined {
+function activityForContact(activities: Activity[], userId: string, contactId: string): Activity | undefined {
   return activities
-    .filter(activity => activity.contact_id === contactId)
+    .filter(activity => activity.user_id === userId && activity.contact_id === contactId)
     .sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime())[0];
 }
 
@@ -45,8 +45,8 @@ function renderContactFlag(contact: Contact, now: Date): string {
   return '';
 }
 
-function renderContactRow(contact: Contact, activities: Activity[], now: Date): string {
-  const latest = activityForContact(activities, contact.id);
+function renderContactRow(contact: Contact, activities: Activity[], userId: string, now: Date): string {
+  const latest = activityForContact(activities, userId, contact.id);
   const telHref = safeTelHref(contact.phone);
   const canText = hasContactPhone(contact.phone);
   const activityText = latest ? escapeHtmlText(latest.description) : 'No activity yet';
@@ -90,7 +90,7 @@ export function renderClientsContent(model: ContactsScreenModel): string {
   const total = ownedContacts.length;
   const leadCount = ownedContacts.filter(contact => contact.status === 'lead').length;
   const filterButtons: Array<[ContactFilter, string]> = [['all', 'All'], ['lead', 'Leads'], ['customer', 'Customers'], ['lost', 'Lost']];
-  const rows = contacts.map(contact => renderContactRow(contact, model.activities, model.now)).join('');
+  const rows = contacts.map(contact => renderContactRow(contact, model.activities, model.userId, model.now)).join('');
 
   const controls = `
     <section class="wo-contacts-controls" aria-label="Contact search and filters">

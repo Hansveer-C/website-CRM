@@ -15,6 +15,18 @@ describe('WashOps contacts interiors', () => {
     expect(renderClientsContent(base)).not.toContain('Foreign contact');
   });
 
+  it('never uses a later foreign activity for an owned contact', () => {
+    const html = renderClientsContent({
+      ...base,
+      activities: [
+        ...base.activities,
+        { id: 'a-foreign', user_id: 'other-user', contact_id: contact.id, type: 'note', description: 'FOREIGN ACTIVITY MUST NOT RENDER', due_date: '2026-08-22T12:00:00.000Z', completed: true }
+      ]
+    });
+    expect(html).toContain('Requested an estimate');
+    expect(html).not.toContain('FOREIGN ACTIVITY MUST NOT RENDER');
+  });
+
   it('escapes contact and activity-controlled values in the Clients list', () => {
     const html = renderClientsContent({ ...base, contacts: [{ ...contact, name: '<img src=x onerror=alert(1)>', source: '<script>x</script>' }], activities: [{ ...base.activities[0], description: '<svg onload=alert(1)>' }] });
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
