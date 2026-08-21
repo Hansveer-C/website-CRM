@@ -213,18 +213,24 @@ describe.skipIf(!chromeExecutable)('authenticated CRM stored-XSS browser probes'
 describe('authenticated CRM sink wiring', () => {
   const main = readFileSync(fileURLToPath(new URL('./main.ts', import.meta.url)), 'utf8');
   const dashboardRenderer = readFileSync(fileURLToPath(new URL('./ui/dashboard/dashboard.ts', import.meta.url)), 'utf8');
+  const contactsRenderer = readFileSync(fileURLToPath(new URL('./ui/contacts/contacts.ts', import.meta.url)), 'utf8');
   const hydrator = readFileSync(fileURLToPath(new URL('./crm_production_hydration.ts', import.meta.url)), 'utf8');
 
   it('encodes every audited public or user-controlled CRM HTML sink at render time', () => {
     for (const renderedValue of [
-      'contact.name', 'contact.phone', 'contact.source', 'contact.address',
-      'latest.content', 'opp.notes.replace(/\\n/g, \' \')',
+      'opp.notes.replace(/\\n/g, \' \')',
       'item.service_name', 'item.description', 'quote.notes', 'item.content'
     ]) {
       expect(main).toContain(`escapeHtmlText(${renderedValue})`);
     }
     expect(dashboardRenderer).toContain('escapeHtmlText(row.description)');
-    expect(main).toContain('safeTelHref(contact.phone)');
+    for (const renderedValue of ['contact.name', 'latest.description']) {
+      expect(contactsRenderer).toContain(`escapeHtmlText(${renderedValue})`);
+    }
+    expect(contactsRenderer).toContain("escapeHtmlText(contact.source || 'Not recorded')");
+    expect(contactsRenderer).toContain("escapeHtmlText(contact.address || 'Not recorded')");
+    expect(contactsRenderer).toContain('escapeHtmlText(formatContactPhone(contact.phone))');
+    expect(contactsRenderer).toContain('safeTelHref(contact.phone)');
     expect(main).toContain('messageText.textContent = message;');
     expect(main).not.toContain('<span>${message}</span>');
   });

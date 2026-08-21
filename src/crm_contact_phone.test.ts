@@ -87,6 +87,7 @@ describe('nullable CRM contact phone behavior', () => {
 
 describe('nullable phone UI and hydration wiring', () => {
   const main = readFileSync(fileURLToPath(new URL('./main.ts', import.meta.url)), 'utf8');
+  const contactsRenderer = readFileSync(fileURLToPath(new URL('./ui/contacts/contacts.ts', import.meta.url)), 'utf8');
   const hydrator = readFileSync(fileURLToPath(new URL('./crm_production_hydration.ts', import.meta.url)), 'utf8');
   const smsLogic = readFileSync(fileURLToPath(new URL('./sms_logic.ts', import.meta.url)), 'utf8');
   const timeline = readFileSync(fileURLToPath(new URL('./timeline.ts', import.meta.url)), 'utf8');
@@ -99,17 +100,17 @@ describe('nullable phone UI and hydration wiring', () => {
   });
 
   it('wires Clients search, neutral display, and unavailable actions through null-safe helpers', () => {
-    expect(main).toContain('contactMatchesClientSearch(contact, clientSearchQuery)');
-    expect(main).not.toContain('contact.phone.includes(clientSearchQuery)');
-    expect(main).toContain('escapeHtmlText(formatContactPhone(contact.phone))');
-    expect(main).toContain('const canText = hasContactPhone(contact.phone);');
-    expect(main).toContain('disabled title="No phone number available"');
-    expect(main).toContain('const telHref = safeTelHref(contact.phone);');
+    expect(contactsRenderer).toContain('[contact.name, contact.phone, contact.email, contact.source]');
+    expect(contactsRenderer).not.toContain('contact.phone.includes(clientSearchQuery)');
+    expect(contactsRenderer).toContain('escapeHtmlText(formatContactPhone(contact.phone))');
+    expect(contactsRenderer).toContain('const canText = hasContactPhone(contact.phone);');
+    expect(contactsRenderer).toContain('disabled title="No phone number available"');
+    expect(contactsRenderer).toContain('const telHref = safeTelHref(contact.phone);');
   });
 
   it('renders contact detail safely and refuses false-success SMS UI', () => {
-    expect(main).toContain("escapeHtmlText(contact.phone ?? '')");
-    expect(main).toContain('placeholder="Add phone..."');
+    expect(contactsRenderer).toContain("escapeHtmlText(contact.phone ?? '')");
+    expect(contactsRenderer).toContain('placeholder="Add phone"');
     expect(main).toContain('const hasPhone = hasContactPhone(contact.phone);');
     expect(main).toContain('const sendResult = await sendMessageToContact(contactId, content);');
     expect(main).toContain('if (!sendResult.success)');
