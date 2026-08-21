@@ -9,12 +9,15 @@ const invoice = { id: 'invoice-1', user_id: owner, contact_id: contact.id, quote
 const base = { userId: owner, invoices: [invoice], contacts: [contact], filter: 'all' as const, production: false };
 
 describe('WashOps invoices interior', () => {
-  it('derives local rows and summary values only from owned invoices', () => {
+  it('derives complete owned invoice summary values without foreign records', () => {
+    const overdue = { ...invoice, id: 'invoice-overdue', amount: 500, status: 'overdue' as const };
+    const paid = { ...invoice, id: 'invoice-paid', amount: 300, status: 'paid' as const };
     const foreign = { ...invoice, id: 'foreign-invoice', user_id: 'other-user', amount: 99999 };
-    expect(ownedInvoices({ ...base, invoices: [invoice, foreign] }).map(item => item.id)).toEqual(['invoice-1']);
-    const html = renderInvoicesContent({ ...base, invoices: [invoice, foreign] });
-    expect(html).toContain('1 invoices');
-    expect(html).toContain('$1,250 outstanding');
+    expect(ownedInvoices({ ...base, invoices: [invoice, overdue, paid, foreign] }).map(item => item.id)).toEqual(['invoice-1', 'invoice-overdue', 'invoice-paid']);
+    const html = renderInvoicesContent({ ...base, invoices: [invoice, overdue, paid, foreign] });
+    expect(html).toContain('$1,750 outstanding');
+    expect(html).toContain('$500 overdue');
+    expect(html).toContain('$300 paid invoice value');
     expect(html).not.toContain('99,999');
   });
 
