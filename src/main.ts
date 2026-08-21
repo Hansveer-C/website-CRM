@@ -29,13 +29,11 @@ import {
   handleBuilderHistoryKeyboardShortcut
 } from './builder_history_controller';
 import {
-  renderButton,
   renderCard,
   renderField,
-  renderInput,
   renderSelect,
-  renderBadge,
-  renderStatusBadge
+  renderStatusBadge,
+  getFieldAccessibilityProps
 } from './ui';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
@@ -9551,9 +9549,13 @@ function renderTemplates() {
 }
 
 function renderWebsiteSettingsSelector(websites: readonly Website[], invalid = false) {
+  const fieldA11y = getFieldAccessibilityProps('settings-website-select', { hasError: invalid });
+
   const selectHtml = renderSelect({
     id: 'settings-website-select',
     className: 'wo-select',
+    invalid: fieldA11y.invalid,
+    describedBy: fieldA11y.describedBy,
     options: [
       { value: '', label: 'Select a website' },
       ...websites.map(site => ({
@@ -9579,14 +9581,14 @@ function renderWebsiteSettingsSelector(websites: readonly Website[], invalid = f
       <p style="margin-bottom: var(--wo-space-4); color: var(--wo-color-text-secondary);">${invalid ? 'That website is not available for this account. Choose an owned website.' : 'Select the website whose settings you want to manage.'}</p>
       ${fieldHtml}
     `,
-    className: `website-settings-selection ${invalid ? 'wo-card--invalid' : ''}`
+    className: 'website-settings-selection'
   });
 
   app.innerHTML = `
     ${renderSidebar('website-settings')}
     <main class="main-content">
       <header class="view-header"><h2>Website Branding & Tracking</h2></header>
-      <section class="website-settings-selection-container" ${invalid ? 'role="alert"' : ''}>
+      <section class="website-settings-selection-container">
         ${cardHtml}
       </section>
     </main>
@@ -9602,9 +9604,13 @@ function renderWebsiteManagementSelector(view: WebsiteManagementView, websites: 
     'seo-pages': 'SEO Pages'
   };
 
+  const fieldA11y = getFieldAccessibilityProps('management-website-select', { hasError: invalid });
+
   const selectHtml = renderSelect({
     id: 'management-website-select',
     className: 'wo-select',
+    invalid: fieldA11y.invalid,
+    describedBy: fieldA11y.describedBy,
     options: [
       { value: '', label: 'Select a website' },
       ...websites.map(site => ({
@@ -9630,14 +9636,14 @@ function renderWebsiteManagementSelector(view: WebsiteManagementView, websites: 
       <p style="margin-bottom: var(--wo-space-4); color: var(--wo-color-text-secondary);">${invalid ? 'That website is not available for this account. Choose an owned website.' : `Select the website whose ${labels[view].toLowerCase()} you want to manage.`}</p>
       ${fieldHtml}
     `,
-    className: `website-settings-selection ${invalid ? 'wo-card--invalid' : ''}`
+    className: 'website-settings-selection'
   });
 
   app.innerHTML = `
     ${renderSidebar(view)}
     <main class="main-content">
       <header class="view-header"><h2>${labels[view]}</h2></header>
-      <section class="website-settings-selection-container" ${invalid ? 'role="alert"' : ''}>
+      <section class="website-settings-selection-container">
         ${cardHtml}
       </section>
     </main>

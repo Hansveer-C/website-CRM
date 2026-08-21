@@ -284,19 +284,38 @@
   cursor: pointer;
 }
 
+.wo-checkbox:focus-visible {
+  outline: var(--wo-focus-ring-outline);
+  outline-offset: var(--wo-focus-outline-offset);
+}
+
 .wo-switch {
   position: relative;
   display: inline-block;
   width: 40px;
   height: 22px;
+  padding: 0;
+  border: none;
   background-color: var(--wo-color-border-strong);
   border-radius: var(--wo-radius-full);
   transition: var(--wo-transition-all);
   cursor: pointer;
+  box-sizing: border-box;
+}
+
+.wo-switch:focus-visible {
+  outline: var(--wo-focus-ring-outline);
+  outline-offset: var(--wo-focus-outline-offset);
 }
 
 .wo-switch[aria-checked="true"] {
   background-color: var(--wo-color-interactive);
+}
+
+.wo-switch:disabled,
+.wo-switch[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .wo-switch-thumb {
@@ -453,7 +472,7 @@
   margin-bottom: -1px;
 }
 
-.wo-tab:hover {
+.wo-tab:hover:not(:disabled) {
   color: var(--wo-color-text-primary);
   border-bottom-color: var(--wo-color-border-strong);
 }
@@ -467,6 +486,12 @@
 .wo-tab:focus-visible {
   outline: var(--wo-focus-ring-outline);
   outline-offset: var(--wo-focus-outline-offset);
+}
+
+.wo-tab:disabled,
+.wo-tab[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .wo-tab-panel {
@@ -522,6 +547,11 @@
 
 .wo-table tbody tr:hover {
   background-color: var(--wo-color-surface-subtle);
+}
+
+.wo-table-empty-cell {
+  text-align: center;
+  padding: var(--wo-space-8) var(--wo-space-4);
 }
 
 /* ==========================================================================

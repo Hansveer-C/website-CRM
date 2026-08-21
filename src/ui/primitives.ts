@@ -1,8 +1,8 @@
 /**
  * WashOps Design System — Framework-Neutral UI Primitives (Phase 1C / Task 7A.2)
  *
- * Provides typed HTML string builders and accessible DOM wiring utilities
- * for all canonical WashOps UI primitives.
+ * Provides typed HTML string builders, safe-by-default output escaping,
+ * and accessible DOM interaction controllers for all canonical WashOps UI primitives.
  */
 
 import { escapeHtmlText } from '../crm_html_output';
@@ -23,7 +23,8 @@ export interface ButtonOptions {
   className?: string;
   disabled?: boolean;
   loading?: boolean;
-  icon?: string;
+  icon?: string; // Plain text / emoji glyph (escaped)
+  iconHtml?: string; // Developer-owned trusted SVG/markup
   iconOnly?: boolean;
   ariaLabel?: string;
   attributes?: Record<string, string>;
@@ -33,6 +34,7 @@ export function renderButton(opts: ButtonOptions): string {
   const variant = opts.variant ?? 'secondary';
   const size = opts.size ?? 'md';
   const type = opts.type ?? 'button';
+  const accessibleName = opts.ariaLabel ?? opts.label;
 
   const classes = [
     'wo-button',
@@ -49,9 +51,10 @@ export function renderButton(opts: ButtonOptions): string {
   ];
 
   if (opts.id) attrs.push(`id="${opts.id}"`);
-  if (opts.disabled) attrs.push('disabled');
+  // Prevent double-activation or keyboard triggers while loading by applying native disabled
+  if (opts.disabled || opts.loading) attrs.push('disabled');
   if (opts.loading) attrs.push('aria-busy="true"');
-  if (opts.ariaLabel) attrs.push(`aria-label="${escapeHtmlText(opts.ariaLabel)}"`);
+  if (accessibleName) attrs.push(`aria-label="${escapeHtmlText(accessibleName)}"`);
 
   if (opts.attributes) {
     for (const [k, v] of Object.entries(opts.attributes)) {
@@ -59,9 +62,16 @@ export function renderButton(opts: ButtonOptions): string {
     }
   }
 
-  const iconHtml = opts.icon ? `<span class="wo-button-icon" aria-hidden="true">${opts.icon}</span>` : '';
+  let iconContent = '';
+  if (opts.iconHtml) {
+    iconContent = opts.iconHtml;
+  } else if (opts.icon) {
+    iconContent = escapeHtmlText(opts.icon);
+  }
+
+  const iconHtml = iconContent ? `<span class="wo-button-icon" aria-hidden="true">${iconContent}</span>` : '';
   const labelHtml = opts.iconOnly
-    ? (opts.ariaLabel ? `<span class="wo-sr-only">${escapeHtmlText(opts.ariaLabel)}</span>` : '')
+    ? `<span class="wo-sr-only">${escapeHtmlText(accessibleName)}</span>`
     : `<span>${escapeHtmlText(opts.label)}</span>`;
   const spinnerHtml = opts.loading ? '<span class="wo-spinner" aria-hidden="true"></span>' : '';
 
@@ -71,6 +81,30 @@ export function renderButton(opts: ButtonOptions): string {
 // ============================================================================
 // 2. FORM CONTROL PRIMITIVES
 // ============================================================================
+
+export interface FieldAccessibilityProps {
+  helperId?: string;
+  errorId?: string;
+  describedBy?: string;
+  invalid?: boolean;
+}
+
+export function getFieldAccessibilityProps(
+  fieldId: string,
+  opts: { hasHelper?: boolean; hasError?: boolean }
+): FieldAccessibilityProps {
+  const helperId = opts.hasHelper ? `${fieldId}-helper` : undefined;
+  const errorId = opts.hasError ? `${fieldId}-error` : undefined;
+  const describedByParts = [helperId, errorId].filter(Boolean);
+  const describedBy = describedByParts.length > 0 ? describedByParts.join(' ') : undefined;
+
+  return {
+    helperId,
+    errorId,
+    describedBy,
+    invalid: Boolean(opts.hasError)
+  };
+}
 
 export interface FieldOptions {
   id: string;
@@ -83,13 +117,15 @@ export interface FieldOptions {
 }
 
 export function renderField(opts: FieldOptions): string {
-  const helperId = opts.helperText ? `${opts.id}-helper` : '';
-  const errorId = opts.errorMessage ? `${opts.id}-error` : '';
+  const a11y = getFieldAccessibilityProps(opts.id, {
+    hasHelper: Boolean(opts.helperText),
+    hasError: Boolean(opts.errorMessage)
+  });
 
   const requiredMarker = opts.required ? '<span class="wo-required-marker" aria-hidden="true">*</span>' : '';
   const labelHtml = `<label for="${opts.id}" class="wo-label">${escapeHtmlText(opts.label)}${requiredMarker}</label>`;
-  const helperHtml = opts.helperText ? `<div id="${helperId}" class="wo-field-helper">${escapeHtmlText(opts.helperText)}</div>` : '';
-  const errorHtml = opts.errorMessage ? `<div id="${errorId}" class="wo-field-error" role="alert">${escapeHtmlText(opts.errorMessage)}</div>` : '';
+  const helperHtml = opts.helperText ? `<div id="${a11y.helperId}" class="wo-field-helper">${escapeHtmlText(opts.helperText)}</div>` : '';
+  const errorHtml = opts.errorMessage ? `<div id="${a11y.errorId}" class="wo-field-error" role="alert">${escapeHtmlText(opts.errorMessage)}</div>` : '';
 
   return `
     <div class="wo-field ${opts.className ?? ''}">
@@ -224,6 +260,124 @@ export function renderTextarea(opts: TextareaOptions): string {
   return `<textarea ${attrs.join(' ')}>${opts.value ? escapeHtmlText(opts.value) : ''}</textarea>`;
 }
 
+export interface CheckboxOptions {
+  id: string;
+  name?: string;
+  label: string;
+  checked?: boolean;
+  disabled?: boolean;
+  required?: boolean;
+  invalid?: boolean;
+  describedBy?: string;
+  className?: string;
+  attributes?: Record<string, string>;
+}
+
+export function renderCheckbox(opts: CheckboxOptions): string {
+  const attrs: string[] = [
+    'type="checkbox"',
+    `id="${opts.id}"`,
+    'class="wo-checkbox"'
+  ];
+
+  if (opts.name) attrs.push(`name="${opts.name}"`);
+  if (opts.checked) attrs.push('checked');
+  if (opts.disabled) attrs.push('disabled');
+  if (opts.required) attrs.push('required');
+  if (opts.invalid) attrs.push('aria-invalid="true"');
+  if (opts.describedBy) attrs.push(`aria-describedby="${opts.describedBy}"`);
+
+  if (opts.attributes) {
+    for (const [k, v] of Object.entries(opts.attributes)) {
+      attrs.push(`${k}="${escapeHtmlText(v)}"`);
+    }
+  }
+
+  const labelClasses = ['wo-checkbox-label', opts.className ?? ''].filter(Boolean).join(' ');
+
+  return `
+    <label class="${labelClasses}" for="${opts.id}">
+      <input ${attrs.join(' ')} />
+      <span>${escapeHtmlText(opts.label)}</span>
+    </label>
+  `.trim();
+}
+
+export interface SwitchOptions {
+  id: string;
+  label: string;
+  checked?: boolean;
+  disabled?: boolean;
+  describedBy?: string;
+  className?: string;
+  attributes?: Record<string, string>;
+}
+
+export function renderSwitch(opts: SwitchOptions): string {
+  const isChecked = Boolean(opts.checked);
+  const attrs: string[] = [
+    'type="button"',
+    'role="switch"',
+    `id="${opts.id}"`,
+    `aria-checked="${isChecked ? 'true' : 'false'}"`,
+    'class="wo-switch"'
+  ];
+
+  if (opts.disabled) {
+    attrs.push('disabled');
+    attrs.push('aria-disabled="true"');
+  }
+  if (opts.describedBy) attrs.push(`aria-describedby="${opts.describedBy}"`);
+  attrs.push(`aria-label="${escapeHtmlText(opts.label)}"`);
+
+  if (opts.attributes) {
+    for (const [k, v] of Object.entries(opts.attributes)) {
+      attrs.push(`${k}="${escapeHtmlText(v)}"`);
+    }
+  }
+
+  const labelClasses = ['wo-switch-label', opts.className ?? ''].filter(Boolean).join(' ');
+
+  return `
+    <label class="${labelClasses}" for="${opts.id}">
+      <button ${attrs.join(' ')}>
+        <span class="wo-switch-thumb" aria-hidden="true"></span>
+      </button>
+      <span>${escapeHtmlText(opts.label)}</span>
+    </label>
+  `.trim();
+}
+
+export function initSwitch(buttonEl: HTMLButtonElement, onToggle?: (checked: boolean) => void): () => void {
+  const toggle = () => {
+    if (buttonEl.disabled || buttonEl.getAttribute('aria-disabled') === 'true') return;
+    const current = buttonEl.getAttribute('aria-checked') === 'true';
+    const next = !current;
+    buttonEl.setAttribute('aria-checked', next ? 'true' : 'false');
+    onToggle?.(next);
+  };
+
+  const handleClick = (e: MouseEvent) => {
+    e.preventDefault();
+    toggle();
+  };
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      toggle();
+    }
+  };
+
+  buttonEl.addEventListener('click', handleClick);
+  buttonEl.addEventListener('keydown', handleKeyDown);
+
+  return () => {
+    buttonEl.removeEventListener('click', handleClick);
+    buttonEl.removeEventListener('keydown', handleKeyDown);
+  };
+}
+
 // ============================================================================
 // 3. CARD / SURFACE PRIMITIVE
 // ============================================================================
@@ -279,14 +433,23 @@ export type BadgeVariant = 'neutral' | 'info' | 'success' | 'warning' | 'danger'
 export interface BadgeOptions {
   label: string;
   variant?: BadgeVariant;
-  icon?: string;
+  icon?: string; // plain text / emoji glyph (escaped)
+  iconHtml?: string; // developer-owned trusted SVG/markup
   className?: string;
 }
 
 export function renderBadge(opts: BadgeOptions): string {
   const variant = opts.variant ?? 'neutral';
   const classes = ['wo-badge', `wo-badge--${variant}`, opts.className ?? ''].filter(Boolean).join(' ');
-  const iconHtml = opts.icon ? `<span class="wo-badge-icon" aria-hidden="true">${opts.icon}</span>` : '';
+
+  let iconContent = '';
+  if (opts.iconHtml) {
+    iconContent = opts.iconHtml;
+  } else if (opts.icon) {
+    iconContent = escapeHtmlText(opts.icon);
+  }
+
+  const iconHtml = iconContent ? `<span class="wo-badge-icon" aria-hidden="true">${iconContent}</span>` : '';
 
   return `<span class="${classes}">${iconHtml}${escapeHtmlText(opts.label)}</span>`;
 }
@@ -338,6 +501,7 @@ export interface TabItem {
   label: string;
   panelId: string;
   active?: boolean;
+  disabled?: boolean;
 }
 
 export interface TabsOptions {
@@ -351,15 +515,95 @@ export function renderTabs(opts: TabsOptions): string {
   const classes = ['wo-tabs', opts.className ?? ''].filter(Boolean).join(' ');
 
   const tabsHtml = opts.tabs.map(t => {
-    const selected = t.active ? 'true' : 'false';
+    const isSelected = Boolean(t.active);
+    const isDisabled = Boolean(t.disabled);
+    const tabIndex = isSelected ? '0' : '-1';
+    const disabledAttr = isDisabled ? ' disabled aria-disabled="true"' : '';
+
     return `
-      <button type="button" role="tab" id="${t.id}" class="wo-tab" aria-selected="${selected}" aria-controls="${t.panelId}">
+      <button type="button" role="tab" id="${t.id}" class="wo-tab" aria-selected="${isSelected ? 'true' : 'false'}" tabindex="${tabIndex}" aria-controls="${t.panelId}"${disabledAttr}>
         ${escapeHtmlText(t.label)}
       </button>
     `.trim();
   }).join('');
 
   return `<div role="tablist"${ariaLabel} class="${classes}">${tabsHtml}</div>`;
+}
+
+export function initTabs(tablistEl: HTMLElement, opts: { onTabChange?: (tabId: string) => void } = {}): () => void {
+  const getTabs = () => Array.from(tablistEl.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+
+  const activateTab = (targetTab: HTMLButtonElement) => {
+    if (targetTab.disabled || targetTab.getAttribute('aria-disabled') === 'true') return;
+    const tabs = getTabs();
+
+    for (const tab of tabs) {
+      const isTarget = tab === targetTab;
+      tab.setAttribute('aria-selected', isTarget ? 'true' : 'false');
+      tab.setAttribute('tabindex', isTarget ? '0' : '-1');
+
+      const panelId = tab.getAttribute('aria-controls');
+      if (panelId) {
+        const panel = document.getElementById(panelId);
+        if (panel) {
+          panel.hidden = !isTarget;
+        }
+      }
+    }
+
+    targetTab.focus();
+    opts.onTabChange?.(targetTab.id);
+  };
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    const tabs = getTabs();
+    const enabledTabs = tabs.filter(t => !t.disabled && t.getAttribute('aria-disabled') !== 'true');
+    const currentTab = document.activeElement as HTMLButtonElement;
+    const currentIndex = enabledTabs.indexOf(currentTab);
+
+    if (currentIndex === -1) return;
+
+    let nextTab: HTMLButtonElement | undefined;
+
+    switch (e.key) {
+      case 'ArrowRight':
+        e.preventDefault();
+        nextTab = enabledTabs[(currentIndex + 1) % enabledTabs.length];
+        break;
+      case 'ArrowLeft':
+        e.preventDefault();
+        nextTab = enabledTabs[(currentIndex - 1 + enabledTabs.length) % enabledTabs.length];
+        break;
+      case 'Home':
+        e.preventDefault();
+        nextTab = enabledTabs[0];
+        break;
+      case 'End':
+        e.preventDefault();
+        nextTab = enabledTabs[enabledTabs.length - 1];
+        break;
+    }
+
+    if (nextTab) {
+      activateTab(nextTab);
+    }
+  };
+
+  const handleClick = (e: MouseEvent) => {
+    const target = (e.target as HTMLElement).closest<HTMLButtonElement>('[role="tab"]');
+    if (target && tablistEl.contains(target)) {
+      e.preventDefault();
+      activateTab(target);
+    }
+  };
+
+  tablistEl.addEventListener('keydown', handleKeyDown);
+  tablistEl.addEventListener('click', handleClick);
+
+  return () => {
+    tablistEl.removeEventListener('keydown', handleKeyDown);
+    tablistEl.removeEventListener('click', handleClick);
+  };
 }
 
 // ============================================================================
@@ -400,7 +644,7 @@ export function renderTable(opts: TableOptions): string {
           <thead><tr>${headerHtml}</tr></thead>
           <tbody>
             <tr>
-              <td colspan="${opts.columns.length}" style="text-align: center; padding: 32px;">
+              <td colspan="${opts.columns.length}" class="wo-table-empty-cell">
                 <div class="wo-empty-state-description">${escapeHtmlText(emptyMsg)}</div>
               </td>
             </tr>
@@ -414,7 +658,8 @@ export function renderTable(opts: TableOptions): string {
     const cellsHtml = opts.columns.map(col => {
       const alignStyle = col.align ? ` style="text-align: ${col.align};"` : '';
       const cellVal = row[col.key];
-      const content = cellVal !== undefined && cellVal !== null ? String(cellVal) : '';
+      // Safe-by-default: ordinary data values are strictly HTML-escaped before interpolation
+      const content = cellVal !== undefined && cellVal !== null ? escapeHtmlText(String(cellVal)) : '';
       return `<td${alignStyle}>${content}</td>`;
     }).join('');
     return `<tr>${cellsHtml}</tr>`;
@@ -458,6 +703,85 @@ export function renderDialog(opts: DialogOptions): string {
       </div>
     </div>
   `.trim();
+}
+
+export function initDialog(
+  backdropEl: HTMLElement,
+  opts: { onClose?: () => void; nonDismissible?: boolean } = {}
+): () => void {
+  const previouslyFocused = document.activeElement as HTMLElement | null;
+  const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  const getFocusableElements = (): HTMLElement[] => {
+    return Array.from(backdropEl.querySelectorAll<HTMLElement>(focusableSelector))
+      .filter(el => el.offsetParent !== null || el === document.activeElement || el.tagName.toLowerCase() === 'button');
+  };
+
+  // Move initial focus inside dialog
+  const focusables = getFocusableElements();
+  if (focusables.length > 0) {
+    focusables[0].focus();
+  } else {
+    backdropEl.setAttribute('tabindex', '-1');
+    backdropEl.focus();
+  }
+
+  const closeDialog = () => {
+    opts.onClose?.();
+    cleanup();
+    if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+      previouslyFocused.focus();
+    }
+  };
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && !opts.nonDismissible) {
+      e.preventDefault();
+      closeDialog();
+      return;
+    }
+
+    if (e.key === 'Tab') {
+      const items = getFocusableElements();
+      if (items.length === 0) {
+        e.preventDefault();
+        return;
+      }
+
+      const first = items[0];
+      const last = items[items.length - 1];
+
+      if (e.shiftKey) {
+        if (document.activeElement === first || !backdropEl.contains(document.activeElement)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last || !backdropEl.contains(document.activeElement)) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+  };
+
+  const handleClick = (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-dialog-close]')) {
+      e.preventDefault();
+      closeDialog();
+    }
+  };
+
+  backdropEl.addEventListener('keydown', handleKeyDown);
+  backdropEl.addEventListener('click', handleClick);
+
+  const cleanup = () => {
+    backdropEl.removeEventListener('keydown', handleKeyDown);
+    backdropEl.removeEventListener('click', handleClick);
+  };
+
+  return cleanup;
 }
 
 // ============================================================================
@@ -513,12 +837,20 @@ export interface EmptyStateOptions {
   title: string;
   description?: string;
   actionHtml?: string;
-  icon?: string;
+  icon?: string; // plain text glyph (escaped)
+  iconHtml?: string; // developer-owned trusted SVG/markup
   className?: string;
 }
 
 export function renderEmptyState(opts: EmptyStateOptions): string {
-  const iconHtml = opts.icon ? `<div class="wo-empty-state-icon" aria-hidden="true">${opts.icon}</div>` : '';
+  let iconContent = '';
+  if (opts.iconHtml) {
+    iconContent = opts.iconHtml;
+  } else if (opts.icon) {
+    iconContent = escapeHtmlText(opts.icon);
+  }
+
+  const iconHtml = iconContent ? `<div class="wo-empty-state-icon" aria-hidden="true">${iconContent}</div>` : '';
   const descHtml = opts.description ? `<p class="wo-empty-state-description">${escapeHtmlText(opts.description)}</p>` : '';
   const actionHtml = opts.actionHtml ? `<div class="wo-empty-state-action">${opts.actionHtml}</div>` : '';
 
