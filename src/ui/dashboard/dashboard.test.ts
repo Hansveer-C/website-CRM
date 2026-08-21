@@ -126,6 +126,7 @@ describe('Phase 1C / Task 7C.1 Dashboard visual and data architecture', () => {
     expect(model.quotes).toMatchObject({ totalCount: 2, sentValue: 250 });
     expect(model.leadSources).toMatchObject({ totalLeads: 1 });
     expect(model.leadSources.sources).toEqual([{ source: 'Public website', count: 1, percentage: 100 }]);
+    expect(renderDashboardContent(model)).toContain('1 active lead');
     expect(JSON.stringify(model)).not.toContain('99999');
     expect(JSON.stringify(model)).not.toContain('Foreign');
   });

@@ -150,7 +150,10 @@ async function captureDashboardStates(browser: Awaited<ReturnType<typeof chromiu
   let screenshotCount = 0;
   for (const viewport of viewports) {
     for (const state of dashboardStates) {
-      const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
+      const context = await browser.newContext({
+        viewport: { width: viewport.width, height: viewport.height },
+        reducedMotion: 'reduce'
+      });
       await context.addInitScript({ content: "window.localStorage.setItem('onboarding_seen', 'true');" });
       const page = await context.newPage();
       await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
@@ -233,7 +236,10 @@ async function smokeOrdinaryRoute(
 async function smokeRegressionRoutes(browser: Awaited<ReturnType<typeof chromium.launch>>): Promise<number> {
   let assertionGroups = 0;
   for (const viewport of viewports) {
-    const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
+    const context = await browser.newContext({
+      viewport: { width: viewport.width, height: viewport.height },
+      reducedMotion: 'reduce'
+    });
     await context.addInitScript({ content: "window.localStorage.setItem('onboarding_seen', 'true');" });
     const page = await context.newPage();
     await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));

@@ -297,7 +297,10 @@ function renderActivityPanel(model: DashboardViewModel): string {
 
 function renderLeadSourcesPanel(model: DashboardViewModel): string {
   const accessory = model.leadSources.available
-    ? renderBadge({ label: `${model.leadSources.totalLeads} active leads`, variant: 'info' })
+    ? renderBadge({
+      label: `${model.leadSources.totalLeads} active ${model.leadSources.totalLeads === 1 ? 'lead' : 'leads'}`,
+      variant: 'info'
+    })
     : renderBadge({ label: 'Unavailable', variant: 'danger' });
   let bodyHtml: string;
 
