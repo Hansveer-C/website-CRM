@@ -270,7 +270,7 @@ export function renderShellSidebar(opts: ShellSidebarOptions): string {
 
       const activeClass = isActive ? ' wo-shell-nav-item--active' : '';
       const currentAttr = isActive ? ' aria-current="page"' : '';
-      const hrefAttr = item.href ?? `(#/${item.id})`;
+      const hrefAttr = item.href ?? `#/${item.id}`;
       const targetPayload = JSON.stringify(item.navTarget || { kind: 'view', view: item.id });
 
       let badgeHtml = '';

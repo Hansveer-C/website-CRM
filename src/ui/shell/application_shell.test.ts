@@ -512,4 +512,63 @@ describe('WashOps Permanent Application Shell (Phase 1C / Task 7B.1)', () => {
     expect(cssContent).toMatch(/\.wo-shell-menu-button\s*\{[^}]*min-width:\s*var\(--wo-min-touch-target/);
     expect(cssContent).toMatch(/\.wo-shell-drawer\s+\.wo-shell-nav-item\s*\{[^}]*min-height:\s*var\(--wo-min-touch-target/);
   });
+
+  it('R. Explicit No-href Fallback: custom nav item without href produces valid #/<id> and NOT (#/<id>)', () => {
+    const customSidebar = renderShellSidebar({
+      activeView: 'custom-view',
+      navGroups: [
+        {
+          title: 'Custom Section',
+          items: [
+            {
+              id: 'custom-view',
+              label: 'Custom Item',
+              iconSvg: '<svg></svg>',
+              navTarget: { kind: 'view', view: 'custom-view' }
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(customSidebar).not.toMatch(/href=["']\(#/);
+    expect(customSidebar).toContain('href="#/custom-view"');
+  });
+
+  it('S. Controller Initialization Lifecycle: initApplicationShell attaches exactly one listener set, destroy cleans it up', () => {
+    const container = new MockElement('div');
+    const toggle = new MockElement('button');
+    toggle.setAttribute('data-shell-drawer-toggle', '');
+    container.appendChild(toggle);
+
+    const backdrop = new MockElement('div');
+    backdrop.setAttribute('id', 'wo-shell-drawer-backdrop');
+    backdrop.setAttribute('hidden', '');
+    container.appendChild(backdrop);
+
+    const drawer = new MockElement('div');
+    drawer.setAttribute('id', 'wo-shell-drawer');
+    backdrop.appendChild(drawer);
+
+    const closeBtn = new MockElement('button');
+    closeBtn.setAttribute('data-shell-drawer-close', '');
+    drawer.appendChild(closeBtn);
+
+    const controller = initApplicationShell(container as any);
+
+    // Opening drawer
+    toggle.dispatchEvent({ type: 'click' });
+    expect(backdrop.hidden).toBe(false);
+
+    // Closing drawer via controller
+    controller.closeDrawer();
+    expect(backdrop.hidden).toBe(true);
+
+    // Destroy controller
+    controller.destroy();
+
+    // After destroy, click events no longer toggle drawer
+    toggle.dispatchEvent({ type: 'click' });
+    expect(backdrop.hidden).toBe(true);
+  });
 });

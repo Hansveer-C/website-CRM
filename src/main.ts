@@ -2415,13 +2415,6 @@ function renderAppWithShell(options: ApplicationShellOptions): void {
   });
 }
 
-function attachShellController(): void {
-  currentShellController?.destroy();
-  currentShellController = initApplicationShell(app, {
-    onNavigate: handleShellNavigation
-  });
-}
-
 /**
  * Temporary legacy sidebar renderer for screens not yet migrated to the full WashOps application shell.
  * @deprecated To be removed in Task 7B.2 when all CRM screens are migrated to renderApplicationShell.
@@ -12132,10 +12125,6 @@ async function executeNavigation(
       }
       break;
     default: renderDashboard();
-  }
-
-  if (!['builder', 'site', 'preview'].includes(view)) {
-    attachShellController();
   }
 
   if (!['site', 'preview'].includes(view)) {
