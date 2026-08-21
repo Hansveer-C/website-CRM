@@ -247,7 +247,7 @@ function renderQuotePanel(model: DashboardViewModel): string {
 }
 
 function renderActivityRow(row: DashboardActivityRow): string {
-  const dateLabel = row.status === 'Completed' ? 'Recorded' : row.status === 'Overdue' ? 'Was due' : 'Due';
+  const dateLabel = row.status === 'Completed' ? 'Date' : row.status === 'Overdue' ? 'Was due' : 'Due';
   const dateText = formatActivityDate(row.datedAt);
   const timeHtml = dateText === 'Date unavailable'
     ? `<span>${dateText}</span>`

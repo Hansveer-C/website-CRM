@@ -185,10 +185,11 @@ describe('Phase 1C / Task 7C.1 Dashboard visual and data architecture', () => {
       description: 'Future annual reminder',
       due_date: '2027-08-21T10:00:00.000Z'
     };
-    const model = createDashboardViewModel(input({ activities: [...activities, futureActivity], activityLimit: 2 }));
+    const model = createDashboardViewModel(input({ activities: [...activities, futureActivity], activityLimit: 3 }));
     expect(model.activities.rows.map(row => [row.id, row.contactName, row.status])).toEqual([
       ['activity-completed', 'Morgan Customer', 'Completed'],
-      ['activity-overdue', 'Avery Client', 'Overdue']
+      ['activity-overdue', 'Avery Client', 'Overdue'],
+      ['activity-future', 'Avery Client', 'Open']
     ]);
     const html = renderDashboardContent(model);
     const completedIndex = html.indexOf('activity-completed');
@@ -196,7 +197,10 @@ describe('Phase 1C / Task 7C.1 Dashboard visual and data architecture', () => {
     expect(completedIndex).toBeGreaterThan(-1);
     expect(overdueIndex).toBeGreaterThan(completedIndex);
     expect(html).toContain('<time datetime="2026-08-21T10:00:00.000Z">');
-    expect(html).toContain('Recorded');
+    expect(html).toContain('Date');
+    expect(html).toContain('Was due');
+    expect(html).toContain('Due');
+    expect(html).not.toContain('Recorded');
     expect(html).toContain('Sent appointment details');
     expect(html).toContain('Follow up on house wash estimate');
   });
