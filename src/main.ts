@@ -29,6 +29,15 @@ import {
   handleBuilderHistoryKeyboardShortcut
 } from './builder_history_controller';
 import {
+  renderButton,
+  renderCard,
+  renderField,
+  renderInput,
+  renderSelect,
+  renderBadge,
+  renderStatusBadge
+} from './ui';
+import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
   BUILDER_PAGE_SLUG_MAX_LENGTH,
   BUILDER_SEO_DESCRIPTION_MAX_LENGTH,
@@ -2650,7 +2659,7 @@ async function renderClients() {
           </div>
         </td>
         <td><div style="font-weight: 500; font-size: 0.9rem; color: #334155;">${escapeHtmlText(formatContactPhone(contact.phone))}</div></td>
-        <td><span class="badge badge-${contact.status}" style="font-size: 0.7rem;">${contact.status}</span></td>
+        <td>${renderStatusBadge(contact.status)}</td>
         <td><span style="font-size: 0.8rem; color: #64748b;">${escapeHtmlText(contact.source)}</span></td>
         <td style="font-size: 0.8rem; color: #64748b;">${escapeHtmlText(latest ? latest.created_at : '-')}</td>
         <td>
@@ -9542,18 +9551,43 @@ function renderTemplates() {
 }
 
 function renderWebsiteSettingsSelector(websites: readonly Website[], invalid = false) {
+  const selectHtml = renderSelect({
+    id: 'settings-website-select',
+    className: 'wo-select',
+    options: [
+      { value: '', label: 'Select a website' },
+      ...websites.map(site => ({
+        value: site.id,
+        label: `${site.name}${site.domain ? ` — ${site.domain}` : ''}`
+      }))
+    ],
+    attributes: {
+      onchange: 'window.selectWebsiteForSettings(this.value)'
+    }
+  });
+
+  const fieldHtml = renderField({
+    id: 'settings-website-select',
+    label: 'Website',
+    controlHtml: selectHtml,
+    errorMessage: invalid ? 'That website is not available for this account. Choose an owned website.' : undefined
+  });
+
+  const cardHtml = renderCard({
+    title: 'Choose a website',
+    bodyHtml: `
+      <p style="margin-bottom: var(--wo-space-4); color: var(--wo-color-text-secondary);">${invalid ? 'That website is not available for this account. Choose an owned website.' : 'Select the website whose settings you want to manage.'}</p>
+      ${fieldHtml}
+    `,
+    className: `website-settings-selection ${invalid ? 'wo-card--invalid' : ''}`
+  });
+
   app.innerHTML = `
     ${renderSidebar('website-settings')}
     <main class="main-content">
       <header class="view-header"><h2>Website Branding & Tracking</h2></header>
-      <section class="card website-settings-selection" ${invalid ? 'role="alert"' : ''}>
-        <h3>Choose a website</h3>
-        <p>${invalid ? 'That website is not available for this account. Choose an owned website.' : 'Select the website whose settings you want to manage.'}</p>
-        <label for="settings-website-select">Website</label>
-        <select id="settings-website-select" onchange="window.selectWebsiteForSettings(this.value)">
-          <option value="">Select a website</option>
-          ${websites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}">${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}
-        </select>
+      <section class="website-settings-selection-container" ${invalid ? 'role="alert"' : ''}>
+        ${cardHtml}
       </section>
     </main>
   `;
@@ -9567,18 +9601,44 @@ function renderWebsiteManagementSelector(view: WebsiteManagementView, websites: 
     'website-structure': 'Website Structure',
     'seo-pages': 'SEO Pages'
   };
+
+  const selectHtml = renderSelect({
+    id: 'management-website-select',
+    className: 'wo-select',
+    options: [
+      { value: '', label: 'Select a website' },
+      ...websites.map(site => ({
+        value: site.id,
+        label: `${site.name}${site.domain ? ` — ${site.domain}` : ''}`
+      }))
+    ],
+    attributes: {
+      onchange: `window.selectWebsiteForManagement('${view}', this.value)`
+    }
+  });
+
+  const fieldHtml = renderField({
+    id: 'management-website-select',
+    label: 'Website',
+    controlHtml: selectHtml,
+    errorMessage: invalid ? 'That website is not available for this account. Choose an owned website.' : undefined
+  });
+
+  const cardHtml = renderCard({
+    title: 'Choose a website',
+    bodyHtml: `
+      <p style="margin-bottom: var(--wo-space-4); color: var(--wo-color-text-secondary);">${invalid ? 'That website is not available for this account. Choose an owned website.' : `Select the website whose ${labels[view].toLowerCase()} you want to manage.`}</p>
+      ${fieldHtml}
+    `,
+    className: `website-settings-selection ${invalid ? 'wo-card--invalid' : ''}`
+  });
+
   app.innerHTML = `
     ${renderSidebar(view)}
     <main class="main-content">
       <header class="view-header"><h2>${labels[view]}</h2></header>
-      <section class="card website-settings-selection" ${invalid ? 'role="alert"' : ''}>
-        <h3>Choose a website</h3>
-        <p>${invalid ? 'That website is not available for this account. Choose an owned website.' : `Select the website whose ${labels[view].toLowerCase()} you want to manage.`}</p>
-        <label for="management-website-select">Website</label>
-        <select id="management-website-select" onchange="window.selectWebsiteForManagement('${view}', this.value)">
-          <option value="">Select a website</option>
-          ${websites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}">${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}
-        </select>
+      <section class="website-settings-selection-container" ${invalid ? 'role="alert"' : ''}>
+        ${cardHtml}
       </section>
     </main>
   `;
