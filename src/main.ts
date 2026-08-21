@@ -51,6 +51,13 @@ import {
   type DashboardDataAvailability
 } from './ui/dashboard';
 import {
+  renderClientsContent,
+  renderClientsLoading,
+  renderContactDetailContent,
+  renderContactDetailLoading,
+  type ContactFilter
+} from './ui/contacts';
+import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
   BUILDER_PAGE_SLUG_MAX_LENGTH,
   BUILDER_SEO_DESCRIPTION_MAX_LENGTH,
@@ -2507,119 +2514,30 @@ function renderDashboard() {
 }
 
 async function renderClients() {
-  // Show initial structure with sidebar to keep UI responsive
   renderAppWithShell({
     activeView: 'clients',
     title: 'Clients & Leads',
     headerActionsHtml: '<button class="btn-primary" onclick="window.navigateTo(\'lead-capture\')">+ Add Lead</button>',
     contentVariant: 'wide',
     user: getCurrentShellUser(),
-    contentHtml: `
-      <div class="card" style="padding: 20px; text-align: center; color: #64748b;">
-        <div class="skeleton" style="height: 40px; margin-bottom: 20px;"></div>
-        Loading contacts...
-      </div>
-    `
+    contentHtml: renderClientsLoading()
   });
 
-  const response = await fetch('/api/contacts');
-  const result = await response.json();
-  const contacts: Contact[] = result.data || result;
+  try {
+    const response = await fetch('/api/contacts');
+    const result = await response.json();
+    const contacts: Contact[] = result.data || result;
+    const userId = getActingUserId();
 
-  const filteredContacts = contacts.filter(contact => {
-    const matchesSearch = contactMatchesClientSearch(contact, clientSearchQuery);
-    const matchesFilter = clientStatusFilter === 'all' || contact.status === clientStatusFilter;
-    return matchesSearch && matchesFilter;
-  });
-
-
-  const tableRows = filteredContacts.map(contact => {
-    const latest = getLatestActivity();
-    const hasAttentionFlag = needsAttention(contact);
-    const isNewLead = isNew(contact.created_at);
-
-    const telHref = safeTelHref(contact.phone);
-    const canText = hasContactPhone(contact.phone);
-    return `
-      <tr onclick="window.navigateTo('contact-detail', '${contact.id}')" style="cursor: pointer; border-bottom: 1px solid #f1f5f9; transition: background 0.1s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
-        <td style="padding: 16px 24px;">
-          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px; flex-wrap: wrap;">
-            <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${escapeHtmlText(contact.name)}</div>
-            ${hasAttentionFlag ? `
-              <span style="background: #fee2e2; color: #991b1b; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid #fecaca;">⚠️ Needs Attention</span>
-            ` : (isNewLead ? `
-              <span style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">New</span>
-            ` : '')}
-          </div>
-          <div style="font-size: 0.75rem; color: #64748b; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 250px;">
-            ${latest ? `<span style="color: #94a3b8; font-weight: 600;">Last:</span> ${escapeHtmlText(latest.content)}` : '<span style="color: #cbd5e1; font-style: italic;">No activity yet</span>'}
-          </div>
-        </td>
-        <td><div style="font-weight: 500; font-size: 0.9rem; color: #334155;">${escapeHtmlText(formatContactPhone(contact.phone))}</div></td>
-        <td>${renderStatusBadge(contact.status)}</td>
-        <td><span style="font-size: 0.8rem; color: #64748b;">${escapeHtmlText(contact.source)}</span></td>
-        <td style="font-size: 0.8rem; color: #64748b;">${escapeHtmlText(latest ? latest.created_at : '-')}</td>
-        <td>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${contact.id}')">View</button>
-            ${canText
-              ? `<button class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #6366f1;" onclick="event.stopPropagation(); window.textContact('${contact.id}')">💬 Text</button>`
-              : `<button class="btn-primary" disabled title="No phone number available" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #94a3b8; opacity: 0.55; cursor: not-allowed;" onclick="event.stopPropagation()">💬 Text</button>`}
-            ${(contact.status === 'lead' && isNewLead && telHref) ? `
-              <a href="${escapeHtmlText(telHref)}" class="btn-primary" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 600; border-radius: 6px; background: #10b981; text-decoration: none; display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation();">
-                📞 Call Now
-              </a>
-            ` : ''}
-          </div>
-        </td>
-      </tr>
-    `;
-  }).join('');
-
-  const clientsContent = `
-    <div class="card" style="margin-bottom: 24px; padding: 16px;">
-      <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
-        <div style="flex: 1; min-width: 300px;">
-          <input type="text" id="client-search" placeholder="Search by name or phone..."
-                 value="${escapeHtmlText(clientSearchQuery)}"
-                 style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-        </div>
-        <div style="display: flex; gap: 10px;">
-          <button class="btn-primary" style="background: ${clientStatusFilter === 'all' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'all' ? 'white' : '#333'}" onclick="window.filterClients('all')">All</button>
-          <button class="btn-primary" style="background: ${clientStatusFilter === 'lead' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'lead' ? 'white' : '#333'}" onclick="window.filterClients('lead')">Leads</button>
-          <button class="btn-primary" style="background: ${clientStatusFilter === 'customer' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'customer' ? 'white' : '#333'}" onclick="window.filterClients('customer')">Customers</button>
-          <button class="btn-primary" style="background: ${clientStatusFilter === 'lost' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'lost' ? 'white' : '#333'}" onclick="window.filterClients('lost')">Lost</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="card" style="padding: 0; overflow: hidden;">
-      <table class="clients-table" style="box-shadow: none; margin-top: 0;">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Phone</th>
-            <th>Status</th>
-            <th>Source</th>
-            <th>Last Activity</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${tableRows || '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #666;">No clients found matching your criteria</td></tr>'}
-        </tbody>
-      </table>
-    </div>
-  `;
-
-  renderAppWithShell({
-    activeView: 'clients',
-    title: 'Clients & Leads',
-    headerActionsHtml: '<button class="btn-primary" onclick="window.navigateTo(\'lead-capture\')">+ Add Lead</button>',
-    contentVariant: 'wide',
-    user: getCurrentShellUser(),
-    contentHtml: clientsContent
-  });
+    renderAppWithShell({
+      activeView: 'clients', title: 'Clients & Leads', contentVariant: 'wide', user: getCurrentShellUser(),
+      headerActionsHtml: '<button class="btn-primary" onclick="window.navigateTo(\'lead-capture\')">+ Add Lead</button>',
+      contentHtml: renderClientsContent({ userId, contacts, activities: mockActivities, query: clientSearchQuery, filter: clientStatusFilter as ContactFilter, now: new Date() })
+    });
+  } catch {
+    renderAppWithShell({ activeView: 'clients', title: 'Clients & Leads', contentVariant: 'wide', user: getCurrentShellUser(), headerActionsHtml: '<button class="btn-primary" onclick="window.navigateTo(\'lead-capture\')">+ Add Lead</button>', contentHtml: '<section class="wo-contacts"><div class="wo-error-state" role="alert"><h2 class="wo-error-state-title">Contacts could not be loaded</h2><p class="wo-error-state-description">Try refreshing this screen.</p></div></section>' });
+    return;
+  }
 
   const searchInput = document.getElementById('client-search') as HTMLInputElement;
   searchInput?.addEventListener('input', (e) => {
@@ -2672,7 +2590,8 @@ async function renderClients() {
   const response = await fetch(`/api/contacts/${contactId}`);
   const contact: Contact | null = await response.json();
   
-  if (!contact || response.status === 404) {
+  const userId = getActingUserId();
+  if (!contact || response.status === 404 || contact.user_id !== userId) {
     (window as any).showToast('Contact not found.', 3000);
     return;
   }
@@ -12203,29 +12122,26 @@ async function loadTimeline(contactId: string) {
   const timeline = result.data || result;
   contactTimelineState = timeline;
 
-  // RENDER: Simple list (no heavy styling yet)
   const timelineContainer = document.getElementById('api-timeline-list');
   if (timelineContainer) {
     timelineContainer.innerHTML = contactTimelineState.map(group => `
-            <div style="margin-bottom: 25px;">
-                <div style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">${escapeHtmlText(group.label)}</div>
-                <div style="display: flex; flex-direction: column; gap: 4px;">
+            <section class="wo-contact-detail-timeline-group">
+                <h3 class="wo-contact-detail-timeline-label">${escapeHtmlText(group.label)}</h3>
+                <div class="wo-contact-detail-timeline-items">
                     ${group.items.map((item: any) => {
       const isMissed = item.type === 'call_missed';
-      const color = isMissed ? '#dc2626' : '#1e293b';
-      const borderColor = isMissed ? '#fca5a5' : '#e2e8f0';
 
       return `
-                            <div style="background: #fff; border-radius: 8px; padding: 12px 15px; border-left: 3px solid ${borderColor}; margin-bottom: 4px;">
-                                <div style="font-size: 0.95rem; color: ${color}; font-weight: ${isMissed ? '600' : '500'}; margin-bottom: 4px;">${escapeHtmlText(item.content)}</div>
-                                <div style="font-size: 0.8rem; color: #64748b;">${escapeHtmlText(item.created_at)}</div>
+                            <div class="wo-contact-detail-timeline-item${isMissed ? ' wo-contact-detail-timeline-item--missed' : ''}">
+                                <div>${escapeHtmlText(item.content)}</div>
+                                <time>${escapeHtmlText(item.created_at)}</time>
                             </div>
                         `;
     }).join('')}
-                    ${group.items.length === 0 ? '<p style="color: #94a3b8; font-style: italic; padding: 10px;">No activities recorded.</p>' : ''}
+                    ${group.items.length === 0 ? '<p class="wo-contact-detail-empty">No activities recorded.</p>' : ''}
                 </div>
-            </div>
-        `).join('') || '<p style="padding: 20px; color: #94a3b8;">No timeline entries found.</p>';
+            </section>
+        `).join('') || '<p class="wo-contact-detail-empty">No timeline entries found.</p>';
   }
 }
 
@@ -12242,124 +12158,35 @@ async function renderContactDetail(contactId: string) {
     activeView: 'contact-detail',
     title: 'Loading contact details…',
     contentVariant: 'standard',
-    contentHtml: `
-      <div style="padding: 24px; text-align: center; color: #64748b;">
-        Loading contact details...
-      </div>
-    `
+    contentHtml: renderContactDetailLoading()
   });
 
   const response = await fetch(`/api/contacts/${contactId}`);
   const result = await response.json();
   const contact: Contact | null = result.data || result;
+  const userId = getActingUserId();
 
-  if (!contact || response.status === 404) {
+  if (!contact || response.status === 404 || contact.user_id !== userId) {
     (window as any).showToast('Contact not found.', 3000);
     window.navigateTo('clients');
     return;
   }
 
-  const contactOpps = mockOpportunities.filter(opp => opp.contact_id === contactId);
-  const contactQuotes = mockQuotes.filter(q => q.contact_id === contactId);
-  const telHref = safeTelHref(contact.phone);
-
+  const contactOpps = mockOpportunities.filter(opp => opp.user_id === userId && opp.contact_id === contactId);
+  const contactQuotes = mockQuotes.filter(q => q.user_id === userId && q.contact_id === contactId);
   renderAppWithShell({
     activeView: 'contact-detail',
     title: contact.name,
     subtitle: `Status: ${contact.status}`,
     headerActionsHtml: `
-      <div style="display: flex; gap: 8px; align-items: center;">
-        <button onclick="window.navigateTo('clients')" style="background: #f1f5f9; border: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; color: #475569; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-          <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-          Back
-        </button>
-        <button class="btn-primary" style="background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; font-size: 0.8rem; padding: 8px 16px;" onclick="window.addNote('${contactId}')">📝 Note</button>
-        <button class="btn-primary" style="font-size: 0.8rem; padding: 8px 16px;" onclick="window.createOpportunity('${contactId}')">💰 New Opportunity</button>
+      <div class="wo-contact-header-actions">
+        <button type="button" class="wo-button wo-button--ghost wo-button--sm" onclick="window.navigateTo('clients')" aria-label="Back to clients">← <span class="wo-contact-header-label">Back</span></button>
+        <button type="button" class="wo-button wo-button--secondary wo-button--sm" onclick="window.addNote('${contactId}')" aria-label="Add note">📝 <span class="wo-contact-header-label">Note</span></button>
+        <button type="button" class="wo-button wo-button--primary wo-button--sm" onclick="window.createOpportunity('${contactId}')" aria-label="Create new opportunity">💰 <span class="wo-contact-header-label">New opportunity</span></button>
       </div>
     `,
     contentVariant: 'wide',
-    contentHtml: `
-      <div style="padding: 24px; max-width: 1100px; margin: 0 auto; background: #fff; border-radius: 12px; border: 1px solid #e2e8f0;">
-        <!-- 1. High-Density Contact Info Grid -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 20px;">
-           <div>
-             <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Phone</div>
-             <input type="text" value="${escapeHtmlText(contact.phone ?? '')}" placeholder="Add phone..." onchange="window.updateContactField('${contactId}', 'phone', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
-           </div>
-           <div>
-             <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Email</div>
-             <input type="email" value="${escapeHtmlText(contact.email || '')}" placeholder="Add email..." onchange="window.updateContactField('${contactId}', 'email', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
-           </div>
-           <div>
-             <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Source</div>
-             <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${escapeHtmlText(contact.source)}</div>
-           </div>
-           <div>
-             <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Address</div>
-             <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtmlText(contact.address)}">${escapeHtmlText(contact.address)}</div>
-           </div>
-        </div>
-
-        <!-- 2. Priority Quick Actions -->
-        <div style="display: flex; gap: 12px; margin-bottom: 30px; flex-wrap: wrap;">
-          ${telHref ? `
-            <a href="${escapeHtmlText(telHref)}" class="btn-primary" style="background: #10b981; flex: 1; min-width: 180px; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
-              📞 Call Lead Now
-            </a>
-            <button class="btn-primary" onclick="window.sendQuickSMS('${contact.id}')" style="background: #6366f1; flex: 1; min-width: 180px; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);">
-              💬 Send Quick Text
-            </button>
-          ` : '<div style="flex: 1; color: #64748b; font-style: italic; background: #f8fafc; padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #e2e8f0;">No phone number provided for quick actions</div>'}
-        </div>
-
-        <!-- 3. Main Content Split -->
-        <div class="detail-container" style="display: grid; grid-template-columns: 1.6fr 1fr; gap: 24px; align-items: start;">
-          <!-- Left Column: Timeline -->
-          <section>
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-              <h3 style="margin: 0; font-size: 0.85rem; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Activity Timeline</h3>
-              <button onclick="window.logCall('${contactId}')" style="background: transparent; border: 1px solid #e2e8f0; color: #64748b; font-size: 0.75rem; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-weight: 600;">Log Item +</button>
-            </div>
-            <div class="card" style="padding: 0; border: 1px solid #e2e8f0; box-shadow: none;">
-              <div id="api-timeline-list" style="max-height: 600px; overflow-y: auto;">
-                <div style="padding: 40px; text-align: center; color: #94a3b8;">
-                   <div class="skeleton-row" style="width: 60%; margin: 10px auto;"></div>
-                   <div class="skeleton-row" style="width: 40%; margin: 10px auto;"></div>
-                   <p style="font-size: 0.85rem; margin-top: 15px;">Retrieving history...</p>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- Right Column: Financials & Deals -->
-          <aside style="display: flex; flex-direction: column; gap: 24px;">
-            <!-- Opportunities -->
-            <div>
-              <h3 style="margin: 0 0 12px 0; font-size: 0.85rem; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Active Opportunities</h3>
-              <div class="card" style="padding: 12px; border: 1px solid #e2e8f0; box-shadow: none;">
-                ${contactOpps.map(opp => `
-                  <div style="padding: 10px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                      <div style="font-weight: 700; color: #1e293b; font-size: 0.9rem;">$${opp.value.toLocaleString()}</div>
-                      <div style="font-size: 0.75rem; color: #64748b;">${escapeHtmlText(opp.pipeline_stage)}</div>
-                    </div>
-                    <span class="badge badge-${opp.status}" style="font-size: 0.65rem;">${opp.status}</span>
-                  </div>
-                `).join('') || '<div style="padding: 10px; color: #94a3b8; font-size: 0.85rem; text-align: center; font-style: italic;">No active opportunities</div>'}
-              </div>
-            </div>
-
-            <!-- Quotes & Invoices Summary -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-              <div class="card" style="padding: 16px; border: 1px solid #e2e8f0; box-shadow: none; text-align: center;">
-                <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; margin-bottom: 4px;">Quotes</div>
-                <div style="font-size: 1.25rem; font-weight: 800; color: #1e293b;">${contactQuotes.length}</div>
-              </div>
-            </div>
-          </aside>
-        </div>
-      </div>
-    `
+    contentHtml: renderContactDetailContent({ contact, opportunities: contactOpps, quotes: contactQuotes })
   });
 
   loadTimeline(contactId);
