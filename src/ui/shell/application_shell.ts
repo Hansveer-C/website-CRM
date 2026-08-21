@@ -75,8 +75,22 @@ export interface ShellNavGroup {
   items: ShellNavItem[];
 }
 
+export interface FunnelDetailContext {
+  funnelId?: string | null;
+  userId?: string | null;
+  websites?: Array<{ id: string; user_id?: string }>;
+  routes?: Array<{ website_id: string; funnel_id?: string | null }>;
+}
+
+export interface ActiveNavContext {
+  funnelMode?: 'website' | 'marketing';
+  funnelDetailContext?: FunnelDetailContext;
+}
+
 export interface ShellSidebarOptions {
   activeView: string;
+  activeNavId?: string;
+  navContext?: ActiveNavContext;
   navGroups?: ShellNavGroup[];
   user?: ShellUser;
   className?: string;
@@ -93,6 +107,8 @@ export interface ShellTopbarOptions {
 
 export interface ApplicationShellOptions {
   activeView: string;
+  activeNavId?: string;
+  navContext?: ActiveNavContext;
   title: string;
   subtitle?: string;
   headerActionsHtml?: string;
@@ -256,17 +272,57 @@ export function getDefaultNavGroups(activeView: string, badgeCounts: Record<stri
 // 4. SIDEBAR RENDERER
 // ============================================================================
 
+export function resolveFunnelDetailMode(ctx: FunnelDetailContext): 'website' | 'marketing' {
+  if (!ctx.funnelId) return 'marketing';
+  const websites = ctx.websites || [];
+  const routes = ctx.routes || [];
+  const userId = ctx.userId;
+
+  // Identify owned website IDs
+  const ownedWebsiteIds = new Set(
+    websites
+      .filter(w => !userId || w.user_id === userId)
+      .map(w => w.id)
+  );
+
+  // Check if any route on an owned website matches this funnel
+  const hasOwnedRoute = routes.some(r =>
+    ownedWebsiteIds.has(r.website_id) && r.funnel_id === ctx.funnelId
+  );
+
+  return hasOwnedRoute ? 'website' : 'marketing';
+}
+
+export function resolveActiveNavId(activeView: string, context?: ActiveNavContext | string): string {
+  if (activeView === 'contact-detail') return 'clients';
+  if (activeView === 'new-quote' || activeView === 'quote-preview') return 'quotes';
+  if (activeView === 'pages' || activeView === 'page-sections' || activeView === 'website-structure' || activeView === 'templates' || activeView === 'components') return 'funnels';
+  if (activeView === 'pages-seo') return 'seo-pages';
+  if (activeView === 'funnel-detail') {
+    if (typeof context === 'string') {
+      return context === 'marketing' || context === 'marketing-funnels' ? 'marketing-funnels' : 'funnels';
+    }
+    if (context?.funnelMode) {
+      return context.funnelMode === 'marketing' ? 'marketing-funnels' : 'funnels';
+    }
+    if (context?.funnelDetailContext) {
+      const mode = resolveFunnelDetailMode(context.funnelDetailContext);
+      return mode === 'marketing' ? 'marketing-funnels' : 'funnels';
+    }
+    return 'funnels';
+  }
+  return activeView;
+}
+
 export function renderShellSidebar(opts: ShellSidebarOptions): string {
   const groups = opts.navGroups ?? getDefaultNavGroups(opts.activeView);
   const isDrawer = Boolean(opts.isDrawer);
   const sidebarClass = isDrawer ? 'wo-shell-drawer' : 'wo-shell-sidebar';
+  const effectiveActiveNav = opts.activeNavId ?? resolveActiveNavId(opts.activeView, opts.navContext);
 
   const groupsHtml = groups.map(group => {
     const itemsHtml = group.items.map(item => {
-      const isActive = opts.activeView === item.id ||
-        (item.id === 'clients' && opts.activeView === 'contact-detail') ||
-        (item.id === 'quotes' && opts.activeView === 'new-quote') ||
-        (item.id === 'website-settings' && opts.activeView === 'website-settings');
+      const isActive = effectiveActiveNav === item.id;
 
       const activeClass = isActive ? ' wo-shell-nav-item--active' : '';
       const currentAttr = isActive ? ' aria-current="page"' : '';
@@ -385,12 +441,16 @@ export function renderShellTopbar(opts: ShellTopbarOptions): string {
 export function renderApplicationShell(opts: ApplicationShellOptions): string {
   const sidebarHtml = renderShellSidebar({
     activeView: opts.activeView,
+    activeNavId: opts.activeNavId,
+    navContext: opts.navContext,
     navGroups: opts.navGroups,
     user: opts.user
   });
 
   const drawerSidebarHtml = renderShellSidebar({
     activeView: opts.activeView,
+    activeNavId: opts.activeNavId,
+    navContext: opts.navContext,
     navGroups: opts.navGroups,
     user: opts.user,
     isDrawer: true
