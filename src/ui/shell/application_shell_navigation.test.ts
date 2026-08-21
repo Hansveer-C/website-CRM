@@ -62,7 +62,7 @@ describe('Application Shell Controller Mount & Navigation Authority Lifecycle', 
     expect(destroyCount).toBe(2);
   });
 
-  it('2. Legacy transition: navigating from Dashboard to legacy screens destroys controller without remounting', () => {
+  it('2. Specialized boundary: navigating to exempt standalone routes destroys controller, navigating back mounts exactly one controller', () => {
     let currentController: ShellController | null = null;
     let initCount = 0;
     let destroyCount = 0;
@@ -89,7 +89,7 @@ describe('Application Shell Controller Mount & Navigation Authority Lifecycle', 
     }
 
     function testExecuteNavigation(view: string) {
-      if (!['dashboard', 'clients', 'website-settings'].includes(view)) {
+      if (['builder', 'preview', 'site'].includes(view)) {
         currentController?.destroy();
         currentController = null;
       }
@@ -100,12 +100,12 @@ describe('Application Shell Controller Mount & Navigation Authority Lifecycle', 
           title: 'Dashboard Overview',
           contentHtml: '<div>Dashboard</div>'
         });
-      } else if (view === 'opportunities') {
-        mockApp.innerHTML = '<div class="sidebar"></div><main class="main-content">Opportunities</main>';
-      } else if (view === 'quotes') {
-        mockApp.innerHTML = '<div class="sidebar"></div><main class="main-content">Quotes</main>';
-      } else if (view === 'website-dashboard') {
-        mockApp.innerHTML = '<div class="sidebar"></div><main class="main-content">Website Dashboard</main>';
+      } else if (view === 'builder') {
+        mockApp.innerHTML = '<div id="builder-app">Builder</div>';
+      } else if (view === 'preview') {
+        mockApp.innerHTML = '<div id="preview-app">Preview</div>';
+      } else if (view === 'site') {
+        mockApp.innerHTML = '<div id="site-app">Public Site</div>';
       }
     }
 
@@ -114,8 +114,8 @@ describe('Application Shell Controller Mount & Navigation Authority Lifecycle', 
     expect(initCount).toBe(1);
     expect(currentController).not.toBeNull();
 
-    // 2. Navigate to Opportunities (legacy)
-    testExecuteNavigation('opportunities');
+    // 2. Navigate to Builder (exempt)
+    testExecuteNavigation('builder');
     expect(destroyCount).toBe(1);
     expect(initCount).toBe(1); // No new controller mounted
     expect(currentController).toBeNull();
@@ -125,8 +125,8 @@ describe('Application Shell Controller Mount & Navigation Authority Lifecycle', 
     expect(initCount).toBe(2);
     expect(currentController).not.toBeNull();
 
-    // 4. Navigate to Quotes (legacy)
-    testExecuteNavigation('quotes');
+    // 4. Navigate to Preview (exempt)
+    testExecuteNavigation('preview');
     expect(destroyCount).toBe(2);
     expect(initCount).toBe(2);
     expect(currentController).toBeNull();
@@ -136,8 +136,8 @@ describe('Application Shell Controller Mount & Navigation Authority Lifecycle', 
     expect(initCount).toBe(3);
     expect(currentController).not.toBeNull();
 
-    // 6. Navigate to Website Dashboard (legacy)
-    testExecuteNavigation('website-dashboard');
+    // 6. Navigate to Public Site (exempt)
+    testExecuteNavigation('site');
     expect(destroyCount).toBe(3);
     expect(initCount).toBe(3);
     expect(currentController).toBeNull();

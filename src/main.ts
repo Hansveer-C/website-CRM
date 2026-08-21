@@ -38,6 +38,7 @@ import {
   renderShellSidebar,
   getDefaultNavGroups,
   initApplicationShell,
+  resolveFunnelDetailMode,
   type ShellController,
   type ShellUser,
   type ShellNavigationTarget,
@@ -9798,20 +9799,20 @@ function renderWebsiteNavigation() {
   const siteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
 
   const itemsHtml = navItems.map((item: any, index: number) => `
-    <div class="card" style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; padding: 20px; border: 1px solid #eef2f6; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+    <div class="card" style="display: flex; align-items: center; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; padding: 20px; border: 1px solid #eef2f6; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
       <div style="display: flex; flex-direction: column; gap: 6px;">
         <button class="btn-outline" style="padding: 4px 10px; font-size: 0.8rem; background: white;" onclick="window.reorderNavItem(${index}, -1)" ${index === 0 ? 'disabled' : ''}>▲</button>
         <button class="btn-outline" style="padding: 4px 10px; font-size: 0.8rem; background: white;" onclick="window.reorderNavItem(${index}, 1)" ${index === navItems.length - 1 ? 'disabled' : ''}>▼</button>
       </div>
       
-      <div style="flex: 2;">
+      <div style="flex: 1 1 140px; min-width: 120px;">
         <label style="font-size: 0.7rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; display: block; margin-bottom: 8px;">Menu Label</label>
-        <input type="text" value="${item.label}" onchange="window.updateNavItem(${index}, 'label', this.value)" style="width: 100%; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 0.95rem;">
+        <input type="text" value="${item.label}" onchange="window.updateNavItem(${index}, 'label', this.value)" style="width: 100%; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 0.95rem; box-sizing: border-box;">
       </div>
 
-      <div style="flex: 2;">
+      <div style="flex: 1 1 140px; min-width: 120px;">
         <label style="font-size: 0.7rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; display: block; margin-bottom: 8px;">Linked Page</label>
-        <select onchange="window.updateNavItem(${index}, 'path', this.value)" style="width: 100%; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: white; font-size: 0.95rem; cursor: pointer;">
+        <select onchange="window.updateNavItem(${index}, 'path', this.value)" style="width: 100%; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: white; font-size: 0.95rem; cursor: pointer; box-sizing: border-box;">
           <option value="" ${!item.path ? 'selected' : ''}>-- Select a Page --</option>
           ${siteRoutes.map(route => {
              const funnel = mockFunnels.find(f => f.id === route.funnel_id);
@@ -9821,7 +9822,7 @@ function renderWebsiteNavigation() {
         <small style="color: #94a3b8; margin-top: 6px; display: block;">Link points to: ${item.path || 'None'}</small>
       </div>
 
-      <div style="flex: 0.5; text-align: center;">
+      <div style="text-align: center;">
         <label style="font-size: 0.7rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; display: block; margin-bottom: 8px;">Visible</label>
         <input type="checkbox" ${item.visible !== false ? 'checked' : ''} onchange="window.updateNavItem(${index}, 'visible', this.checked)" style="width: 24px; height: 24px; cursor: pointer; accent-color: var(--primary-color);">
       </div>
@@ -11377,8 +11378,19 @@ function renderFunnels(mode: 'website' | 'marketing' = 'website') {
 
 
 async function renderFunnelDetail(funnelId: string) {
+  const userId = getActingUserId();
+  const funnelMode = resolveFunnelDetailMode({
+    funnelId,
+    userId,
+    websites: mockWebsites,
+    routes: mockWebsiteRoutes
+  });
+  const backTarget = funnelMode === 'marketing' ? 'marketing-funnels' : 'funnels';
+  const activeNav = funnelMode === 'marketing' ? 'marketing-funnels' : 'funnels';
+
   renderAppWithShell({
     activeView: 'funnel-detail',
+    activeNavId: activeNav,
     title: 'Loading page details…',
     contentVariant: 'wide',
     contentHtml: `
@@ -11443,7 +11455,6 @@ async function renderFunnelDetail(funnelId: string) {
       ${index < steps.length - 1 ? `<div style="width: 2px; height: 30px; background: #e2e8f0; margin-left: 19px; margin-top: -24px; margin-bottom: 4px;"></div>` : ''}
     `).join('');
 
-    const userId = getActingUserId();
     const routes = mockWebsiteRoutes
       .filter(route => route.funnel_id === funnelId)
       .map(route => {
@@ -11457,10 +11468,11 @@ async function renderFunnelDetail(funnelId: string) {
 
     renderAppWithShell({
       activeView: 'funnel-detail',
+      activeNavId: activeNav,
       title: funnel.name || 'Page Details',
       subtitle: `Status: ${funnel.status} · Configure your sections and layout`,
       headerActionsHtml: `
-        <button onclick="window.navigateTo('funnels')" class="btn-primary" style="background: #f1f5f9; color: #475569; padding: 8px 12px; border-radius: 8px; border: none;">← Back</button>
+        <button onclick="window.navigateTo('${backTarget}')" class="btn-primary" style="background: #f1f5f9; color: #475569; padding: 8px 12px; border-radius: 8px; border: none;">← Back</button>
       `,
       contentVariant: 'wide',
       contentHtml: `
@@ -11584,9 +11596,13 @@ async function renderFunnelDetail(funnelId: string) {
     console.error('Failed to load page detail:', err);
     renderAppWithShell({
       activeView: 'funnel-detail',
+      activeNavId: activeNav,
       title: 'Page Details',
+      headerActionsHtml: `
+        <button onclick="window.navigateTo('${backTarget}')" class="btn-primary" style="background: #f1f5f9; color: #475569; padding: 8px 12px; border-radius: 8px; border: none;">← Back</button>
+      `,
       contentVariant: 'wide',
-      contentHtml: `<div class="error">Failed to load page: ${err.message}</div>`
+      contentHtml: `<div class="error">Failed to load page: ${escapeHtmlText(err.message)}</div>`
     });
   }
 }
@@ -13146,6 +13162,10 @@ async function bootRouter() {
 bootRouter();
 
 window.addEventListener('popstate', () => {
+    bootRouter();
+});
+
+window.addEventListener('hashchange', () => {
     bootRouter();
 });
 

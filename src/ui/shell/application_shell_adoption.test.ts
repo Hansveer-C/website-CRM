@@ -1,17 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
-  renderAppWithShell,
-  renderShellSidebar,
-  renderShellTopbar,
-  renderShellDrawer,
   resolveActiveNavId,
-  renderApplicationShell,
-  SHELL_NAV_GROUPS
+  resolveFunnelDetailMode,
+  renderApplicationShell
 } from './application_shell';
 import * as fs from 'fs';
 import * as path from 'path';
 
-describe('Task 7B.2 Application Shell Adoption & Navigation Resolution', () => {
+describe('Task 7B.2 Application Shell Adoption and Navigation Resolution', () => {
   describe('resolveActiveNavId', () => {
     it('resolves direct top-level views', () => {
       expect(resolveActiveNavId('dashboard')).toBe('dashboard');
@@ -36,13 +32,114 @@ describe('Task 7B.2 Application Shell Adoption & Navigation Resolution', () => {
       expect(resolveActiveNavId('contact-detail')).toBe('clients');
       expect(resolveActiveNavId('new-quote')).toBe('quotes');
       expect(resolveActiveNavId('quote-preview')).toBe('quotes');
-      expect(resolveActiveNavId('funnel-detail')).toBe('funnels');
       expect(resolveActiveNavId('pages')).toBe('funnels');
       expect(resolveActiveNavId('page-sections')).toBe('funnels');
       expect(resolveActiveNavId('website-structure')).toBe('funnels');
       expect(resolveActiveNavId('templates')).toBe('funnels');
       expect(resolveActiveNavId('components')).toBe('funnels');
       expect(resolveActiveNavId('pages-seo')).toBe('seo-pages');
+    });
+  });
+
+  describe('resolveFunnelDetailMode and contextual active navigation', () => {
+    const mockWebsites = [
+      { id: 'site-user-1', user_id: 'user-1' },
+      { id: 'site-user-2', user_id: 'user-2' }
+    ];
+    const mockRoutes = [
+      { website_id: 'site-user-1', funnel_id: 'funnel-owned-1' },
+      { website_id: 'site-user-2', funnel_id: 'funnel-other-user' }
+    ];
+
+    it('A: classifies routed owned funnel as website mode', () => {
+      const mode = resolveFunnelDetailMode({
+        funnelId: 'funnel-owned-1',
+        userId: 'user-1',
+        websites: mockWebsites,
+        routes: mockRoutes
+      });
+      expect(mode).toBe('website');
+    });
+
+    it('B: classifies standalone unrouted funnel as marketing mode', () => {
+      const mode = resolveFunnelDetailMode({
+        funnelId: 'funnel-standalone',
+        userId: 'user-1',
+        websites: mockWebsites,
+        routes: mockRoutes
+      });
+      expect(mode).toBe('marketing');
+    });
+
+    it('C: route belonging to another user does NOT classify funnel as current user website page', () => {
+      const mode = resolveFunnelDetailMode({
+        funnelId: 'funnel-other-user',
+        userId: 'user-1',
+        websites: mockWebsites,
+        routes: mockRoutes
+      });
+      expect(mode).toBe('marketing');
+    });
+
+    it('D: resolves Website detail active nav to funnels', () => {
+      const activeNav = resolveActiveNavId('funnel-detail', {
+        funnelDetailContext: {
+          funnelId: 'funnel-owned-1',
+          userId: 'user-1',
+          websites: mockWebsites,
+          routes: mockRoutes
+        }
+      });
+      expect(activeNav).toBe('funnels');
+    });
+
+    it('E: resolves Marketing detail active nav to marketing-funnels', () => {
+      const activeNav = resolveActiveNavId('funnel-detail', {
+        funnelDetailContext: {
+          funnelId: 'funnel-standalone',
+          userId: 'user-1',
+          websites: mockWebsites,
+          routes: mockRoutes
+        }
+      });
+      expect(activeNav).toBe('marketing-funnels');
+    });
+
+    it('F and G: determines correct Back navigation target based on resolved classification', () => {
+      const websiteMode = resolveFunnelDetailMode({
+        funnelId: 'funnel-owned-1',
+        userId: 'user-1',
+        websites: mockWebsites,
+        routes: mockRoutes
+      });
+      const websiteBack = websiteMode === 'marketing' ? 'marketing-funnels' : 'funnels';
+      expect(websiteBack).toBe('funnels');
+
+      const marketingMode = resolveFunnelDetailMode({
+        funnelId: 'funnel-standalone',
+        userId: 'user-1',
+        websites: mockWebsites,
+        routes: mockRoutes
+      });
+      const marketingBack = marketingMode === 'marketing' ? 'marketing-funnels' : 'funnels';
+      expect(marketingBack).toBe('marketing-funnels');
+    });
+
+    it('H: classification remains deterministic without window.funnelMode', () => {
+      const res1 = resolveFunnelDetailMode({
+        funnelId: 'funnel-standalone',
+        userId: 'user-1',
+        websites: mockWebsites,
+        routes: mockRoutes
+      });
+      const res2 = resolveFunnelDetailMode({
+        funnelId: 'funnel-standalone',
+        userId: 'user-1',
+        websites: mockWebsites,
+        routes: mockRoutes
+      });
+      expect(res1).toBe(res2);
+      expect(res1).toBe('marketing');
     });
   });
 
@@ -59,7 +156,6 @@ describe('Task 7B.2 Application Shell Adoption & Navigation Resolution', () => {
       { view: 'lead-capture', title: 'Lead Capture' },
       { view: 'funnels', title: 'Site Pages' },
       { view: 'marketing-funnels', title: 'Marketing Pages' },
-      { view: 'funnel-detail', title: 'Funnel Detail' },
       { view: 'pages', title: 'All Website Sections' },
       { view: 'page-sections', title: 'Page Sections' },
       { view: 'templates', title: 'Website Templates' },
@@ -73,7 +169,7 @@ describe('Task 7B.2 Application Shell Adoption & Navigation Resolution', () => {
       { view: 'reports', title: 'Reports & Analytics' },
       { view: 'quickstart', title: 'Quickstart Guide' },
       { view: 'event-logs', title: 'System Event Logs' },
-      { view: 'qa-tools', title: 'QA Tools' }
+      { view: 'qa-tools', title: 'QATools' }
     ];
 
     it.each(ordinaryViews)('generates valid shell markup with active nav highlight for view "$view"', ({
@@ -84,7 +180,7 @@ describe('Task 7B.2 Application Shell Adoption & Navigation Resolution', () => {
         activeView: view,
         title,
         contentVariant: 'wide',
-        contentHtml: `<div class="test-content">Content for ${view}</div>`
+        contentHtml: '<div class="test-content">Content for ' + view + '</div>'
       });
 
       expect(html).toContain('class="wo-shell"');
@@ -92,7 +188,7 @@ describe('Task 7B.2 Application Shell Adoption & Navigation Resolution', () => {
       expect(html).toContain('class="wo-shell-topbar"');
       expect(html).toContain('class="wo-shell-drawer"');
       expect(html).toContain('class="wo-shell-main');
-      expect(html).toContain(`Content for ${view}`);
+      expect(html).toContain('Content for ' + view);
 
       const expectedActiveNav = resolveActiveNavId(view);
       expect(html).toContain('data-nav-view="' + expectedActiveNav + '"');
