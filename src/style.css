@@ -4,6 +4,7 @@
 @import './ui/dashboard/dashboard.css';
 @import './ui/contacts/contacts.css';
 @import './ui/opportunities/opportunities.css';
+@import './ui/quotes/quotes.css';
 
 :root {
     /* Legacy Compatibility Aliases -> Canonical WashOps Tokens */

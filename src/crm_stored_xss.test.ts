@@ -215,6 +215,7 @@ describe('authenticated CRM sink wiring', () => {
   const dashboardRenderer = readFileSync(fileURLToPath(new URL('./ui/dashboard/dashboard.ts', import.meta.url)), 'utf8');
   const contactsRenderer = readFileSync(fileURLToPath(new URL('./ui/contacts/contacts.ts', import.meta.url)), 'utf8');
   const opportunitiesRenderer = readFileSync(fileURLToPath(new URL('./ui/opportunities/opportunities.ts', import.meta.url)), 'utf8');
+  const quotesRenderer = readFileSync(fileURLToPath(new URL('./ui/quotes/quotes.ts', import.meta.url)), 'utf8');
   const hydrator = readFileSync(fileURLToPath(new URL('./crm_production_hydration.ts', import.meta.url)), 'utf8');
 
   it('encodes every audited public or user-controlled CRM HTML sink at render time', () => {
@@ -225,6 +226,9 @@ describe('authenticated CRM sink wiring', () => {
     }
     expect(dashboardRenderer).toContain('escapeHtmlText(row.description)');
     expect(opportunitiesRenderer).toContain("escapeHtmlText(opportunity.notes.replace(/\\n/g, ' '))");
+    for (const renderedValue of ['contact?.name ?? \'Contact unavailable\'', 'item.service_name', 'item.description', 'quote.notes']) {
+      expect(quotesRenderer).toContain(`escapeHtmlText(${renderedValue})`);
+    }
     for (const renderedValue of ['contact.name', 'latest.description']) {
       expect(contactsRenderer).toContain(`escapeHtmlText(${renderedValue})`);
     }

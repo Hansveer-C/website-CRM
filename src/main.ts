@@ -58,6 +58,7 @@ import {
   type ContactFilter
 } from './ui/contacts';
 import { renderOpportunitiesContent } from './ui/opportunities';
+import { renderNewQuoteContent, renderQuotePreviewContent, renderQuotesContent } from './ui/quotes';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
   BUILDER_PAGE_SLUG_MAX_LENGTH,
@@ -10129,54 +10130,12 @@ function renderOpportunities() {
 }
 
 function renderQuotes() {
-  const tableRows = mockQuotes.map(quote => {
-    const contact = mockContacts.find(c => c.id === quote.contact_id);
-    return `
-      <tr onclick="window.navigateTo('contact-detail', '${quote.contact_id}')" style="cursor: pointer;">
-        <td style="font-weight: 600; color: var(--primary-color);">Q-${quote.id}</td>
-        <td>${escapeHtmlText(contact ? contact.name : 'Unknown')}</td>
-        <td><span class="badge badge-${quote.status}">${quote.status}</span></td>
-        <td style="font-weight: 600;">$${quote.total_amount.toLocaleString()}</td>
-        <td>${new Date(quote.created_at).toLocaleDateString()}</td>
-        <td>
-          <div style="display: flex; gap: 5px;">
-            <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="event.stopPropagation(); window.navigateTo('quote-preview', '${quote.id}')">Preview</button>
-            <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${quote.contact_id}')">View</button>
-            ${quote.status === 'draft' ? `<button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="event.stopPropagation(); window.sendQuote('${quote.id}')">Send</button>` : ''}
-            ${quote.status === 'sent' ? `
-              <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="event.stopPropagation(); window.approveQuote('${quote.id}')">Approve</button>
-              <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #dc3545;" onclick="event.stopPropagation(); window.rejectQuote('${quote.id}')">Reject</button>
-            ` : ''}
-          </div>
-        </td>
-      </tr>
-    `;
-  }).join('');
-
   renderAppWithShell({
     activeView: 'quotes',
     title: 'Quotes',
-    headerActionsHtml: `<button class="btn-primary" onclick="window.navigateTo('new-quote')">+ New Quote</button>`,
+    headerActionsHtml: `<button type="button" class="wo-button wo-button--primary" onclick="window.navigateTo('new-quote')">New quote</button>`,
     contentVariant: 'wide',
-    contentHtml: `
-      <div class="card" style="padding: 0; overflow-x: auto;">
-        <table class="clients-table" style="box-shadow: none; margin-top: 0; min-width: 700px;">
-          <thead>
-            <tr>
-              <th>Quote #</th>
-              <th>Contact</th>
-              <th>Status</th>
-              <th>Amount</th>
-              <th>Date</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tableRows || '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #666;">No quotes found</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    `
+    contentHtml: renderQuotesContent({ userId: getActingUserId(), quotes: mockQuotes, contacts: mockContacts, editable: !editorUsesSupabase() })
   });
 }
 
@@ -10262,6 +10221,15 @@ function renderInvoices() {
 };
 
 function renderNewQuote() {
+  const userId = getActingUserId();
+  renderAppWithShell({
+    activeView: 'new-quote',
+    title: 'Create quote',
+    headerActionsHtml: `<div class="wo-shell-header-actions"><button type="button" class="wo-button wo-button--secondary" onclick="window.navigateTo('quotes')">Back</button><button type="button" class="wo-button wo-button--primary" onclick="window.saveQuote()">Create quote</button></div>`,
+    contentVariant: 'wide',
+    contentHtml: renderNewQuoteContent({ userId, contacts: mockContacts, opportunities: mockOpportunities, contactId: (window as any).newQuoteContactId || '', opportunityId: (window as any).newQuoteOpportunityId || '', items: (window as any).newQuoteLineItems })
+  });
+  return;
   const contacts = mockContacts;
   const nqcId = (window as any).newQuoteContactId;
   const nqoId = (window as any).newQuoteOpportunityId;
@@ -10362,7 +10330,8 @@ function renderNewQuote() {
 }
 
 (window as any).updateNewQuoteContact = (id: string) => {
-  (window as any).newQuoteContactId = id;
+  const contact = mockContacts.find(candidate => candidate.user_id === getActingUserId() && candidate.id === id);
+  (window as any).newQuoteContactId = contact ? id : '';
   (window as any).newQuoteOpportunityId = '';
   renderNewQuote();
 };
@@ -10412,6 +10381,15 @@ function renderNewQuote() {
 
   if (!nqcId) {
     alert("Please select a contact.");
+    return;
+  }
+  const quoteContact = mockContacts.find(contact => contact.user_id === getActingUserId() && contact.id === nqcId);
+  if (!quoteContact) {
+    alert('Please select a contact from this account.');
+    return;
+  }
+  if (nqoId && !mockOpportunities.some(opportunity => opportunity.user_id === getActingUserId() && opportunity.contact_id === nqcId && opportunity.id === nqoId)) {
+    alert('Please select an opportunity for the selected contact.');
     return;
   }
 
@@ -10499,7 +10477,7 @@ function renderNewQuote() {
 
   // Sync with Opportunity value
   if (nqoId) {
-    const opportunity = mockOpportunities.find(o => o.id === nqoId);
+    const opportunity = mockOpportunities.find(o => o.user_id === getActingUserId() && o.contact_id === nqcId && o.id === nqoId);
     if (opportunity) {
       opportunity.value = basicTotal;
     }
@@ -11953,15 +11931,15 @@ ${publishedPages.map(page => `  <url>
 
 (window as any).selectQuoteTier = (quoteId: string, tier: 'basic' | 'standard' | 'premium') => {
   if (editorUsesSupabase()) { (window as any).showToast('Quote option updates are temporarily unavailable.', 'error'); return; }
-  const quote = mockQuotes.find(q => q.id === quoteId);
+  const quote = mockQuotes.find(q => q.user_id === getActingUserId() && q.id === quoteId);
   if (quote) {
     quote.selected_tier = tier;
-    const tierItems = mockQuoteItems.filter(i => i.quote_id === quoteId && i.tier === tier);
+    const tierItems = mockQuoteItems.filter(i => i.user_id === getActingUserId() && i.quote_id === quoteId && i.tier === tier);
     quote.total_amount = tierItems.reduce((sum, item) => sum + item.total, 0);
 
     // Update linked opportunity value
     if (quote.opportunity_id) {
-      const opportunity = mockOpportunities.find(o => o.id === quote.opportunity_id);
+      const opportunity = mockOpportunities.find(o => o.user_id === getActingUserId() && o.id === quote.opportunity_id);
       if (opportunity) {
         opportunity.value = quote.total_amount;
       }
@@ -11972,9 +11950,19 @@ ${publishedPages.map(page => `  <url>
 };
 
 function renderQuotePreview(quoteId: string) {
-  const quote = mockQuotes.find(q => q.id === quoteId);
+  const userId = getActingUserId();
+  const preview = renderQuotePreviewContent({ userId, quoteId, quotes: mockQuotes, contacts: mockContacts, items: mockQuoteItems, editable: !editorUsesSupabase() });
+  renderAppWithShell({
+    activeView: 'quote-preview',
+    title: 'Quote preview',
+    headerActionsHtml: `<div class="wo-shell-header-actions"><button type="button" class="wo-button wo-button--secondary no-print" onclick="window.navigateTo('quotes')">Back</button><button type="button" class="wo-button wo-button--primary no-print" onclick="window.print()">Print quote</button></div>`,
+    contentVariant: 'wide',
+    contentHtml: preview
+  });
+  return;
+  const quote = mockQuotes.find(q => q.id === quoteId)!;
   if (!quote) return;
-  const contact = mockContacts.find(c => c.id === quote.contact_id);
+  const contact = mockContacts.find(c => c.id === quote.contact_id)!;
   const allItems = mockQuoteItems.filter(i => i.quote_id === quoteId);
 
   const renderTierColumn = (tier: 'basic' | 'standard' | 'premium') => {
@@ -12254,11 +12242,17 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).createQuote = (contactId: string) => {
-  (window as any).newQuoteContactId = contactId;
+  const userId = getActingUserId();
+  const ownedContact = mockContacts.find(contact => contact.user_id === userId && contact.id === contactId);
+  if (!ownedContact) {
+    (window as any).showToast('That contact is unavailable for this account.', 'error');
+    return;
+  }
+  (window as any).newQuoteContactId = ownedContact.id;
 
   // Try to find the latest open opportunity for this contact
   const activeOpp = mockOpportunities
-    .filter(o => o.contact_id === contactId && o.status === 'open')
+    .filter(o => o.user_id === userId && o.contact_id === ownedContact.id && o.status === 'open')
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
 
   (window as any).newQuoteOpportunityId = activeOpp ? activeOpp.id : '';
@@ -12298,10 +12292,10 @@ async function renderContactDetail(contactId: string) {
 
 (window as any).convertToInvoice = (quoteId: string) => {
   if (editorUsesSupabase()) { (window as any).showToast('Invoice persistence is not available yet.', 'error'); return; }
-  const quote = mockQuotes.find(q => q.id === quoteId);
+  const quote = mockQuotes.find(q => q.user_id === getActingUserId() && q.id === quoteId);
   if (quote) {
     // Check for existing invoice
-    if (mockInvoices.some(i => i.quote_id === quoteId)) {
+    if (mockInvoices.some(i => i.user_id === getActingUserId() && i.quote_id === quoteId)) {
       alert("Invoice already exists for this quote.");
       return;
     }
@@ -12338,10 +12332,10 @@ async function renderContactDetail(contactId: string) {
 
 (window as any).approveQuote = (quoteId: string) => {
   if (editorUsesSupabase()) { (window as any).showToast('Quote status updates are temporarily unavailable.', 'error'); return; }
-  const quote = mockQuotes.find(q => q.id === quoteId);
+  const quote = mockQuotes.find(q => q.user_id === getActingUserId() && q.id === quoteId);
   if (quote) {
     quote.status = 'approved';
-    const opportunity = mockOpportunities.find(o => o.id === quote.opportunity_id);
+    const opportunity = mockOpportunities.find(o => o.user_id === getActingUserId() && o.id === quote.opportunity_id);
     if (opportunity) {
       opportunity.status = 'won';
       opportunity.pipeline_stage = 'Scheduled';
@@ -12359,7 +12353,7 @@ async function renderContactDetail(contactId: string) {
     });
 
     // Automatically create Invoice if one doesn't exist
-    if (!mockInvoices.some(i => i.quote_id === quote.id)) {
+    if (!mockInvoices.some(i => i.user_id === getActingUserId() && i.quote_id === quote.id)) {
       const invoiceId = 'inv-' + (mockInvoices.length + 1) + '-' + Math.floor(Math.random() * 100);
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + 7);
@@ -12393,10 +12387,10 @@ async function renderContactDetail(contactId: string) {
 
 (window as any).rejectQuote = (quoteId: string) => {
   if (editorUsesSupabase()) { (window as any).showToast('Quote status updates are temporarily unavailable.', 'error'); return; }
-  const quote = mockQuotes.find(q => q.id === quoteId);
+  const quote = mockQuotes.find(q => q.user_id === getActingUserId() && q.id === quoteId);
   if (quote) {
     quote.status = 'rejected';
-    const opportunity = mockOpportunities.find(o => o.id === quote.opportunity_id);
+    const opportunity = mockOpportunities.find(o => o.user_id === getActingUserId() && o.id === quote.opportunity_id);
     if (opportunity) {
       opportunity.status = 'lost';
     }
@@ -12418,7 +12412,7 @@ async function renderContactDetail(contactId: string) {
 
 (window as any).sendQuote = (quoteId: string) => {
   if (editorUsesSupabase()) { (window as any).showToast('Quote sending is temporarily unavailable.', 'error'); return; }
-  const quote = mockQuotes.find(q => q.id === quoteId);
+  const quote = mockQuotes.find(q => q.user_id === getActingUserId() && q.id === quoteId);
   if (quote) {
     quote.status = 'sent';
     console.log(`Sending Quote Q-${quote.id} to client...`);
@@ -12436,7 +12430,7 @@ async function renderContactDetail(contactId: string) {
 
     // Update Opportunity stage and value
     if (quote.opportunity_id) {
-      const opportunity = mockOpportunities.find(o => o.id === quote.opportunity_id);
+      const opportunity = mockOpportunities.find(o => o.user_id === getActingUserId() && o.id === quote.opportunity_id);
       if (opportunity) {
         opportunity.pipeline_stage = 'Quote Sent';
         opportunity.value = quote.total_amount;
