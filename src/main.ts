@@ -33,7 +33,12 @@ import {
   renderField,
   renderSelect,
   renderStatusBadge,
-  getFieldAccessibilityProps
+  getFieldAccessibilityProps,
+  renderApplicationShell,
+  renderShellSidebar,
+  getDefaultNavGroups,
+  initApplicationShell,
+  type ShellController
 } from './ui';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
@@ -2119,6 +2124,8 @@ function clearProtectedRuntimeData(): void {
   builderMediaControllerIdentity = '';
   websiteDashboardController?.invalidate();
   websiteDashboardController = null;
+  currentShellController?.destroy();
+  currentShellController = null;
   lastContactCount = 0;
 }
 
@@ -2366,49 +2373,31 @@ function needsAttention(contact: any): boolean {
   return !!recentMissedCall;
 }
 
+let currentShellController: ShellController | null = null;
+
+function attachShellController(): void {
+  currentShellController?.destroy();
+  currentShellController = initApplicationShell(app, {
+    onNavigate: (view: string) => {
+      window.navigateTo(view);
+    }
+  });
+}
+
 function renderSidebar(activeView: string) {
-  return `
-    <div class="sidebar">
-      <h1>PressurePro</h1>
-      <nav>
-        <ul>
-          <div class="nav-group-title" style="margin-top: 0;">Main Menu</div>
-          <li onclick="window.navigateTo('dashboard')" class="${activeView === 'dashboard' ? 'active' : ''}">Dashboard</li>
-          <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}" style="display: flex; justify-content: space-between; align-items: center;">
-            <span>Clients & Leads</span>
-            ${(() => {
-              const userId = getActingUserId();
-              const newCount = mockContacts.filter(c => c.user_id === userId && isNew(c.created_at)).length;
-              return newCount > 0 ? `<span class="badge" style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 800;">${newCount}</span>` : '';
-            })()}
-          </li>
-          <li onclick="window.navigateTo('opportunities')" class="${activeView === 'opportunities' ? 'active' : ''}">Opportunities</li>
-          <li onclick="window.navigateTo('quotes')" class="${activeView === 'quotes' ? 'active' : ''}">Quotes</li>
-          <li onclick="window.navigateTo('invoices')" class="${activeView === 'invoices' ? 'active' : ''}">Invoices</li>
-          
-          <div class="nav-group-title">Marketing & Outreach</div>
-          <li onclick="window.navigateTo('lead-capture')" class="${activeView === 'lead-capture' ? 'active' : ''}">Lead Capture</li>
-          <li onclick="window.navigateTo('marketing-funnels')" class="${activeView === 'marketing-funnels' || activeView === 'funnels' && (window as any).funnelMode === 'marketing' ? 'active' : ''}">Ad Landing Pages</li>
-          
-          <div class="nav-group-title">Websites</div>
-          <li onclick="window.navigateTo('website-dashboard')" class="${activeView === 'website-dashboard' ? 'active' : ''}" style="font-weight: 700; color: var(--primary-color);">My Website</li>
-          <li onclick="window.openWebsiteManagementView('funnels')" class="${activeView === 'funnels' && (window as any).funnelMode !== 'marketing' ? 'active' : ''}">Site Pages</li>
-          <li onclick="window.openWebsiteManagementView('website-navigation')" class="${activeView === 'website-navigation' ? 'active' : ''}">Navigation</li>
-          <li onclick="window.openWebsiteManagementView('seo-pages')" class="${activeView === 'seo-pages' ? 'active' : ''}">SEO Pages</li>
-          <li onclick="window.openWebsiteSettings()" class="${activeView === 'website-settings' ? 'active' : ''}">Settings</li>
-          
-          <div class="nav-group-title">System</div>
-          <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
-          <li onclick="window.navigateTo('quickstart')" class="${activeView === 'quickstart' ? 'active' : ''}">Quickstart Guide</li>
-          <li onclick="window.navigateTo('event-logs')" class="${activeView === 'event-logs' ? 'active' : ''}">Event Logs</li>
-          <li onclick="window.navigateTo('qa-tools')" class="${activeView === 'qa-tools' ? 'active' : ''}">QA Tools</li>
-          <li>Payments</li>
-          <li>Settings</li>
-          <li><button type="button" class="sidebar-sign-out" onclick="window.signOutApplication()">Sign out</button></li>
-        </ul>
-      </nav>
-    </div>
-  `;
+  const userId = getActingUserId();
+  const newCount = mockContacts.filter(c => c.user_id === userId && isNew(c.created_at)).length;
+  const businessName = mockWebsiteSettings?.business_name || 'WashOps Pressure Washing';
+  const userName = 'Account User';
+
+  return renderShellSidebar({
+    activeView,
+    navGroups: getDefaultNavGroups(activeView, { clients: newCount }),
+    user: {
+      name: userName,
+      businessName
+    }
+  });
 }
 
 function renderDashboard() {
@@ -12042,6 +12031,10 @@ async function executeNavigation(
       }
       break;
     default: renderDashboard();
+  }
+
+  if (!['builder', 'site', 'preview'].includes(view)) {
+    attachShellController();
   }
 
   if (!['site', 'preview'].includes(view)) {
