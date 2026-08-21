@@ -33,7 +33,15 @@ import {
   renderField,
   renderSelect,
   renderStatusBadge,
-  getFieldAccessibilityProps
+  getFieldAccessibilityProps,
+  renderApplicationShell,
+  renderShellSidebar,
+  getDefaultNavGroups,
+  initApplicationShell,
+  type ShellController,
+  type ShellUser,
+  type ShellNavigationTarget,
+  type ApplicationShellOptions
 } from './ui';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
@@ -2119,6 +2127,8 @@ function clearProtectedRuntimeData(): void {
   builderMediaControllerIdentity = '';
   websiteDashboardController?.invalidate();
   websiteDashboardController = null;
+  currentShellController?.destroy();
+  currentShellController = null;
   lastContactCount = 0;
 }
 
@@ -2366,7 +2376,53 @@ function needsAttention(contact: any): boolean {
   return !!recentMissedCall;
 }
 
-function renderSidebar(activeView: string) {
+let currentShellController: ShellController | null = null;
+
+function getCurrentShellUser(): ShellUser {
+  const userId = getActingUserId();
+  const businessName = mockWebsiteSettings?.business_name || 'WashOps Pressure Washing';
+  const userName = 'Account User';
+  return {
+    name: userName,
+    businessName
+  };
+}
+
+function handleShellNavigation(target: ShellNavigationTarget): void {
+  if (target.kind === 'website-settings') {
+    (window as any).openWebsiteSettings();
+  } else if (target.kind === 'website-management') {
+    (window as any).openWebsiteManagementView(target.view);
+  } else {
+    (window as any).navigateTo(target.view, target.id);
+  }
+}
+
+function renderAppWithShell(options: ApplicationShellOptions): void {
+  currentShellController?.destroy();
+  const userId = getActingUserId();
+  const newCount = mockContacts.filter(c => c.user_id === userId && isNew(c.created_at)).length;
+  const navGroups = options.navGroups ?? getDefaultNavGroups(options.activeView, { clients: newCount });
+
+  app.innerHTML = renderApplicationShell({
+    ...options,
+    navGroups,
+    user: options.user ?? getCurrentShellUser()
+  });
+
+  currentShellController = initApplicationShell(app, {
+    onNavigate: handleShellNavigation
+  });
+}
+
+/**
+ * Temporary legacy sidebar renderer for screens not yet migrated to the full WashOps application shell.
+ * @deprecated To be removed in Task 7B.2 when all CRM screens are migrated to renderApplicationShell.
+ */
+function renderLegacySidebar(activeView: string): string {
+  const userId = getActingUserId();
+  const newCount = mockContacts.filter(c => c.user_id === userId && isNew(c.created_at)).length;
+
   return `
     <div class="sidebar">
       <h1>PressurePro</h1>
@@ -2376,11 +2432,7 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('dashboard')" class="${activeView === 'dashboard' ? 'active' : ''}">Dashboard</li>
           <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}" style="display: flex; justify-content: space-between; align-items: center;">
             <span>Clients & Leads</span>
-            ${(() => {
-              const userId = getActingUserId();
-              const newCount = mockContacts.filter(c => c.user_id === userId && isNew(c.created_at)).length;
-              return newCount > 0 ? `<span class="badge" style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 800;">${newCount}</span>` : '';
-            })()}
+            ${newCount > 0 ? `<span class="badge" style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 800;">${newCount}</span>` : ''}
           </li>
           <li onclick="window.navigateTo('opportunities')" class="${activeView === 'opportunities' ? 'active' : ''}">Opportunities</li>
           <li onclick="window.navigateTo('quotes')" class="${activeView === 'quotes' ? 'active' : ''}">Quotes</li>
@@ -2404,11 +2456,15 @@ function renderSidebar(activeView: string) {
           <li onclick="window.navigateTo('qa-tools')" class="${activeView === 'qa-tools' ? 'active' : ''}">QA Tools</li>
           <li>Payments</li>
           <li>Settings</li>
-          <li><button type="button" class="sidebar-sign-out" onclick="window.signOutApplication()">Sign out</button></li>
+          <li><button type="button" class="sidebar-sign-out" onclick="window.signOutApplication ? window.signOutApplication() : undefined">Sign out</button></li>
         </ul>
       </nav>
     </div>
-  `;
+  `.trim();
+}
+
+function renderSidebar(activeView: string): string {
+  return renderLegacySidebar(activeView);
 }
 
 function renderDashboard() {
@@ -2485,143 +2541,144 @@ function renderDashboard() {
   const formSubmissions = mockContacts.length > 0 ? Math.floor(websiteLeads * 1.5) + 3 : 0;
   const topPageName = mockPages.length > 0 ? mockPages[Math.floor(Math.random() * Math.min(mockPages.length, 3))].name : 'Home';
 
-  app.innerHTML = `
-    ${renderSidebar('dashboard')}
-    <main class="main-content">
-      <header class="view-header">
-        <h2>Dashboard Overview</h2>
-      </header>
-      
-      <div class="dashboard-grid" style="grid-template-columns: repeat(4, 1fr);">
-        <div class="card">
-          <small style="color: #666;">Cash in Pipeline</small>
-          <h3>Pipeline Value</h3>
-          <p class="value" style="color: var(--primary-color);">$${pipelineValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+  const dashboardContent = `
+    <div class="dashboard-grid" style="grid-template-columns: repeat(4, 1fr);">
+      <div class="card">
+        <small style="color: #666;">Cash in Pipeline</small>
+        <h3>Pipeline Value</h3>
+        <p class="value" style="color: var(--primary-color);">$${pipelineValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+      </div>
+      <div class="card">
+        <small style="color: #666;">Action Required</small>
+        <h3>Open Leads</h3>
+        <p class="value">${openCount}</p>
+      </div>
+      <div class="card">
+        <small style="color: #666;">Success Rate</small>
+        <h3>Conv. Rate</h3>
+        <p class="value">${conversionRate.toFixed(1)}%</p>
+      </div>
+      <div class="card" style="border-bottom: 4px solid #ff4444;">
+        <small style="color: #666;">Attention Needed</small>
+        <h3 style="color: #ff4444;">Overdue</h3>
+        <p class="value" style="color: #ff4444;">${overdueTasks.length}</p>
+      </div>
+    </div>
+
+    <div class="stats-grid" style="margin-top: 30px;">
+      <div class="card">
+        <h3>Revenue by Pipeline Stage</h3>
+        <div class="chart-container" style="margin-top: 20px;">
+          ${revenueByStage.map(s => `
+            <div class="report-item">
+              <div class="report-item-header">
+                <span>${s.stage}</span>
+                <span style="font-weight: 600;">$${s.value.toLocaleString()}</span>
+              </div>
+              <div class="visual-bar-bg">
+                <div class="visual-bar-fill" style="width: ${(s.value / maxRevenue) * 100}%"></div>
+              </div>
+            </div>
+          `).join('') || '<p style="color: #666; font-style: italic; padding: 20px;">No revenue data for active stages</p>'}
         </div>
-        <div class="card">
-          <small style="color: #666;">Action Required</small>
-          <h3>Open Leads</h3>
-          <p class="value">${openCount}</p>
-        </div>
-        <div class="card">
-          <small style="color: #666;">Success Rate</small>
-          <h3>Conv. Rate</h3>
-          <p class="value">${conversionRate.toFixed(1)}%</p>
-        </div>
-        <div class="card" style="border-bottom: 4px solid #ff4444;">
-          <small style="color: #666;">Attention Needed</small>
-          <h3 style="color: #ff4444;">Overdue</h3>
-          <p class="value" style="color: #ff4444;">${overdueTasks.length}</p>
+      </div>
+      <div class="card">
+        <h3>Lead Sources Performance</h3>
+        <div class="chart-container" style="margin-top: 20px;">
+          ${leadsBySource.map(s => `
+            <div class="report-item">
+              <div class="report-item-header">
+                <span>${escapeHtmlText(s.source)}</span>
+                <span style="font-weight: 600;">${s.count} Leads</span>
+              </div>
+              <div class="visual-bar-bg">
+                <div class="visual-bar-fill" style="width: ${(s.count / maxLeads) * 100}%; background: #6c757d;"></div>
+              </div>
+            </div>
+          `).join('')}
         </div>
       </div>
 
-      <div class="stats-grid" style="margin-top: 30px;">
-        <div class="card">
-          <h3>Revenue by Pipeline Stage</h3>
-          <div class="chart-container" style="margin-top: 20px;">
-            ${revenueByStage.map(s => `
-              <div class="report-item">
-                <div class="report-item-header">
-                  <span>${s.stage}</span>
-                  <span style="font-weight: 600;">$${s.value.toLocaleString()}</span>
-                </div>
-                <div class="visual-bar-bg">
-                  <div class="visual-bar-fill" style="width: ${(s.value / maxRevenue) * 100}%"></div>
-                </div>
-              </div>
-            `).join('') || '<p style="color: #666; font-style: italic; padding: 20px;">No revenue data for active stages</p>'}
+      <div class="card" style="display: flex; flex-direction: column;">
+        <h3>Website Performance</h3>
+        <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 20px; flex: 1;">
+
+          <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid var(--primary-color);">
+            <small style="color: #64748b; font-weight: 600; text-transform: uppercase;">Total Leads Acquired</small>
+            <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b; margin-top: 5px;">${websiteLeads}</div>
           </div>
-        </div>
-        <div class="card">
-          <h3>Lead Sources Performance</h3>
-          <div class="chart-container" style="margin-top: 20px;">
-            ${leadsBySource.map(s => `
-              <div class="report-item">
-                <div class="report-item-header">
-                  <span>${escapeHtmlText(s.source)}</span>
-                  <span style="font-weight: 600;">${s.count} Leads</span>
-                </div>
-                <div class="visual-bar-bg">
-                  <div class="visual-bar-fill" style="width: ${(s.count / maxLeads) * 100}%; background: #6c757d;"></div>
-                </div>
-              </div>
-            `).join('')}
+
+          <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid #10b981;">
+            <small style="color: #64748b; font-weight: 600; text-transform: uppercase;">Form Submissions</small>
+            <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b; margin-top: 5px;">${formSubmissions}</div>
           </div>
-        </div>
-        
-        <div class="card" style="display: flex; flex-direction: column;">
-          <h3>Website Performance</h3>
-          <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 20px; flex: 1;">
-            
-            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid var(--primary-color);">
-              <small style="color: #64748b; font-weight: 600; text-transform: uppercase;">Total Leads Acquired</small>
-              <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b; margin-top: 5px;">${websiteLeads}</div>
-            </div>
 
-            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid #10b981;">
-              <small style="color: #64748b; font-weight: 600; text-transform: uppercase;">Form Submissions</small>
-              <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b; margin-top: 5px;">${formSubmissions}</div>
-            </div>
-
-            <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;">
-              <small style="color: #64748b; font-weight: 600; text-transform: uppercase;">Top Converting Page</small>
-              <div style="font-size: 1.2rem; font-weight: 700; color: #1e293b; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${topPageName}</div>
-            </div>
-
+          <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+            <small style="color: #64748b; font-weight: 600; text-transform: uppercase;">Top Converting Page</small>
+            <div style="font-size: 1.2rem; font-weight: 700; color: #1e293b; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${topPageName}</div>
           </div>
-        </div>
 
+        </div>
       </div>
 
-      ${overdueTasks.length > 0 ? `
-        <div class="card" style="margin-top: 30px; border: 1px solid #ffcccc;">
-          <h3 style="color: #cc0000; display: flex; align-items: center; gap: 10px;">
-             🛑 Action Item: Overdue Tasks
-          </h3>
-          <table class="clients-table" style="box-shadow: none; border: 1px solid #eee; margin-top: 20px;">
-            <thead>
-              <tr>
-                <th>Contact</th>
-                <th>Task</th>
-                <th>Due Date</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${overdueTasks.map((task: Activity) => {
-    const contact = mockContacts.find(c => c.id === task.contact_id);
-    return `
-                  <tr style="background: #fffafa;">
-                    <td style="font-weight: 600;">${escapeHtmlText(contact ? contact.name : 'Unknown')}</td>
-                    <td>${escapeHtmlText(task.description)}</td>
-                    <td style="color: #ff4444; font-weight: 500;">${new Date(task.due_date).toLocaleDateString()}</td>
-                    <td><button class="btn-primary" style="padding: 6px 12px; font-size: 0.8rem; background: #ff4444; border-radius: 4px;">Resolve</button></td>
-                  </tr>
-                `;
-  }).join('')}
-            </tbody>
-          </table>
-        </div>
-      ` : ''}
-    </main>
+    </div>
+
+    ${overdueTasks.length > 0 ? `
+      <div class="card" style="margin-top: 30px; border: 1px solid #ffcccc;">
+        <h3 style="color: #cc0000; display: flex; align-items: center; gap: 10px;">
+           🛑 Action Item: Overdue Tasks
+        </h3>
+        <table class="clients-table" style="box-shadow: none; border: 1px solid #eee; margin-top: 20px;">
+          <thead>
+            <tr>
+              <th>Contact</th>
+              <th>Task</th>
+              <th>Due Date</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${overdueTasks.map((task: Activity) => {
+  const contact = mockContacts.find(c => c.id === task.contact_id);
+  return `
+                <tr style="background: #fffafa;">
+                  <td style="font-weight: 600;">${escapeHtmlText(contact ? contact.name : 'Unknown')}</td>
+                  <td>${escapeHtmlText(task.description)}</td>
+                  <td style="color: #ff4444; font-weight: 500;">${new Date(task.due_date).toLocaleDateString()}</td>
+                  <td><button class="btn-primary" style="padding: 6px 12px; font-size: 0.8rem; background: #ff4444; border-radius: 4px;">Resolve</button></td>
+                </tr>
+              `;
+}).join('')}
+          </tbody>
+        </table>
+      </div>
+    ` : ''}
   `;
+
+  renderAppWithShell({
+    activeView: 'dashboard',
+    title: 'Dashboard Overview',
+    contentVariant: 'standard',
+    user: getCurrentShellUser(),
+    contentHtml: dashboardContent
+  });
 }
 
 async function renderClients() {
   // Show initial structure with sidebar to keep UI responsive
-  app.innerHTML = `
-    ${renderSidebar('clients')}
-    <main class="main-content">
-      <header class="view-header">
-        <h2>Clients & Leads</h2>
-        <button class="btn-primary" onclick="window.navigateTo('lead-capture')">+ Add Lead</button>
-      </header>
+  renderAppWithShell({
+    activeView: 'clients',
+    title: 'Clients & Leads',
+    headerActionsHtml: '<button class="btn-primary" onclick="window.navigateTo(\'lead-capture\')">+ Add Lead</button>',
+    contentVariant: 'wide',
+    user: getCurrentShellUser(),
+    contentHtml: `
       <div class="card" style="padding: 20px; text-align: center; color: #64748b;">
         <div class="skeleton" style="height: 40px; margin-bottom: 20px;"></div>
         Loading contacts...
       </div>
-    </main>
-  `;
+    `
+  });
 
   const response = await fetch('/api/contacts');
   const result = await response.json();
@@ -2677,49 +2734,50 @@ async function renderClients() {
     `;
   }).join('');
 
-  app.innerHTML = `
-    ${renderSidebar('clients')}
-    <main class="main-content">
-      <header class="view-header">
-        <h2>Clients & Leads</h2>
-        <button class="btn-primary" onclick="window.navigateTo('lead-capture')">+ Add Lead</button>
-      </header>
-
-      <div class="card" style="margin-bottom: 24px; padding: 16px;">
-        <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
-          <div style="flex: 1; min-width: 300px;">
-            <input type="text" id="client-search" placeholder="Search by name or phone..." 
-                   value="${escapeHtmlText(clientSearchQuery)}"
-                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-          </div>
-          <div style="display: flex; gap: 10px;">
-            <button class="btn-primary" style="background: ${clientStatusFilter === 'all' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'all' ? 'white' : '#333'}" onclick="window.filterClients('all')">All</button>
-            <button class="btn-primary" style="background: ${clientStatusFilter === 'lead' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'lead' ? 'white' : '#333'}" onclick="window.filterClients('lead')">Leads</button>
-            <button class="btn-primary" style="background: ${clientStatusFilter === 'customer' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'customer' ? 'white' : '#333'}" onclick="window.filterClients('customer')">Customers</button>
-            <button class="btn-primary" style="background: ${clientStatusFilter === 'lost' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'lost' ? 'white' : '#333'}" onclick="window.filterClients('lost')">Lost</button>
-          </div>
+  const clientsContent = `
+    <div class="card" style="margin-bottom: 24px; padding: 16px;">
+      <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 300px;">
+          <input type="text" id="client-search" placeholder="Search by name or phone..."
+                 value="${escapeHtmlText(clientSearchQuery)}"
+                 style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn-primary" style="background: ${clientStatusFilter === 'all' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'all' ? 'white' : '#333'}" onclick="window.filterClients('all')">All</button>
+          <button class="btn-primary" style="background: ${clientStatusFilter === 'lead' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'lead' ? 'white' : '#333'}" onclick="window.filterClients('lead')">Leads</button>
+          <button class="btn-primary" style="background: ${clientStatusFilter === 'customer' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'customer' ? 'white' : '#333'}" onclick="window.filterClients('customer')">Customers</button>
+          <button class="btn-primary" style="background: ${clientStatusFilter === 'lost' ? 'var(--primary-color)' : '#eee'}; color: ${clientStatusFilter === 'lost' ? 'white' : '#333'}" onclick="window.filterClients('lost')">Lost</button>
         </div>
       </div>
+    </div>
 
-      <div class="card" style="padding: 0; overflow: hidden;">
-        <table class="clients-table" style="box-shadow: none; margin-top: 0;">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Phone</th>
-              <th>Status</th>
-              <th>Source</th>
-              <th>Last Activity</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tableRows || '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #666;">No clients found matching your criteria</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    </main>
+    <div class="card" style="padding: 0; overflow: hidden;">
+      <table class="clients-table" style="box-shadow: none; margin-top: 0;">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Status</th>
+            <th>Source</th>
+            <th>Last Activity</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tableRows || '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #666;">No clients found matching your criteria</td></tr>'}
+        </tbody>
+      </table>
+    </div>
   `;
+
+  renderAppWithShell({
+    activeView: 'clients',
+    title: 'Clients & Leads',
+    headerActionsHtml: '<button class="btn-primary" onclick="window.navigateTo(\'lead-capture\')">+ Add Lead</button>',
+    contentVariant: 'wide',
+    user: getCurrentShellUser(),
+    contentHtml: clientsContent
+  });
 
   const searchInput = document.getElementById('client-search') as HTMLInputElement;
   searchInput?.addEventListener('input', (e) => {
@@ -9584,15 +9642,19 @@ function renderWebsiteSettingsSelector(websites: readonly Website[], invalid = f
     className: 'website-settings-selection'
   });
 
-  app.innerHTML = `
-    ${renderSidebar('website-settings')}
-    <main class="main-content">
-      <header class="view-header"><h2>Website Branding & Tracking</h2></header>
-      <section class="website-settings-selection-container">
-        ${cardHtml}
-      </section>
-    </main>
+  const contentHtml = `
+    <section class="website-settings-selection-container">
+      ${cardHtml}
+    </section>
   `;
+
+  renderAppWithShell({
+    activeView: 'website-settings',
+    title: 'Website Branding & Tracking',
+    contentVariant: 'standard',
+    user: getCurrentShellUser(),
+    contentHtml
+  });
 }
 
 function renderWebsiteManagementSelector(view: WebsiteManagementView, websites: readonly Website[], invalid = false) {
@@ -9639,15 +9701,19 @@ function renderWebsiteManagementSelector(view: WebsiteManagementView, websites: 
     className: 'website-settings-selection'
   });
 
-  app.innerHTML = `
-    ${renderSidebar(view)}
-    <main class="main-content">
-      <header class="view-header"><h2>${labels[view]}</h2></header>
-      <section class="website-settings-selection-container">
-        ${cardHtml}
-      </section>
-    </main>
+  const contentHtml = `
+    <section class="website-settings-selection-container">
+      ${cardHtml}
+    </section>
   `;
+
+  renderAppWithShell({
+    activeView: view,
+    title: labels[view],
+    contentVariant: 'standard',
+    user: getCurrentShellUser(),
+    contentHtml
+  });
 }
 
 function renderWebsiteManagementSwitcher(view: WebsiteManagementView): string {
@@ -9662,78 +9728,78 @@ function renderWebsiteSettings() {
   const userId = getActingUserId();
   const ownedWebsites = mockWebsites.filter(website => website.user_id === userId);
   applyPrimaryColor(settings.primary_color);
-  app.innerHTML = `
-    ${renderSidebar('website-settings')}
-    <main class="main-content">
-      <header class="view-header">
-        <h2>Website Branding & Tracking</h2>
-        <div style="display: flex; gap: 10px;">
-           <button class="btn-primary" style="background: var(--primary-color);" onclick="window.saveGlobalSettings()">Save Settings</button>
-        </div>
-      </header>
-      ${ownedWebsites.length > 1 ? `<div class="website-dashboard-selector"><label for="settings-website-select">Active website</label><select id="settings-website-select" onchange="window.selectWebsiteForSettings(this.value)">${ownedWebsites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}" ${site.id === activeSettingsWebsiteId ? 'selected' : ''}>${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></div>` : ''}
-      <div style="max-width: 800px;">
-        <div class="card" style="margin-bottom: 24px;">
-          <h3>Business Profile</h3>
-          <div style="display: flex; flex-direction: column; gap: 15px;">
-            <div class="form-group">
-              <label>Business Name</label>
-              <input type="text" data-settings-field="business_name" value="${settings.business_name}" onchange="window.updateSettingsField('business_name', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
-               <div class="form-group">
-                 <label>Public Phone</label>
-                 <input type="text" id="settings-phone-input" value="${settings.phone}" onchange="window.updateSettingsField('phone', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-               </div>
-               <div class="form-group">
-                 <label>Text/SMS Number</label>
-                 <input type="text" id="settings-sms-number-input" value="${settings.sms_number || ''}" onchange="window.updateSettingsField('sms_number', this.value)" placeholder="${settings.phone}" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-                 <small style="color: #94a3b8; font-size: 0.75rem;">Used for text-message CTAs. Leave blank to use your public phone number.</small>
-               </div>
-               <div class="form-group">
-                 <label>Public Email</label>
-                 <input type="email" id="settings-email-input" value="${settings.email}" onchange="window.updateSettingsField('email', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-               </div>
-            </div>
-            <div style="display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center;">
-               <div class="form-group" style="margin: 0;">
-                 <label>Brand Color</label>
-                 <div style="display: flex; align-items: center; gap: 12px; margin-top: 6px;">
-                   <input type="color" id="settings-primary-color-input" value="${settings.primary_color || '#4f46e5'}" onchange="window.updateSettingsField('primary_color', this.value)" oninput="window.updateSettingsField('primary_color', this.value)" style="width: 48px; height: 40px; border: 1px solid #ddd; border-radius: 6px; padding: 2px; cursor: pointer;">
-                   <code style="font-size: 0.85rem; color: #475569; font-weight: 600;" id="settings-primary-color-display">${settings.primary_color || '#4f46e5'}</code>
-                 </div>
-               </div>
-               <div style="padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 0.85rem; color: #64748b; margin-top: 20px;">
-                 Changes button and accent colors across your public website and CRM dashboard.
-               </div>
-            </div>
-            <div class="form-group">
-              <label>Logo URL</label>
-              <div style="display: flex; gap: 10px;">
-                 <input type="text" id="settings-logo-url-input" value="${settings.logo_url || ''}" onchange="window.updateSettingsField('logo_url', this.value)" style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-                 ${settings.logo_url ? `<img id="settings-logo-img" src="${settings.logo_url}" style="height: 42px; width: 42px; border-radius: 4px; object-fit: cover; border: 1px solid #ddd;">` : ''}
-              </div>
-            </div>
+  const contentHtml = `
+    ${ownedWebsites.length > 1 ? `<div class="website-dashboard-selector"><label for="settings-website-select">Active website</label><select id="settings-website-select" onchange="window.selectWebsiteForSettings(this.value)">${ownedWebsites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}" ${site.id === activeSettingsWebsiteId ? 'selected' : ''}>${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></div>` : ''}
+    <div style="max-width: 800px;">
+      <div class="card" style="margin-bottom: 24px;">
+        <h3>Business Profile</h3>
+        <div style="display: flex; flex-direction: column; gap: 15px;">
+          <div class="form-group">
+            <label>Business Name</label>
+            <input type="text" data-settings-field="business_name" value="${settings.business_name}" onchange="window.updateSettingsField('business_name', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
           </div>
-        </div>
-
-        <div class="card">
-          <h3>Tracking & Marketing</h3>
-          <p style="color: #666; font-size: 0.9rem; margin-bottom: 20px;">Connect your marketing tools for analytics and ad tracking.</p>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-            <div class="form-group">
-              <label>Facebook Pixel ID</label>
-              <input type="text" data-settings-field="facebook_pixel_id" placeholder="e.g. 1234567890" value="${settings.facebook_pixel_id || ''}" onchange="window.updateSettingsField('facebook_pixel_id', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-            </div>
-            <div class="form-group">
-              <label>GTM Container ID</label>
-              <input type="text" data-settings-field="gtm_id" placeholder="e.g. GTM-XXXXXX" value="${settings.gtm_id || ''}" onchange="window.updateSettingsField('gtm_id', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
+             <div class="form-group">
+               <label>Public Phone</label>
+               <input type="text" id="settings-phone-input" value="${settings.phone}" onchange="window.updateSettingsField('phone', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+             </div>
+             <div class="form-group">
+               <label>Text/SMS Number</label>
+               <input type="text" id="settings-sms-number-input" value="${settings.sms_number || ''}" onchange="window.updateSettingsField('sms_number', this.value)" placeholder="${settings.phone}" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+               <small style="color: #94a3b8; font-size: 0.75rem;">Used for text-message CTAs. Leave blank to use your public phone number.</small>
+             </div>
+             <div class="form-group">
+               <label>Public Email</label>
+               <input type="email" id="settings-email-input" value="${settings.email}" onchange="window.updateSettingsField('email', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+             </div>
+          </div>
+          <div style="display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center;">
+             <div class="form-group" style="margin: 0;">
+               <label>Brand Color</label>
+               <div style="display: flex; align-items: center; gap: 12px; margin-top: 6px;">
+                 <input type="color" id="settings-primary-color-input" value="${settings.primary_color || '#4f46e5'}" onchange="window.updateSettingsField('primary_color', this.value)" oninput="window.updateSettingsField('primary_color', this.value)" style="width: 48px; height: 40px; border: 1px solid #ddd; border-radius: 6px; padding: 2px; cursor: pointer;">
+                 <code style="font-size: 0.85rem; color: #475569; font-weight: 600;" id="settings-primary-color-display">${settings.primary_color || '#4f46e5'}</code>
+               </div>
+             </div>
+             <div style="padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 0.85rem; color: #64748b; margin-top: 20px;">
+               Changes button and accent colors across your public website and CRM dashboard.
+             </div>
+          </div>
+          <div class="form-group">
+            <label>Logo URL</label>
+            <div style="display: flex; gap: 10px;">
+               <input type="text" id="settings-logo-url-input" value="${settings.logo_url || ''}" onchange="window.updateSettingsField('logo_url', this.value)" style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+               ${settings.logo_url ? `<img id="settings-logo-img" src="${settings.logo_url}" style="height: 42px; width: 42px; border-radius: 4px; object-fit: cover; border: 1px solid #ddd;">` : ''}
             </div>
           </div>
         </div>
       </div>
-    </main>
+
+      <div class="card">
+        <h3>Tracking & Marketing</h3>
+        <p style="color: #666; font-size: 0.9rem; margin-bottom: 20px;">Connect your marketing tools for analytics and ad tracking.</p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+          <div class="form-group">
+            <label>Facebook Pixel ID</label>
+            <input type="text" data-settings-field="facebook_pixel_id" placeholder="e.g. 1234567890" value="${settings.facebook_pixel_id || ''}" onchange="window.updateSettingsField('facebook_pixel_id', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+          </div>
+          <div class="form-group">
+            <label>GTM Container ID</label>
+            <input type="text" data-settings-field="gtm_id" placeholder="e.g. GTM-XXXXXX" value="${settings.gtm_id || ''}" onchange="window.updateSettingsField('gtm_id', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+          </div>
+        </div>
+      </div>
+    </div>
   `;
+
+  renderAppWithShell({
+    activeView: 'website-settings',
+    title: 'Website Branding & Tracking',
+    headerActionsHtml: '<div style="display: flex; gap: 10px;"><button class="btn-primary" style="background: var(--primary-color);" onclick="window.saveGlobalSettings()">Save Settings</button></div>',
+    contentVariant: 'standard',
+    user: getCurrentShellUser(),
+    contentHtml
+  });
 }
 
 function renderWebsiteNavigation() {
@@ -11769,7 +11835,20 @@ function isExplicitWebsiteManagementView(view: string): view is WebsiteManagemen
 
 function renderWebsiteRepositoryUnavailable(view: string): void {
   currentView = view;
-  app.innerHTML = `${renderSidebar(view)}<main class="main-content"><header class="view-header"><h1>Website information could not be loaded.</h1></header><section class="card website-dashboard-state" role="alert"><p>Please try again.</p><button type="button" class="btn-outline" onclick="window.navigateTo('${escapeBuilderInspectorHtml(view)}')">Retry</button></section></main>`;
+  const contentHtml = `
+    <section class="card website-dashboard-state" role="alert">
+      <p>Please try again.</p>
+      <button type="button" class="btn-outline" onclick="window.navigateTo('${escapeBuilderInspectorHtml(view)}')">Retry</button>
+    </section>
+  `;
+
+  renderAppWithShell({
+    activeView: view,
+    title: 'Website information could not be loaded.',
+    contentVariant: 'standard',
+    user: getCurrentShellUser(),
+    contentHtml
+  });
 }
 
 (window as any).navigateTo = async (view: string, id?: string, context?: any) => {
@@ -11928,6 +12007,10 @@ async function executeNavigation(
   navigationOperation?: ProtectedAsyncOperationToken
 ) {
   if (navigationOperation) protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
+  if (['builder', 'site', 'preview'].includes(view) || !['dashboard', 'clients', 'website-settings'].includes(view)) {
+    currentShellController?.destroy();
+    currentShellController = null;
+  }
   if (isExplicitWebsiteManagementView(view)) {
     const selection = resolveWebsiteSettingsSelection({
       actingUserId: getActingUserId(),
@@ -13038,7 +13121,7 @@ async function bootRouter() {
 
   // Authenticated CRM hash routes.
   if (decision.hash) {
-     const hashContent = decision.hash.slice(2);
+     const hashContent = decision.hash.replace(/^#\/?/, '');
      if (hashContent) {
        const [routePart, query = ''] = hashContent.split('?');
        const parts = routePart.split('/');
@@ -13069,7 +13152,7 @@ setInterval(() => {
   // 🌿 1. Detect New Leads (Global Alert - WB.5.4)
   if (mockContacts.length > lastContactCount) {
     const newLeads = mockContacts.slice(lastContactCount);
-    
+
     // Detailed toast for the most recent lead
     if (newLeads.length === 1) {
       const lead = newLeads[0];
@@ -13083,20 +13166,21 @@ setInterval(() => {
   }
 
   // 2. Refresh UI (only in standard app views)
-  const sidebar = document.querySelector('.sidebar');
-  if (sidebar && !['builder', 'preview', 'site'].includes(currentView)) {
-    console.log('[POLLING] Refreshing UI state...');
-
-    // Always refresh sidebar for badge counts
-    sidebar.outerHTML = renderSidebar(currentView);
-
-    // If a new lead was detected, re-render the active view to show it immediately
+  if (['dashboard', 'clients', 'website-settings'].includes(currentView)) {
     if (changeDetected) {
-      if (currentView === 'clients') renderClients();
+      if (currentView === 'clients') void renderClients();
+      if (currentView === 'dashboard') renderDashboard();
+    }
+  } else if (!['builder', 'preview', 'site'].includes(currentView)) {
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) {
+      sidebar.outerHTML = renderLegacySidebar(currentView);
+    }
+    if (changeDetected) {
+      if (currentView === 'clients') void renderClients();
       if (currentView === 'dashboard') renderDashboard();
     }
   }
-
 }, 5000);
 
 // ── WB.6.1 Onboarding Modal & Flow ──────────────────────────────────
