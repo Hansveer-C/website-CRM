@@ -493,7 +493,7 @@ export function renderStatusBadge(status: string): string {
 }
 
 // ============================================================================
-// 5. TABS PRIMITIVE
+// 5. TABS & TABPANEL PRIMITIVES
 // ============================================================================
 
 export interface TabItem {
@@ -514,9 +514,14 @@ export function renderTabs(opts: TabsOptions): string {
   const ariaLabel = opts.ariaLabel ? ` aria-label="${escapeHtmlText(opts.ariaLabel)}"` : '';
   const classes = ['wo-tabs', opts.className ?? ''].filter(Boolean).join(' ');
 
+  // Identify active enabled tab deterministically
+  const enabledTabs = opts.tabs.filter(t => !t.disabled);
+  const explicitActiveEnabled = enabledTabs.find(t => t.active);
+  const selectedTab = explicitActiveEnabled ?? enabledTabs[0];
+
   const tabsHtml = opts.tabs.map(t => {
-    const isSelected = Boolean(t.active);
     const isDisabled = Boolean(t.disabled);
+    const isSelected = !isDisabled && t === selectedTab;
     const tabIndex = isSelected ? '0' : '-1';
     const disabledAttr = isDisabled ? ' disabled aria-disabled="true"' : '';
 
@@ -530,10 +535,33 @@ export function renderTabs(opts: TabsOptions): string {
   return `<div role="tablist"${ariaLabel} class="${classes}">${tabsHtml}</div>`;
 }
 
-export function initTabs(tablistEl: HTMLElement, opts: { onTabChange?: (tabId: string) => void } = {}): () => void {
+export interface TabPanelOptions {
+  id: string;
+  tabId: string;
+  bodyHtml: string;
+  active?: boolean;
+  className?: string;
+}
+
+export function renderTabPanel(opts: TabPanelOptions): string {
+  const classes = ['wo-tab-panel', opts.className ?? ''].filter(Boolean).join(' ');
+  const hiddenAttr = opts.active ? '' : ' hidden';
+
+  return `<div role="tabpanel" id="${opts.id}" aria-labelledby="${opts.tabId}" class="${classes}"${hiddenAttr}>${opts.bodyHtml}</div>`;
+}
+
+export interface TabsController {
+  destroy: () => void;
+  selectTab: (tabId: string) => void;
+}
+
+export function initTabs(
+  tablistEl: HTMLElement,
+  opts: { onTabChange?: (tabId: string) => void } = {}
+): TabsController {
   const getTabs = () => Array.from(tablistEl.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
 
-  const activateTab = (targetTab: HTMLButtonElement) => {
+  const activateTab = (targetTab: HTMLButtonElement, emitChange: boolean = true) => {
     if (targetTab.disabled || targetTab.getAttribute('aria-disabled') === 'true') return;
     const tabs = getTabs();
 
@@ -551,15 +579,40 @@ export function initTabs(tablistEl: HTMLElement, opts: { onTabChange?: (tabId: s
       }
     }
 
-    targetTab.focus();
-    opts.onTabChange?.(targetTab.id);
+    if (emitChange) {
+      targetTab.focus();
+      opts.onTabChange?.(targetTab.id);
+    }
   };
+
+  // Immediate DOM normalization at initialization
+  const allTabs = getTabs();
+  const enabledTabs = allTabs.filter(t => !t.disabled && t.getAttribute('aria-disabled') !== 'true');
+  const explicitlySelected = enabledTabs.find(t => t.getAttribute('aria-selected') === 'true');
+  const initialSelected = explicitlySelected ?? enabledTabs[0];
+
+  if (initialSelected) {
+    activateTab(initialSelected, false);
+  } else {
+    // All tabs disabled: normalize all to aria-selected=false, tabindex=-1
+    for (const tab of allTabs) {
+      tab.setAttribute('aria-selected', 'false');
+      tab.setAttribute('tabindex', '-1');
+      const panelId = tab.getAttribute('aria-controls');
+      if (panelId) {
+        const panel = document.getElementById(panelId);
+        if (panel) panel.hidden = true;
+      }
+    }
+  }
 
   const handleKeyDown = (e: KeyboardEvent) => {
     const tabs = getTabs();
-    const enabledTabs = tabs.filter(t => !t.disabled && t.getAttribute('aria-disabled') !== 'true');
+    const enabled = tabs.filter(t => !t.disabled && t.getAttribute('aria-disabled') !== 'true');
+    if (enabled.length === 0) return;
+
     const currentTab = document.activeElement as HTMLButtonElement;
-    const currentIndex = enabledTabs.indexOf(currentTab);
+    const currentIndex = enabled.indexOf(currentTab);
 
     if (currentIndex === -1) return;
 
@@ -568,24 +621,24 @@ export function initTabs(tablistEl: HTMLElement, opts: { onTabChange?: (tabId: s
     switch (e.key) {
       case 'ArrowRight':
         e.preventDefault();
-        nextTab = enabledTabs[(currentIndex + 1) % enabledTabs.length];
+        nextTab = enabled[(currentIndex + 1) % enabled.length];
         break;
       case 'ArrowLeft':
         e.preventDefault();
-        nextTab = enabledTabs[(currentIndex - 1 + enabledTabs.length) % enabledTabs.length];
+        nextTab = enabled[(currentIndex - 1 + enabled.length) % enabled.length];
         break;
       case 'Home':
         e.preventDefault();
-        nextTab = enabledTabs[0];
+        nextTab = enabled[0];
         break;
       case 'End':
         e.preventDefault();
-        nextTab = enabledTabs[enabledTabs.length - 1];
+        nextTab = enabled[enabled.length - 1];
         break;
     }
 
     if (nextTab) {
-      activateTab(nextTab);
+      activateTab(nextTab, true);
     }
   };
 
@@ -593,17 +646,24 @@ export function initTabs(tablistEl: HTMLElement, opts: { onTabChange?: (tabId: s
     const target = (e.target as HTMLElement).closest<HTMLButtonElement>('[role="tab"]');
     if (target && tablistEl.contains(target)) {
       e.preventDefault();
-      activateTab(target);
+      activateTab(target, true);
     }
   };
 
   tablistEl.addEventListener('keydown', handleKeyDown);
   tablistEl.addEventListener('click', handleClick);
 
-  return () => {
+  const destroy = () => {
     tablistEl.removeEventListener('keydown', handleKeyDown);
     tablistEl.removeEventListener('click', handleClick);
   };
+
+  const selectTab = (tabId: string) => {
+    const target = allTabs.find(t => t.id === tabId);
+    if (target) activateTab(target, true);
+  };
+
+  return { destroy, selectTab };
 }
 
 // ============================================================================
@@ -705,16 +765,74 @@ export function renderDialog(opts: DialogOptions): string {
   `.trim();
 }
 
+interface InertEntry {
+  element: HTMLElement;
+  prevInert: boolean;
+  prevAriaHidden: string | null;
+}
+
+function applyInertToBackground(dialogEl: HTMLElement): () => void {
+  const entries: InertEntry[] = [];
+  let current: HTMLElement | null = dialogEl;
+
+  // Walk ancestor levels from the dialog up to document.body
+  while (current && current !== document.body && current.parentElement) {
+    const parent: HTMLElement = current.parentElement;
+    const siblings = Array.from(parent.children) as HTMLElement[];
+
+    for (const sibling of siblings) {
+      if (sibling !== current && sibling.nodeType === 1 && !sibling.contains(dialogEl)) {
+        entries.push({
+          element: sibling,
+          prevInert: (sibling as any).inert === true,
+          prevAriaHidden: sibling.getAttribute('aria-hidden')
+        });
+
+        (sibling as any).inert = true;
+        sibling.setAttribute('aria-hidden', 'true');
+      }
+    }
+    current = parent;
+  }
+
+  return () => {
+    for (const entry of entries) {
+      (entry.element as any).inert = entry.prevInert;
+
+      if (entry.prevAriaHidden !== null) {
+        entry.element.setAttribute('aria-hidden', entry.prevAriaHidden);
+      } else {
+        entry.element.removeAttribute('aria-hidden');
+      }
+    }
+  };
+}
+
+export interface DialogController {
+  close: () => void;
+  destroy: () => void;
+}
+
 export function initDialog(
   backdropEl: HTMLElement,
   opts: { onClose?: () => void; nonDismissible?: boolean } = {}
-): () => void {
+): DialogController {
+  let isClosed = false;
   const previouslyFocused = document.activeElement as HTMLElement | null;
-  const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  // Ensure backdrop is visible upon initialization
+  backdropEl.hidden = false;
+
+  // Apply inert boundary to background element subtrees
+  const restoreInert = applyInertToBackground(backdropEl);
+
+  const focusableSelector =
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
   const getFocusableElements = (): HTMLElement[] => {
-    return Array.from(backdropEl.querySelectorAll<HTMLElement>(focusableSelector))
-      .filter(el => el.offsetParent !== null || el === document.activeElement || el.tagName.toLowerCase() === 'button');
+    return Array.from(backdropEl.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+      el => el.offsetParent !== null || el === document.activeElement || el.tagName.toLowerCase() === 'button'
+    );
   };
 
   // Move initial focus inside dialog
@@ -726,18 +844,12 @@ export function initDialog(
     backdropEl.focus();
   }
 
-  const closeDialog = () => {
-    opts.onClose?.();
-    cleanup();
-    if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
-      previouslyFocused.focus();
-    }
-  };
-
   const handleKeyDown = (e: KeyboardEvent) => {
+    if (isClosed) return;
+
     if (e.key === 'Escape' && !opts.nonDismissible) {
       e.preventDefault();
-      closeDialog();
+      close();
       return;
     }
 
@@ -766,22 +878,53 @@ export function initDialog(
   };
 
   const handleClick = (e: MouseEvent) => {
+    if (isClosed) return;
     const target = e.target as HTMLElement;
     if (target.closest('[data-dialog-close]')) {
       e.preventDefault();
-      closeDialog();
+      close();
     }
   };
 
   backdropEl.addEventListener('keydown', handleKeyDown);
   backdropEl.addEventListener('click', handleClick);
 
-  const cleanup = () => {
+  const removeListeners = () => {
     backdropEl.removeEventListener('keydown', handleKeyDown);
     backdropEl.removeEventListener('click', handleClick);
   };
 
-  return cleanup;
+  const close = () => {
+    if (isClosed) return;
+    isClosed = true;
+
+    // 1. Intrinsically hide the dialog backdrop
+    backdropEl.hidden = true;
+
+    // 2. Remove listeners
+    removeListeners();
+
+    // 3. Restore inert states on background siblings
+    restoreInert();
+
+    // 4. Invoke lifecycle callback
+    opts.onClose?.();
+
+    // 5. Restore focus to opener trigger
+    if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+      previouslyFocused.focus();
+    }
+  };
+
+  const destroy = () => {
+    if (isClosed) return;
+    isClosed = true;
+
+    removeListeners();
+    restoreInert();
+  };
+
+  return { close, destroy };
 }
 
 // ============================================================================

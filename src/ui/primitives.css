@@ -570,6 +570,10 @@
   box-sizing: border-box;
 }
 
+.wo-dialog-backdrop[hidden] {
+  display: none;
+}
+
 .wo-dialog {
   background-color: var(--wo-color-surface);
   border-radius: var(--wo-radius-xl);

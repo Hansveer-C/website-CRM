@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -15,6 +15,7 @@ import {
   renderBadge,
   renderStatusBadge,
   renderTabs,
+  renderTabPanel,
   initTabs,
   renderTable,
   renderDialog,
@@ -31,6 +32,8 @@ class MockElement {
   public id: string = '';
   public disabled: boolean = false;
   public hidden: boolean = false;
+  public inert: boolean = false;
+  public nodeType: number = 1;
   public offsetParent: any = {};
   public children: MockElement[] = [];
   public parentElement: MockElement | null = null;
@@ -45,6 +48,7 @@ class MockElement {
     this.attributes.set(name, value);
     if (name === 'id') this.id = value;
     if (name === 'disabled') this.disabled = true;
+    if (name === 'hidden') this.hidden = true;
   }
 
   getAttribute(name: string): string | null {
@@ -58,6 +62,7 @@ class MockElement {
   removeAttribute(name: string) {
     this.attributes.delete(name);
     if (name === 'disabled') this.disabled = false;
+    if (name === 'hidden') this.hidden = false;
   }
 
   addEventListener(type: string, listener: (event: any) => void) {
@@ -74,9 +79,13 @@ class MockElement {
   dispatchEvent(event: any): boolean {
     event.target = event.target ?? this;
     event.preventDefault = event.preventDefault ?? (() => {});
-    const list = this.listeners.get(event.type) ?? [];
-    for (const listener of list) {
-      listener(event);
+    let current: MockElement | null = this;
+    while (current) {
+      const list = current.listeners.get(event.type) ?? [];
+      for (const listener of list) {
+        listener(event);
+      }
+      current = current.parentElement;
     }
     return true;
   }
@@ -94,7 +103,7 @@ class MockElement {
   contains(element: any): boolean {
     if (element === this) return true;
     for (const child of this.children) {
-      if (child.contains(element)) return true;
+      if (child === element || child.contains(element)) return true;
     }
     return false;
   }
@@ -185,6 +194,7 @@ describe('WashOps Canonical UI Primitives (Phase 1C / Task 7A.2)', () => {
       '.wo-table',
       '.wo-table-empty-cell',
       '.wo-dialog-backdrop',
+      '.wo-dialog-backdrop[hidden]',
       '.wo-dialog',
       '.wo-dialog-header',
       '.wo-dialog-title',
@@ -415,31 +425,87 @@ describe('WashOps Canonical UI Primitives (Phase 1C / Task 7A.2)', () => {
   });
 
   // ==========================================================================
-  // 5. TABS PRIMITIVE & KEYBOARD CONTROLLER
+  // 5. TABS & TABPANEL PRIMITIVES & CONTROLLER
   // ==========================================================================
-  it('K. verifies tabs ARIA roles, roving tabindex, and initTabs keyboard navigation', () => {
+  it('K. verifies renderTabPanel active and inactive markup', () => {
+    const activePanel = renderTabPanel({
+      id: 'panel-general',
+      tabId: 'tab-general',
+      bodyHtml: '<p>General Settings</p>',
+      active: true
+    });
+    expect(activePanel).toContain('role="tabpanel" id="panel-general" aria-labelledby="tab-general" class="wo-tab-panel"');
+    expect(activePanel).not.toContain('hidden');
+    expect(activePanel).toContain('<p>General Settings</p>');
+
+    const inactivePanel = renderTabPanel({
+      id: 'panel-security',
+      tabId: 'tab-security',
+      bodyHtml: '<p>Security Settings</p>',
+      active: false
+    });
+    expect(inactivePanel).toContain('role="tabpanel" id="panel-security" aria-labelledby="tab-security" class="wo-tab-panel" hidden');
+  });
+
+  it('L. verifies renderTabs deterministic initial selection & disabled normalization', () => {
+    // 1. If explicit active is provided on enabled tab -> first enabled active selected
+    const t1 = renderTabs({
+      tabs: [
+        { id: 'tab-a', label: 'Tab A', panelId: 'p-a', active: true },
+        { id: 'tab-b', label: 'Tab B', panelId: 'p-b', active: true }
+      ]
+    });
+    expect(t1).toContain('id="tab-a" class="wo-tab" aria-selected="true" tabindex="0"');
+    expect(t1).toContain('id="tab-b" class="wo-tab" aria-selected="false" tabindex="-1"');
+
+    // 2. If no active provided -> first enabled selected
+    const t2 = renderTabs({
+      tabs: [
+        { id: 'tab-a', label: 'Tab A', panelId: 'p-a' },
+        { id: 'tab-b', label: 'Tab B', panelId: 'p-b' }
+      ]
+    });
+    expect(t2).toContain('id="tab-a" class="wo-tab" aria-selected="true" tabindex="0"');
+    expect(t2).toContain('id="tab-b" class="wo-tab" aria-selected="false" tabindex="-1"');
+
+    // 3. If active provided on disabled tab -> disabled tab ignored, first enabled tab selected
+    const t3 = renderTabs({
+      tabs: [
+        { id: 'tab-a', label: 'Tab A', panelId: 'p-a', disabled: true, active: true },
+        { id: 'tab-b', label: 'Tab B', panelId: 'p-b' }
+      ]
+    });
+    expect(t3).toContain('id="tab-a" class="wo-tab" aria-selected="false" tabindex="-1" aria-controls="p-a" disabled aria-disabled="true"');
+    expect(t3).toContain('id="tab-b" class="wo-tab" aria-selected="true" tabindex="0"');
+
+    // 4. If all tabs disabled -> none selected, all tabindex -1
+    const t4 = renderTabs({
+      tabs: [
+        { id: 'tab-a', label: 'Tab A', panelId: 'p-a', disabled: true },
+        { id: 'tab-b', label: 'Tab B', panelId: 'p-b', disabled: true }
+      ]
+    });
+    expect(t4).toContain('id="tab-a" class="wo-tab" aria-selected="false" tabindex="-1" aria-controls="p-a" disabled aria-disabled="true"');
+    expect(t4).toContain('id="tab-b" class="wo-tab" aria-selected="false" tabindex="-1" aria-controls="p-b" disabled aria-disabled="true"');
+  });
+
+  it('M. verifies initTabs initial DOM normalization, keyboard navigation, and click activation', () => {
     const tablist = new MockElement('div') as any;
     tablist.setAttribute('role', 'tablist');
 
     const tab1 = new MockElement('button') as any;
     tab1.setAttribute('id', 'tab-1');
     tab1.setAttribute('role', 'tab');
-    tab1.setAttribute('aria-selected', 'true');
-    tab1.setAttribute('tabindex', '0');
     tab1.setAttribute('aria-controls', 'panel-1');
 
     const tab2 = new MockElement('button') as any;
     tab2.setAttribute('id', 'tab-2');
     tab2.setAttribute('role', 'tab');
-    tab2.setAttribute('aria-selected', 'false');
-    tab2.setAttribute('tabindex', '-1');
     tab2.setAttribute('aria-controls', 'panel-2');
 
     const tab3 = new MockElement('button') as any;
     tab3.setAttribute('id', 'tab-3');
     tab3.setAttribute('role', 'tab');
-    tab3.setAttribute('aria-selected', 'false');
-    tab3.setAttribute('tabindex', '-1');
     tab3.setAttribute('aria-controls', 'panel-3');
     tab3.disabled = true;
 
@@ -449,11 +515,9 @@ describe('WashOps Canonical UI Primitives (Phase 1C / Task 7A.2)', () => {
 
     const panel1 = new MockElement('div') as any;
     panel1.id = 'panel-1';
-    panel1.hidden = false;
 
     const panel2 = new MockElement('div') as any;
     panel2.id = 'panel-2';
-    panel2.hidden = true;
 
     const elementRegistry = new Map<string, any>([
       ['panel-1', panel1],
@@ -466,44 +530,58 @@ describe('WashOps Canonical UI Primitives (Phase 1C / Task 7A.2)', () => {
     };
 
     const changeSpy = vi.fn();
-    const cleanup = initTabs(tablist, { onTabChange: changeSpy });
+    const controller = initTabs(tablist, { onTabChange: changeSpy });
 
-    // Focus tab1 and press ArrowRight -> moves to tab2, updates panel visibility
+    // Initial DOM normalization: tab1 selected, panel1 visible, panel2 hidden
+    expect(tab1.getAttribute('aria-selected')).toBe('true');
+    expect(tab1.getAttribute('tabindex')).toBe('0');
+    expect(tab2.getAttribute('aria-selected')).toBe('false');
+    expect(tab2.getAttribute('tabindex')).toBe('-1');
+    expect(panel1.hidden).toBe(false);
+    expect(panel2.hidden).toBe(true);
+    expect(changeSpy).not.toHaveBeenCalled(); // No change event on initial sync
+
+    // ArrowRight -> activates tab2, shows panel2, hides panel1
     tab1.focus();
     tablist.dispatchEvent({ type: 'keydown', key: 'ArrowRight' });
-
     expect(tab2.getAttribute('aria-selected')).toBe('true');
-    expect(tab2.getAttribute('tabindex')).toBe('0');
-    expect(tab1.getAttribute('aria-selected')).toBe('false');
-    expect(tab1.getAttribute('tabindex')).toBe('-1');
     expect(panel1.hidden).toBe(true);
     expect(panel2.hidden).toBe(false);
     expect(changeSpy).toHaveBeenCalledWith('tab-2');
 
-    // From tab2, press ArrowRight -> skips disabled tab-3 and wraps around to tab1
+    // ArrowRight from tab2 -> skips disabled tab3, wraps to tab1
     tab2.focus();
     tablist.dispatchEvent({ type: 'keydown', key: 'ArrowRight' });
     expect(tab1.getAttribute('aria-selected')).toBe('true');
     expect(panel1.hidden).toBe(false);
     expect(panel2.hidden).toBe(true);
 
-    // Press End key -> moves to last enabled tab (tab-2)
+    // End key -> moves to last enabled tab (tab2)
     tab1.focus();
     tablist.dispatchEvent({ type: 'keydown', key: 'End' });
     expect(tab2.getAttribute('aria-selected')).toBe('true');
 
-    // Press Home key -> moves to first enabled tab (tab-1)
+    // Home key -> moves to first enabled tab (tab1)
     tab2.focus();
     tablist.dispatchEvent({ type: 'keydown', key: 'Home' });
     expect(tab1.getAttribute('aria-selected')).toBe('true');
 
-    cleanup();
+    // Click activation
+    tab2.dispatchEvent({ type: 'click' });
+    expect(tab2.getAttribute('aria-selected')).toBe('true');
+    expect(panel2.hidden).toBe(false);
+
+    // Click on disabled tab is ignored
+    tab3.dispatchEvent({ type: 'click' });
+    expect(tab2.getAttribute('aria-selected')).toBe('true');
+
+    controller.destroy();
   });
 
   // ==========================================================================
   // 6. TABLE PRIMITIVE & XSS SECURITY
   // ==========================================================================
-  it('L. verifies table primitive escapes data safe-by-default against XSS', () => {
+  it('N. verifies table primitive escapes data safe-by-default against XSS', () => {
     const cols = [
       { key: 'name', label: 'Customer Name' },
       { key: 'comment', label: 'Comment' }
@@ -531,9 +609,19 @@ describe('WashOps Canonical UI Primitives (Phase 1C / Task 7A.2)', () => {
   });
 
   // ==========================================================================
-  // 7. DIALOG PRIMITIVE & FOCUS TRAP / ESCAPE / RESTORE
+  // 7. DIALOG PRIMITIVE & LIFECYCLE / INERT / FOCUS / RESTORE
   // ==========================================================================
-  it('M. verifies dialog accessible structure and interaction controller (initDialog)', () => {
+  it('O. verifies dialog intrinsic close, background inert, focus trap, and restoration', () => {
+    const rootBody = new MockElement('body') as any;
+
+    // Sibling application content
+    const appSibling = new MockElement('div') as any;
+    appSibling.setAttribute('id', 'app-root');
+    const backgroundBtn = new MockElement('button') as any;
+    appSibling.appendChild(backgroundBtn);
+
+    // Dialog container subtree
+    const dialogContainer = new MockElement('div') as any;
     const triggerBtn = new MockElement('button') as any;
     triggerBtn.setAttribute('id', 'open-modal-trigger');
     triggerBtn.focus();
@@ -546,50 +634,132 @@ describe('WashOps Canonical UI Primitives (Phase 1C / Task 7A.2)', () => {
     closeBtn.setAttribute('id', 'modal-close-btn');
     closeBtn.setAttribute('data-dialog-close', 'true');
 
-    const inputEl = new MockElement('input') as any;
-    inputEl.setAttribute('id', 'modal-input');
-
     const submitBtn = new MockElement('button') as any;
     submitBtn.setAttribute('id', 'modal-submit-btn');
 
     backdrop.appendChild(closeBtn);
-    backdrop.appendChild(inputEl);
     backdrop.appendChild(submitBtn);
 
+    dialogContainer.appendChild(triggerBtn);
+    dialogContainer.appendChild(backdrop);
+
+    rootBody.appendChild(appSibling);
+    rootBody.appendChild(dialogContainer);
+
     (globalThis as any).document = {
+      body: rootBody,
       activeElement: triggerBtn
     };
 
     const closeSpy = vi.fn();
-    const cleanup = initDialog(backdrop, { onClose: closeSpy });
+    const controller = initDialog(backdrop, { onClose: closeSpy });
 
-    // Initial focus moved to first interactive element inside dialog (close button)
+    // 1. Initial state: backdrop is visible (not hidden)
+    expect(backdrop.hidden).toBe(false);
+
+    // 2. Background sibling subtree is inert and aria-hidden
+    expect(appSibling.inert).toBe(true);
+    expect(appSibling.getAttribute('aria-hidden')).toBe('true');
+
+    // 3. Initial focus moved to first focusable element inside dialog
     expect((globalThis as any).document.activeElement).toBe(closeBtn);
 
-    // Tab key trapping from last element (submitBtn) wraps to first element (closeBtn)
+    // 4. Focus trapping Tab and Shift+Tab
     submitBtn.focus();
     backdrop.dispatchEvent({ type: 'keydown', key: 'Tab', shiftKey: false });
     expect((globalThis as any).document.activeElement).toBe(closeBtn);
 
-    // Shift+Tab key trapping from first element (closeBtn) wraps to last element (submitBtn)
     closeBtn.focus();
     backdrop.dispatchEvent({ type: 'keydown', key: 'Tab', shiftKey: true });
     expect((globalThis as any).document.activeElement).toBe(submitBtn);
 
-    // Escape key closes dialog and calls callback
+    // 5. Escape closes intrinsically and sets backdrop.hidden = true
     backdrop.dispatchEvent({ type: 'keydown', key: 'Escape' });
-    expect(closeSpy).toHaveBeenCalled();
+    expect(backdrop.hidden).toBe(true);
+    expect(closeSpy).toHaveBeenCalledTimes(1);
 
-    // Focus restored to opening trigger element
+    // 6. Background sibling inert state restored
+    expect(appSibling.inert).toBe(false);
+    expect(appSibling.getAttribute('aria-hidden')).toBe(null);
+
+    // 7. Focus restored to opening trigger element
     expect((globalThis as any).document.activeElement).toBe(triggerBtn);
 
-    cleanup();
+    // 8. Idempotent close does not repeat or throw
+    controller.close();
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('P. verifies dialog intrinsically closes with [data-dialog-close] when no onClose callback supplied', () => {
+    const rootBody = new MockElement('body') as any;
+    const dialogContainer = new MockElement('div') as any;
+
+    const trigger = new MockElement('button') as any;
+    trigger.focus();
+
+    const backdrop = new MockElement('div') as any;
+    const closeBtn = new MockElement('button') as any;
+    closeBtn.setAttribute('data-dialog-close', 'true');
+    backdrop.appendChild(closeBtn);
+
+    dialogContainer.appendChild(trigger);
+    dialogContainer.appendChild(backdrop);
+    rootBody.appendChild(dialogContainer);
+
+    (globalThis as any).document = {
+      body: rootBody,
+      activeElement: trigger
+    };
+
+    // No onClose callback supplied
+    const controller = initDialog(backdrop);
+    expect(backdrop.hidden).toBe(false);
+
+    // Click close control
+    closeBtn.dispatchEvent({ type: 'click' });
+
+    // Must intrinsically hide the backdrop and restore focus
+    expect(backdrop.hidden).toBe(true);
+    expect((globalThis as any).document.activeElement).toBe(trigger);
+
+    controller.destroy();
+  });
+
+  it('Q. verifies dialog preserves pre-existing inert and aria-hidden states upon close', () => {
+    const rootBody = new MockElement('body') as any;
+
+    // Pre-existing inert/hidden sibling
+    const preExistingHiddenSibling = new MockElement('aside') as any;
+    preExistingHiddenSibling.inert = true;
+    preExistingHiddenSibling.setAttribute('aria-hidden', 'true');
+
+    const dialogContainer = new MockElement('div') as any;
+    const backdrop = new MockElement('div') as any;
+    const closeBtn = new MockElement('button') as any;
+    closeBtn.setAttribute('data-dialog-close', 'true');
+    backdrop.appendChild(closeBtn);
+    dialogContainer.appendChild(backdrop);
+
+    rootBody.appendChild(preExistingHiddenSibling);
+    rootBody.appendChild(dialogContainer);
+
+    (globalThis as any).document = {
+      body: rootBody,
+      activeElement: null
+    };
+
+    const controller = initDialog(backdrop);
+    controller.close();
+
+    // Pre-existing inert and aria-hidden must NOT be stripped
+    expect(preExistingHiddenSibling.inert).toBe(true);
+    expect(preExistingHiddenSibling.getAttribute('aria-hidden')).toBe('true');
   });
 
   // ==========================================================================
   // 8. SECURITY REGRESSION: HTML SPECIAL CHARACTERS ESCAPING
   // ==========================================================================
-  it('N. verifies strict HTML escaping across all text-accepting primitives', () => {
+  it('R. verifies strict HTML escaping across all text-accepting primitives', () => {
     const dangerousString = '"><script>alert(1)</script>&test\'';
 
     // Button label
