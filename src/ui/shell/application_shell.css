@@ -467,3 +467,36 @@
     display: none;
   }
 }
+
+/* ==========================================================================
+   8. PRINT MEDIA STYLES
+   ========================================================================== */
+
+@media print {
+  .wo-shell-sidebar,
+  .wo-shell-topbar,
+  .wo-shell-drawer-backdrop,
+  .wo-shell-drawer,
+  .no-print,
+  .no-print-sidebar {
+    display: none !important;
+  }
+
+  .wo-shell {
+    display: block !important;
+    background: transparent !important;
+    min-height: auto !important;
+  }
+
+  .wo-shell-body {
+    display: block !important;
+    min-height: auto !important;
+    background: transparent !important;
+  }
+
+  .wo-shell-main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+  }
+}

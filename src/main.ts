@@ -2138,7 +2138,12 @@ const CRM_DATA_VIEWS = new Set([
 ]);
 
 function renderCrmDataLoading(view: string): void {
-  app.innerHTML = `${renderSidebar(view)}<main class="main-content"><header class="view-header"><h1>Loading CRM dataâ€¦</h1></header><section class="card" aria-busy="true"><p>Loading your account data.</p></section></main>`;
+  renderAppWithShell({
+    activeView: view,
+    title: 'Loading CRM data…',
+    contentVariant: 'standard',
+    contentHtml: `<section class="card" aria-busy="true"><p>Loading your account data.</p></section>`
+  });
 }
 
 function renderCrmHydrationNotice(): void {
@@ -2146,7 +2151,7 @@ function renderCrmHydrationNotice(): void {
   const failed = Object.entries(crmProductionHydrator.state.entities)
     .filter(([, status]) => status === 'error')
     .map(([name]) => name.replace('_', ' '));
-  const main = app.querySelector<HTMLElement>('main.main-content');
+  const main = app.querySelector<HTMLElement>('main.wo-shell-main') || app.querySelector<HTMLElement>('main.main-content');
   if (!main || main.querySelector('[data-crm-hydration-error]')) return;
   const notice = document.createElement('section');
   notice.className = 'card';
@@ -2413,58 +2418,6 @@ function renderAppWithShell(options: ApplicationShellOptions): void {
   currentShellController = initApplicationShell(app, {
     onNavigate: handleShellNavigation
   });
-}
-
-/**
- * Temporary legacy sidebar renderer for screens not yet migrated to the full WashOps application shell.
- * @deprecated To be removed in Task 7B.2 when all CRM screens are migrated to renderApplicationShell.
- */
-function renderLegacySidebar(activeView: string): string {
-  const userId = getActingUserId();
-  const newCount = mockContacts.filter(c => c.user_id === userId && isNew(c.created_at)).length;
-
-  return `
-    <div class="sidebar">
-      <h1>PressurePro</h1>
-      <nav>
-        <ul>
-          <div class="nav-group-title" style="margin-top: 0;">Main Menu</div>
-          <li onclick="window.navigateTo('dashboard')" class="${activeView === 'dashboard' ? 'active' : ''}">Dashboard</li>
-          <li onclick="window.navigateTo('clients')" class="${activeView === 'clients' ? 'active' : ''}" style="display: flex; justify-content: space-between; align-items: center;">
-            <span>Clients & Leads</span>
-            ${newCount > 0 ? `<span class="badge" style="background: #fbbf24; color: #78350f; font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; font-weight: 800;">${newCount}</span>` : ''}
-          </li>
-          <li onclick="window.navigateTo('opportunities')" class="${activeView === 'opportunities' ? 'active' : ''}">Opportunities</li>
-          <li onclick="window.navigateTo('quotes')" class="${activeView === 'quotes' ? 'active' : ''}">Quotes</li>
-          <li onclick="window.navigateTo('invoices')" class="${activeView === 'invoices' ? 'active' : ''}">Invoices</li>
-          
-          <div class="nav-group-title">Marketing & Outreach</div>
-          <li onclick="window.navigateTo('lead-capture')" class="${activeView === 'lead-capture' ? 'active' : ''}">Lead Capture</li>
-          <li onclick="window.navigateTo('marketing-funnels')" class="${activeView === 'marketing-funnels' || activeView === 'funnels' && (window as any).funnelMode === 'marketing' ? 'active' : ''}">Ad Landing Pages</li>
-          
-          <div class="nav-group-title">Websites</div>
-          <li onclick="window.navigateTo('website-dashboard')" class="${activeView === 'website-dashboard' ? 'active' : ''}" style="font-weight: 700; color: var(--primary-color);">My Website</li>
-          <li onclick="window.openWebsiteManagementView('funnels')" class="${activeView === 'funnels' && (window as any).funnelMode !== 'marketing' ? 'active' : ''}">Site Pages</li>
-          <li onclick="window.openWebsiteManagementView('website-navigation')" class="${activeView === 'website-navigation' ? 'active' : ''}">Navigation</li>
-          <li onclick="window.openWebsiteManagementView('seo-pages')" class="${activeView === 'seo-pages' ? 'active' : ''}">SEO Pages</li>
-          <li onclick="window.openWebsiteSettings()" class="${activeView === 'website-settings' ? 'active' : ''}">Settings</li>
-          
-          <div class="nav-group-title">System</div>
-          <li onclick="window.navigateTo('reports')" class="${activeView === 'reports' ? 'active' : ''}">Reports & Insights</li>
-          <li onclick="window.navigateTo('quickstart')" class="${activeView === 'quickstart' ? 'active' : ''}">Quickstart Guide</li>
-          <li onclick="window.navigateTo('event-logs')" class="${activeView === 'event-logs' ? 'active' : ''}">Event Logs</li>
-          <li onclick="window.navigateTo('qa-tools')" class="${activeView === 'qa-tools' ? 'active' : ''}">QA Tools</li>
-          <li>Payments</li>
-          <li>Settings</li>
-          <li><button type="button" class="sidebar-sign-out" onclick="window.signOutApplication ? window.signOutApplication() : undefined">Sign out</button></li>
-        </ul>
-      </nav>
-    </div>
-  `.trim();
-}
-
-function renderSidebar(activeView: string): string {
-  return renderLegacySidebar(activeView);
 }
 
 function renderDashboard() {
@@ -8958,12 +8911,11 @@ function renderSectionBody(type: string, content: any, styles: any, id: string, 
 
 
 function renderReports() {
-  app.innerHTML = `
-    ${renderSidebar('reports')}
-    <main class="main-content">
-      <header class="view-header">
-        <h2>Reports & Insights</h2>
-      </header>
+  renderAppWithShell({
+    activeView: 'reports',
+    title: 'Reports & Insights',
+    contentVariant: 'wide',
+    contentHtml: `
       <div class="stats-grid">
         <div class="card">
           <h3>Lead Sources</h3>
@@ -8980,8 +8932,8 @@ function renderReports() {
           <div class="report-item"><span>Roof Cleaning</span> <span>$3,400</span></div>
         </div>
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 (window as any).showAttachToWebsiteModal = (funnelId: string) => {
@@ -9337,23 +9289,21 @@ function renderPages() {
   `;
   }).join('');
 
-  app.innerHTML = `
-    ${renderSidebar('pages')}
-    <main class="main-content">
-      <header class="view-header">
-        <div style="display: flex; gap: 10px; align-items: center;">
-          <h2>All Website Sections</h2>
-          <button class="btn-primary" style="background: #6c757d; padding: 5px 15px; font-size: 0.85rem;" onclick="window.downloadSitemap()">Export sitemap.xml</button>
-        </div>
-        <div style="display: flex; gap: 10px; align-items: center;">
-          <button class="btn-primary" style="background: #8a2be2;" onclick="window.openNewPageModal('ai')">✨ Generate with AI</button>
-          <button class="btn-primary" style="background: #17a2b8;" onclick="window.openNewPageModal('template')">📄 Use Template</button>
-          <button class="btn-primary" onclick="window.openNewPageModal('blank')">+ New Page</button>
-        </div>
-      </header>
-
-      <div class="card" style="padding: 0; overflow: hidden;">
-        <table class="clients-table" style="box-shadow: none; margin-top: 0;">
+  renderAppWithShell({
+    activeView: 'pages',
+    title: 'All Website Sections',
+    headerActionsHtml: `
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <button class="btn-primary" style="background: #6c757d; padding: 5px 15px; font-size: 0.85rem;" onclick="window.downloadSitemap()">Export sitemap.xml</button>
+        <button class="btn-primary" style="background: #8a2be2;" onclick="window.openNewPageModal('ai')">✨ Generate with AI</button>
+        <button class="btn-primary" style="background: #17a2b8;" onclick="window.openNewPageModal('template')">📄 Use Template</button>
+        <button class="btn-primary" onclick="window.openNewPageModal('blank')">+ New Page</button>
+      </div>
+    `,
+    contentVariant: 'wide',
+    contentHtml: `
+      <div class="card" style="padding: 0; overflow-x: auto;">
+        <table class="clients-table" style="box-shadow: none; margin-top: 0; min-width: 700px;">
           <thead>
             <tr>
               <th>Page Name</th>
@@ -9370,10 +9320,8 @@ function renderPages() {
           </tbody>
         </table>
       </div>
-
-      </div>
-    </main>
-  `;
+    `
+  });
 }
 
 function renderPageSections(pageId: string) {
@@ -9403,19 +9351,19 @@ function renderPageSections(pageId: string) {
     </tr>
   `).join('');
 
-  app.innerHTML = `
-    ${renderSidebar('pages')}
-    <main class="main-content">
-      <header class="view-header">
-        <div style="display: flex; align-items: center; gap: 15px;">
-          <button onclick="window.navigateTo('pages')" class="btn-primary" style="background: #eee; color: #333; padding: 5px 10px;">← Back</button>
-          <h2>Sections for: ${page.name}</h2>
-        </div>
+  renderAppWithShell({
+    activeView: 'page-sections',
+    title: `Sections for: ${page.name}`,
+    headerActionsHtml: `
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <button onclick="window.navigateTo('pages')" class="btn-primary" style="background: #eee; color: #333; padding: 5px 10px;">← Back</button>
         <button class="btn-primary">+ Add Section</button>
-      </header>
-
-      <div class="card" style="padding: 0; overflow: hidden;">
-        <table class="clients-table" style="box-shadow: none; margin-top: 0;">
+      </div>
+    `,
+    contentVariant: 'wide',
+    contentHtml: `
+      <div class="card" style="padding: 0; overflow-x: auto;">
+        <table class="clients-table" style="box-shadow: none; margin-top: 0; min-width: 650px;">
           <thead>
             <tr>
               <th>Order</th>
@@ -9430,8 +9378,8 @@ function renderPageSections(pageId: string) {
           </tbody>
         </table>
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 function renderComponents() {
@@ -9486,39 +9434,54 @@ function renderComponents() {
     </div>
   `).join('');
 
-  app.innerHTML = `
-    ${isPickerMode ? '' : renderSidebar('components')}
-    <main class="${isPickerMode ? '' : 'main-content'}" style="${isPickerMode ? 'width: 100vw; height: 100vh; overflow-y: auto; padding: 20px;' : ''}">
-      <header class="view-header" style="${isPickerMode ? 'border-bottom: 1px solid #eee; padding-bottom: 20px; display: flex; flex-direction: column; gap: 15px;' : ''}">
-        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-          <h2>${isPickerMode ? 'Select Component to Insert' : 'Component Library'}</h2>
-          <div>
-            ${isPickerMode ? `
+  if (isPickerMode) {
+    currentShellController?.destroy();
+    currentShellController = null;
+    app.innerHTML = `
+      <main style="width: 100vw; height: 100vh; overflow-y: auto; padding: 20px; box-sizing: border-box; background: white;">
+        <header class="view-header" style="border-bottom: 1px solid #eee; padding-bottom: 20px; display: flex; flex-direction: column; gap: 15px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+            <h2>Select Component to Insert</h2>
+            <div>
               <button class="btn-primary" style="background: transparent; color: #666; border: 1px solid #ccc; margin-right: 10px;" onclick="window.cancelComponentPicker()">Cancel</button>
-            ` : `
-              <button class="btn-primary" onclick="alert('Register New Component')">+ New Component</button>
-            `}
+            </div>
           </div>
-        </div>
-        
-        <!-- Search and Filter Bar -->
-        <div style="display: flex; gap: 20px; align-items: center; width: 100%; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; flex-wrap: wrap;">
-          <input type="text" placeholder="Search components by name or type..." value="${compSearchQuery}" oninput="window.setCompSearch(this.value)" style="flex: 1; min-width: 250px; padding: 10px 15px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.95rem; outline: none;">
-          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            ${['all', 'basic', 'layout', 'forms', 'advanced'].map(cat => `
-              <button onclick="window.setCompCategory('${cat}')" style="padding: 8px 16px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; border: 1px solid ${compCategoryFilter === cat ? 'var(--primary-color)' : '#e2e8f0'}; background: ${compCategoryFilter === cat ? 'var(--primary-color)' : 'white'}; color: ${compCategoryFilter === cat ? 'white' : '#64748b'};">${cat.charAt(0).toUpperCase() + cat.slice(1)}</button>
-            `).join('')}
+          <div style="display: flex; gap: 20px; align-items: center; width: 100%; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; flex-wrap: wrap;">
+            <input type="text" placeholder="Search components by name or type..." value="${compSearchQuery}" oninput="window.setCompSearch(this.value)" style="flex: 1; min-width: 250px; padding: 10px 15px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.95rem; outline: none;">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              ${['all', 'basic', 'layout', 'forms', 'advanced'].map(cat => `
+                <button onclick="window.setCompCategory('${cat}')" style="padding: 8px 16px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; border: 1px solid ${compCategoryFilter === cat ? 'var(--primary-color)' : '#e2e8f0'}; background: ${compCategoryFilter === cat ? 'var(--primary-color)' : 'white'}; color: ${compCategoryFilter === cat ? 'white' : '#64748b'};">${cat.charAt(0).toUpperCase() + cat.slice(1)}</button>
+              `).join('')}
+            </div>
           </div>
+        </header>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 24px; padding-top: 20px;">
+          ${gridItems || '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #666; font-size: 1.1rem;">No components match your search.</div>'}
         </div>
-      </header>
+      </main>
+    `;
+    return;
+  }
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 24px; padding-top: 20px;">
+  renderAppWithShell({
+    activeView: 'components',
+    title: 'Component Library',
+    headerActionsHtml: `<button class="btn-primary" onclick="alert('Register New Component')">+ New Component</button>`,
+    contentVariant: 'wide',
+    contentHtml: `
+      <div style="display: flex; gap: 20px; align-items: center; width: 100%; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; flex-wrap: wrap; margin-bottom: 24px;">
+        <input type="text" placeholder="Search components by name or type..." value="${compSearchQuery}" oninput="window.setCompSearch(this.value)" style="flex: 1; min-width: 250px; padding: 10px 15px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.95rem; outline: none;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          ${['all', 'basic', 'layout', 'forms', 'advanced'].map(cat => `
+            <button onclick="window.setCompCategory('${cat}')" style="padding: 8px 16px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.2s; border: 1px solid ${compCategoryFilter === cat ? 'var(--primary-color)' : '#e2e8f0'}; background: ${compCategoryFilter === cat ? 'var(--primary-color)' : 'white'}; color: ${compCategoryFilter === cat ? 'white' : '#64748b'};">${cat.charAt(0).toUpperCase() + cat.slice(1)}</button>
+          `).join('')}
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 24px;">
         ${gridItems || '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #666; font-size: 1.1rem;">No components match your search.</div>'}
       </div>
-
-      </div>
-    </main>
-  `;
+    `
+  });
 }
 
 (window as any).useTemplate = (templateId: string) => {
@@ -9593,17 +9556,17 @@ function renderTemplates() {
     </div>
   `).join('');
 
-  app.innerHTML = `
-    ${renderSidebar('templates')}
-    <main class="main-content">
-      <header class="view-header">
-        <h2>Website Templates</h2>
-      </header>
-      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 30px; padding: 10px;">
+  renderAppWithShell({
+    activeView: 'templates',
+    title: 'Website Templates',
+    subtitle: 'Pre-designed templates for your handyman and pressure washing business.',
+    contentVariant: 'wide',
+    contentHtml: `
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 30px; padding: 10px 0;">
         ${cardsHtml}
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 function renderWebsiteSettingsSelector(websites: readonly Website[], invalid = false) {
@@ -9810,11 +9773,21 @@ function renderWebsiteNavigation() {
     return;
   }
   if (editorUsesSupabase() && websiteLayoutHydrator.state.status === 'loading') {
-    app.innerHTML = `${renderSidebar('website-navigation')}<main class="main-content" aria-busy="true"><header class="view-header"><h2>Website Navigation</h2></header><section class="card"><p>Loading navigation configuration…</p></section></main>`;
+    renderAppWithShell({
+      activeView: 'website-navigation',
+      title: 'Website Navigation',
+      contentVariant: 'wide',
+      contentHtml: `<section class="card" aria-busy="true"><p>Loading navigation configuration…</p></section>`
+    });
     return;
   }
   if (editorUsesSupabase() && websiteLayoutHydrator.state.status === 'error') {
-    app.innerHTML = `${renderSidebar('website-navigation')}<main class="main-content"><header class="view-header"><h2>Website Navigation</h2></header><section class="card" role="alert"><h3>Navigation could not be loaded.</h3><p>Your saved configuration was not changed.</p><button class="btn-outline" onclick="window.navigateTo('website-navigation')">Retry</button></section></main>`;
+    renderAppWithShell({
+      activeView: 'website-navigation',
+      title: 'Website Navigation',
+      contentVariant: 'wide',
+      contentHtml: `<section class="card" role="alert"><h3>Navigation could not be loaded.</h3><p>Your saved configuration was not changed.</p><button class="btn-outline" onclick="window.navigateTo('website-navigation')">Retry</button></section>`
+    });
     return;
   }
   const layout = mockWebsiteLayouts.find(l => l.website_id === website.id);
@@ -9859,26 +9832,24 @@ function renderWebsiteNavigation() {
     </div>
   `).join('');
 
-  app.innerHTML = `
-    ${renderSidebar('website-navigation')}
-    <main class="main-content">
-      <header class="view-header">
-        <div>
-          <h2 style="margin: 0; font-size: 1.75rem;">Website Navigation</h2>
-          <p style="color: #64748b; margin-top: 6px;">Manage your site's header menu. Links are restricted to your published pages to prevent dead ends.</p>
-        </div>
-        <div style="display: flex; gap: 12px;">
-           ${layout ? `<button class="btn-primary" style="background: #8a2be2; border: none; padding: 12px 24px;" onclick="window.addNavItem()">+ Add Menu Item</button>` : ''}
-           <button class="btn-primary" style="padding: 12px 24px;" onclick="window.saveWebsiteLayout()">${layout ? 'Save Configuration' : 'Create Navigation'}</button>
-        </div>
-      </header>
+  renderAppWithShell({
+    activeView: 'website-navigation',
+    title: 'Website Navigation',
+    subtitle: "Manage your site's header menu. Links are restricted to your published pages to prevent dead ends.",
+    headerActionsHtml: `
+      <div style="display: flex; gap: 12px;">
+        ${layout ? `<button class="btn-primary" style="background: #8a2be2; border: none; padding: 12px 24px;" onclick="window.addNavItem()">+ Add Menu Item</button>` : ''}
+        <button class="btn-primary" style="padding: 12px 24px;" onclick="window.saveWebsiteLayout()">${layout ? 'Save Configuration' : 'Create Navigation'}</button>
+      </div>
+    `,
+    contentVariant: 'wide',
+    contentHtml: `
       ${renderWebsiteManagementSwitcher('website-navigation')}
-
-      <div style="max-width: 1000px; padding: 10px;">
+      <div style="max-width: 1000px; padding: 10px 0;">
         ${itemsHtml || '<div class="empty-state" style="padding: 80px; text-align: center; background: white; border-radius: 20px; border: 2px dashed #e2e8f0; color: #64748b;"><div style="font-size: 3rem; margin-bottom: 16px;">📂</div><h3>No menu items here</h3><p>Start building your navigation menu by adding your first link.</p><button class="btn-primary" style="margin-top: 20px;" onclick="window.addNavItem()">Add Item</button></div>'}
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 (window as any).addNavItem = () => {
@@ -9986,18 +9957,13 @@ function renderWebsiteStructure() {
   
   const websiteUrl = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
 
-  app.innerHTML = `
-    ${renderSidebar('website-structure')}
-    <main class="main-content">
-      <header class="view-header">
-        <div>
-          <h2>Website Configuration</h2>
-          <p style="color: #64748b; margin-top: 4px;">Map your custom URLs to website pages.</p>
-        </div>
-        <div style="display: flex; gap: 10px;">
-           <button class="btn-primary" onclick="window.showAddRouteModal('${website.id}')">Add New Route</button>
-        </div>
-      </header>
+  renderAppWithShell({
+    activeView: 'website-structure',
+    title: 'Website Configuration',
+    subtitle: 'Map your custom URLs to website pages.',
+    headerActionsHtml: `<button class="btn-primary" onclick="window.showAddRouteModal('${website.id}')">Add New Route</button>`,
+    contentVariant: 'wide',
+    contentHtml: `
       ${renderWebsiteManagementSwitcher('website-structure')}
       
       <div class="card" style="margin-bottom: 24px; border-left: 4px solid var(--primary-color);">
@@ -10052,8 +10018,8 @@ function renderWebsiteStructure() {
           </tbody>
         </table>
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 (window as any).showAddRouteModal = (websiteId: string) => {
@@ -10236,12 +10202,11 @@ function renderWebsiteStructure() {
 };
 
 function renderQuickstart() {
-  app.innerHTML = `
-    ${renderSidebar('quickstart')}
-    <main class="main-content">
-      <header class="view-header">
-        <h2>Quickstart Guide</h2>
-      </header>
+  renderAppWithShell({
+    activeView: 'quickstart',
+    title: 'Quickstart Guide',
+    contentVariant: 'standard',
+    contentHtml: `
       <ul class="guide-list">
         <li class="guide-step"><input type="checkbox" checked> <span>Complete your Business Profile</span></li>
         <li class="guide-step"><input type="checkbox"> <span>Connect your Domain</span></li>
@@ -10249,20 +10214,19 @@ function renderQuickstart() {
         <li class="guide-step"><input type="checkbox"> <span>Import existing Client List</span></li>
         <li class="guide-step"><input type="checkbox"> <span>Set up Stripe for Automated Billing</span></li>
       </ul>
-    </main>
-  `;
+    `
+  });
 }
 
 function renderLeadCapture() {
   (window as any).internalLeadRequestKey ||= crypto.randomUUID();
-  app.innerHTML = `
-    ${renderSidebar('lead-capture')}
-    <main class="main-content">
-      <header class="view-header">
-        <h2>Lead Capture Form</h2>
-      </header>
+  renderAppWithShell({
+    activeView: 'lead-capture',
+    title: 'Lead Capture Form',
+    subtitle: 'Complete the form below to register a new lead and create a sales opportunity.',
+    contentVariant: 'standard',
+    contentHtml: `
       <div class="lead-form-container">
-        <p style="margin-bottom: 24px; color: var(--secondary-color);">Complete the form below to register a new lead and create a sales opportunity.</p>
         <form id="lead-form">
           <div class="form-group">
             <label for="lead_name">Full Name</label>
@@ -10300,8 +10264,8 @@ function renderLeadCapture() {
           </div>
         </form>
       </div>
-    </main>
-  `;
+    `
+  });
 
   document.getElementById('lead-form')?.addEventListener('submit', handleLeadCaptureSubmission);
 }
@@ -10381,18 +10345,17 @@ function renderOpportunities() {
     `;
   }).join('');
 
-  app.innerHTML = `
-    ${renderSidebar('opportunities')}
-    <main class="main-content">
-      <header class="view-header">
-        <h2>Sales Pipeline: ${defaultPipeline.name}</h2>
-        <button class="btn-primary">+ New Opportunity</button>
-      </header>
+  renderAppWithShell({
+    activeView: 'opportunities',
+    title: `Sales Pipeline: ${defaultPipeline.name}`,
+    headerActionsHtml: `<button class="btn-primary">+ New Opportunity</button>`,
+    contentVariant: 'wide',
+    contentHtml: `
       <div class="kanban-board">
         ${columnsHtml}
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 function renderQuotes() {
@@ -10420,16 +10383,14 @@ function renderQuotes() {
     `;
   }).join('');
 
-  app.innerHTML = `
-    ${renderSidebar('quotes')}
-    <main class="main-content">
-      <header class="view-header">
-        <h2>Quotes</h2>
-        <button class="btn-primary" onclick="window.navigateTo('new-quote')">+ New Quote</button>
-      </header>
-
-      <div class="card" style="padding: 0; overflow: hidden;">
-        <table class="clients-table" style="box-shadow: none; margin-top: 0;">
+  renderAppWithShell({
+    activeView: 'quotes',
+    title: 'Quotes',
+    headerActionsHtml: `<button class="btn-primary" onclick="window.navigateTo('new-quote')">+ New Quote</button>`,
+    contentVariant: 'wide',
+    contentHtml: `
+      <div class="card" style="padding: 0; overflow-x: auto;">
+        <table class="clients-table" style="box-shadow: none; margin-top: 0; min-width: 700px;">
           <thead>
             <tr>
               <th>Quote #</th>
@@ -10445,13 +10406,23 @@ function renderQuotes() {
           </tbody>
         </table>
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 function renderInvoices() {
   if (editorUsesSupabase()) {
-    app.innerHTML = `${renderSidebar('invoices')}<main class="main-content"><header class="view-header"><h2>Invoices</h2></header><section class="card" role="status"><h3>Invoices are not available yet.</h3><p>Production invoice persistence has not been implemented. No invoice changes will be stored until that backend is available.</p></section></main>`;
+    renderAppWithShell({
+      activeView: 'invoices',
+      title: 'Invoices',
+      contentVariant: 'wide',
+      contentHtml: `
+        <section class="card" role="status">
+          <h3>Invoices are not available yet.</h3>
+          <p>Production invoice persistence has not been implemented. No invoice changes will be stored until that backend is available.</p>
+        </section>
+      `
+    });
     return;
   }
   const filteredInvoices = mockInvoices.filter(i => {
@@ -10478,24 +10449,24 @@ function renderInvoices() {
     `;
   }).join('');
 
-  app.innerHTML = `
-    ${renderSidebar('invoices')}
-    <main class="main-content">
-      <header class="view-header">
-        <div style="display: flex; align-items: center; gap: 20px;">
-          <h2>Invoices</h2>
-          <select onchange="window.updateInvoiceFilter(this.value)" style="padding: 8px 12px; border-radius: 4px; border: 1px solid #ddd; background: white; font-family: inherit;">
-            <option value="all" ${invoiceStatusFilter === 'all' ? 'selected' : ''}>All Invoices</option>
-            <option value="unpaid" ${invoiceStatusFilter === 'unpaid' ? 'selected' : ''}>Unpaid</option>
-            <option value="paid" ${invoiceStatusFilter === 'paid' ? 'selected' : ''}>Paid</option>
-            <option value="overdue" ${invoiceStatusFilter === 'overdue' ? 'selected' : ''}>Overdue</option>
-          </select>
-        </div>
+  renderAppWithShell({
+    activeView: 'invoices',
+    title: 'Invoices',
+    headerActionsHtml: `
+      <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <select onchange="window.updateInvoiceFilter(this.value)" style="padding: 8px 12px; border-radius: 4px; border: 1px solid #ddd; background: white; font-family: inherit;">
+          <option value="all" ${invoiceStatusFilter === 'all' ? 'selected' : ''}>All Invoices</option>
+          <option value="unpaid" ${invoiceStatusFilter === 'unpaid' ? 'selected' : ''}>Unpaid</option>
+          <option value="paid" ${invoiceStatusFilter === 'paid' ? 'selected' : ''}>Paid</option>
+          <option value="overdue" ${invoiceStatusFilter === 'overdue' ? 'selected' : ''}>Overdue</option>
+        </select>
         <button class="btn-primary" onclick="alert('Create Invoice from Quote or Client Detail page')">+ New Invoice</button>
-      </header>
-
-      <div class="card" style="padding: 0; overflow: hidden;">
-        <table class="clients-table" style="box-shadow: none; border: none; margin-top: 0;">
+      </div>
+    `,
+    contentVariant: 'wide',
+    contentHtml: `
+      <div class="card" style="padding: 0; overflow-x: auto;">
+        <table class="clients-table" style="box-shadow: none; border: none; margin-top: 0; min-width: 700px;">
           <thead>
             <tr>
               <th>Invoice #</th>
@@ -10511,8 +10482,8 @@ function renderInvoices() {
           </tbody>
         </table>
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 (window as any).updateInvoiceFilter = (status: string) => {
@@ -10525,31 +10496,30 @@ function renderNewQuote() {
   const nqcId = (window as any).newQuoteContactId;
   const nqoId = (window as any).newQuoteOpportunityId;
   const nqItems = (window as any).newQuoteLineItems;
-
   const opportunities = nqcId
     ? mockOpportunities.filter(o => o.contact_id === nqcId)
     : [];
 
   const renderTierGroup = (tier: 'basic' | 'standard' | 'premium') => {
-    const tierItems = nqItems.map((item: any, index: number) => ({ ...item, index })).filter((item: any) => item.tier === tier);
+    const tierItems = nqItems.map((item: any, idx: number) => ({ ...item, index: idx })).filter((item: any) => item.tier === tier);
     const tierTotal = tierItems.reduce((sum: number, item: any) => sum + (item.quantity * item.price), 0);
 
     return `
-      <div style="flex: 1; min-width: 320px; background: #fff; padding: 20px; border-radius: 12px; border: 1px solid #eef2f6; display: flex; flex-direction: column;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-          <h3 style="margin:0; text-transform: capitalize; color: var(--secondary-color); font-size: 1.1rem;">${tier} Option</h3>
-          <button class="btn-primary" style="padding: 4px 10px; font-size: 0.8rem; background: #f0f7ff; color: var(--primary-color); border: 1px solid var(--primary-color);" onclick="window.addLineItem('${tier}')">+ Add Item</button>
-        </div>
-        
-        <div style="flex: 1; overflow-y: auto; max-height: 500px;">
+      <div class="card" style="flex: 1; min-width: 280px; display: flex; flex-direction: column; justify-content: space-between; border-top: 4px solid ${tier === 'premium' ? 'var(--primary-color)' : '#cbd5e1'};">
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h3 style="margin: 0; text-transform: capitalize;">${tier} Option</h3>
+            <button class="btn-primary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="window.addLineItem('${tier}')">+ Add Item</button>
+          </div>
+
           ${tierItems.map((item: any) => `
-            <div style="padding: 15px; border: 1px solid #f0f0f0; border-radius: 8px; margin-bottom: 15px; position: relative;">
-              <button onclick="window.removeLineItem(${item.index})" style="position: absolute; right: 8px; top: 8px; background: none; border: none; color: #ccc; cursor: pointer; font-size: 1.2rem;">×</button>
-              <div style="margin-bottom: 10px;">
-                <input type="text" placeholder="Service Name" value="${escapeHtmlText(item.service)}" style="width: 100%; border: none; font-weight: 600; font-size: 0.95rem; margin-bottom: 4px;" oninput="window.updateLineItem(${item.index}, 'service', this.value, false)">
-                <input type="text" placeholder="Short description" value="${escapeHtmlText(item.description)}" style="width: 100%; border: none; font-size: 0.85rem; color: #666;" oninput="window.updateLineItem(${item.index}, 'description', this.value, false)">
+            <div style="background: #f8fafc; padding: 10px; border-radius: 6px; margin-bottom: 10px; border: 1px solid #e2e8f0;">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                <input type="text" placeholder="Service Name" value="${escapeHtmlText(item.service)}" style="width: 70%; font-weight: 600; border: none; background: transparent; border-bottom: 1px solid #ccc; padding: 2px;" onchange="window.updateLineItem(${item.index}, 'service', this.value)">
+                <button onclick="window.removeLineItem(${item.index})" style="background: none; border: none; color: #ef4444; cursor: pointer;">&times;</button>
               </div>
-              <div style="display: flex; gap: 10px; align-items: center; background: #f8fafc; padding: 10px; border-radius: 6px;">
+              <textarea placeholder="Description" style="width: 100%; font-size: 0.8rem; border: 1px solid #eee; border-radius: 4px; padding: 4px; resize: none;" rows="2" onchange="window.updateLineItem(${item.index}, 'description', this.value)">${escapeHtmlText(item.description)}</textarea>
+              <div style="display: flex; gap: 10px; margin-top: 5px; align-items: center;">
                 <div style="flex: 1;">
                   <label style="font-size: 0.7rem; color: #999; display: block;">QTY</label>
                   <input type="number" value="${item.quantity}" style="width: 100%; border: 1px solid #e2e8f0; border-radius: 4px; padding: 4px;" oninput="window.updateLineItem(${item.index}, 'quantity', this.value, true)">
@@ -10567,7 +10537,6 @@ function renderNewQuote() {
           `).join('')}
           ${tierItems.length === 0 ? '<div style="text-align: center; color: #ccc; padding: 20px; font-style: italic; border: 1px dashed #eee; border-radius: 8px;">No items in this tier</div>' : ''}
         </div>
-
         <div style="margin-top: 20px; padding-top: 15px; border-top: 2px solid #f1f5f9; text-align: right;">
           <div style="font-size: 0.85rem; color: #64748b; font-weight: 500;">Option Total</div>
           <div id="tier-total-${tier}" style="font-size: 1.5rem; font-weight: 800; color: #1e293b;">$${tierTotal.toLocaleString()}</div>
@@ -10576,20 +10545,20 @@ function renderNewQuote() {
     `;
   };
 
-  app.innerHTML = `
-    ${renderSidebar('quotes')}
-    <main class="main-content">
-      <header class="view-header">
-        <div style="display: flex; align-items: center; gap: 15px;">
-          <button onclick="window.navigateTo('quotes')" class="btn-primary" style="background: #eee; color: #333; padding: 5px 10px;">← Back</button>
-          <h2>Create Multi-Tier Quote</h2>
-        </div>
-        <button class="btn-primary" style="padding: 10px 25px;" onclick="window.saveQuote()">Create Quote</button>
-      </header>
-
-      <div style="padding: 24px;">
+  renderAppWithShell({
+    activeView: 'new-quote',
+    title: 'Create Multi-Tier Quote',
+    headerActionsHtml: `
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <button onclick="window.navigateTo('quotes')" class="btn-primary" style="background: #eee; color: #333; padding: 6px 12px;">← Back</button>
+        <button class="btn-primary" style="padding: 8px 20px;" onclick="window.saveQuote()">Create Quote</button>
+      </div>
+    `,
+    contentVariant: 'wide',
+    contentHtml: `
+      <div>
         <div class="card" style="margin-bottom: 24px; padding: 20px;">
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
             <div class="form-group" style="margin: 0;">
               <label>Select Contact</label>
               <select id="quote-contact" style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;" onchange="window.updateNewQuoteContact(this.value)">
@@ -10618,8 +10587,8 @@ function renderNewQuote() {
            <textarea id="quote-notes" style="width: 100%; height: 80px; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; font-family: inherit;" placeholder="e.g. Terms & conditions or specific project details..."></textarea>
         </div>
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 (window as any).updateNewQuoteContact = (id: string) => {
@@ -11260,20 +11229,40 @@ async function renderWebsiteDashboard(force = false) {
   const userId = typeof (window as any).currentUser === 'string' ? (window as any).currentUser.trim() : '';
   const route = getWebsiteDashboardRouteContext();
   if (!websiteDashboardController || force) websiteDashboardController = new WebsiteDashboardController({ loadCore: loadWebsiteDashboardCore, loadSummary: loadWebsiteDashboardSummary });
-  app.innerHTML = `${renderSidebar('website-dashboard')}<main class="main-content website-dashboard" aria-busy="true"><div class="website-dashboard-loading" role="status">Loading website dashboard…</div></main>`;
+  renderAppWithShell({
+    activeView: 'website-dashboard',
+    title: 'Website Dashboard',
+    contentVariant: 'wide',
+    contentHtml: `<div class="website-dashboard-loading" role="status">Loading website dashboard…</div>`
+  });
   const state = await websiteDashboardController.load({ actingUserId: userId, explicitWebsiteId: route.websiteId, explicitPageId: route.pageId, previousWebsiteId: activeDashboardWebsiteId });
   if (currentView !== 'website-dashboard') return;
   if (state.status === 'selection-required') {
-    app.innerHTML = `${renderSidebar('website-dashboard')}<main class="main-content website-dashboard"><header class="view-header"><h1>Website Dashboard</h1></header><section class="card website-dashboard-state"><h2>Choose a website</h2><label for="dashboard-website-select">Website</label><select id="dashboard-website-select" onchange="window.selectDashboardWebsite(this.value)"><option value="">Select a website</option>${state.resolution.ownedWebsites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}">${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></section></main>`;
+    renderAppWithShell({
+      activeView: 'website-dashboard',
+      title: 'Website Dashboard',
+      contentVariant: 'wide',
+      contentHtml: `<section class="card website-dashboard-state"><h2>Choose a website</h2><label for="dashboard-website-select">Website</label><select id="dashboard-website-select" onchange="window.selectDashboardWebsite(this.value)"><option value="">Select a website</option>${state.resolution.ownedWebsites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}">${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></section>`
+    });
     return;
   }
   if (state.status === 'error') {
-    app.innerHTML = `${renderSidebar('website-dashboard')}<main class="main-content website-dashboard"><header class="view-header"><h1>Website Dashboard</h1></header><section class="card website-dashboard-state" role="alert"><h2>Website information could not be loaded.</h2><p>Please try again.</p><button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Retry</button></section></main>`;
+    renderAppWithShell({
+      activeView: 'website-dashboard',
+      title: 'Website Dashboard',
+      contentVariant: 'wide',
+      contentHtml: `<section class="card website-dashboard-state" role="alert"><h2>Website information could not be loaded.</h2><p>Please try again.</p><button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Retry</button></section>`
+    });
     return;
   }
   if (state.status === 'empty' || state.status === 'unavailable') {
     const empty = state.status === 'empty';
-    app.innerHTML = `${renderSidebar('website-dashboard')}<main class="main-content website-dashboard"><header class="view-header"><h1>Website Dashboard</h1></header><section class="card website-dashboard-state" role="${empty ? 'status' : 'alert'}"><h2>${empty ? 'Create your first website.' : 'This website is not available.'}</h2><p>${empty ? 'Add your business details and we will create an editable homepage and site structure.' : 'Check your access or choose another owned website.'}</p>${empty ? '<button type="button" class="btn-primary" onclick="window.showOnboardingModal()">Create your website</button>' : ''}<button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Retry</button></section></main>`;
+    renderAppWithShell({
+      activeView: 'website-dashboard',
+      title: 'Website Dashboard',
+      contentVariant: 'wide',
+      contentHtml: `<section class="card website-dashboard-state" role="${empty ? 'status' : 'alert'}"><h2>${empty ? 'Create your first website.' : 'This website is not available.'}</h2><p>${empty ? 'Add your business details and we will create an editable homepage and site structure.' : 'Check your access or choose another owned website.'}</p>${empty ? '<button type="button" class="btn-primary" onclick="window.showOnboardingModal()">Create your website</button>' : ''}<button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Retry</button></section>`
+    });
     return;
   }
   if (state.status !== 'ready' && state.status !== 'partial') return;
@@ -11282,16 +11271,23 @@ async function renderWebsiteDashboard(force = false) {
   const selected = state.websites.find(item => item.id === model.website.id);
   const warning = state.status === 'partial' ? `<div class="website-dashboard-warning" role="alert">${escapeBuilderInspectorHtml(state.warning)} <button type="button" onclick="window.refreshWebsiteDashboard()">Retry</button></div>` : '';
   const liveLink = model.publicUrl ? `<a class="btn-primary website-dashboard-live" href="${escapeBuilderInspectorHtml(model.publicUrl)}" target="_blank" rel="noopener noreferrer">View Live Site <span aria-hidden="true">↗</span><span class="sr-only"> (opens in a new tab)</span></a>` : `<button type="button" class="btn-outline website-dashboard-live" disabled title="${escapeBuilderInspectorHtml(model.actions.viewLive.reason)}">View Live Site</button>`;
-  app.innerHTML = `${renderSidebar('website-dashboard')}<main class="main-content website-dashboard">
-    <header class="view-header website-dashboard-header"><div><h1>Website Dashboard</h1><p>Manage the draft and published experience for this website.</p></div><button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Refresh</button></header>${warning}
-    ${state.websites.length > 1 ? `<div class="website-dashboard-selector"><label for="dashboard-website-select">Active website</label><select id="dashboard-website-select" onchange="window.selectDashboardWebsite(this.value)">${state.websites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}" ${site.id === model.website.id ? 'selected' : ''}>${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></div>` : ''}
-    <section class="card website-dashboard-identity" aria-labelledby="dashboard-site-heading"><div><span class="website-dashboard-eyebrow">Active website</span><h2 id="dashboard-site-heading">${escapeBuilderInspectorHtml(model.website.name)}</h2><p>${escapeBuilderInspectorHtml(model.website.publicHost ?? selected?.subdomain ?? 'Public domain not configured')}</p></div>${liveLink}</section>
-    <div class="website-dashboard-grid"><section class="card website-dashboard-home" aria-labelledby="dashboard-home-heading"><div class="website-dashboard-card-heading"><div><span class="website-dashboard-eyebrow">Homepage</span><h2 id="dashboard-home-heading">${escapeBuilderInspectorHtml(model.homepage.name ?? 'No editable homepage found')}</h2></div><span class="website-dashboard-status status-${model.homepage.publicationState}">${escapeBuilderInspectorHtml(publicationDashboardLabel(model.homepage.publicationState))}</span></div>
-    ${model.homepage.name ? `<dl class="website-dashboard-facts"><div><dt>Path</dt><dd>${escapeBuilderInspectorHtml(model.homepage.path)}</dd></div><div><dt>Page row status</dt><dd>${escapeBuilderInspectorHtml(model.homepage.legacyPageStatus)}</dd></div><div><dt>Last published</dt><dd>${model.homepage.lastPublishedAt ? escapeBuilderInspectorHtml(new Date(model.homepage.lastPublishedAt).toLocaleString()) : 'Not available'}</dd></div></dl>` : `<p>No editable homepage was found for this website. Open Pages to review the website structure.</p>`}
-    <div class="website-dashboard-primary-actions">${dashboardActionButton(model, 'edit', 'Edit Home Page', 'edit', model.homepage.id)}${dashboardActionButton(model, 'preview', 'Preview Draft', 'preview', model.homepage.id)}${dashboardActionButton(model, 'publish', 'Publish', 'publish', model.homepage.id)}</div></section>
-    <aside class="card website-dashboard-quick" aria-labelledby="dashboard-quick-heading"><h2 id="dashboard-quick-heading">Quick actions</h2>${dashboardActionButton(model, 'pages', 'Manage Pages', 'pages')}${dashboardActionButton(model, 'guided-setup', 'Guided Setup', 'guidedSetup')}${dashboardActionButton(model, 'assets', 'Assets', 'assets')}${dashboardActionButton(model, 'settings', 'Page Settings', 'settings')}</aside></div>
-    <section class="website-dashboard-summary" aria-label="Website summary"><article class="card"><strong>${model.counts.pages}</strong><span>Website pages</span></article><article class="card"><strong>${model.counts.draftPages}</strong><span>Draft page rows</span></article><article class="card"><strong>${model.counts.mediaAssets ?? '—'}</strong><span>${model.counts.mediaAssets === null ? 'Media count unavailable' : 'Media assets'}</span></article><article class="card"><strong>${model.readiness.setupBriefVersion ? `v${model.readiness.setupBriefVersion}` : '—'}</strong><span>Guided setup brief</span></article></section>
-  </main>`;
+  renderAppWithShell({
+    activeView: 'website-dashboard',
+    title: 'Website Dashboard',
+    subtitle: 'Manage the draft and published experience for this website.',
+    headerActionsHtml: `<button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Refresh</button>`,
+    contentVariant: 'wide',
+    contentHtml: `
+      ${warning}
+      ${state.websites.length > 1 ? `<div class="website-dashboard-selector"><label for="dashboard-website-select">Active website</label><select id="dashboard-website-select" onchange="window.selectDashboardWebsite(this.value)">${state.websites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}" ${site.id === model.website.id ? 'selected' : ''}>${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></div>` : ''}
+      <section class="card website-dashboard-identity" aria-labelledby="dashboard-site-heading"><div><span class="website-dashboard-eyebrow">Active website</span><h2 id="dashboard-site-heading">${escapeBuilderInspectorHtml(model.website.name)}</h2><p>${escapeBuilderInspectorHtml(model.website.publicHost ?? selected?.subdomain ?? 'Public domain not configured')}</p></div>${liveLink}</section>
+      <div class="website-dashboard-grid"><section class="card website-dashboard-home" aria-labelledby="dashboard-home-heading"><div class="website-dashboard-card-heading"><div><span class="website-dashboard-eyebrow">Homepage</span><h2 id="dashboard-home-heading">${escapeBuilderInspectorHtml(model.homepage.name ?? 'No editable homepage found')}</h2></div><span class="website-dashboard-status status-${model.homepage.publicationState}">${escapeBuilderInspectorHtml(publicationDashboardLabel(model.homepage.publicationState))}</span></div>
+      ${model.homepage.name ? `<dl class="website-dashboard-facts"><div><dt>Path</dt><dd>${escapeBuilderInspectorHtml(model.homepage.path)}</dd></div><div><dt>Page row status</dt><dd>${escapeBuilderInspectorHtml(model.homepage.legacyPageStatus)}</dd></div><div><dt>Last published</dt><dd>${model.homepage.lastPublishedAt ? escapeBuilderInspectorHtml(new Date(model.homepage.lastPublishedAt).toLocaleString()) : 'Not available'}</dd></div></dl>` : `<p>No editable homepage was found for this website. Open Pages to review the website structure.</p>`}
+      <div class="website-dashboard-primary-actions">${dashboardActionButton(model, 'edit', 'Edit Home Page', 'edit', model.homepage.id)}${dashboardActionButton(model, 'preview', 'Preview Draft', 'preview', model.homepage.id)}${dashboardActionButton(model, 'publish', 'Publish', 'publish', model.homepage.id)}</div></section>
+      <aside class="card website-dashboard-quick" aria-labelledby="dashboard-quick-heading"><h2 id="dashboard-quick-heading">Quick actions</h2>${dashboardActionButton(model, 'pages', 'Manage Pages', 'pages')}${dashboardActionButton(model, 'guided-setup', 'Guided Setup', 'guidedSetup')}${dashboardActionButton(model, 'assets', 'Assets', 'assets')}${dashboardActionButton(model, 'settings', 'Page Settings', 'settings')}</aside></div>
+      <section class="website-dashboard-summary" aria-label="Website summary"><article class="card"><strong>${model.counts.pages}</strong><span>Website pages</span></article><article class="card"><strong>${model.counts.draftPages}</strong><span>Draft page rows</span></article><article class="card"><strong>${model.counts.mediaAssets ?? '—'}</strong><span>${model.counts.mediaAssets === null ? 'Media count unavailable' : 'Media assets'}</span></article><article class="card"><strong>${model.readiness.setupBriefVersion ? `v${model.readiness.setupBriefVersion}` : '—'}</strong><span>Guided setup brief</span></article></section>
+    `
+  });
 }
 
 function renderFunnels(mode: 'website' | 'marketing' = 'website') {
@@ -11340,24 +11336,23 @@ function renderFunnels(mode: 'website' | 'marketing' = 'website') {
     `;
   }).join('');
 
-  app.innerHTML = `
-    ${renderSidebar('funnels')}
-    <main class="main-content">
-      <header class="view-header">
-        <div>
-          <h2 style="margin: 0;">${viewTitle}</h2>
-          <p style="color: #64748b; margin-top: 4px; font-size: 0.9rem;">${viewDesc}</p>
-        </div>
-        <div style="display: flex; gap: 12px;">
-          ${mode === 'website' 
-            ? `<button class="btn-primary" onclick="window.showAddPageModal('${website!.id}')">+ New Website Page</button>`
-            : `<button class="btn-primary" style="background: #4f46e5; border: none;" onclick="window.openNewPageModal('template')">+ New Marketing Page</button>`
-          }
-        </div>
-      </header>
+  renderAppWithShell({
+    activeView: mode === 'website' ? 'funnels' : 'marketing-funnels',
+    title: viewTitle,
+    subtitle: viewDesc,
+    headerActionsHtml: `
+      <div style="display: flex; gap: 12px;">
+        ${mode === 'website'
+          ? `<button class="btn-primary" onclick="window.showAddPageModal('${website!.id}')">+ New Website Page</button>`
+          : `<button class="btn-primary" style="background: #4f46e5; border: none;" onclick="window.openNewPageModal('template')">+ New Marketing Page</button>`
+        }
+      </div>
+    `,
+    contentVariant: 'wide',
+    contentHtml: `
       ${mode === 'website' ? renderWebsiteManagementSwitcher('funnels') : ''}
       
-      <div id="pages-list-container" style="padding: 20px;">
+      <div id="pages-list-container" style="padding: 10px 0;">
         <div class="card" style="padding: 0; overflow: hidden;">
           <table class="clients-table" style="box-shadow: none; margin-top: 0;">
             <thead>
@@ -11374,27 +11369,28 @@ function renderFunnels(mode: 'website' | 'marketing' = 'website') {
           </table>
         </div>
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 
 
 
 async function renderFunnelDetail(funnelId: string) {
-  app.innerHTML = `
-    ${renderSidebar('funnels')}
-    <main class="main-content">
+  renderAppWithShell({
+    activeView: 'funnel-detail',
+    title: 'Loading page details…',
+    contentVariant: 'wide',
+    contentHtml: `
       <div id="funnel-detail-container" style="padding: 20px;">
         <div class="loading">Loading page details...</div>
       </div>
-    </main>
-  `;
+    `
+  });
 
   try {
     const res = await fetch(`/api/funnels/${funnelId}`).then(r => r.json());
-    const container = document.getElementById('funnel-detail-container');
-    if (!container || !res.success) throw new Error(res.error || 'Failed to load');
+    if (!res.success) throw new Error(res.error || 'Failed to load');
 
     const funnel = res.data;
     const steps = funnel.steps || [];
@@ -11459,93 +11455,89 @@ async function renderFunnelDetail(funnelId: string) {
       .filter((route): route is WebsiteRoute => Boolean(route));
     const siteUrlBase = '';
 
-    container.innerHTML = `
-      <!-- Website Attachment Card (W6.7) -->
-      <div id="website-attachment-card" class="card" style="background: ${routes.length > 0 ? '#f0fdf4' : '#fffbeb'}; border: 1px solid ${routes.length > 0 ? '#bbf7d0' : '#fde68a'}; padding: 25px; margin-bottom: 32px; border-left: 6px solid ${routes.length > 0 ? '#10b981' : '#f59e0b'};">
-        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: ${routes.length > 0 ? '0' : '20px'};">
-          <div style="display: flex; align-items: center; gap: 15px;">
-            <span style="font-size: 2rem;">${routes.length > 0 ? '🌐' : '🔗'}</span>
-            <div>
-              <div style="font-size: 0.75rem; color: ${routes.length > 0 ? '#166534' : '#92400e'}; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">
-                ${routes.length > 0 ? 'Connected to Website' : 'Not Connected to Website'}
+    renderAppWithShell({
+      activeView: 'funnel-detail',
+      title: funnel.name || 'Page Details',
+      subtitle: `Status: ${funnel.status} · Configure your sections and layout`,
+      headerActionsHtml: `
+        <button onclick="window.navigateTo('funnels')" class="btn-primary" style="background: #f1f5f9; color: #475569; padding: 8px 12px; border-radius: 8px; border: none;">← Back</button>
+      `,
+      contentVariant: 'wide',
+      contentHtml: `
+        <!-- Website Attachment Card (W6.7) -->
+        <div id="website-attachment-card" class="card" style="background: ${routes.length > 0 ? '#f0fdf4' : '#fffbeb'}; border: 1px solid ${routes.length > 0 ? '#bbf7d0' : '#fde68a'}; padding: 25px; margin-bottom: 32px; border-left: 6px solid ${routes.length > 0 ? '#10b981' : '#f59e0b'};">
+          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: ${routes.length > 0 ? '0' : '20px'};">
+            <div style="display: flex; align-items: center; gap: 15px;">
+              <span style="font-size: 2rem;">${routes.length > 0 ? '🌐' : '🔗'}</span>
+              <div>
+                <div style="font-size: 0.75rem; color: ${routes.length > 0 ? '#166534' : '#92400e'}; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">
+                  ${routes.length > 0 ? 'Connected to Website' : 'Not Connected to Website'}
+                </div>
+                <h3 style="margin: 0; font-size: 1.25rem; color: #1e293b; font-family: 'Inter', sans-serif;">
+                  ${routes.length > 0
+                    ? routes.map(r => `<a href="${siteUrlBase}${r.path}" target="_blank" style="color: inherit; text-decoration: none; border-bottom: 2px dashed #bbf7d0;">${siteUrlBase}${r.path} ↗</a>`).join(', ')
+                    : 'Standalone Funnel (Not on Website)'}
+                </h3>
               </div>
-              <h3 style="margin: 0; font-size: 1.25rem; color: #1e293b; font-family: 'Inter', sans-serif;">
-                ${routes.length > 0 
-                  ? routes.map(r => `<a href="${siteUrlBase}${r.path}" target="_blank" style="color: inherit; text-decoration: none; border-bottom: 2px dashed #bbf7d0;">${siteUrlBase}${r.path} ↗</a>`).join(', ') 
-                  : 'Standalone Funnel (Not on Website)'}
+            </div>
+            <button class="btn-primary" style="background: #1e293b; color: white; border: none; padding: 12px 24px; font-weight: 700; border-radius: 10px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);" onclick="window.showAttachToWebsiteModal('${funnelId}')">
+              ${routes.length > 0 ? 'Manage Connection' : 'Attach to Website Page'}
+            </button>
+          </div>
+
+          ${routes.length === 0 ? `
+             <div style="font-size: 0.9rem; color: #92400e; font-weight: 600; background: rgba(255,255,255,0.4); padding: 14px; border-radius: 10px; margin-top: 15px; border: 1px dashed #fde68a;">
+                💡 This page is currently a standalone project. Connecting it to your website allows it to appear in your site navigation and use your custom domain URL.
+             </div>
+          ` : ''}
+        </div>
+
+        <div style="margin-bottom: 12px; font-size: 0.9rem; color: #475569; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+          <span style="color: #10b981;">📈</span>
+          <span>${weeklyLeads} leads this week</span>
+        </div>
+
+        <div id="funnel-metrics" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-bottom: 32px;">
+          <div class="card" style="padding: 24px; text-align: center; border: 1px solid #e2e8f0; background: white;">
+            <div style="font-size: 2.5rem; font-weight: 800; color: #1e293b; margin-bottom: 4px;">${totalLeads}</div>
+            <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Total Leads</div>
+          </div>
+          <div class="card" style="padding: 24px; text-align: center; border: 1px solid #e2e8f0; background: white;">
+            <div style="font-size: 2.5rem; font-weight: 800; color: #3b82f6; margin-bottom: 4px;">${todayLeads}</div>
+            <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Leads Today</div>
+          </div>
+          <div class="card" style="padding: 24px; text-align: center; border: 1px solid #e2e8f0; background: white;">
+            <div style="font-size: ${respTimeStr === 'No data yet' ? '1.5rem' : '2.5rem'}; font-weight: 800; color: #10b981; margin-bottom: 4px;">${respTimeStr}</div>
+            <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Avg. response time</div>
+            <div style="font-size: 0.7rem; color: #059669; font-weight: 600; margin-top: 8px;">Faster responses = more bookings</div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 32px; max-width: 1200px;">
+          <div id="steps-section">
+            <h3 style="margin-bottom: 24px; color: #1e293b; font-size: 1.25rem;">Page Sections</h3>
+            <div class="steps-flow">
+              ${stepsHtml}
+            </div>
+
+            <div style="margin-top: 32px; text-align: center; padding: 32px; border: 2px dashed #e2e8f0; border-radius: 12px;">
+              <button class="btn-primary" style="background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0;">+ Add New Step</button>
+            </div>
+          </div>
+
+          <div id="activity-section">
+            <div class="card" style="padding: 24px; position: sticky; top: 20px;">
+              <h3 style="margin-top: 0; margin-bottom: 20px; color: #1e293b; font-size: 1.15rem; display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.25rem;">⚡</span> Recent Activity
               </h3>
-            </div>
-          </div>
-          <button class="btn-primary" style="background: #1e293b; color: white; border: none; padding: 12px 24px; font-weight: 700; border-radius: 10px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);" onclick="window.showAttachToWebsiteModal('${funnelId}')">
-            ${routes.length > 0 ? 'Manage Connection' : 'Attach to Website Page'}
-          </button>
-        </div>
-        
-        ${routes.length === 0 ? `
-           <div style="font-size: 0.9rem; color: #92400e; font-weight: 600; background: rgba(255,255,255,0.4); padding: 14px; border-radius: 10px; margin-top: 15px; border: 1px dashed #fde68a;">
-              💡 This page is currently a standalone project. Connecting it to your website allows it to appear in your site navigation and use your custom domain URL.
-           </div>
-        ` : ''}
-      </div>
-
-      <div style="margin-bottom: 12px; font-size: 0.9rem; color: #475569; font-weight: 600; display: flex; align-items: center; gap: 8px;">
-        <span style="color: #10b981;">📈</span>
-        <span>${weeklyLeads} leads this week</span>
-      </div>
-
-      <div id="funnel-metrics" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-bottom: 32px;">
-        <div class="card" style="padding: 24px; text-align: center; border: 1px solid #e2e8f0; background: white;">
-          <div style="font-size: 2.5rem; font-weight: 800; color: #1e293b; margin-bottom: 4px;">${totalLeads}</div>
-          <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Total Leads</div>
-        </div>
-        <div class="card" style="padding: 24px; text-align: center; border: 1px solid #e2e8f0; background: white;">
-          <div style="font-size: 2.5rem; font-weight: 800; color: #3b82f6; margin-bottom: 4px;">${todayLeads}</div>
-          <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Leads Today</div>
-        </div>
-        <div class="card" style="padding: 24px; text-align: center; border: 1px solid #e2e8f0; background: white;">
-          <div style="font-size: ${respTimeStr === 'No data yet' ? '1.5rem' : '2.5rem'}; font-weight: 800; color: #10b981; margin-bottom: 4px;">${respTimeStr}</div>
-          <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Avg. response time</div>
-          <div style="font-size: 0.7rem; color: #059669; font-weight: 600; margin-top: 8px;">Faster responses = more bookings</div>
-        </div>
-      </div>
-
-      <header class="view-header" style="padding-left: 0; margin-bottom: 32px;">
-        <div style="display: flex; align-items: center; gap: 16px;">
-          <button onclick="window.navigateTo('funnels')" class="btn-primary" style="background: #f1f5f9; color: #475569; padding: 8px 12px; border-radius: 8px; border: none;">←</button>
-          <div>
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <h2 style="margin: 0;">${funnel.name}</h2>
-              <span class="badge badge-${funnel.status}" style="text-transform: capitalize; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem;">${funnel.status}</span>
-            </div>
-            <p style="color: #64748b; margin: 4px 0 0 0; font-size: 0.9rem;">Configure your sections and layout</p>
-          </div>
-        </div>
-      </header>
-
-      <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 32px; max-width: 1200px;">
-        <div id="steps-section">
-          <h3 style="margin-bottom: 24px; color: #1e293b; font-size: 1.25rem;">Page Sections</h3>
-          <div class="steps-flow">
-            ${stepsHtml}
-          </div>
-          
-          <div style="margin-top: 32px; text-align: center; padding: 32px; border: 2px dashed #e2e8f0; border-radius: 12px;">
-            <button class="btn-primary" style="background: #f8fafc; color: #64748b; border: 1px solid #e2e8f0;">+ Add New Step</button>
-          </div>
-        </div>
-
-        <div id="activity-section">
-          <div class="card" style="padding: 24px; position: sticky; top: 20px;">
-            <h3 style="margin-top: 0; margin-bottom: 20px; color: #1e293b; font-size: 1.15rem; display: flex; align-items: center; gap: 10px;">
-              <span style="font-size: 1.25rem;">⚡</span> Recent Activity
-            </h3>
-            <div id="activity-feed-container">
-               <div id="activity-feed-list"></div>
+              <div id="activity-feed-container">
+                 <div id="activity-feed-list"></div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    `;
+      `
+    });
 
     // 🌿 WB.5.6: Populate activity feed
     const activityList = document.getElementById('activity-feed-list');
@@ -11581,7 +11573,7 @@ async function renderFunnelDetail(funnelId: string) {
                   <span style="font-weight: 700; color: #1e293b; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${contactName}</span>
                   <span style="font-size: 0.75rem; color: #94a3b8;">${timeStr}</span>
                 </div>
-                <div style="font-size: 0.8rem; color: #64748b; text-transform: capitalize;">${label}</span></div>
+                <div style="font-size: 0.8rem; color: #64748b; text-transform: capitalize;">${label}</div>
               </div>
             </div>
           `;
@@ -11590,8 +11582,12 @@ async function renderFunnelDetail(funnelId: string) {
     }
   } catch (err: any) {
     console.error('Failed to load page detail:', err);
-    const container = document.getElementById('funnel-detail-container');
-    if (container) container.innerHTML = `<div class="error">Failed to load page: ${err.message}</div>`;
+    renderAppWithShell({
+      activeView: 'funnel-detail',
+      title: 'Page Details',
+      contentVariant: 'wide',
+      contentHtml: `<div class="error">Failed to load page: ${err.message}</div>`
+    });
   }
 }
 
@@ -11926,16 +11922,25 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
 
   // Show skeleton if switching to major data-heavy views
   if (view !== previousView && ['pages', 'templates', 'builder'].includes(view)) {
-    const sidebar = (view === 'builder') ? '' : renderSidebar(view);
-    app.innerHTML = `
-      ${sidebar}
-      <main class="${view === 'builder' ? '' : 'main-content'}">
-        <header class="view-header">
-          <div class="skeleton skeleton-title" style="width: 300px; margin: 0;"></div>
-        </header>
-        ${renderSkeleton(view as any)}
-      </main>
-    `;
+    if (view === 'builder') {
+      currentShellController?.destroy();
+      currentShellController = null;
+      app.innerHTML = `
+        <main>
+          <header class="view-header">
+            <div class="skeleton skeleton-title" style="width: 300px; margin: 0;"></div>
+          </header>
+          ${renderSkeleton(view as any)}
+        </main>
+      `;
+    } else {
+      renderAppWithShell({
+        activeView: view,
+        title: view === 'pages' ? 'All Website Sections' : 'Website Templates',
+        contentVariant: 'wide',
+        contentHtml: renderSkeleton(view as any)
+      });
+    }
     setTimeout(() => {
       if (!protectedAsyncOperationGuard.isCurrent(navigationOperation, getActingUserId())) return;
       void executeNavigation(view, id, context, navigationOperation).catch(error => {
@@ -12007,7 +12012,7 @@ async function executeNavigation(
   navigationOperation?: ProtectedAsyncOperationToken
 ) {
   if (navigationOperation) protectedAsyncOperationGuard.requireCurrent(navigationOperation, getActingUserId());
-  if (['builder', 'site', 'preview'].includes(view) || !['dashboard', 'clients', 'website-settings'].includes(view)) {
+  if (['builder', 'site', 'preview'].includes(view)) {
     currentShellController?.destroy();
     currentShellController = null;
   }
@@ -12062,7 +12067,7 @@ async function executeNavigation(
     }
     case 'templates': renderTemplates(); break;
     case 'pages-seo': renderPagesSeoLanding(); break;
-    case 'components': app.innerHTML = `${renderSidebar('components')}<main class="main-content"><h2>Components Shelf</h2><div class="empty-state">Library of pre-built UI components coming soon.</div></main>`; break;
+    case 'components': renderComponents(); break;
     case 'website-settings': {
       const selection = resolveWebsiteSettingsSelection({
         actingUserId: getActingUserId(),
@@ -12222,18 +12227,18 @@ function renderQuotePreview(quoteId: string) {
     `;
   };
 
-  app.innerHTML = `
-    ${renderSidebar('quotes')}
-    <main class="main-content no-print-sidebar">
-      <header class="view-header no-print">
-        <div style="display: flex; align-items: center; gap: 15px;">
-          <button onclick="window.navigateTo('quotes')" class="btn-primary" style="background: #eee; color: #333; padding: 5px 10px;">← Back</button>
-          <h2>Quote Preview</h2>
-        </div>
-        <button class="btn-primary" onclick="window.print()">Print Selected Option</button>
-      </header>
-
-      <div class="card quote-preview" style="padding: 60px; max-width: 1100px; margin: 20px auto; background: white; border-radius: 0; min-height: 1000px;">
+  renderAppWithShell({
+    activeView: 'quote-preview',
+    title: 'Quote Preview',
+    headerActionsHtml: `
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <button onclick="window.navigateTo('quotes')" class="btn-primary no-print" style="background: #eee; color: #333; padding: 6px 12px;">← Back</button>
+        <button class="btn-primary no-print" onclick="window.print()">Print Selected Option</button>
+      </div>
+    `,
+    contentVariant: 'wide',
+    contentHtml: `
+      <div class="card quote-preview" style="padding: 60px; max-width: 1100px; margin: 0 auto; background: white; border-radius: 0; min-height: 1000px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 60px; border-bottom: 3px solid #f1f5f9; padding-bottom: 30px;">
           <div>
             <h1 style="margin: 0; color: var(--primary-color); font-size: 2rem; letter-spacing: -0.5px;">Handyman Hans Pressure Washing</h1>
@@ -12280,8 +12285,8 @@ function renderQuotePreview(quoteId: string) {
           <p style="color: #64748b; font-size: 0.95rem;">Select your preferred option above. We look forward to working with you!</p>
         </div>
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 /**
@@ -12329,12 +12334,16 @@ async function sendQuickSMS(contactId: string) {
 (window as any).sendQuickSMS = sendQuickSMS;
 
 async function renderContactDetail(contactId: string) {
-  app.innerHTML = `
-    ${renderSidebar('clients')}
-    <main class="main-content" style="padding: 24px; text-align: center; color: #64748b;">
-      Loading contact details...
-    </main>
-  `;
+  renderAppWithShell({
+    activeView: 'contact-detail',
+    title: 'Loading contact details…',
+    contentVariant: 'standard',
+    contentHtml: `
+      <div style="padding: 24px; text-align: center; color: #64748b;">
+        Loading contact details...
+      </div>
+    `
+  });
 
   const response = await fetch(`/api/contacts/${contactId}`);
   const result = await response.json();
@@ -12349,106 +12358,105 @@ async function renderContactDetail(contactId: string) {
   const contactOpps = mockOpportunities.filter(opp => opp.contact_id === contactId);
   const contactQuotes = mockQuotes.filter(q => q.contact_id === contactId);
   const telHref = safeTelHref(contact.phone);
-  app.innerHTML = `
-    ${renderSidebar('clients')}
-    <main class="main-content" style="padding: 24px; max-width: 1100px; margin: 0 auto; background: #fff;">
-      <!-- Header -->
-      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
-        <div style="display: flex; align-items: center; gap: 16px;">
-          <button onclick="window.navigateTo('clients')" style="background: #f1f5f9; border: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; color: #475569; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-            <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-            Back
-          </button>
-          <h2 style="margin: 0; font-size: 1.6rem; font-weight: 800; color: #0f172a;">${escapeHtmlText(contact.name)}</h2>
-          <span class="badge badge-${contact.status}" style="font-size: 0.75rem; padding: 4px 10px;">${contact.status}</span>
+
+  renderAppWithShell({
+    activeView: 'contact-detail',
+    title: contact.name,
+    subtitle: `Status: ${contact.status}`,
+    headerActionsHtml: `
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button onclick="window.navigateTo('clients')" style="background: #f1f5f9; border: none; padding: 8px 12px; border-radius: 8px; cursor: pointer; color: #475569; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+          <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+          Back
+        </button>
+        <button class="btn-primary" style="background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; font-size: 0.8rem; padding: 8px 16px;" onclick="window.addNote('${contactId}')">📝 Note</button>
+        <button class="btn-primary" style="font-size: 0.8rem; padding: 8px 16px;" onclick="window.createOpportunity('${contactId}')">💰 New Opportunity</button>
+      </div>
+    `,
+    contentVariant: 'wide',
+    contentHtml: `
+      <div style="padding: 24px; max-width: 1100px; margin: 0 auto; background: #fff; border-radius: 12px; border: 1px solid #e2e8f0;">
+        <!-- 1. High-Density Contact Info Grid -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 20px;">
+           <div>
+             <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Phone</div>
+             <input type="text" value="${escapeHtmlText(contact.phone ?? '')}" placeholder="Add phone..." onchange="window.updateContactField('${contactId}', 'phone', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
+           </div>
+           <div>
+             <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Email</div>
+             <input type="email" value="${escapeHtmlText(contact.email || '')}" placeholder="Add email..." onchange="window.updateContactField('${contactId}', 'email', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
+           </div>
+           <div>
+             <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Source</div>
+             <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${escapeHtmlText(contact.source)}</div>
+           </div>
+           <div>
+             <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Address</div>
+             <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtmlText(contact.address)}">${escapeHtmlText(contact.address)}</div>
+           </div>
         </div>
-        <div style="display: flex; gap: 8px;">
-          <button class="btn-primary" style="background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; font-size: 0.8rem; padding: 8px 16px;" onclick="window.addNote('${contactId}')">📝 Note</button>
-          <button class="btn-primary" style="font-size: 0.8rem; padding: 8px 16px;" onclick="window.createOpportunity('${contactId}')">💰 New Opportunity</button>
+
+        <!-- 2. Priority Quick Actions -->
+        <div style="display: flex; gap: 12px; margin-bottom: 30px; flex-wrap: wrap;">
+          ${telHref ? `
+            <a href="${escapeHtmlText(telHref)}" class="btn-primary" style="background: #10b981; flex: 1; min-width: 180px; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
+              📞 Call Lead Now
+            </a>
+            <button class="btn-primary" onclick="window.sendQuickSMS('${contact.id}')" style="background: #6366f1; flex: 1; min-width: 180px; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);">
+              💬 Send Quick Text
+            </button>
+          ` : '<div style="flex: 1; color: #64748b; font-style: italic; background: #f8fafc; padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #e2e8f0;">No phone number provided for quick actions</div>'}
         </div>
-      </div>
 
-      <!-- 1. High-Density Contact Info Grid -->
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; padding: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 20px;">
-         <div>
-           <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Phone</div>
-           <input type="text" value="${escapeHtmlText(contact.phone ?? '')}" placeholder="Add phone..." onchange="window.updateContactField('${contactId}', 'phone', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
-         </div>
-         <div>
-           <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Email</div>
-           <input type="email" value="${escapeHtmlText(contact.email || '')}" placeholder="Add email..." onchange="window.updateContactField('${contactId}', 'email', this.value)" style="background: transparent; border: none; font-weight: 700; color: #1e293b; font-size: 0.95rem; width: 100%; outline: none;" onfocus="this.style.background='#fff'; this.style.boxShadow='0 0 0 2px #e2e8f0'" onblur="this.style.background='transparent'; this.style.boxShadow='none'">
-         </div>
-         <div>
-           <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Source</div>
-           <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem;">${escapeHtmlText(contact.source)}</div>
-         </div>
-         <div>
-           <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Address</div>
-           <div style="font-weight: 700; color: #1e293b; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtmlText(contact.address)}">${escapeHtmlText(contact.address)}</div>
-         </div>
-      </div>
-
-      <!-- 2. Priority Quick Actions -->
-      <div style="display: flex; gap: 12px; margin-bottom: 30px;">
-        ${telHref ? `
-          <a href="${escapeHtmlText(telHref)}" class="btn-primary" style="background: #10b981; flex: 1; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
-            📞 Call Lead Now
-          </a>
-          <button class="btn-primary" onclick="window.sendQuickSMS('${contact.id}')" style="background: #6366f1; flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; height: 50px; border-radius: 10px; font-size: 1rem; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);">
-            💬 Send Quick Text
-          </button>
-        ` : '<div style="flex: 1; color: #64748b; font-style: italic; background: #f8fafc; padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #e2e8f0;">No phone number provided for quick actions</div>'}
-      </div>
-
-      <!-- 3. Main Content Split -->
-      <div class="detail-container" style="display: grid; grid-template-columns: 1.6fr 1fr; gap: 24px; align-items: start;">
-        
-        <!-- Left Column: Timeline -->
-        <section>
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-            <h3 style="margin: 0; font-size: 0.85rem; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Activity Timeline</h3>
-            <button onclick="window.logCall('${contactId}')" style="background: transparent; border: 1px solid #e2e8f0; color: #64748b; font-size: 0.75rem; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-weight: 600;">Log Item +</button>
-          </div>
-          <div class="card" style="padding: 0; border: 1px solid #e2e8f0; box-shadow: none;">
-            <div id="api-timeline-list" style="max-height: 600px; overflow-y: auto;">
-              <div style="padding: 40px; text-align: center; color: #94a3b8;">
-                 <div class="skeleton-row" style="width: 60%; margin: 10px auto;"></div>
-                 <div class="skeleton-row" style="width: 40%; margin: 10px auto;"></div>
-                 <p style="font-size: 0.85rem; margin-top: 15px;">Retrieving history...</p>
+        <!-- 3. Main Content Split -->
+        <div class="detail-container" style="display: grid; grid-template-columns: 1.6fr 1fr; gap: 24px; align-items: start;">
+          <!-- Left Column: Timeline -->
+          <section>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+              <h3 style="margin: 0; font-size: 0.85rem; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Activity Timeline</h3>
+              <button onclick="window.logCall('${contactId}')" style="background: transparent; border: 1px solid #e2e8f0; color: #64748b; font-size: 0.75rem; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-weight: 600;">Log Item +</button>
+            </div>
+            <div class="card" style="padding: 0; border: 1px solid #e2e8f0; box-shadow: none;">
+              <div id="api-timeline-list" style="max-height: 600px; overflow-y: auto;">
+                <div style="padding: 40px; text-align: center; color: #94a3b8;">
+                   <div class="skeleton-row" style="width: 60%; margin: 10px auto;"></div>
+                   <div class="skeleton-row" style="width: 40%; margin: 10px auto;"></div>
+                   <p style="font-size: 0.85rem; margin-top: 15px;">Retrieving history...</p>
+                </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <!-- Right Column: Financials & Deals -->
-        <aside style="display: flex; flex-direction: column; gap: 24px;">
-          
-          <!-- Opportunities -->
-          <div>
-            <h3 style="margin: 0 0 12px 0; font-size: 0.85rem; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Active Opportunities</h3>
-            <div class="card" style="padding: 12px; border: 1px solid #e2e8f0; box-shadow: none;">
-              ${contactOpps.map(opp => `
-                <div style="padding: 10px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center;">
-                  <div>
-                    <div style="font-weight: 700; color: #1e293b; font-size: 0.9rem;">$${opp.value.toLocaleString()}</div>
-                    <div style="font-size: 0.75rem; color: #64748b;">${escapeHtmlText(opp.pipeline_stage)}</div>
+          <!-- Right Column: Financials & Deals -->
+          <aside style="display: flex; flex-direction: column; gap: 24px;">
+            <!-- Opportunities -->
+            <div>
+              <h3 style="margin: 0 0 12px 0; font-size: 0.85rem; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 1px;">Active Opportunities</h3>
+              <div class="card" style="padding: 12px; border: 1px solid #e2e8f0; box-shadow: none;">
+                ${contactOpps.map(opp => `
+                  <div style="padding: 10px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                      <div style="font-weight: 700; color: #1e293b; font-size: 0.9rem;">$${opp.value.toLocaleString()}</div>
+                      <div style="font-size: 0.75rem; color: #64748b;">${escapeHtmlText(opp.pipeline_stage)}</div>
+                    </div>
+                    <span class="badge badge-${opp.status}" style="font-size: 0.65rem;">${opp.status}</span>
                   </div>
-                  <span class="badge badge-${opp.status}" style="font-size: 0.65rem;">${opp.status}</span>
-                </div>
-              `).join('') || '<div style="padding: 10px; color: #94a3b8; font-size: 0.85rem; text-align: center; font-style: italic;">No active opportunities</div>'}
+                `).join('') || '<div style="padding: 10px; color: #94a3b8; font-size: 0.85rem; text-align: center; font-style: italic;">No active opportunities</div>'}
+              </div>
             </div>
-          </div>
 
-          <!-- Quotes & Invoices Summary -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-            <div class="card" style="padding: 16px; border: 1px solid #e2e8f0; box-shadow: none; text-align: center;">
-              <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; margin-bottom: 4px;">Quotes</div>
-              <div style="font-size: 1.25rem; font-weight: 800; color: #1e293b;">${contactQuotes.length}</div>
-
-        </aside>
+            <!-- Quotes & Invoices Summary -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <div class="card" style="padding: 16px; border: 1px solid #e2e8f0; box-shadow: none; text-align: center;">
+                <div style="font-size: 0.65rem; color: #94a3b8; font-weight: 800; text-transform: uppercase; margin-bottom: 4px;">Quotes</div>
+                <div style="font-size: 1.25rem; font-weight: 800; color: #1e293b;">${contactQuotes.length}</div>
+              </div>
+            </div>
+          </aside>
+        </div>
       </div>
-    </main>
-  `;
+    `
+  });
 
   loadTimeline(contactId);
 }
@@ -12805,15 +12813,13 @@ function renderEventLogs() {
     `;
   }).join('');
 
-  app.innerHTML = `
-    ${renderSidebar('event-logs')}
-    <main class="main-content">
-      <header class="view-header">
-        <h2>System Event Logs</h2>
-      </header>
-
-      <div class="card" style="padding: 0; overflow: hidden;">
-        <table class="clients-table" style="box-shadow: none; border: none; margin-top: 0;">
+  renderAppWithShell({
+    activeView: 'event-logs',
+    title: 'System Event Logs',
+    contentVariant: 'wide',
+    contentHtml: `
+      <div class="card" style="padding: 0; overflow-x: auto;">
+        <table class="clients-table" style="box-shadow: none; border: none; margin-top: 0; min-width: 700px;">
           <thead>
             <tr>
               <th>Event Name</th>
@@ -12827,22 +12833,20 @@ function renderEventLogs() {
           </tbody>
         </table>
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 function renderQATools() {
-  app.innerHTML = `
-    ${renderSidebar('qa-tools')}
-    <main class="main-content">
-      <header class="view-header">
-        <h2>QA & Debug Tools</h2>
-      </header>
-
+  renderAppWithShell({
+    activeView: 'qa-tools',
+    title: 'QA & Debug Tools',
+    contentVariant: 'wide',
+    contentHtml: `
       <div class="card" style="padding: 24px; margin-bottom: 24px; background: #fdf2f2; border: 1px solid #fee2e2;">
         <h3 style="margin-top: 0; color: #991b1b;">Multi-User Isolation Simulation</h3>
         <p style="color: #b91c1c; font-size: 0.9rem; margin-bottom: 16px;">Switches the UI context to simulate different logged-in users. Verify that User B cannot see User A's data.</p>
-        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+        <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
           <button class="btn-${(window as any).currentUser === 'user_a' ? 'primary' : 'secondary'}" 
                   onclick="window.switchUser('user_a')">Simulate User A</button>
           <button class="btn-${(window as any).currentUser === 'user_b' ? 'primary' : 'secondary'}" 
@@ -12864,12 +12868,12 @@ function renderQATools() {
           ${!pendingSimulationCallId ? `
             <button class="btn-primary" onclick="window.startSimulationCall()" style="background: #10b981; border: none;">📞 Simulate Inbound Call</button>
           ` : `
-            <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; width: 100%; display: flex; align-items: center; justify-content: space-between; border: 1px solid #e2e8f0;">
+            <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; width: 100%; display: flex; align-items: center; justify-content: space-between; border: 1px solid #e2e8f0; flex-wrap: wrap; gap: 12px;">
               <div>
                 <span style="display: block; font-size: 0.7rem; text-transform: uppercase; color: #64748b; font-weight: 800;">Pending Call ID</span>
                 <span style="font-weight: 700; color: #1e293b;">${pendingSimulationCallId}</span>
               </div>
-              <div style="display: flex; gap: 10px;">
+              <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <button class="btn-primary" 
                         onclick="window.completeSimulationCall(false)" 
                         style="background: #ef4444; border: none; font-size: 0.8rem; padding: 8px 16px; ${isProcessingSimulation ? 'opacity: 0.5; pointer-events: none;' : ''}"
@@ -12932,8 +12936,8 @@ function renderQATools() {
           <li>If the phone number is new, it will result in a generic event log.</li>
         </ul>
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 (window as any).startSimulationCall = async () => {
@@ -13166,20 +13170,9 @@ setInterval(() => {
   }
 
   // 2. Refresh UI (only in standard app views)
-  if (['dashboard', 'clients', 'website-settings'].includes(currentView)) {
-    if (changeDetected) {
-      if (currentView === 'clients') void renderClients();
-      if (currentView === 'dashboard') renderDashboard();
-    }
-  } else if (!['builder', 'preview', 'site'].includes(currentView)) {
-    const sidebar = document.querySelector('.sidebar');
-    if (sidebar) {
-      sidebar.outerHTML = renderLegacySidebar(currentView);
-    }
-    if (changeDetected) {
-      if (currentView === 'clients') void renderClients();
-      if (currentView === 'dashboard') renderDashboard();
-    }
+  if (!['builder', 'preview', 'site'].includes(currentView) && changeDetected) {
+    if (currentView === 'clients') void renderClients();
+    if (currentView === 'dashboard') renderDashboard();
   }
 }, 5000);
 
@@ -13605,18 +13598,17 @@ let seoWizardState = {
         return;
     }
 
-    app.innerHTML = `
-        ${renderSidebar('seo-pages')}
-        <main class="main-content">
-            <header class="view-header">
-                <div>
-                    <h2 style="margin: 0; font-size: 1.75rem;">Local SEO Hub</h2>
-                    <p style="color: #64748b; margin-top: 6px;">Target specific neighborhoods and service types to dominate local search results.</p>
-                </div>
-                <div style="display: flex; gap: 12px;">
-                    <button class="btn-primary" onclick="window.startSeoWizard()" style="background: #10b981; border: none; padding: 12px 24px;">+ Batch Generate Pages</button>
-                </div>
-            </header>
+    renderAppWithShell({
+        activeView: 'seo-pages',
+        title: 'Local SEO Hub',
+        subtitle: 'Target specific neighborhoods and service types to dominate local search results.',
+        headerActionsHtml: `
+            <div style="display: flex; gap: 12px;">
+                <button class="btn-primary" onclick="window.startSeoWizard()" style="background: #10b981; border: none; padding: 10px 20px;">+ Batch Generate Pages</button>
+            </div>
+        `,
+        contentVariant: 'wide',
+        contentHtml: `
             ${renderWebsiteManagementSwitcher('seo-pages')}
 
             <div class="card" style="margin-bottom: 30px; padding: 24px; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border: 1px solid #bae6fd; border-radius: 16px;">
@@ -13631,8 +13623,8 @@ let seoWizardState = {
                 </div>
             </div>
 
-            <div class="card" style="padding: 0; overflow: hidden; border-radius: 16px;">
-                <table class="clients-table" style="box-shadow: none; border: none; margin-top: 0;">
+            <div class="card" style="padding: 0; overflow-x: auto; border-radius: 16px;">
+                <table class="clients-table" style="box-shadow: none; border: none; margin-top: 0; min-width: 700px;">
                     <thead style="background: #f8fafc;">
                         <tr>
                             <th style="padding: 16px 24px;">Service & Region</th>
@@ -13667,8 +13659,8 @@ let seoWizardState = {
                     </tbody>
                 </table>
             </div>
-        </main>
-    `;
+        `
+    });
 };
 
 (window as any).startSeoWizard = () => {
@@ -13743,22 +13735,21 @@ function renderSeoWizard() {
         `;
     }
 
-    app.innerHTML = `
-        ${renderSidebar('seo-pages')}
-        <main class="main-content">
-            <header class="view-header">
-                <div>
-                    <h2 style="margin: 0; font-size: 1.75rem;">Build Your Local Presence</h2>
-                    <p style="color: #64748b; margin-top: 6px;">Step ${seoWizardState.step} of 3</p>
-                </div>
-                <div style="width: 200px; height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden; position: relative;">
-                    <div style="width: ${progress}%; height: 100%; background: var(--primary-color); transition: width 0.4s ease-out;"></div>
-                </div>
-            </header>
+    renderAppWithShell({
+        activeView: 'seo-pages',
+        title: 'Build Your Local Presence',
+        subtitle: `Step ${seoWizardState.step} of 3`,
+        headerActionsHtml: `
+            <div style="width: 200px; height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden; position: relative;">
+                <div style="width: ${progress}%; height: 100%; background: var(--primary-color); transition: width 0.4s ease-out;"></div>
+            </div>
+        `,
+        contentVariant: 'wide',
+        contentHtml: `
             ${renderWebsiteManagementSwitcher('seo-pages')}
             ${content}
-        </main>
-    `;
+        `
+    });
 }
 
 (window as any).nextSeoStep = (step: number) => {
@@ -13801,16 +13792,12 @@ function renderSeoWizard() {
 };
 
 function renderPagesSeoLanding() {
-  app.innerHTML = `
-    ${renderSidebar('pages-seo')}
-    <main class="main-content">
-      <header class="view-header">
-        <div>
-          <h2>Pages & SEO</h2>
-          <p style="color: #64748b; margin-top: 4px;">Organize your site architecture, menus, and search engine optimization.</p>
-        </div>
-      </header>
-
+  renderAppWithShell({
+    activeView: 'pages-seo',
+    title: 'Pages & SEO',
+    subtitle: 'Organize your site architecture, menus, and search engine optimization.',
+    contentVariant: 'wide',
+    contentHtml: `
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; margin-top: 10px;">
         <!-- Card 1: Site Pages -->
         <div class="card"
@@ -13884,8 +13871,8 @@ function renderPagesSeoLanding() {
           </div>
         </div>
       </div>
-    </main>
-  `;
+    `
+  });
 }
 
 (window as any).deleteSeoPage = async (routeId: string) => {

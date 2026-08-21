@@ -256,17 +256,23 @@ export function getDefaultNavGroups(activeView: string, badgeCounts: Record<stri
 // 4. SIDEBAR RENDERER
 // ============================================================================
 
+export function resolveActiveNavId(activeView: string): string {
+  if (activeView === 'contact-detail') return 'clients';
+  if (activeView === 'new-quote' || activeView === 'quote-preview') return 'quotes';
+  if (activeView === 'pages' || activeView === 'page-sections' || activeView === 'funnel-detail' || activeView === 'website-structure' || activeView === 'templates' || activeView === 'components') return 'funnels';
+  if (activeView === 'pages-seo') return 'seo-pages';
+  return activeView;
+}
+
 export function renderShellSidebar(opts: ShellSidebarOptions): string {
   const groups = opts.navGroups ?? getDefaultNavGroups(opts.activeView);
   const isDrawer = Boolean(opts.isDrawer);
   const sidebarClass = isDrawer ? 'wo-shell-drawer' : 'wo-shell-sidebar';
+  const effectiveActiveNav = resolveActiveNavId(opts.activeView);
 
   const groupsHtml = groups.map(group => {
     const itemsHtml = group.items.map(item => {
-      const isActive = opts.activeView === item.id ||
-        (item.id === 'clients' && opts.activeView === 'contact-detail') ||
-        (item.id === 'quotes' && opts.activeView === 'new-quote') ||
-        (item.id === 'website-settings' && opts.activeView === 'website-settings');
+      const isActive = effectiveActiveNav === item.id;
 
       const activeClass = isActive ? ' wo-shell-nav-item--active' : '';
       const currentAttr = isActive ? ' aria-current="page"' : '';
