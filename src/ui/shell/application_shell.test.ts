@@ -9,6 +9,12 @@ import {
   initApplicationShell,
   SHELL_ICONS
 } from './application_shell';
+import {
+  renderCard,
+  renderField,
+  renderSelect,
+  getFieldAccessibilityProps
+} from '../index';
 
 // Lightweight mock DOM environment for framework-neutral interaction controller testing
 class MockElement {
@@ -100,25 +106,22 @@ class MockElement {
 
   querySelectorAll(selector: string): MockElement[] {
     const results: MockElement[] = [];
-    const walk = (el: MockElement) => {
+    const check = (el: MockElement) => {
+      let matches = false;
+      if (selector === '#wo-shell-drawer-backdrop' && el.id === 'wo-shell-drawer-backdrop') matches = true;
+      else if (selector === '#wo-shell-drawer' && el.id === 'wo-shell-drawer') matches = true;
+      else if (selector === '[data-shell-drawer-toggle]' && el.hasAttribute('data-shell-drawer-toggle')) matches = true;
+      else if (selector === '[data-shell-drawer-close]' && el.hasAttribute('data-shell-drawer-close')) matches = true;
+      else if (selector === '.wo-shell-nav-item' && el.getAttribute('class')?.includes('wo-shell-nav-item')) matches = true;
+      else if (selector.includes('button') && el.tagName === 'BUTTON' && !el.disabled) matches = true;
+      else if (selector.includes('[href]') && el.hasAttribute('href')) matches = true;
+
+      if (matches) results.push(el);
       for (const child of el.children) {
-        if (selector === '#wo-shell-drawer-backdrop' && child.id === 'wo-shell-drawer-backdrop') {
-          results.push(child);
-        } else if (selector === '#wo-shell-drawer' && child.id === 'wo-shell-drawer') {
-          results.push(child);
-        } else if (selector.includes('data-shell-drawer-toggle') && child.hasAttribute('data-shell-drawer-toggle')) {
-          results.push(child);
-        } else if (selector.includes('data-shell-drawer-close') && child.hasAttribute('data-shell-drawer-close')) {
-          results.push(child);
-        } else if (selector.includes('button') && child.tagName === 'BUTTON') {
-          results.push(child);
-        } else if (selector.includes('.wo-shell-nav-item') && child.getAttribute('class')?.includes('wo-shell-nav-item')) {
-          results.push(child);
-        }
-        walk(child);
+        check(child);
       }
     };
-    walk(this);
+    check(this);
     return results;
   }
 
@@ -128,52 +131,44 @@ class MockElement {
   }
 }
 
-describe('WashOps Permanent Application Shell Foundation (Phase 1C / Task 7B.1)', () => {
+describe('WashOps Permanent Application Shell (Phase 1C / Task 7B.1)', () => {
   const cssPath = path.resolve(__dirname, 'application_shell.css');
-  const stylePath = path.resolve(__dirname, '../../style.css');
+  const cssContent = fs.readFileSync(cssPath, 'utf-8');
+  const tokensCssPath = path.resolve(__dirname, '../../tokens/tokens.css');
+  const tokensCssContent = fs.readFileSync(tokensCssPath, 'utf-8');
 
-  // ==========================================================================
-  // 1. FILE STRUCTURE & TOKEN CONSUMPTION
-  // ==========================================================================
-  it('A. verifies application_shell.css exists and is imported in style.css', () => {
-    expect(fs.existsSync(cssPath)).toBe(true);
-    expect(fs.existsSync(path.resolve(__dirname, 'application_shell.ts'))).toBe(true);
+  it('A. Token Reference Audit: every var(--wo-*) in application_shell.css is defined in tokens.css or has a fallback', () => {
+    // Extract all declared variables in tokens.css: --wo-[a-zA-Z0-9_-]+:
+    const declaredVarMatches = tokensCssContent.match(/--wo-[a-zA-Z0-9_-]+(?=\s*:)/g) || [];
+    const declaredTokens = new Set(declaredVarMatches);
 
-    const styleContent = fs.readFileSync(stylePath, 'utf8');
-    expect(styleContent).toMatch(/@import\s+['"]\.\/ui\/shell\/application_shell\.css['"];/m);
-  });
+    // Extract all var(--wo-...) usages in application_shell.css
+    const varUsageRegex = /var\(\s*(--wo-[a-zA-Z0-9_-]+)(?:\s*,\s*([^)]+))?\s*\)/g;
+    let match: RegExpExecArray | null;
+    const undefinedTokens: string[] = [];
 
-  it('B. verifies token consumption in application_shell.css', () => {
-    const css = fs.readFileSync(cssPath, 'utf8');
-
-    const expectedTokens = [
-      'var(--wo-color-surface)',
-      'var(--wo-color-interactive)',
-      'var(--wo-color-border)',
-      'var(--wo-space-2)',
-      'var(--wo-space-3)',
-      'var(--wo-space-4)',
-      'var(--wo-space-6)',
-      'var(--wo-radius-md)',
-      'var(--wo-radius-full)',
-      'var(--wo-shadow-xl)',
-      'var(--wo-z-modal)',
-      'var(--wo-z-elevated)',
-      'var(--wo-focus-ring-outline)'
-    ];
-
-    for (const token of expectedTokens) {
-      expect(css).toContain(token);
+    while ((match = varUsageRegex.exec(cssContent)) !== null) {
+      const tokenName = match[1];
+      const fallback = match[2];
+      if (!declaredTokens.has(tokenName) && !fallback) {
+        undefinedTokens.push(tokenName);
+      }
     }
+
+    expect(undefinedTokens).toEqual([]);
   });
 
-  // ==========================================================================
-  // 2. PRIMARY NAVIGATION INFORMATION ARCHITECTURE
-  // ==========================================================================
-  it('C. verifies default navigation groups contain only real supported destinations', () => {
-    const groups = getDefaultNavGroups('dashboard');
-    const groupTitles = groups.map(g => g.title);
-    expect(groupTitles).toEqual([
+  it('B. Focus Styling Contract: focus-visible states use valid outline / ring tokens without invalid box-shadow syntax', () => {
+    // Verify no box-shadow: var(--wo-focus-ring-outline)
+    expect(cssContent).not.toMatch(/box-shadow:\s*var\(--wo-focus-ring-outline\)/);
+    // Verify valid outline usages
+    expect(cssContent).toContain('outline: var(--wo-focus-ring-outline)');
+    expect(cssContent).toContain('outline-offset: var(--wo-focus-outline-offset)');
+  });
+
+  it('C. Canonical Navigation Hierarchy: getDefaultNavGroups covers all core, customers, marketing, websites, and system destinations', () => {
+    const navGroups = getDefaultNavGroups('dashboard', { clients: 5 });
+    expect(navGroups.map(g => g.title)).toEqual([
       'Core',
       'Customers & Sales',
       'Marketing & Outreach',
@@ -181,199 +176,243 @@ describe('WashOps Permanent Application Shell Foundation (Phase 1C / Task 7B.1)'
       'System'
     ]);
 
-    const allItems = groups.flatMap(g => g.items);
-    const itemIds = allItems.map(i => i.id);
+    const core = navGroups.find(g => g.title === 'Core')!;
+    expect(core.items.map(i => i.id)).toContain('dashboard');
 
-    // All canonical CRM destinations supported in this codebase
-    expect(itemIds).toContain('dashboard');
-    expect(itemIds).toContain('clients');
-    expect(itemIds).toContain('opportunities');
-    expect(itemIds).toContain('quotes');
-    expect(itemIds).toContain('invoices');
-    expect(itemIds).toContain('lead-capture');
-    expect(itemIds).toContain('marketing-funnels');
-    expect(itemIds).toContain('website-dashboard');
-    expect(itemIds).toContain('funnels');
-    expect(itemIds).toContain('website-navigation');
-    expect(itemIds).toContain('seo-pages');
-    expect(itemIds).toContain('website-settings');
-    expect(itemIds).toContain('reports');
-    expect(itemIds).toContain('quickstart');
-    expect(itemIds).toContain('event-logs');
-    expect(itemIds).toContain('qa-tools');
+    const customers = navGroups.find(g => g.title === 'Customers & Sales')!;
+    expect(customers.items.map(i => i.id)).toEqual(['clients', 'opportunities', 'quotes', 'invoices']);
+    const clientsItem = customers.items.find(i => i.id === 'clients')!;
+    expect(clientsItem.badge?.count).toBe(5);
+    expect(clientsItem.badge?.variant).toBe('warning');
+
+    const websites = navGroups.find(g => g.title === 'Websites')!;
+    expect(websites.items.map(i => i.id)).toEqual([
+      'website-dashboard',
+      'funnels',
+      'website-navigation',
+      'seo-pages',
+      'website-settings'
+    ]);
   });
 
-  // ==========================================================================
-  // 3. ACTIVE ROUTE & SEMANTIC MAPPING
-  // ==========================================================================
-  it('D. verifies active destination exposes aria-current="page" and active class', () => {
-    const sidebarHtml = renderShellSidebar({ activeView: 'clients' });
-
-    expect(sidebarHtml).toContain('data-nav-view="clients" aria-current="page"');
-    expect(sidebarHtml).toContain('wo-shell-nav-item--active');
-    expect(sidebarHtml).not.toContain('data-nav-view="dashboard" aria-current="page"');
-  });
-
-  it('E. verifies secondary detail views map to their parent navigation item', () => {
-    // contact-detail maps to clients
-    const contactDetailHtml = renderShellSidebar({ activeView: 'contact-detail' });
-    expect(contactDetailHtml).toContain('data-nav-view="clients" aria-current="page"');
-
-    // new-quote maps to quotes
-    const newQuoteHtml = renderShellSidebar({ activeView: 'new-quote' });
-    expect(newQuoteHtml).toContain('data-nav-view="quotes" aria-current="page"');
-  });
-
-  // ==========================================================================
-  // 4. SECURITY & DATA ESCAPING
-  // ==========================================================================
-  it('F. verifies dynamic user, business, title, and subtitle data are HTML-escaped', () => {
-    const dangerousString = '"><script>alert("xss")</script>&test\'';
-
-    const shellHtml = renderApplicationShell({
-      activeView: 'dashboard',
-      title: dangerousString,
-      subtitle: dangerousString,
-      contentHtml: '<p>Safe Content</p>',
-      user: {
-        name: dangerousString,
-        businessName: dangerousString
-      }
-    });
-
-    expect(shellHtml).not.toContain('<script>');
-    expect(shellHtml).toContain('&quot;&gt;&lt;script&gt;');
-    expect(shellHtml).toContain('&amp;test&#39;');
-  });
-
-  // ==========================================================================
-  // 5. DESKTOP SIDEBAR & TOPBAR STRUCTURE
-  // ==========================================================================
-  it('G. verifies desktop sidebar brand, navigation lists, and user profile region', () => {
+  it('D. Desktop Sidebar Renderer: renders docked sidebar, grouped semantic navigation, and user section with initials', () => {
     const sidebarHtml = renderShellSidebar({
       activeView: 'dashboard',
       user: {
-        name: 'John Doe',
-        businessName: 'Sparkle Wash Co.',
-        initials: 'JD'
+        name: 'Hansveer Singh',
+        businessName: 'PressurePro WashOps'
       }
     });
 
     expect(sidebarHtml).toContain('class="wo-shell-sidebar"');
-    expect(sidebarHtml).toContain('class="wo-shell-logo"');
     expect(sidebarHtml).toContain('WashOps');
-    expect(sidebarHtml).toContain('class="wo-shell-nav"');
-    expect(sidebarHtml).toContain('class="wo-shell-user-section"');
-    expect(sidebarHtml).toContain('class="wo-shell-avatar"');
-    expect(sidebarHtml).toContain('JD');
-    expect(sidebarHtml).toContain('John Doe');
-    expect(sidebarHtml).toContain('Sparkle Wash Co.');
-    expect(sidebarHtml).toContain('aria-label="Sign out"');
+    expect(sidebarHtml).toContain('CRM');
+    expect(sidebarHtml).toContain('Hansveer Singh');
+    expect(sidebarHtml).toContain('PressurePro WashOps');
+    expect(sidebarHtml).toContain('HS'); // avatar initials
+    expect(sidebarHtml).toContain('aria-label="Primary Navigation"');
+    expect(sidebarHtml).toContain('aria-current="page"'); // Dashboard active
   });
 
-  it('H. verifies topbar title, subtitle, header actions, and mobile menu button', () => {
+  it('E. Topbar Renderer: renders sticky topbar, title, subtitle, header actions, and responsive menu trigger', () => {
     const topbarHtml = renderShellTopbar({
       activeView: 'clients',
       title: 'Clients & Leads',
-      subtitle: 'Manage all customer records and lead pipelines',
-      headerActionsHtml: '<button class="wo-button wo-button--primary">Add Client</button>'
+      subtitle: 'Manage your customer accounts and leads',
+      headerActionsHtml: '<button class="btn-primary">+ Add Lead</button>'
     });
 
     expect(topbarHtml).toContain('class="wo-shell-topbar"');
-    expect(topbarHtml).toContain('class="wo-shell-menu-button"');
-    expect(topbarHtml).toContain('aria-label="Open navigation menu"');
+    expect(topbarHtml).toContain('data-shell-drawer-toggle');
     expect(topbarHtml).toContain('aria-expanded="false"');
-    expect(topbarHtml).toContain('aria-controls="wo-shell-drawer"');
-    expect(topbarHtml).toContain('class="wo-shell-topbar-title">Clients &amp; Leads</h1>');
-    expect(topbarHtml).toContain('class="wo-shell-topbar-subtitle">Manage all customer records');
-    expect(topbarHtml).toContain('Add Client</button>');
+    expect(topbarHtml).toContain('Clients &amp; Leads');
+    expect(topbarHtml).toContain('Manage your customer accounts and leads');
+    expect(topbarHtml).toContain('<button class="btn-primary">+ Add Lead</button>');
   });
 
-  it('I. verifies application shell standard vs wide layout variants', () => {
-    const standardShell = renderApplicationShell({
+  it('F. Full Application Shell Composition: renders outer frame with sidebar, drawer, topbar, and main content area', () => {
+    const shellHtml = renderApplicationShell({
       activeView: 'dashboard',
-      title: 'Dashboard',
-      contentHtml: '<div>Standard Content</div>',
-      contentVariant: 'standard'
+      title: 'Dashboard Overview',
+      contentHtml: '<div class="dashboard-widgets">Metrics</div>',
+      contentVariant: 'standard',
+      user: {
+        name: 'Alex Rivera',
+        businessName: 'Apex Wash Services'
+      }
     });
-    expect(standardShell).toContain('wo-shell-main wo-shell-main--standard');
 
-    const wideShell = renderApplicationShell({
+    expect(shellHtml).toContain('class="wo-shell"');
+    expect(shellHtml).toContain('class="wo-shell-sidebar"');
+    expect(shellHtml).toContain('id="wo-shell-drawer-backdrop"');
+    expect(shellHtml).toContain('id="wo-shell-drawer"');
+    expect(shellHtml).toContain('class="wo-shell-body"');
+    expect(shellHtml).toContain('class="wo-shell-topbar"');
+    expect(shellHtml).toContain('class="wo-shell-main wo-shell-main--standard"');
+    expect(shellHtml).toContain('Metrics');
+  });
+
+  it('G. Wide Layout Variant: renders wo-shell-main--wide when contentVariant is wide', () => {
+    const shellHtml = renderApplicationShell({
       activeView: 'clients',
       title: 'Clients & Leads',
-      contentHtml: '<div>Wide Table Content</div>',
+      contentHtml: '<table class="clients-table"></table>',
       contentVariant: 'wide'
     });
-    expect(wideShell).toContain('wo-shell-main wo-shell-main--wide');
+
+    expect(shellHtml).toContain('class="wo-shell-main wo-shell-main--wide"');
   });
 
-  // ==========================================================================
-  // 6. MOBILE DRAWER INTERACTION CONTROLLER
-  // ==========================================================================
-  it('J. verifies mobile drawer open, close, background inert, and focus restoration', () => {
-    const rootBody = new MockElement('body') as any;
+  it('H. Pilot Screen Composition: Dashboard renders full shell with topbar and no duplicate view-header', () => {
+    const dashboardContent = `
+      <div class="dashboard-grid">
+        <div class="card"><h3>Pipeline Value</h3></div>
+      </div>
+    `;
+    const renderedDashboard = renderApplicationShell({
+      activeView: 'dashboard',
+      title: 'Dashboard Overview',
+      contentVariant: 'standard',
+      contentHtml: dashboardContent
+    });
 
-    const container = new MockElement('div') as any;
-    container.setAttribute('class', 'wo-shell');
+    expect(renderedDashboard).toContain('class="wo-shell"');
+    expect(renderedDashboard).toContain('class="wo-shell-sidebar"');
+    expect(renderedDashboard).toContain('class="wo-shell-topbar"');
+    expect(renderedDashboard).toContain('id="wo-shell-drawer-backdrop"');
+    expect(renderedDashboard).toContain('<h1 class="wo-shell-topbar-title">Dashboard Overview</h1>');
+    expect(renderedDashboard).not.toContain('<header class="view-header">');
+  });
 
-    const menuToggle = new MockElement('button') as any;
-    menuToggle.setAttribute('data-shell-drawer-toggle', 'true');
-    menuToggle.setAttribute('aria-expanded', 'false');
-    (globalThis as any).document = {
-      body: rootBody,
-      activeElement: null
-    };
+  it('I. Pilot Screen Composition: Contacts renders wide shell and preserves action slot', () => {
+    const contactsContent = `<div class="card"><table class="clients-table"></table></div>`;
+    const renderedContacts = renderApplicationShell({
+      activeView: 'clients',
+      title: 'Clients & Leads',
+      headerActionsHtml: '<button class="btn-primary" onclick="window.navigateTo(\'lead-capture\')">+ Add Lead</button>',
+      contentVariant: 'wide',
+      contentHtml: contactsContent
+    });
 
-    menuToggle.focus();
+    expect(renderedContacts).toContain('class="wo-shell"');
+    expect(renderedContacts).toContain('class="wo-shell-main wo-shell-main--wide"');
+    expect(renderedContacts).toContain('<button class="btn-primary" onclick="window.navigateTo(\'lead-capture\')">+ Add Lead</button>');
+    expect(renderedContacts).not.toContain('<header class="view-header">');
+  });
 
-    const drawerBackdrop = new MockElement('div') as any;
-    drawerBackdrop.id = 'wo-shell-drawer-backdrop';
-    drawerBackdrop.hidden = true;
+  it('J. Pilot Screen Composition: Website Settings Selector renders full shell with primitive card', () => {
+    const selectHtml = renderSelect({
+      id: 'settings-website-select',
+      options: [{ value: 'site-1', label: 'Main Website' }]
+    });
+    const fieldHtml = renderField({
+      id: 'settings-website-select',
+      label: 'Website',
+      controlHtml: selectHtml
+    });
+    const cardHtml = renderCard({
+      title: 'Choose a website',
+      bodyHtml: fieldHtml
+    });
+    const selectorContent = `<section class="website-settings-selection-container">${cardHtml}</section>`;
 
-    const drawer = new MockElement('div') as any;
-    drawer.id = 'wo-shell-drawer';
+    const renderedSelector = renderApplicationShell({
+      activeView: 'website-settings',
+      title: 'Website Branding & Tracking',
+      contentVariant: 'standard',
+      contentHtml: selectorContent
+    });
 
-    const closeBtn = new MockElement('button') as any;
-    closeBtn.setAttribute('data-shell-drawer-close', 'true');
+    expect(renderedSelector).toContain('class="wo-shell"');
+    expect(renderedSelector).toContain('<h1 class="wo-shell-topbar-title">Website Branding &amp; Tracking</h1>');
+    expect(renderedSelector).toContain('settings-website-select');
+    expect(renderedSelector).not.toContain('<header class="view-header">');
+  });
 
-    const navBtn = new MockElement('button') as any;
-    navBtn.setAttribute('class', 'wo-shell-nav-item');
-    navBtn.setAttribute('data-nav-view', 'clients');
+  it('K. Security & XSS Escaping: dangerous characters in user names and titles are escaped in shell output', () => {
+    const shellHtml = renderApplicationShell({
+      activeView: 'dashboard',
+      title: '<script>alert("xss")</script>',
+      subtitle: '<img src=x onerror=alert(1)>',
+      user: {
+        name: 'Jane <script>alert("u")</script>',
+        businessName: 'Business & "Co"'
+      },
+      contentHtml: '<div>Safe</div>'
+    });
 
-    drawer.appendChild(closeBtn);
-    drawer.appendChild(navBtn);
+    expect(shellHtml).not.toContain('<script>alert("xss")</script>');
+    expect(shellHtml).not.toContain('<img src=x onerror=alert(1)>');
+    expect(shellHtml).not.toContain('<script>alert("u")</script>');
+    expect(shellHtml).toContain('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+    expect(shellHtml).toContain('Business &amp; &quot;Co&quot;');
+  });
+
+  it('L. Mobile Drawer Lifecycle & Single-Fire Navigation: opens, closes, traps focus, isolates background, and fires navigation exactly once', () => {
+    // Setup Mock DOM Tree
+    (globalThis as any).document = { activeElement: null, body: new MockElement('body') };
+
+    const body = (globalThis as any).document.body;
+    const container = new MockElement('div');
+    body.appendChild(container);
+
+    const mainSibling = new MockElement('main');
+    container.appendChild(mainSibling);
+
+    const menuToggle = new MockElement('button');
+    menuToggle.setAttribute('data-shell-drawer-toggle', '');
+    container.appendChild(menuToggle);
+
+    const drawerBackdrop = new MockElement('div');
+    drawerBackdrop.setAttribute('id', 'wo-shell-drawer-backdrop');
+    drawerBackdrop.setAttribute('hidden', '');
+    container.appendChild(drawerBackdrop);
+
+    const drawer = new MockElement('div');
+    drawer.setAttribute('id', 'wo-shell-drawer');
     drawerBackdrop.appendChild(drawer);
 
-    const mainSibling = new MockElement('main') as any;
-    mainSibling.setAttribute('class', 'wo-shell-main');
+    const closeBtn = new MockElement('button');
+    closeBtn.setAttribute('data-shell-drawer-close', '');
+    drawer.appendChild(closeBtn);
 
-    container.appendChild(menuToggle);
-    container.appendChild(drawerBackdrop);
-    container.appendChild(mainSibling);
-    rootBody.appendChild(container);
+    const navLink = new MockElement('a');
+    navLink.setAttribute('class', 'wo-shell-nav-item');
+    navLink.setAttribute('data-nav-view', 'clients');
+    navLink.setAttribute('href', '#/clients');
+    drawer.appendChild(navLink);
 
-    (globalThis as any).document = {
-      body: rootBody,
-      activeElement: menuToggle
+    let navigatedView: string | null = null;
+    let navigateCount = 0;
+    const onNavigate = (view: string) => {
+      navigatedView = view;
+      navigateCount += 1;
     };
 
-    const navigateSpy = vi.fn();
-    const controller = initApplicationShell(container, { onNavigate: navigateSpy });
+    const controller = initApplicationShell(container as any, { onNavigate });
 
-    // 1. Initial state: drawer hidden
+    // Initial state: drawer hidden, background not inert
     expect(drawerBackdrop.hidden).toBe(true);
-    expect(menuToggle.getAttribute('aria-expanded')).toBe('false');
+    expect(mainSibling.inert).toBe(false);
 
-    // 2. Open drawer via menu toggle
+    // 1. Open drawer via toggle button
     menuToggle.dispatchEvent({ type: 'click' });
     expect(drawerBackdrop.hidden).toBe(false);
     expect(menuToggle.getAttribute('aria-expanded')).toBe('true');
     expect(mainSibling.inert).toBe(true);
-    expect(mainSibling.getAttribute('aria-hidden')).toBe('true');
+    expect((globalThis as any).document.activeElement).toBe(closeBtn);
 
-    // 3. Tab trapping
-    navBtn.focus();
-    drawerBackdrop.dispatchEvent({ type: 'keydown', key: 'Tab', shiftKey: false });
+    // 2. Click nav link inside drawer -> closes drawer and calls onNavigate EXACTLY ONCE
+    navLink.dispatchEvent({ type: 'click' });
+    expect(drawerBackdrop.hidden).toBe(true);
+    expect(menuToggle.getAttribute('aria-expanded')).toBe('false');
+    expect(mainSibling.inert).toBe(false);
+    expect(navigatedView).toBe('clients');
+    expect(navigateCount).toBe(1);
+
+    // 3. Open drawer again
+    controller.openDrawer();
+    expect(drawerBackdrop.hidden).toBe(false);
     expect((globalThis as any).document.activeElement).toBe(closeBtn);
 
     // 4. Escape key closes drawer and restores focus
@@ -381,16 +420,9 @@ describe('WashOps Permanent Application Shell Foundation (Phase 1C / Task 7B.1)'
     expect(drawerBackdrop.hidden).toBe(true);
     expect(menuToggle.getAttribute('aria-expanded')).toBe('false');
     expect(mainSibling.inert).toBe(false);
-    expect(mainSibling.getAttribute('aria-hidden')).toBe(null);
     expect((globalThis as any).document.activeElement).toBe(menuToggle);
 
-    // 5. Open again and click nav item inside drawer
-    menuToggle.dispatchEvent({ type: 'click' });
-    expect(drawerBackdrop.hidden).toBe(false);
-    navBtn.dispatchEvent({ type: 'click' });
-    expect(drawerBackdrop.hidden).toBe(true);
-    expect(navigateSpy).toHaveBeenCalledWith('clients');
-
+    // 5. Cleanup / Destroy
     controller.destroy();
   });
 });

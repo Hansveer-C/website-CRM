@@ -58,7 +58,7 @@ export interface ShellNavItem {
   id: string;
   label: string;
   iconSvg: string;
-  onClickAction?: string;
+  href?: string;
   badge?: ShellNavBadge;
   disabled?: boolean;
 }
@@ -111,7 +111,7 @@ export function getDefaultNavGroups(activeView: string, badgeCounts: Record<stri
           id: 'dashboard',
           label: 'Dashboard',
           iconSvg: SHELL_ICONS.dashboard,
-          onClickAction: "window.navigateTo('dashboard')"
+          href: '#/dashboard'
         }
       ]
     },
@@ -122,26 +122,26 @@ export function getDefaultNavGroups(activeView: string, badgeCounts: Record<stri
           id: 'clients',
           label: 'Clients & Leads',
           iconSvg: SHELL_ICONS.clients,
-          onClickAction: "window.navigateTo('clients')",
+          href: '#/clients',
           badge: clientsBadgeCount > 0 ? { count: clientsBadgeCount, variant: 'warning' } : undefined
         },
         {
           id: 'opportunities',
           label: 'Opportunities',
           iconSvg: SHELL_ICONS.opportunities,
-          onClickAction: "window.navigateTo('opportunities')"
+          href: '#/opportunities'
         },
         {
           id: 'quotes',
           label: 'Quotes',
           iconSvg: SHELL_ICONS.quotes,
-          onClickAction: "window.navigateTo('quotes')"
+          href: '#/quotes'
         },
         {
           id: 'invoices',
           label: 'Invoices',
           iconSvg: SHELL_ICONS.invoices,
-          onClickAction: "window.navigateTo('invoices')"
+          href: '#/invoices'
         }
       ]
     },
@@ -152,13 +152,13 @@ export function getDefaultNavGroups(activeView: string, badgeCounts: Record<stri
           id: 'lead-capture',
           label: 'Lead Capture',
           iconSvg: SHELL_ICONS.leadCapture,
-          onClickAction: "window.navigateTo('lead-capture')"
+          href: '#/lead-capture'
         },
         {
           id: 'marketing-funnels',
           label: 'Ad Landing Pages',
           iconSvg: SHELL_ICONS.marketingFunnels,
-          onClickAction: "window.navigateTo('marketing-funnels')"
+          href: '#/marketing-funnels'
         }
       ]
     },
@@ -169,31 +169,31 @@ export function getDefaultNavGroups(activeView: string, badgeCounts: Record<stri
           id: 'website-dashboard',
           label: 'My Website',
           iconSvg: SHELL_ICONS.websiteDashboard,
-          onClickAction: "window.navigateTo('website-dashboard')"
+          href: '#/website-dashboard'
         },
         {
           id: 'funnels',
           label: 'Site Pages',
           iconSvg: SHELL_ICONS.sitePages,
-          onClickAction: "window.openWebsiteManagementView ? window.openWebsiteManagementView('funnels') : window.navigateTo('funnels')"
+          href: '#/funnels'
         },
         {
           id: 'website-navigation',
           label: 'Navigation',
           iconSvg: SHELL_ICONS.navigation,
-          onClickAction: "window.openWebsiteManagementView ? window.openWebsiteManagementView('website-navigation') : window.navigateTo('website-navigation')"
+          href: '#/website-navigation'
         },
         {
           id: 'seo-pages',
           label: 'SEO Pages',
           iconSvg: SHELL_ICONS.seoPages,
-          onClickAction: "window.openWebsiteManagementView ? window.openWebsiteManagementView('seo-pages') : window.navigateTo('seo-pages')"
+          href: '#/seo-pages'
         },
         {
           id: 'website-settings',
           label: 'Settings',
           iconSvg: SHELL_ICONS.websiteSettings,
-          onClickAction: "window.openWebsiteSettings ? window.openWebsiteSettings() : window.navigateTo('website-settings')"
+          href: '#/website-settings'
         }
       ]
     },
@@ -204,25 +204,25 @@ export function getDefaultNavGroups(activeView: string, badgeCounts: Record<stri
           id: 'reports',
           label: 'Reports & Insights',
           iconSvg: SHELL_ICONS.reports,
-          onClickAction: "window.navigateTo('reports')"
+          href: '#/reports'
         },
         {
           id: 'quickstart',
           label: 'Quickstart Guide',
           iconSvg: SHELL_ICONS.quickstart,
-          onClickAction: "window.navigateTo('quickstart')"
+          href: '#/quickstart'
         },
         {
           id: 'event-logs',
           label: 'Event Logs',
           iconSvg: SHELL_ICONS.eventLogs,
-          onClickAction: "window.navigateTo('event-logs')"
+          href: '#/event-logs'
         },
         {
           id: 'qa-tools',
           label: 'QA Tools',
           iconSvg: SHELL_ICONS.qaTools,
-          onClickAction: "window.navigateTo('qa-tools')"
+          href: '#/qa-tools'
         }
       ]
     }
@@ -247,7 +247,7 @@ export function renderShellSidebar(opts: ShellSidebarOptions): string {
 
       const activeClass = isActive ? ' wo-shell-nav-item--active' : '';
       const currentAttr = isActive ? ' aria-current="page"' : '';
-      const actionAttr = item.onClickAction ? ` onclick="${item.onClickAction}"` : '';
+      const hrefAttr = item.href ?? `(#/${item.id})`;
 
       let badgeHtml = '';
       if (item.badge && item.badge.count > 0) {
@@ -257,13 +257,13 @@ export function renderShellSidebar(opts: ShellSidebarOptions): string {
 
       return `
         <li>
-          <button type="button" class="wo-shell-nav-item${activeClass}" data-nav-view="${escapeHtmlText(item.id)}"${currentAttr}${actionAttr}>
+          <a href="${escapeHtmlText(hrefAttr)}" class="wo-shell-nav-item${activeClass}" data-nav-view="${escapeHtmlText(item.id)}"${currentAttr}>
             <span class="wo-shell-nav-item-content">
               ${item.iconSvg}
               <span class="wo-shell-nav-label">${escapeHtmlText(item.label)}</span>
             </span>
             ${badgeHtml}
-          </button>
+          </a>
         </li>
       `.trim();
     }).join('');
@@ -298,7 +298,7 @@ export function renderShellSidebar(opts: ShellSidebarOptions): string {
 
   let headerHtml = `
     <div class="wo-shell-brand">
-      <a href="#/dashboard" class="wo-shell-logo" onclick="window.navigateTo ? window.navigateTo('dashboard') : undefined">
+      <a href="#/dashboard" class="wo-shell-logo">
         <span>WashOps</span>
         <span class="wo-shell-logo-badge">CRM</span>
       </a>
@@ -308,7 +308,7 @@ export function renderShellSidebar(opts: ShellSidebarOptions): string {
   if (isDrawer) {
     headerHtml = `
       <div class="wo-shell-drawer-header">
-        <a href="#/dashboard" class="wo-shell-logo" onclick="window.navigateTo ? window.navigateTo('dashboard') : undefined">
+        <a href="#/dashboard" class="wo-shell-logo">
           <span>WashOps</span>
           <span class="wo-shell-logo-badge">CRM</span>
         </a>
@@ -563,13 +563,16 @@ export function initApplicationShell(
       return;
     }
 
-    // Nav item clicked inside drawer -> close drawer
+    // Nav item clicked inside drawer -> close drawer and single-fire navigation if programmatic handler supplied
     const navItem = target.closest<HTMLElement>('.wo-shell-nav-item');
     if (navItem && drawer && drawer.contains(navItem)) {
-      const view = navItem.getAttribute('data-nav-view');
       closeDrawer();
-      if (view && opts.onNavigate) {
-        opts.onNavigate(view);
+      if (opts.onNavigate) {
+        e.preventDefault();
+        const view = navItem.getAttribute('data-nav-view');
+        if (view) {
+          opts.onNavigate(view);
+        }
       }
     }
   };
