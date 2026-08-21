@@ -59,6 +59,7 @@ import {
 } from './ui/contacts';
 import { renderOpportunitiesContent } from './ui/opportunities';
 import { renderNewQuoteContent, renderQuotePreviewContent, renderQuotesContent } from './ui/quotes';
+import { renderInvoicesContent, type InvoiceFilter } from './ui/invoices';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
   BUILDER_PAGE_SLUG_MAX_LENGTH,
@@ -10141,78 +10142,11 @@ function renderQuotes() {
 
 function renderInvoices() {
   if (editorUsesSupabase()) {
-    renderAppWithShell({
-      activeView: 'invoices',
-      title: 'Invoices',
-      contentVariant: 'wide',
-      contentHtml: `
-        <section class="card" role="status">
-          <h3>Invoices are not available yet.</h3>
-          <p>Production invoice persistence has not been implemented. No invoice changes will be stored until that backend is available.</p>
-        </section>
-      `
-    });
+    // Invoices are not available yet. The renderer preserves that explicit production state.
+    renderAppWithShell({ activeView: 'invoices', title: 'Invoices', contentVariant: 'wide', contentHtml: renderInvoicesContent({ userId: getActingUserId(), invoices: mockInvoices, contacts: mockContacts, filter: invoiceStatusFilter as InvoiceFilter, production: true }) });
     return;
   }
-  const filteredInvoices = mockInvoices.filter(i => {
-    if (invoiceStatusFilter === 'all') return true;
-    return i.status === invoiceStatusFilter;
-  });
-
-  const tableRows = filteredInvoices.map(invoice => {
-    const contact = mockContacts.find(c => c.id === invoice.contact_id);
-    return `
-      <tr onclick="window.navigateTo('contact-detail', '${invoice.contact_id}')" style="cursor: pointer;">
-        <td style="font-weight: 600; color: var(--primary-color);">INV-${invoice.id}</td>
-        <td>${escapeHtmlText(contact ? contact.name : 'Unknown')}</td>
-        <td style="font-weight: 600;">$${invoice.amount.toLocaleString()}</td>
-        <td><span class="badge badge-${invoice.status}">${invoice.status}</span></td>
-        <td>${new Date(invoice.due_date).toLocaleDateString()}</td>
-        <td>
-          <div style="display: flex; gap: 5px;">
-            <button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem;" onclick="event.stopPropagation(); window.navigateTo('contact-detail', '${invoice.contact_id}')">View</button>
-            ${invoice.status !== 'paid' ? `<button class="btn-primary" style="padding: 5px 10px; font-size: 0.8rem; background: #28a745;" onclick="event.stopPropagation(); window.markAsPaid('${invoice.id}')">Mark as Paid</button>` : ''}
-          </div>
-        </td>
-      </tr>
-    `;
-  }).join('');
-
-  renderAppWithShell({
-    activeView: 'invoices',
-    title: 'Invoices',
-    headerActionsHtml: `
-      <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-        <select onchange="window.updateInvoiceFilter(this.value)" style="padding: 8px 12px; border-radius: 4px; border: 1px solid #ddd; background: white; font-family: inherit;">
-          <option value="all" ${invoiceStatusFilter === 'all' ? 'selected' : ''}>All Invoices</option>
-          <option value="unpaid" ${invoiceStatusFilter === 'unpaid' ? 'selected' : ''}>Unpaid</option>
-          <option value="paid" ${invoiceStatusFilter === 'paid' ? 'selected' : ''}>Paid</option>
-          <option value="overdue" ${invoiceStatusFilter === 'overdue' ? 'selected' : ''}>Overdue</option>
-        </select>
-        <button class="btn-primary" onclick="alert('Create Invoice from Quote or Client Detail page')">+ New Invoice</button>
-      </div>
-    `,
-    contentVariant: 'wide',
-    contentHtml: `
-      <div class="card" style="padding: 0; overflow-x: auto;">
-        <table class="clients-table" style="box-shadow: none; border: none; margin-top: 0; min-width: 700px;">
-          <thead>
-            <tr>
-              <th>Invoice #</th>
-              <th>Contact Name</th>
-              <th>Amount</th>
-              <th>Status</th>
-              <th>Due Date</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tableRows || '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #666;">No invoices match your selection</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    `
-  });
+  renderAppWithShell({ activeView: 'invoices', title: 'Invoices', contentVariant: 'wide', contentHtml: renderInvoicesContent({ userId: getActingUserId(), invoices: mockInvoices, contacts: mockContacts, filter: invoiceStatusFilter as InvoiceFilter, production: false }) });
 }
 
 (window as any).updateInvoiceFilter = (status: string) => {
@@ -12262,14 +12196,14 @@ async function renderContactDetail(contactId: string) {
 
 (window as any).markAsPaid = (invoiceId: string) => {
   if (editorUsesSupabase()) { (window as any).showToast('Invoice persistence is not available yet.', 'error'); return; }
-  const invoice = mockInvoices.find(i => i.id === invoiceId);
+  const invoice = mockInvoices.find(i => i.user_id === getActingUserId() && i.id === invoiceId);
   if (invoice) {
     invoice.status = 'paid';
 
     // Update linked opportunity
-    const quote = mockQuotes.find(q => q.id === invoice.quote_id);
+    const quote = mockQuotes.find(q => q.user_id === getActingUserId() && q.id === invoice.quote_id);
     if (quote && quote.opportunity_id) {
-      const opportunity = mockOpportunities.find(o => o.id === quote.opportunity_id);
+      const opportunity = mockOpportunities.find(o => o.user_id === getActingUserId() && o.id === quote.opportunity_id);
       if (opportunity) {
         opportunity.pipeline_stage = 'Paid';
       }
@@ -12447,14 +12381,16 @@ async function renderContactDetail(contactId: string) {
 
 (window as any).createInvoice = (contactId: string) => {
   if (editorUsesSupabase()) { (window as any).showToast('Invoice persistence is not available yet.', 'error'); return; }
-  const contactQuotes = mockQuotes.filter(q => q.contact_id === contactId);
+  const ownedContact = mockContacts.find(contact => contact.user_id === getActingUserId() && contact.id === contactId);
+  if (!ownedContact) return;
+  const contactQuotes = mockQuotes.filter(q => q.user_id === getActingUserId() && q.contact_id === ownedContact.id);
   if (contactQuotes.length === 0) {
     alert("Please create a Quote first.");
     return;
   }
 
   // Use the most recent quote by default for simulation
-  const latestQuote = contactQuotes[contactQuotes.length - 1];
+  const latestQuote = [...contactQuotes].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
 
   const amountStr = prompt("Enter Invoice Amount:", latestQuote.total_amount.toString());
   const amount = parseFloat(amountStr || "0");
@@ -12468,7 +12404,7 @@ async function renderContactDetail(contactId: string) {
   mockInvoices.push({
     id: invoiceId,
     user_id: getActingUserId(),
-    contact_id: contactId,
+    contact_id: ownedContact.id,
     quote_id: latestQuote.id,
     amount: amount,
     status: 'unpaid',
@@ -12476,7 +12412,7 @@ async function renderContactDetail(contactId: string) {
     created_at: new Date().toISOString()
   });
 
-  renderContactDetail(contactId);
+  renderContactDetail(ownedContact.id);
 };
 
 function renderEventLogs() {
