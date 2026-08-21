@@ -45,6 +45,12 @@ import {
   type ApplicationShellOptions
 } from './ui';
 import {
+  createDashboardLoadingShellOptions,
+  createDashboardShellOptions,
+  createDashboardViewModel,
+  type DashboardDataAvailability
+} from './ui/dashboard';
+import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
   BUILDER_PAGE_SLUG_MAX_LENGTH,
   BUILDER_SEO_DESCRIPTION_MAX_LENGTH,
@@ -2139,6 +2145,13 @@ const CRM_DATA_VIEWS = new Set([
 ]);
 
 function renderCrmDataLoading(view: string): void {
+  if (view === 'dashboard') {
+    renderAppWithShell({
+      ...createDashboardLoadingShellOptions(),
+      user: getCurrentShellUser()
+    });
+    return;
+  }
   renderAppWithShell({
     activeView: view,
     title: 'Loading CRM data…',
@@ -2422,9 +2435,18 @@ function renderAppWithShell(options: ApplicationShellOptions): void {
 }
 
 function renderDashboard() {
-  const now = new Date();
-
   const userId = getActingUserId();
+
+  const fixtureState = browserFixturesEnabled
+    ? new URLSearchParams(window.location.search).get('dashboardState')
+    : null;
+  if (fixtureState === 'loading') {
+    renderAppWithShell({
+      ...createDashboardLoadingShellOptions(),
+      user: getCurrentShellUser()
+    });
+    return;
+  }
 
   // 🏁 WB.6.1: Check for Onboarding
   const alreadySeenOnboarding = !!window.localStorage.getItem('onboarding_seen');
@@ -2458,163 +2480,29 @@ function renderDashboard() {
     });
   }
 
-  // Top Level Metrics
-  const openOpportunities = mockOpportunities.filter(o => o.user_id === userId && o.status === 'open');
-  const pipelineValue = openOpportunities.reduce((sum, o) => sum + o.value, 0);
-  const openCount = openOpportunities.length;
-
-  const userOpps = mockOpportunities.filter(o => o.user_id === userId);
-  const totalCount = userOpps.length;
-  const wonCount = userOpps.filter(o => o.status === 'won').length;
-  const conversionRate = totalCount > 0 ? (wonCount / totalCount) * 100 : 0;
-
-  // 1. Revenue by Stage (Only Open/Won)
-  const stages = mockPipelines[0].stages;
-  const revenueByStage = stages.map(stage => {
-    const value = mockOpportunities
-      .filter(o => o.pipeline_stage === stage && (o.status === 'open' || o.status === 'won'))
-      .reduce((sum, o) => sum + o.value, 0);
-    return { stage, value };
-  }).filter(s => s.value > 0);
-
-  const maxRevenue = Math.max(...revenueByStage.map(s => s.value), 1);
-
-  // 2. Leads by Source
-  const sourceMap: Record<string, number> = {};
-  mockContacts.forEach(c => {
-    sourceMap[c.source] = (sourceMap[c.source] || 0) + 1;
+  const fixtureEmpty = fixtureState === 'empty';
+  const availability: DashboardDataAvailability = editorUsesSupabase()
+    ? {
+      contacts: crmProductionHydrator.state.entities.contacts === 'ready',
+      opportunities: crmProductionHydrator.state.entities.opportunities === 'ready',
+      activities: crmProductionHydrator.state.entities.activities === 'ready',
+      quotes: crmProductionHydrator.state.entities.quotes === 'ready'
+    }
+    : { contacts: true, opportunities: true, activities: true, quotes: true };
+  const model = createDashboardViewModel({
+    userId,
+    now: new Date(),
+    contacts: fixtureEmpty ? [] : mockContacts,
+    opportunities: fixtureEmpty ? [] : mockOpportunities,
+    activities: fixtureEmpty ? [] : mockActivities,
+    quotes: fixtureEmpty ? [] : mockQuotes,
+    pipelineStages: mockPipelines[0]?.stages ?? [],
+    availability
   });
-  const leadsBySource = Object.entries(sourceMap).map(([source, count]) => ({ source, count }));
-  const maxLeads = Math.max(...leadsBySource.map(s => s.count), 1);
-
-  // 3. Overdue Tasks
-  const overdueTasks = mockActivities.filter((a: Activity) => !a.completed && new Date(a.due_date) < now);
-
-  // 4. Website Performance Metrics
-  const websiteLeads = mockContacts.filter(c => c.source.toLowerCase().includes('website') || c.source.toLowerCase().includes('search') || c.source.toLowerCase().includes('ad')).length;
-  const formSubmissions = mockContacts.length > 0 ? Math.floor(websiteLeads * 1.5) + 3 : 0;
-  const topPageName = mockPages.length > 0 ? mockPages[Math.floor(Math.random() * Math.min(mockPages.length, 3))].name : 'Home';
-
-  const dashboardContent = `
-    <div class="dashboard-grid" style="grid-template-columns: repeat(4, 1fr);">
-      <div class="card">
-        <small style="color: #666;">Cash in Pipeline</small>
-        <h3>Pipeline Value</h3>
-        <p class="value" style="color: var(--primary-color);">$${pipelineValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
-      </div>
-      <div class="card">
-        <small style="color: #666;">Action Required</small>
-        <h3>Open Leads</h3>
-        <p class="value">${openCount}</p>
-      </div>
-      <div class="card">
-        <small style="color: #666;">Success Rate</small>
-        <h3>Conv. Rate</h3>
-        <p class="value">${conversionRate.toFixed(1)}%</p>
-      </div>
-      <div class="card" style="border-bottom: 4px solid #ff4444;">
-        <small style="color: #666;">Attention Needed</small>
-        <h3 style="color: #ff4444;">Overdue</h3>
-        <p class="value" style="color: #ff4444;">${overdueTasks.length}</p>
-      </div>
-    </div>
-
-    <div class="stats-grid" style="margin-top: 30px;">
-      <div class="card">
-        <h3>Revenue by Pipeline Stage</h3>
-        <div class="chart-container" style="margin-top: 20px;">
-          ${revenueByStage.map(s => `
-            <div class="report-item">
-              <div class="report-item-header">
-                <span>${s.stage}</span>
-                <span style="font-weight: 600;">$${s.value.toLocaleString()}</span>
-              </div>
-              <div class="visual-bar-bg">
-                <div class="visual-bar-fill" style="width: ${(s.value / maxRevenue) * 100}%"></div>
-              </div>
-            </div>
-          `).join('') || '<p style="color: #666; font-style: italic; padding: 20px;">No revenue data for active stages</p>'}
-        </div>
-      </div>
-      <div class="card">
-        <h3>Lead Sources Performance</h3>
-        <div class="chart-container" style="margin-top: 20px;">
-          ${leadsBySource.map(s => `
-            <div class="report-item">
-              <div class="report-item-header">
-                <span>${escapeHtmlText(s.source)}</span>
-                <span style="font-weight: 600;">${s.count} Leads</span>
-              </div>
-              <div class="visual-bar-bg">
-                <div class="visual-bar-fill" style="width: ${(s.count / maxLeads) * 100}%; background: #6c757d;"></div>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-
-      <div class="card" style="display: flex; flex-direction: column;">
-        <h3>Website Performance</h3>
-        <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 20px; flex: 1;">
-
-          <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid var(--primary-color);">
-            <small style="color: #64748b; font-weight: 600; text-transform: uppercase;">Total Leads Acquired</small>
-            <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b; margin-top: 5px;">${websiteLeads}</div>
-          </div>
-
-          <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid #10b981;">
-            <small style="color: #64748b; font-weight: 600; text-transform: uppercase;">Form Submissions</small>
-            <div style="font-size: 1.8rem; font-weight: 700; color: #1e293b; margin-top: 5px;">${formSubmissions}</div>
-          </div>
-
-          <div style="background: #f8fafc; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b;">
-            <small style="color: #64748b; font-weight: 600; text-transform: uppercase;">Top Converting Page</small>
-            <div style="font-size: 1.2rem; font-weight: 700; color: #1e293b; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${topPageName}</div>
-          </div>
-
-        </div>
-      </div>
-
-    </div>
-
-    ${overdueTasks.length > 0 ? `
-      <div class="card" style="margin-top: 30px; border: 1px solid #ffcccc;">
-        <h3 style="color: #cc0000; display: flex; align-items: center; gap: 10px;">
-           🛑 Action Item: Overdue Tasks
-        </h3>
-        <table class="clients-table" style="box-shadow: none; border: 1px solid #eee; margin-top: 20px;">
-          <thead>
-            <tr>
-              <th>Contact</th>
-              <th>Task</th>
-              <th>Due Date</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${overdueTasks.map((task: Activity) => {
-  const contact = mockContacts.find(c => c.id === task.contact_id);
-  return `
-                <tr style="background: #fffafa;">
-                  <td style="font-weight: 600;">${escapeHtmlText(contact ? contact.name : 'Unknown')}</td>
-                  <td>${escapeHtmlText(task.description)}</td>
-                  <td style="color: #ff4444; font-weight: 500;">${new Date(task.due_date).toLocaleDateString()}</td>
-                  <td><button class="btn-primary" style="padding: 6px 12px; font-size: 0.8rem; background: #ff4444; border-radius: 4px;">Resolve</button></td>
-                </tr>
-              `;
-}).join('')}
-          </tbody>
-        </table>
-      </div>
-    ` : ''}
-  `;
 
   renderAppWithShell({
-    activeView: 'dashboard',
-    title: 'Dashboard Overview',
-    contentVariant: 'standard',
-    user: getCurrentShellUser(),
-    contentHtml: dashboardContent
+    ...createDashboardShellOptions(model),
+    user: getCurrentShellUser()
   });
 }
 
