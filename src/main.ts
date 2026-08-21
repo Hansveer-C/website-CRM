@@ -12242,11 +12242,17 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).createQuote = (contactId: string) => {
-  (window as any).newQuoteContactId = contactId;
+  const userId = getActingUserId();
+  const ownedContact = mockContacts.find(contact => contact.user_id === userId && contact.id === contactId);
+  if (!ownedContact) {
+    (window as any).showToast('That contact is unavailable for this account.', 'error');
+    return;
+  }
+  (window as any).newQuoteContactId = ownedContact.id;
 
   // Try to find the latest open opportunity for this contact
   const activeOpp = mockOpportunities
-    .filter(o => o.contact_id === contactId && o.status === 'open')
+    .filter(o => o.user_id === userId && o.contact_id === ownedContact.id && o.status === 'open')
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
 
   (window as any).newQuoteOpportunityId = activeOpp ? activeOpp.id : '';

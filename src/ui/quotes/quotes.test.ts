@@ -37,4 +37,12 @@ describe('WashOps quote workflow', () => {
     const main = readFileSync(fileURLToPath(new URL('../../main.ts', import.meta.url)), 'utf8');
     expect(main).toContain("mockQuotes.find(q => q.user_id === getActingUserId() && q.id === quoteId)"); expect(main).toContain("mockQuoteItems.filter(i => i.user_id === getActingUserId() && i.quote_id === quoteId && i.tier === tier)"); expect(main).toContain("mockOpportunities.find(o => o.user_id === getActingUserId() && o.id === quote.opportunity_id)");
   });
+  it('keeps Contact Detail createQuote contact and latest-open-opportunity selection tenant-scoped', () => {
+    const main = readFileSync(fileURLToPath(new URL('../../main.ts', import.meta.url)), 'utf8');
+    const createQuote = main.slice(main.indexOf('(window as any).createQuote'), main.indexOf('(window as any).markAsPaid'));
+    expect(createQuote).toContain('mockContacts.find(contact => contact.user_id === userId && contact.id === contactId)');
+    expect(createQuote).toContain("o.user_id === userId && o.contact_id === ownedContact.id && o.status === 'open'");
+    expect(createQuote).toContain("new Date(b.created_at).getTime() - new Date(a.created_at).getTime()");
+    expect(createQuote).toContain("newQuoteOpportunityId = activeOpp ? activeOpp.id : ''");
+  });
 });
