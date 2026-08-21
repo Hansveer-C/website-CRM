@@ -26,7 +26,15 @@ describe('WashOps opportunities pipeline', () => {
   });
   it('renders stage empty states and honest production read-only presentation', () => {
     const html = renderOpportunitiesContent({ ...base, opportunities: [], editable: false });
-    expect(html).toContain('No opportunities'); expect(html).toContain('Read-only in production'); expect(html).not.toContain('draggable="true"');
+    expect(html).toContain('No opportunities'); expect(html).toContain('Read-only in production'); expect(html).not.toContain('draggable="true"'); expect(html).not.toContain('window.allowDrop'); expect(html).not.toContain('window.drop'); expect(html).not.toContain('window.updateOpportunityField');
+  });
+  it('wires editable stages to the existing tenant-safe drag and drop path', () => {
+    const html = renderOpportunitiesContent(base);
+    expect(html).toContain('data-stage="New Lead"'); expect(html).toContain('ondragover="window.allowDrop(event)"'); expect(html).toContain('ondrop="window.drop(event, this.dataset.stage)"'); expect(html).toContain('draggable="true"');
+  });
+  it('keeps card keyboard navigation on the card, not its editable value input', () => {
+    const html = renderOpportunitiesContent(base);
+    expect(html).toContain("onkeydown=\"if(event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' '))"); expect(html).toContain('window.updateOpportunityField');
   });
   it('composes in one shell and preserves contact-detail navigation', () => {
     const content = renderOpportunitiesContent(base); const html = renderApplicationShell({ activeView: 'opportunities', title: 'Pipeline', contentHtml: content, contentVariant: 'wide' });
