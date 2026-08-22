@@ -75,7 +75,10 @@ import {
   renderSitePagesContent,
   renderSitePageDetail,
   renderSitePageDetailError,
-  renderSitePageDetailLoading
+  renderSitePageDetailLoading,
+  getWebsiteScopedEffectiveRoutes,
+  renderWebsiteNavigationContent,
+  type WebsiteNavigationModel
 } from './ui/website-management';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
@@ -182,6 +185,8 @@ import { BuilderUnifiedPublicationController } from './builder_unified_publicati
 import { SupabaseBuilderUnifiedPublicationRepository } from './builder_unified_publication_repository_supabase';
 import { renderUnifiedPublishModal } from './builder_unified_publication_ui';
 import type { NavigationMenuScope } from './builder_site_navigation_domain';
+import { validateNavigationItem } from './builder_site_navigation_domain';
+import { generateNavigationUuid } from './builder_site_navigation_ui';
 import { WebsiteDashboardController, type WebsiteDashboardCoreData } from './website_dashboard_controller';
 import { getWebsiteScopedPages, resolveWebsiteHomepage, type WebsiteDashboardModel, type WebsiteDashboardSummaryInput } from './website_dashboard_model';
 import { createBrowserCallSimulator } from './browser_call_simulation';
@@ -4274,6 +4279,14 @@ function getActiveBuilderWebsite(): Website | undefined {
   return owned.length === 1 ? owned[0] : undefined;
 }
 
+function getActiveNavigationWebsite(): Website | undefined {
+  const userId = getActingUserId();
+  if (activeDashboardWebsiteId) {
+    return mockWebsites.find(website => website.id === activeDashboardWebsiteId && website.user_id === userId);
+  }
+  return getActiveBuilderWebsite();
+}
+
 function getActiveSettingsWebsite(): Website | undefined {
   const userId = getActingUserId();
   const explicitWebsiteId = currentView === 'website-settings'
@@ -4294,7 +4307,7 @@ function getBuilderNewPageContext(): BuilderNewPageContext {
     : '';
   return {
     actingUserId,
-    website: getActiveBuilderWebsite(),
+    website: currentView === 'website-navigation' ? getActiveNavigationWebsite() : getActiveBuilderWebsite(),
     websiteRoutes: mockWebsiteRoutes,
     funnels: mockFunnels,
     pages: mockPages,
@@ -4599,7 +4612,8 @@ export function getBuilderPageRouteController(): BuilderPageRouteController {
   });
   if (context.website?.id) {
     builderPageRouteController.hydrate(context.website.id).then(() => {
-      renderBuilder();
+      if (currentView === 'website-navigation') renderWebsiteNavigation();
+      else if (currentView === 'builder') renderBuilder();
     });
   }
   return builderPageRouteController;
@@ -4717,11 +4731,11 @@ let builderNavigationUiManager: BuilderNavigationUiManager | null = null;
 let builderSiteNavigationIdentity = '';
 
 function getNavUiContext(): NavigationUiContext | null {
-  const website = getActiveBuilderWebsite();
+  const website = currentView === 'website-navigation' ? getActiveNavigationWebsite() : getActiveBuilderWebsite();
   if (!website) return null;
 
   const routeController = getBuilderPageRouteController();
-  const effectiveRoutes = routeController.getState().effectiveRoutes;
+  const effectiveRoutes = getWebsiteScopedEffectiveRoutes(website.id, routeController.getState().effectiveRoutes);
   const websiteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
   const associatedFunnelIds = new Set<string>();
   if (website.homepage_funnel_id) associatedFunnelIds.add(website.homepage_funnel_id);
@@ -4748,7 +4762,7 @@ function getNavUiContext(): NavigationUiContext | null {
 }
 
 export function getBuilderSiteNavigationManager(): BuilderNavigationUiManager {
-  const website = getActiveBuilderWebsite();
+  const website = currentView === 'website-navigation' ? getActiveNavigationWebsite() : getActiveBuilderWebsite();
   const userId = getActingUserId();
   const identity = `${userId}:${website?.id ?? ''}`;
   if (builderNavigationUiManager && builderSiteNavigationIdentity === identity && builderSiteNavigationController) {
@@ -9549,6 +9563,48 @@ function renderWebsiteNavigation() {
     renderWebsiteRepositoryUnavailable('website-navigation');
     return;
   }
+  const managedWebsite = website;
+  const routeController = getBuilderPageRouteController();
+  const routeState = routeController.getState();
+  if (routeState.websiteId !== managedWebsite.id || routeState.isLoading) {
+    renderAppWithShell({ activeView: 'website-navigation', title: 'Website Navigation', contentVariant: 'wide', contentHtml: `${renderWebsiteManagementSwitcher('website-navigation')}${renderWebsiteNavigationContent({ websiteName: managedWebsite.name, authority: 'loading', items: [], legacyItems: [] }, { add: '', edit: () => '', remove: () => '', move: () => '', toggle: () => '', adopt: '', discard: '', reload: '' })}` });
+    if (routeState.websiteId !== managedWebsite.id) void routeController.hydrate(managedWebsite.id).then(() => renderWebsiteNavigation());
+    return;
+  }
+  const navigationManager = getBuilderSiteNavigationManager();
+  const navigationController = builderSiteNavigationController;
+  const navigationContext = getNavUiContext();
+  if (!navigationContext || !navigationController) {
+    renderWebsiteRepositoryUnavailable('website-navigation');
+    return;
+  }
+  const renderCanonical = () => {
+    const current = navigationController.getState();
+    const legacyItems = (navigationContext.layout?.header_config.nav_items ?? []).map(item => ({ label: String(item.label ?? ''), path: String(item.path ?? ''), visible: item.visible !== false }));
+    const routesByFunnelId = new Map(navigationContext.effectiveRoutes.filter(route => route.funnel_id).map(route => [route.funnel_id!, route]));
+    const destinations = navigationContext.funnels
+      .filter(funnel => routesByFunnelId.has(funnel.id))
+      .map(funnel => {
+        const page = navigationContext.pages.find(candidate => candidate.funnel_id === funnel.id);
+        const route = routesByFunnelId.get(funnel.id)!;
+        return { value: funnel.id, label: `${page?.name || funnel.name || 'Untitled page'} (${route.path})` };
+      });
+    const editor = navigationManager.getItemModalState();
+    const adoptionReview = navigationManager.getAdoptionReviewState();
+    const model: WebsiteNavigationModel = current.status === 'ready'
+      ? { websiteName: managedWebsite.name, authority: current.isConflict ? 'conflict' : current.isDraft ? 'draft' : current.liveRevision > 0 ? 'live' : 'legacy', items: current.items, legacyItems, error: current.errorMessage ?? undefined, editor: { ...editor, destinations }, adoptionReview: { ...adoptionReview } }
+      : { websiteName: managedWebsite.name, authority: current.status === 'error' ? 'error' : 'loading', items: [], legacyItems, error: current.status === 'error' ? current.error : undefined };
+    const action = (code: string) => `window.${code}`;
+    renderAppWithShell({ activeView: 'website-navigation', title: 'Website Navigation', subtitle: 'Manage your primary website navigation.', contentVariant: 'wide', contentHtml: `${renderWebsiteManagementSwitcher('website-navigation')}${renderWebsiteNavigationContent(model, { add: renderButton({ label: 'Add menu item', variant: 'primary', attributes: { onclick: action('addWebsiteNavigationItem()') } }), edit: id => renderButton({ label: 'Edit', variant: 'secondary', attributes: { onclick: `window.editWebsiteNavigationItem(${builderInspectorJsArgument(id)})` } }), remove: id => renderButton({ label: 'Delete', variant: 'danger', attributes: { onclick: `window.removeWebsiteNavigationItem(${builderInspectorJsArgument(id)})` } }), move: (id, direction) => renderButton({ label: direction === 'up' ? 'Move up' : 'Move down', variant: 'ghost', size: 'sm', icon: direction === 'up' ? '↑' : '↓', iconOnly: true, attributes: { onclick: `window.moveWebsiteNavigationItem(${builderInspectorJsArgument(id)}, ${builderInspectorJsArgument(direction)})` } }), toggle: id => renderButton({ label: 'Toggle visibility', variant: 'ghost', size: 'sm', attributes: { onclick: `window.toggleWebsiteNavigationItem(${builderInspectorJsArgument(id)})` } }), adopt: action('adoptWebsiteNavigation()'), discard: renderButton({ label: 'Discard unpublished changes', variant: 'secondary', attributes: { onclick: action('discardWebsiteNavigationDraft()') } }), reload: renderButton({ label: 'Reload latest navigation', variant: 'secondary', attributes: { onclick: action('reloadWebsiteNavigation()') } }) })}` });
+  };
+  const navigationState = navigationController.getState();
+  if (navigationState.status === 'uninitialized' || navigationState.status === 'loading' || navigationController.getActiveWebsiteId() !== managedWebsite.id) {
+    renderAppWithShell({ activeView: 'website-navigation', title: 'Website Navigation', contentVariant: 'wide', contentHtml: `${renderWebsiteManagementSwitcher('website-navigation')}${renderWebsiteNavigationContent({ websiteName: managedWebsite.name, authority: 'loading', items: [], legacyItems: [] }, { add: '', edit: () => '', remove: () => '', move: () => '', toggle: () => '', adopt: '', discard: '', reload: '' })}` });
+    void navigationController.hydrate(managedWebsite.id, { effectiveRoutes: navigationContext.effectiveRoutes, homepageFunnelId: managedWebsite.homepage_funnel_id }).then(renderCanonical);
+    return;
+  }
+  renderCanonical();
+  return;
   if (editorUsesSupabase() && websiteLayoutHydrator.state.status === 'loading') {
     renderAppWithShell({
       activeView: 'website-navigation',
@@ -9567,12 +9623,12 @@ function renderWebsiteNavigation() {
     });
     return;
   }
-  const layout = mockWebsiteLayouts.find(l => l.website_id === website.id);
+  const layout = mockWebsiteLayouts.find(l => l.website_id === managedWebsite.id);
   
   const navItems = layout?.header_config.nav_items ?? [];
 
   // 🌿 Fix.2: Get available pages for the dropdown
-  const siteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
+  const siteRoutes = mockWebsiteRoutes.filter(r => r.website_id === managedWebsite.id);
 
   const itemsHtml = navItems.map((item: any, index: number) => `
     <div class="card" style="display: flex; align-items: center; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; padding: 20px; border: 1px solid #eef2f6; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
@@ -9628,6 +9684,22 @@ function renderWebsiteNavigation() {
     `
   });
 }
+
+(window as any).addWebsiteNavigationItem = () => { const manager = getBuilderSiteNavigationManager(); manager.openAddItemModal(); renderWebsiteNavigation(); };
+(window as any).editWebsiteNavigationItem = (id: string) => { const manager = getBuilderSiteNavigationManager(); const state = builderSiteNavigationController?.getState(); if (state?.status === 'ready') { const item = state.rawItems.find(candidate => candidate.id === id); if (item) manager.openEditItemModal(item); } renderWebsiteNavigation(); };
+(window as any).closeWebsiteNavigationEditor = () => { getBuilderSiteNavigationManager().closeItemModal(); renderWebsiteNavigation(); };
+(window as any).setWebsiteNavigationEditorField = (field: string, value: unknown) => { const manager = getBuilderSiteNavigationManager(); manager.setItemModalField(field as any, value as any); if (field === 'targetKind') manager.setItemModalField('targetValue', ''); renderWebsiteNavigation(); };
+(window as any).saveWebsiteNavigationEditor = async () => { const manager = getBuilderSiteNavigationManager(); const context = getNavUiContext(); if (!context) return; const modal = manager.getItemModalState(); if (modal.targetKind === 'internal' && !context.funnels.some(funnel => funnel.id === modal.targetValue && context.effectiveRoutes.some(route => route.funnel_id === funnel.id))) { manager.setItemModalField('targetValue', ''); (window as any).showToast('Choose a destination from this website.', 'error'); renderWebsiteNavigation(); return; } const success = await manager.saveItemModal({ effectiveRoutes: context.effectiveRoutes, homepageFunnelId: context.website.homepage_funnel_id }); if (success) (window as any).showToast('Navigation item saved', 'success'); renderWebsiteNavigation(); };
+(window as any).removeWebsiteNavigationItem = async (id: string) => { const manager = getBuilderSiteNavigationManager(); const context = getNavUiContext(); if (!context) return; const success = await manager.removeItem(id, { effectiveRoutes: context.effectiveRoutes, homepageFunnelId: context.website.homepage_funnel_id }); if (success) (window as any).showToast('Navigation item removed', 'success'); renderWebsiteNavigation(); };
+(window as any).toggleWebsiteNavigationItem = async (id: string) => { const manager = getBuilderSiteNavigationManager(); const context = getNavUiContext(); if (!context) return; const success = await manager.toggleItemVisibility(id, { effectiveRoutes: context.effectiveRoutes, homepageFunnelId: context.website.homepage_funnel_id }); if (success) (window as any).showToast('Visibility updated', 'success'); renderWebsiteNavigation(); };
+(window as any).moveWebsiteNavigationItem = async (id: string, direction: 'up' | 'down') => { const manager = getBuilderSiteNavigationManager(); const context = getNavUiContext(); if (!context) return; await manager.moveItem(id, direction, { effectiveRoutes: context.effectiveRoutes, homepageFunnelId: context.website.homepage_funnel_id }); renderWebsiteNavigation(); };
+(window as any).adoptWebsiteNavigation = () => { const manager = getBuilderSiteNavigationManager(); const context = getNavUiContext(); if (context) manager.startLegacyAdoptionReview(context.layout, { effectiveRoutes: context.effectiveRoutes, funnels: context.funnels, pages: context.pages }); renderWebsiteNavigation(); };
+(window as any).cancelWebsiteNavigationAdoption = () => { getBuilderSiteNavigationManager().closeLegacyAdoptionReview(); renderWebsiteNavigation(); };
+(window as any).resolveWebsiteNavigationCandidate = (id: string) => { getBuilderSiteNavigationManager().openResolveCandidateModal(id); renderWebsiteNavigation(); };
+(window as any).removeWebsiteNavigationCandidate = (id: string) => { getBuilderSiteNavigationManager().removeAdoptionCandidate(id); renderWebsiteNavigation(); };
+(window as any).confirmWebsiteNavigationAdoption = async () => { const manager = getBuilderSiteNavigationManager(); const context = getNavUiContext(); if (!context) return; const success = await manager.commitLegacyAdoption({ effectiveRoutes: context.effectiveRoutes, homepageFunnelId: context.website.homepage_funnel_id }); if (success) (window as any).showToast('Created editable navigation draft', 'success'); renderWebsiteNavigation(); };
+(window as any).discardWebsiteNavigationDraft = async () => { const controller = builderSiteNavigationController; const context = getNavUiContext(); if (!controller || !context) return; const state = controller.getState(); if (state.status !== 'ready' || !state.isDraft) return; const result = await controller.revertDraft({ effectiveRoutes: context.effectiveRoutes, homepageFunnelId: context.website.homepage_funnel_id }); if (result.success) (window as any).showToast('Unpublished navigation changes discarded', 'success'); renderWebsiteNavigation(); };
+(window as any).reloadWebsiteNavigation = async () => { const controller = builderSiteNavigationController; const context = getNavUiContext(); if (!controller || !context) return; await controller.hydrate(context.website.id, { effectiveRoutes: context.effectiveRoutes, homepageFunnelId: context.website.homepage_funnel_id }); renderWebsiteNavigation(); };
 
 (window as any).addNavItem = () => {
     const userId = getActingUserId();
