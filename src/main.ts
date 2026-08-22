@@ -61,7 +61,16 @@ import { renderOpportunitiesContent } from './ui/opportunities';
 import { renderNewQuoteContent, renderQuotePreviewContent, renderQuotesContent } from './ui/quotes';
 import { renderInvoicesContent, type InvoiceFilter } from './ui/invoices';
 import { createReportsViewModel, renderReportsContent, type ReportsAvailability } from './ui/reports';
-import { renderWebsiteDashboardReady } from './ui/website-management';
+import {
+  renderWebsiteDashboardEmpty,
+  renderWebsiteDashboardError,
+  renderWebsiteDashboardLoading,
+  renderWebsiteDashboardReady,
+  renderWebsiteDashboardSelectionRequired,
+  renderWebsiteDashboardUnavailable,
+  renderWebsiteManagementSelectorContent,
+  renderWebsiteManagementSwitcher as renderWebsiteManagementSwitcherControl
+} from './ui/website-management';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
   BUILDER_PAGE_SLUG_MAX_LENGTH,
@@ -9434,61 +9443,18 @@ function renderWebsiteManagementSelector(view: WebsiteManagementView, websites: 
     'seo-pages': 'SEO Pages'
   };
 
-  const fieldA11y = getFieldAccessibilityProps('management-website-select', { hasError: invalid });
-
-  const selectHtml = renderSelect({
-    id: 'management-website-select',
-    className: 'wo-select',
-    invalid: fieldA11y.invalid,
-    describedBy: fieldA11y.describedBy,
-    options: [
-      { value: '', label: 'Select a website' },
-      ...websites.map(site => ({
-        value: site.id,
-        label: `${site.name}${site.domain ? ` — ${site.domain}` : ''}`
-      }))
-    ],
-    attributes: {
-      onchange: `window.selectWebsiteForManagement('${view}', this.value)`
-    }
-  });
-
-  const fieldHtml = renderField({
-    id: 'management-website-select',
-    label: 'Website',
-    controlHtml: selectHtml,
-    errorMessage: invalid ? 'That website is not available for this account. Choose an owned website.' : undefined
-  });
-
-  const cardHtml = renderCard({
-    title: 'Choose a website',
-    bodyHtml: `
-      <p style="margin-bottom: var(--wo-space-4); color: var(--wo-color-text-secondary);">${invalid ? 'That website is not available for this account. Choose an owned website.' : `Select the website whose ${labels[view].toLowerCase()} you want to manage.`}</p>
-      ${fieldHtml}
-    `,
-    className: 'website-settings-selection'
-  });
-
-  const contentHtml = `
-    <section class="website-settings-selection-container">
-      ${cardHtml}
-    </section>
-  `;
-
   renderAppWithShell({
     activeView: view,
     title: labels[view],
     contentVariant: 'standard',
     user: getCurrentShellUser(),
-    contentHtml
+    contentHtml: renderWebsiteManagementSelectorContent({ view, title: labels[view], websites, invalid })
   });
 }
 
 function renderWebsiteManagementSwitcher(view: WebsiteManagementView): string {
   const userId = getActingUserId();
-  const owned = mockWebsites.filter(site => site.user_id === userId);
-  if (owned.length < 2 || !activeDashboardWebsiteId) return '';
-  return `<div class="website-dashboard-selector"><label for="management-website-select">Active website</label><select id="management-website-select" onchange="window.selectWebsiteForManagement('${view}', this.value)">${owned.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}" ${site.id === activeDashboardWebsiteId ? 'selected' : ''}>${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></div>`;
+  return renderWebsiteManagementSwitcherControl({ view, websites: mockWebsites, actingUserId: userId, activeWebsiteId: activeDashboardWebsiteId });
 }
 
 function renderWebsiteSettings() {
@@ -10909,7 +10875,7 @@ async function renderWebsiteDashboard(force = false) {
     activeView: 'website-dashboard',
     title: 'Website Dashboard',
     contentVariant: 'wide',
-    contentHtml: `<div class="website-dashboard-loading" role="status">Loading website dashboard…</div>`
+    contentHtml: renderWebsiteDashboardLoading()
   });
   const state = await websiteDashboardController.load({ actingUserId: userId, explicitWebsiteId: route.websiteId, explicitPageId: route.pageId, previousWebsiteId: activeDashboardWebsiteId });
   if (currentView !== 'website-dashboard') return;
@@ -10918,7 +10884,7 @@ async function renderWebsiteDashboard(force = false) {
       activeView: 'website-dashboard',
       title: 'Website Dashboard',
       contentVariant: 'wide',
-      contentHtml: `<section class="card website-dashboard-state"><h2>Choose a website</h2><label for="dashboard-website-select">Website</label><select id="dashboard-website-select" onchange="window.selectDashboardWebsite(this.value)"><option value="">Select a website</option>${state.resolution.ownedWebsites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}">${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></section>`
+      contentHtml: renderWebsiteDashboardSelectionRequired(state.resolution.ownedWebsites)
     });
     return;
   }
@@ -10927,7 +10893,7 @@ async function renderWebsiteDashboard(force = false) {
       activeView: 'website-dashboard',
       title: 'Website Dashboard',
       contentVariant: 'wide',
-      contentHtml: `<section class="card website-dashboard-state" role="alert"><h2>Website information could not be loaded.</h2><p>Please try again.</p><button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Retry</button></section>`
+      contentHtml: renderWebsiteDashboardError()
     });
     return;
   }
@@ -10937,7 +10903,7 @@ async function renderWebsiteDashboard(force = false) {
       activeView: 'website-dashboard',
       title: 'Website Dashboard',
       contentVariant: 'wide',
-      contentHtml: `<section class="card website-dashboard-state" role="${empty ? 'status' : 'alert'}"><h2>${empty ? 'Create your first website.' : 'This website is not available.'}</h2><p>${empty ? 'Add your business details and we will create an editable homepage and site structure.' : 'Check your access or choose another owned website.'}</p>${empty ? '<button type="button" class="btn-primary" onclick="window.showOnboardingModal()">Create your website</button>' : ''}<button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Retry</button></section>`
+      contentHtml: empty ? renderWebsiteDashboardEmpty() : renderWebsiteDashboardUnavailable()
     });
     return;
   }
