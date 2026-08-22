@@ -76,6 +76,7 @@ import {
   renderSitePageDetail,
   renderSitePageDetailError,
   renderSitePageDetailLoading,
+  getWebsiteScopedEffectiveRoutes,
   renderWebsiteNavigationContent,
   type WebsiteNavigationModel
 } from './ui/website-management';
@@ -4306,7 +4307,7 @@ function getBuilderNewPageContext(): BuilderNewPageContext {
     : '';
   return {
     actingUserId,
-    website: getActiveBuilderWebsite(),
+    website: currentView === 'website-navigation' ? getActiveNavigationWebsite() : getActiveBuilderWebsite(),
     websiteRoutes: mockWebsiteRoutes,
     funnels: mockFunnels,
     pages: mockPages,
@@ -4611,7 +4612,8 @@ export function getBuilderPageRouteController(): BuilderPageRouteController {
   });
   if (context.website?.id) {
     builderPageRouteController.hydrate(context.website.id).then(() => {
-      renderBuilder();
+      if (currentView === 'website-navigation') renderWebsiteNavigation();
+      else if (currentView === 'builder') renderBuilder();
     });
   }
   return builderPageRouteController;
@@ -4733,7 +4735,7 @@ function getNavUiContext(): NavigationUiContext | null {
   if (!website) return null;
 
   const routeController = getBuilderPageRouteController();
-  const effectiveRoutes = routeController.getState().effectiveRoutes;
+  const effectiveRoutes = getWebsiteScopedEffectiveRoutes(website.id, routeController.getState().effectiveRoutes);
   const websiteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
   const associatedFunnelIds = new Set<string>();
   if (website.homepage_funnel_id) associatedFunnelIds.add(website.homepage_funnel_id);
@@ -9562,6 +9564,13 @@ function renderWebsiteNavigation() {
     return;
   }
   const managedWebsite = website;
+  const routeController = getBuilderPageRouteController();
+  const routeState = routeController.getState();
+  if (routeState.websiteId !== managedWebsite.id || routeState.isLoading) {
+    renderAppWithShell({ activeView: 'website-navigation', title: 'Website Navigation', contentVariant: 'wide', contentHtml: `${renderWebsiteManagementSwitcher('website-navigation')}${renderWebsiteNavigationContent({ websiteName: managedWebsite.name, authority: 'loading', items: [], legacyItems: [] }, { add: '', edit: () => '', remove: () => '', move: () => '', toggle: () => '', adopt: '', discard: '', reload: '' })}` });
+    if (routeState.websiteId !== managedWebsite.id) void routeController.hydrate(managedWebsite.id).then(() => renderWebsiteNavigation());
+    return;
+  }
   const navigationManager = getBuilderSiteNavigationManager();
   const navigationController = builderSiteNavigationController;
   const navigationContext = getNavUiContext();

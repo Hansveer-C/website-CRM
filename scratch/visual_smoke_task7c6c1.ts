@@ -69,7 +69,9 @@ async function smokeNavigation(page: any, name: string) {
     const db = await import('/src/db.ts');
     const actingUserId = String((window as any).currentUser || db.mockWebsites[0].user_id);
     db.mockWebsites.forEach(site => { site.user_id = actingUserId; });
-    if (!db.mockWebsites.some(site => site.id === 'ws-2')) db.mockWebsites.push({ ...db.mockWebsites[0], id: 'ws-2', user_id: actingUserId, name: 'Second owned website', domain: 'second.example', subdomain: 'second' });
+    if (!db.mockWebsites.some(site => site.id === 'ws-2')) db.mockWebsites.push({ ...db.mockWebsites[0], id: 'ws-2', user_id: actingUserId, name: 'Second owned website', domain: 'second.example', subdomain: 'second', homepage_funnel_id: 'fnl-2' });
+    if (!db.mockPages.some(page => page.id === 'page-site-b')) db.mockPages.push({ ...db.mockPages.find(page => page.id === 'p3')!, id: 'page-site-b', user_id: actingUserId, funnel_id: 'fnl-2', name: 'Site B destination', slug: 'site-b-destination' });
+    if (!db.mockWebsiteRoutes.some(route => route.id === 'route-site-b')) db.mockWebsiteRoutes.push({ ...db.mockWebsiteRoutes[0], id: 'route-site-b', website_id: 'ws-2', funnel_id: 'fnl-2', path: '/site-b-destination' });
   });
   await page.waitForTimeout(1500);
   await page.evaluate(() => (window as any).navigateTo('website-navigation', undefined, { websiteManagementRoute: { status: 'valid', websiteId: 'ws-1' } }));
@@ -84,11 +86,21 @@ async function smokeNavigation(page: any, name: string) {
   await page.getByRole('button', { name: 'Review conversion' }).click();
   await page.waitForSelector('.wo-website-navigation-adoption');
   assert((await page.locator('.wo-website-navigation-adoption').innerText()).includes('Review legacy conversion'), `${name}: legacy review did not open`);
-  while (await page.getByRole('button', { name: 'Create editable draft' }).isDisabled()) {
-    const remove = page.getByRole('button', { name: 'Remove' }).first();
-    assert(await remove.count() === 1, `${name}: unresolved legacy candidate cannot be corrected or removed`);
-    await remove.click();
-  }
+  const unresolved = page.getByRole('button', { name: 'Choose destination' }).first();
+  assert(await unresolved.count() === 1, `${name}: expected an unresolved legacy candidate`);
+  await unresolved.click();
+  await page.waitForSelector('#website-navigation-editor-title');
+  const activeModals = await page.locator('.wo-website-navigation [role="dialog"][aria-modal="true"]').evaluateAll((dialogs: Element[]) => dialogs.map(dialog => dialog.textContent?.slice(0, 80)));
+  assert(activeModals.length === 1, `${name}: candidate editor must be the sole active modal (found ${activeModals.length}: ${activeModals.join(' | ')})`);
+  const resolveKind = page.locator('#website-navigation-kind');
+  await resolveKind.selectOption('internal');
+  const destinations = await page.locator('#website-navigation-target option').allTextContents();
+  assert(destinations.some(label => label.includes('Driveway Cleaning')), `${name}: selected Site A destination is absent`);
+  assert(!destinations.some(label => label.includes('Site B destination')), `${name}: Site B destination leaked into selected Site A`);
+  await page.locator('#website-navigation-target').selectOption('fnl-1');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await page.waitForSelector('.wo-website-navigation-adoption');
+  assert((await page.locator('.wo-website-navigation-adoption').innerText()).includes('ready'), `${name}: resolved candidate did not return ready to review`);
   await page.getByRole('button', { name: 'Create editable draft' }).click();
   await page.waitForFunction(() => document.body.innerText.includes('Unpublished changes'));
   await page.getByRole('button', { name: 'Add menu item' }).click();
@@ -97,7 +109,7 @@ async function smokeNavigation(page: any, name: string) {
   for (const target of ['homepage', 'internal', 'external', 'phone', 'email']) { await kind.selectOption(target); assert(await kind.inputValue() === target, `${name}: ${target} unavailable`); }
   await kind.selectOption('phone'); await page.locator('#website-navigation-label').fill('Call us'); await page.locator('#website-navigation-target').fill('+1 555 234 5678'); await page.locator('input[type="checkbox"]').nth(1).check(); await page.getByRole('button', { name: 'Add item' }).click();
   await page.waitForFunction(() => document.body.innerText.includes('Call us'));
-  await page.getByRole('button', { name: 'Edit' }).click(); await page.waitForSelector('#website-navigation-editor-title'); await page.locator('#website-navigation-label').fill('Call today'); await page.getByRole('button', { name: 'Save changes' }).click(); await page.waitForFunction(() => document.body.innerText.includes('Call today'));
+  await page.getByRole('listitem').filter({ hasText: 'Call us' }).getByRole('button', { name: 'Edit' }).click(); await page.waitForSelector('#website-navigation-editor-title'); await page.locator('#website-navigation-label').fill('Call today'); await page.getByRole('button', { name: 'Save changes' }).click(); await page.waitForFunction(() => document.body.innerText.includes('Call today'));
   await page.getByRole('button', { name: 'Discard unpublished changes' }).click(); await page.waitForFunction(() => document.body.innerText.includes('Legacy navigation'));
 
   for (const authority of ['legacy', 'live', 'draft', 'empty', 'conflict'] as const) {

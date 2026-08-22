@@ -1,5 +1,6 @@
 import { escapeHtmlText } from '../../crm_html_output';
 import type { NavigationTargetKind, ResolvedNavigationItem } from '../../builder_site_navigation_domain';
+import type { EffectiveRoute } from '../../builder_route_lifecycle';
 import { renderButton, renderCard, renderEmptyState, renderErrorState, renderField, renderInput, renderSelect, renderStatusBadge } from '../primitives';
 
 export type WebsiteNavigationAuthority = 'legacy' | 'live' | 'draft' | 'conflict' | 'loading' | 'error';
@@ -11,6 +12,10 @@ export interface WebsiteNavigationModel { websiteName: string; authority: Websit
 export interface WebsiteNavigationActions { add: string; edit: (id: string) => string; remove: (id: string) => string; move: (id: string, direction: 'up' | 'down') => string; toggle: (id: string) => string; adopt: string; discard: string; reload: string; }
 
 const editorField = (field: string, value: string) => `window.setWebsiteNavigationEditorField('${field}', ${value})`;
+
+export function getWebsiteScopedEffectiveRoutes(websiteId: string, routes: readonly EffectiveRoute[]): readonly EffectiveRoute[] {
+  return routes.filter(route => route.website_id === websiteId);
+}
 
 function renderEditor(editor: NavigationEditorModel | undefined): string {
   if (!editor?.isOpen) return '';
@@ -38,5 +43,5 @@ export function renderWebsiteNavigationContent(model: WebsiteNavigationModel, ac
   const legacy = model.authority === 'legacy' ? `<div class="wo-website-navigation-legacy"><p>Legacy navigation remains authoritative until you explicitly convert it.</p>${model.legacyItems.length ? model.legacyItems.map(item => `<div class="wo-website-navigation-legacy-row"><strong>${escapeHtmlText(item.label)}</strong><code>${escapeHtmlText(item.path || '(no destination)')}</code>${renderStatusBadge(item.visible ? 'visible' : 'hidden')}</div>`).join('') : renderEmptyState({ title: 'No legacy menu items', description: 'The existing legacy menu is empty.' })}${renderButton({ label: 'Review conversion', variant: 'secondary', attributes: { onclick: actions.adopt } })}</div>` : '';
   const rows = model.items.map(item => `<li class="wo-website-navigation-item"><div class="wo-website-navigation-reorder">${actions.move(item.id, 'up')} ${actions.move(item.id, 'down')}</div><div class="wo-website-navigation-item-main"><strong>${escapeHtmlText(item.label)}</strong><span>${escapeHtmlText(item.resolution_details ?? item.resolved_href ?? item.target_value)}</span><small>${escapeHtmlText(item.target_kind)} · ${item.visible ? 'Visible' : 'Hidden'}${item.is_cta ? ' · CTA' : ''}</small>${item.resolution_status !== 'resolved' ? `<em>Needs attention: ${escapeHtmlText(item.resolution_details ?? item.resolution_status)}</em>` : ''}</div><div class="wo-website-navigation-actions">${actions.toggle(item.id)}${actions.edit(item.id)}${actions.remove(item.id)}</div></li>`).join('');
   const body = rows ? `<ol class="wo-website-navigation-list">${rows}</ol>` : renderEmptyState({ title: 'No menu items yet', description: 'Add a primary navigation item to begin.' });
-  return `<section class="wo-website-navigation" aria-label="Website Navigation"><div class="wo-website-navigation-status"><span>Authority</span>${renderStatusBadge(authorityLabel)}${model.authority === 'draft' ? actions.discard : ''}</div>${error}${legacy}${model.authority !== 'legacy' ? `${renderCard({ className: 'wo-website-navigation-card', bodyHtml: `${body}<div class="wo-website-navigation-add">${actions.add}</div>` })}` : ''}${renderEditor(model.editor)}${renderAdoptionReview(model.adoptionReview)}</section>`;
+  return `<section class="wo-website-navigation" aria-label="Website Navigation"><div class="wo-website-navigation-status"><span>Authority</span>${renderStatusBadge(authorityLabel)}${model.authority === 'draft' ? actions.discard : ''}</div>${error}${legacy}${model.authority !== 'legacy' ? `${renderCard({ className: 'wo-website-navigation-card', bodyHtml: `${body}<div class="wo-website-navigation-add">${actions.add}</div>` })}` : ''}${renderEditor(model.editor)}${model.editor?.isOpen ? '' : renderAdoptionReview(model.adoptionReview)}</section>`;
 }
