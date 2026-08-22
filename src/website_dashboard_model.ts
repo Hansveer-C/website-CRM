@@ -1,4 +1,5 @@
 import type { Funnel, Page, Website, WebsiteRoute } from './types';
+import { isOwnedWebsiteFunnel } from './website_funnel_ownership';
 
 export type ActiveWebsiteResolution =
   | { status: 'resolved'; website: Website; ownedWebsites: readonly Website[] }
@@ -100,7 +101,7 @@ export function resolveWebsiteHomepage(input: {
   if (!funnelId) return { status: 'missing-homepage-funnel' };
   const funnel = input.funnels.find(item => item.id === funnelId);
   if (!funnel) return { status: 'missing-funnel' };
-  if (funnel.user_id !== input.actingUserId) return { status: 'ownership-mismatch' };
+  if (!isOwnedWebsiteFunnel(funnel, input.website, input.actingUserId)) return { status: 'ownership-mismatch' };
   const candidates = input.pages.filter(page => page.user_id === input.actingUserId && page.funnel_id === funnelId);
   if (candidates.length === 0) return { status: 'no-homepage-page' };
   const sorted = [...candidates].sort(compareHomepageCandidates);
@@ -120,13 +121,8 @@ export function getWebsiteScopedPages(input: {
   pages: readonly Page[];
 }): readonly Page[] {
   if (input.website.user_id !== input.actingUserId) return [];
-  const associated = new Set<string>();
-  if (clean(input.website.homepage_funnel_id)) associated.add(input.website.homepage_funnel_id!);
-  if (clean(input.website.draft_homepage_funnel_id)) associated.add(input.website.draft_homepage_funnel_id!);
-  input.routes.filter(route => route.website_id === input.website.id && clean(route.funnel_id))
-    .forEach(route => associated.add(route.funnel_id));
   const owned = new Set(input.funnels
-    .filter(funnel => funnel.user_id === input.actingUserId && associated.has(funnel.id))
+    .filter(funnel => isOwnedWebsiteFunnel(funnel, input.website, input.actingUserId))
     .map(funnel => funnel.id));
   return input.pages.filter(page => page.user_id === input.actingUserId && !!page.funnel_id && owned.has(page.funnel_id));
 }

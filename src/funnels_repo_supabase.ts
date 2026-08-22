@@ -1,6 +1,6 @@
 import { supabase, safeDbCall } from './utils/db/supabase';
 import { Funnel, RepoResponse } from './types';
-import { mockFunnels } from './db';
+import { mockFunnels, mockWebsites } from './db';
 
 const isBrowser = typeof window !== 'undefined';
 const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
@@ -13,11 +13,15 @@ export const FunnelsRepo = {
   /**
    * Creates a new funnel.
    */
-  async createFunnel(userId: string, name: string, service_type?: string, city?: string): Promise<RepoResponse<Funnel>> {
+  async createFunnel(userId: string, name: string, service_type?: string, city?: string, websiteId?: string | null): Promise<RepoResponse<Funnel>> {
+    if (websiteId && !mockWebsites.some(website => website.id === websiteId && website.user_id === userId)) {
+      return { success: false, error: 'WEBSITE_NOT_FOUND' };
+    }
     if (!hasSupabase) {
       const offlineFunnel: Funnel = {
         id: `fnl_${Date.now()}`,
         user_id: userId,
+        website_id: websiteId ?? null,
         name,
         status: 'draft',
         service_type,
@@ -32,6 +36,7 @@ export const FunnelsRepo = {
     const funnel: Partial<Funnel> = {
       id: `fnl_${Date.now()}`,
       user_id: userId,
+      website_id: websiteId ?? null,
       name,
       status: 'draft',
       service_type,

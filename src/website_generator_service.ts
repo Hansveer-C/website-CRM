@@ -139,7 +139,7 @@ export const WebsiteGeneratorService = {
         // Only if no homepage is set yet
         let homeFunnelId = website.homepage_funnel_id;
         if (!homeFunnelId) {
-            const homeFunnel = await this.createFunnelFromTemplate(userId, defaultTplId, 'Home', input.city, createdIds, { businessName: input.business_name });
+            const homeFunnel = await this.createFunnelFromTemplate(userId, defaultTplId, 'Home', input.city, createdIds, { businessName: input.business_name, websiteId: website.id });
             createdIds.funnel_ids.push(homeFunnel.id);
             homeFunnelId = homeFunnel.id;
             
@@ -163,10 +163,10 @@ export const WebsiteGeneratorService = {
             const path = generateServiceCitySlug(service, input.city);
 
             // Check if funnel already exists by name (minimal idempotency)
-            let serviceFunnel = existingFunnels.find(f => f.name === service);
+            let serviceFunnel = existingFunnels.find(f => f.name === service && f.website_id === website.id);
             if (!serviceFunnel) {
                 const tplId = templateMap[service] || defaultTplId;
-                serviceFunnel = await this.createFunnelFromTemplate(userId, tplId, service, input.city, createdIds, { businessName: input.business_name, serviceName: service });
+                serviceFunnel = await this.createFunnelFromTemplate(userId, tplId, service, input.city, createdIds, { businessName: input.business_name, serviceName: service, websiteId: website.id });
                 createdIds.funnel_ids.push(serviceFunnel.id);
                 
                 // W2.4: Add service-specific content
@@ -190,9 +190,9 @@ export const WebsiteGeneratorService = {
         if (genCities) {
             for (const city of selectedCities) {
                 const citySlug = `/${sanitizeSlug(city)}`;
-                let cityFunnel = existingFunnels.find(f => f.name === `City - ${city}`);
+                let cityFunnel = existingFunnels.find(f => f.name === `City - ${city}` && f.website_id === website.id);
                 if (!cityFunnel) {
-                    cityFunnel = await this.createFunnelFromTemplate(userId, defaultTplId, `City - ${city}`, city, createdIds, { businessName: input.business_name });
+                    cityFunnel = await this.createFunnelFromTemplate(userId, defaultTplId, `City - ${city}`, city, createdIds, { businessName: input.business_name, websiteId: website.id });
                     createdIds.funnel_ids.push(cityFunnel.id);
                     
                     // Tag funnel
@@ -205,9 +205,9 @@ export const WebsiteGeneratorService = {
         }
 
         // ── 5. Create Contact Funnel ─────────────────────────────────────
-        let contactFunnel = existingFunnels.find(f => f.name === 'Contact Us');
+        let contactFunnel = existingFunnels.find(f => f.name === 'Contact Us' && f.website_id === website.id);
         if (!contactFunnel) {
-            const cf = await this.createFunnelFromTemplate(userId, defaultTplId, 'Contact Us', input.city, createdIds, { businessName: input.business_name });
+            const cf = await this.createFunnelFromTemplate(userId, defaultTplId, 'Contact Us', input.city, createdIds, { businessName: input.business_name, websiteId: website.id });
             contactFunnel = cf;
             createdIds.funnel_ids.push(cf.id);
             
@@ -348,14 +348,14 @@ export const WebsiteGeneratorService = {
   /**
    * Internal helper to create a funnel and its steps from a template.
    */
-  async createFunnelFromTemplate(userId: string, templateId: string, name: string, city: string, createdIds: any, options: { businessName?: string, serviceName?: string } = {}): Promise<Funnel> {
+  async createFunnelFromTemplate(userId: string, templateId: string, name: string, city: string, createdIds: any, options: { businessName?: string, serviceName?: string, websiteId?: string } = {}): Promise<Funnel> {
     const tplRes = await FunnelTemplatesRepo.getTemplateById(templateId);
     if (!tplRes.success || !tplRes.data) {
         throw new Error(`TEMPLATE_NOT_FOUND: ${templateId}`);
     }
 
     const template = tplRes.data;
-    const funnelRes = await FunnelsRepo.createFunnel(userId, name);
+    const funnelRes = await FunnelsRepo.createFunnel(userId, name, undefined, undefined, options.websiteId);
     if (!funnelRes.success || !funnelRes.data) {
         throw new Error(`FUNNEL_CREATION_FAILED: ${funnelRes.error}`);
     }
@@ -713,7 +713,7 @@ export const WebsiteGeneratorService = {
     const defaultTplId = '0d3214fb-2777-41fa-9837-4a6fddc660ec';
     
     // 2. Create Funnel
-    const funnel = await this.createFunnelFromTemplate(userId, defaultTplId, `${service} - ${city}`, city, createdIds, { businessName, serviceName: service });
+    const funnel = await this.createFunnelFromTemplate(userId, defaultTplId, `${service} - ${city}`, city, createdIds, { businessName, serviceName: service, websiteId });
     await FunnelsRepo.updateFunnel(userId, funnel.id, { 
         service_type: service, 
         city: city 

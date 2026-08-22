@@ -4,6 +4,7 @@ export const mockFunnels: Funnel[] = [
   {
     id: 'fnl-1',
     user_id: 'system',
+    website_id: 'ws-1',
     name: 'Home Page',
     status: 'published',
     created_at: '2026-03-24T10:00:00Z',
@@ -12,6 +13,7 @@ export const mockFunnels: Funnel[] = [
   {
     id: 'fnl-2',
     user_id: 'system',
+    website_id: null,
     name: 'House Washing Page',
     status: 'draft',
     created_at: '2026-03-25T14:30:00Z',

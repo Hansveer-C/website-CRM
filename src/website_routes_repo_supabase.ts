@@ -1,6 +1,6 @@
 import { DB } from './utils/db/db_module';
 import { WebsiteRoute } from './types';
-import { mockWebsiteRoutes } from './db';
+import { mockFunnels, mockWebsites, mockWebsiteRoutes } from './db';
 
 const isBrowser = typeof window !== 'undefined';
 const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
@@ -19,6 +19,13 @@ export const WebsiteRoutesRepo = {
     const normalizedPath = path.startsWith('/') ? path : `/${path}`;
 
     if (!hasSupabase) {
+      const localWebsite = mockWebsites.find(website => website.id === website_id);
+      const localFunnel = mockFunnels.find(funnel => funnel.id === funnel_id);
+      if (!localWebsite || !localFunnel
+        || localWebsite.user_id !== localFunnel.user_id
+        || localFunnel.website_id !== website_id) {
+        throw new Error('FUNNEL_WEBSITE_OWNERSHIP_MISMATCH');
+      }
       console.log('[DB MOCK FALLBACK: ADD_ROUTE] Saving to mockWebsiteRoutes:', { website_id, normalizedPath, funnel_id, seoData });
       const newRoute: WebsiteRoute = {
         id: `r-${Date.now()}`,
