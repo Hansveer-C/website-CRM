@@ -44,7 +44,8 @@ async function renderFixture(page: any, authority: string) {
       move: (_id: string, direction: string) => '<button type="button" class="wo-button wo-button--ghost wo-button--sm" aria-label="Move ' + direction + '">' + (direction === 'up' ? '↑' : '↓') + '</button>',
       toggle: () => '<button type="button" class="wo-button wo-button--ghost wo-button--sm">Toggle visibility</button>',
       adopt: 'window.adoptWebsiteNavigation()',
-      revert: '<button type="button" class="wo-button wo-button--secondary">Reload latest navigation</button>'
+      discard: '<button type="button" class="wo-button wo-button--secondary">Discard unpublished changes</button>',
+      reload: '<button type="button" class="wo-button wo-button--secondary">Reload latest navigation</button>'
     };
   const model = authority === 'conflict'
       ? { websiteName: 'PressurePro', authority: 'conflict', items: [], legacyItems: [], error: 'Reload required' }
@@ -79,13 +80,33 @@ async function smokeNavigation(page: any, name: string) {
   await assertShell(page, `Website Navigation legacy ${name}`, true);
   assert(!(await page.locator('.wo-website-navigation').locator('[style*="purple"], [style*="#8a2be2"]').count()), `${name}: old purple inline styling remains`);
 
+  await page.waitForFunction(() => document.body.innerText.includes('Review conversion'), undefined, { timeout: 10000 });
+  await page.getByRole('button', { name: 'Review conversion' }).click();
+  await page.waitForSelector('.wo-website-navigation-adoption');
+  assert((await page.locator('.wo-website-navigation-adoption').innerText()).includes('Review legacy conversion'), `${name}: legacy review did not open`);
+  while (await page.getByRole('button', { name: 'Create editable draft' }).isDisabled()) {
+    const remove = page.getByRole('button', { name: 'Remove' }).first();
+    assert(await remove.count() === 1, `${name}: unresolved legacy candidate cannot be corrected or removed`);
+    await remove.click();
+  }
+  await page.getByRole('button', { name: 'Create editable draft' }).click();
+  await page.waitForFunction(() => document.body.innerText.includes('Unpublished changes'));
+  await page.getByRole('button', { name: 'Add menu item' }).click();
+  await page.waitForSelector('#website-navigation-editor-title');
+  const kind = page.locator('#website-navigation-kind');
+  for (const target of ['homepage', 'internal', 'external', 'phone', 'email']) { await kind.selectOption(target); assert(await kind.inputValue() === target, `${name}: ${target} unavailable`); }
+  await kind.selectOption('phone'); await page.locator('#website-navigation-label').fill('Call us'); await page.locator('#website-navigation-target').fill('+1 555 234 5678'); await page.locator('input[type="checkbox"]').nth(1).check(); await page.getByRole('button', { name: 'Add item' }).click();
+  await page.waitForFunction(() => document.body.innerText.includes('Call us'));
+  await page.getByRole('button', { name: 'Edit' }).click(); await page.waitForSelector('#website-navigation-editor-title'); await page.locator('#website-navigation-label').fill('Call today'); await page.getByRole('button', { name: 'Save changes' }).click(); await page.waitForFunction(() => document.body.innerText.includes('Call today'));
+  await page.getByRole('button', { name: 'Discard unpublished changes' }).click(); await page.waitForFunction(() => document.body.innerText.includes('Legacy navigation'));
+
   for (const authority of ['legacy', 'live', 'draft', 'empty', 'conflict'] as const) {
     await renderFixture(page, authority);
     const region = page.locator('.wo-website-navigation');
     assert(await region.count() === 1, `${name}: ${authority} region missing`);
     const text = await region.innerText();
     if (authority === 'live') assert(text.includes('Live') && text.includes('Home'), `${name}: live state missing`);
-    if (authority === 'draft') assert(text.includes('Unpublished changes') && text.includes('Reload latest navigation'), `${name}: draft state missing`);
+    if (authority === 'draft') assert(text.includes('Unpublished changes') && text.includes('Discard unpublished changes'), `${name}: draft state missing`);
     if (authority === 'empty') assert(text.includes('No menu items yet'), `${name}: empty state missing`);
     if (authority === 'legacy') assert(text.includes('Legacy navigation') && text.includes('Review conversion'), `${name}: legacy state missing`);
     if (authority === 'conflict') assert(text.includes('Navigation conflict') && text.includes('Reload latest navigation'), `${name}: conflict state missing`);
