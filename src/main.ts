@@ -72,7 +72,10 @@ import {
   renderWebsiteManagementSelectorContent,
   renderWebsiteManagementSwitcher as renderWebsiteManagementSwitcherControl,
   createSitePagesViewModel,
-  renderSitePagesContent
+  renderSitePagesContent,
+  renderSitePageDetail,
+  renderSitePageDetailError,
+  renderSitePageDetailLoading
 } from './ui/website-management';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
@@ -11064,11 +11067,9 @@ async function renderFunnelDetail(funnelId: string) {
     activeNavId: activeNav,
     title: 'Loading page details…',
     contentVariant: 'wide',
-    contentHtml: `
-      <div id="funnel-detail-container" style="padding: 20px;">
-        <div class="loading">Loading page details...</div>
-      </div>
-    `
+    contentHtml: funnelMode === 'website'
+      ? renderSitePageDetailLoading()
+      : `<div id="funnel-detail-container" style="padding: 20px;"><div class="loading">Loading page details...</div></div>`
   });
 
   try {
@@ -11084,12 +11085,12 @@ async function renderFunnelDetail(funnelId: string) {
       fetch('/api/events/logs').then(r => r.json())
     ]);
 
-    const funnelOpps = (oppsAll.data || []).filter((o: any) => o.funnel_id === funnelId);
+    const funnelOpps = (oppsAll.data || []).filter((o: any) => o.user_id === userId && o.funnel_id === funnelId);
     const totalLeads = funnelOpps.length;
     const todayLeads = funnelOpps.filter((o: any) => new Date(o.created_at).toDateString() === new Date().toDateString()).length;
     
     // Average Response Time calculation
-    const logs = logsAll.data || [];
+    const logs = (logsAll.data || []).filter((log: any) => log.user_id === userId);
     const leadLogs = logs.filter((l: any) => l.event_name === 'lead_captured' && (l.payload?.funnel_id === funnelId || l.funnel_id === funnelId));
     
     let totalRespTime = 0;
@@ -11136,6 +11137,49 @@ async function renderFunnelDetail(funnelId: string) {
       })
       .filter((route): route is WebsiteRoute => Boolean(route));
     const siteUrlBase = '';
+
+    if (funnelMode === 'website') {
+      const ownedRoutes = mockWebsiteRoutes
+        .filter(route => route.funnel_id === funnelId)
+        .map(route => ({ route, website: mockWebsites.find(site => site.id === route.website_id && site.user_id === userId) }))
+        .filter((entry): entry is { route: WebsiteRoute; website: Website } => Boolean(entry.website));
+      const hasOwnedSiteContext = funnel.user_id === userId && ownedRoutes.length > 0;
+      if (!hasOwnedSiteContext) {
+        renderAppWithShell({
+          activeView: 'funnel-detail', activeNavId: 'funnels', title: 'Site Page unavailable', contentVariant: 'wide',
+          headerActionsHtml: renderButton({ label: 'Back to Site Pages', variant: 'secondary', attributes: { onclick: "window.navigateTo('funnels')" } }),
+          contentHtml: renderSitePageDetailError('This Site Page is unavailable for the current account.', renderButton({ label: 'Back to Site Pages', variant: 'secondary', attributes: { onclick: "window.navigateTo('funnels')" } }))
+        });
+        return;
+      }
+      const safePublicUrl = (website: Website, path: string): string | null => {
+        const host = website.domain || `${website.subdomain}.pressurepro.io`;
+        if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(host) || !/^\/[A-Za-z0-9._~!$&'()*+,;=:@/%-]*$/.test(path)) return null;
+        return `https://${host}${path}`;
+      };
+      const ownedLogs = logs;
+      const contactIds = new Set(funnelOpps.map((opportunity: any) => opportunity.contact_id));
+      const activities = ownedLogs
+        .filter((log: any) => contactIds.has(log.payload?.contact_id || log.contact_id) || log.payload?.funnel_id === funnelId || log.funnel_id === funnelId)
+        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 15)
+        .map((log: any) => ({ id: String(log.id), eventName: String(log.event_name || ''), contactName: String(log.payload?.name || 'Lead'), createdAt: String(log.created_at || '') }));
+      renderAppWithShell({
+        activeView: 'funnel-detail', activeNavId: 'funnels', title: funnel.name || 'Site Page', subtitle: `Status: ${funnel.status}`,
+        headerActionsHtml: renderButton({ label: 'Back to Site Pages', variant: 'secondary', attributes: { onclick: "window.navigateTo('funnels')" } }), contentVariant: 'wide',
+        contentHtml: renderSitePageDetail({
+          model: {
+            funnelId: funnel.id, name: funnel.name || 'Site Page', status: funnel.status || 'draft',
+            routes: ownedRoutes.map(({ route, website }) => ({ id: route.id, path: route.path, publicUrl: safePublicUrl(website, route.path) })),
+            metrics: { totalLeads, leadsToday: todayLeads, leadsThisWeek: weeklyLeads, responseTime: respTimeStr },
+            steps: steps.map((step: any) => ({ id: String(step.id), step_type: String(step.step_type || ''), name: String(step.name || ''), slug: String(step.slug || '') })), activities
+          },
+          renderAttachAction: id => renderButton({ label: ownedRoutes.length ? 'Manage Connection' : 'Attach to Website Page', variant: 'secondary', attributes: { onclick: `window.showAttachToWebsiteModal(${builderInspectorJsArgument(id)})` } }),
+          renderEditAction: (stepId, id) => renderButton({ label: 'Edit Section', variant: 'secondary', attributes: { onclick: `window.openBuilderFromFunnel(${builderInspectorJsArgument(stepId)}, ${builderInspectorJsArgument(id)})` } })
+        })
+      });
+      return;
+    }
 
     renderAppWithShell({
       activeView: 'funnel-detail',
@@ -11273,7 +11317,9 @@ async function renderFunnelDetail(funnelId: string) {
         <button onclick="window.navigateTo('${backTarget}')" class="btn-primary" style="background: #f1f5f9; color: #475569; padding: 8px 12px; border-radius: 8px; border: none;">← Back</button>
       `,
       contentVariant: 'wide',
-      contentHtml: `<div class="error">Failed to load page: ${escapeHtmlText(err.message)}</div>`
+      contentHtml: funnelMode === 'website'
+        ? renderSitePageDetailError('Unable to load this Site Page. Please try again.', renderButton({ label: 'Retry', variant: 'secondary', attributes: { onclick: `window.navigateTo('funnel-detail', ${builderInspectorJsArgument(funnelId)})` } }))
+        : `<div class="error">Failed to load page: ${escapeHtmlText(err.message)}</div>`
     });
   }
 }
