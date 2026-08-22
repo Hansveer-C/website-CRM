@@ -86,5 +86,6 @@ describe('Website management shared controls', () => {
     expect(html).not.toContain('FOREIGN SITE');
     expect(renderWebsiteManagementSwitcher({ view: 'funnels', websites: [websites[0], websites[2]], actingUserId: 'u1', activeWebsiteId: 'one' })).toBe('');
     expect(renderWebsiteManagementSwitcher({ view: 'funnels', websites, actingUserId: 'u1', activeWebsiteId: null })).toBe('');
+    expect(renderWebsiteManagementSwitcher({ view: 'funnels', websites, actingUserId: 'u1', activeWebsiteId: 'foreign' })).toBe('');
   });
 });

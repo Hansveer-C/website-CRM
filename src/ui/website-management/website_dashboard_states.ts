@@ -97,7 +97,8 @@ export function renderWebsiteManagementSelectorContent(input: WebsiteManagementS
 
 export function renderWebsiteManagementSwitcher(input: { view: WebsiteManagementView; websites: readonly Website[]; actingUserId: string; activeWebsiteId: string | null }): string {
   const ownedWebsites = input.websites.filter(site => site.user_id === input.actingUserId);
-  if (ownedWebsites.length < 2 || !input.activeWebsiteId) return '';
+  const hasOwnedActiveWebsite = input.activeWebsiteId !== null && ownedWebsites.some(site => site.id === input.activeWebsiteId);
+  if (ownedWebsites.length < 2 || !hasOwnedActiveWebsite) return '';
   return `<div class="wo-website-management-switcher">${renderField({
     id: 'management-website-select',
     label: 'Active website',
