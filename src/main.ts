@@ -4278,6 +4278,14 @@ function getActiveBuilderWebsite(): Website | undefined {
   return owned.length === 1 ? owned[0] : undefined;
 }
 
+function getActiveNavigationWebsite(): Website | undefined {
+  const userId = getActingUserId();
+  if (activeDashboardWebsiteId) {
+    return mockWebsites.find(website => website.id === activeDashboardWebsiteId && website.user_id === userId);
+  }
+  return getActiveBuilderWebsite();
+}
+
 function getActiveSettingsWebsite(): Website | undefined {
   const userId = getActingUserId();
   const explicitWebsiteId = currentView === 'website-settings'
@@ -4721,7 +4729,7 @@ let builderNavigationUiManager: BuilderNavigationUiManager | null = null;
 let builderSiteNavigationIdentity = '';
 
 function getNavUiContext(): NavigationUiContext | null {
-  const website = getActiveBuilderWebsite();
+  const website = currentView === 'website-navigation' ? getActiveNavigationWebsite() : getActiveBuilderWebsite();
   if (!website) return null;
 
   const routeController = getBuilderPageRouteController();
@@ -4752,7 +4760,7 @@ function getNavUiContext(): NavigationUiContext | null {
 }
 
 export function getBuilderSiteNavigationManager(): BuilderNavigationUiManager {
-  const website = getActiveBuilderWebsite();
+  const website = currentView === 'website-navigation' ? getActiveNavigationWebsite() : getActiveBuilderWebsite();
   const userId = getActingUserId();
   const identity = `${userId}:${website?.id ?? ''}`;
   if (builderNavigationUiManager && builderSiteNavigationIdentity === identity && builderSiteNavigationController) {
