@@ -40,6 +40,13 @@ async function run() {
         const detail = page.locator('.wo-site-page-detail'); const text = await detail.innerText();
         for (const value of ['connected to website', 'total leads', 'leads today', 'leads this week', 'avg. response time', 'page sections', 'recent activity', 'edit section']) assert(text.toLowerCase().includes(value), `${name}: missing ${value}; ${text}`);
         assert(await page.getByRole('button', { name: 'Back to Site Pages' }).isVisible(), `${name}: Back action missing`);
+        for (const label of ['Total Leads', 'Leads Today', 'Leads This Week']) {
+          const metric = detail.locator('.wo-site-page-detail-metric', { hasText: label });
+          assert(await metric.count() === 1, `${name}: ${label} card missing or ambiguous`);
+          assert((await metric.locator('strong').innerText()).trim() === '1', `${name}: ${label} included a foreign opportunity`);
+        }
+        assert(await detail.getByText('Owned lead', { exact: true }).isVisible(), `${name}: owned activity missing`);
+        assert(!(await detail.getByText('FOREIGN EVENT MUST NOT RENDER', { exact: true }).count()), `${name}: foreign activity rendered`);
         assert((await page.locator('.wo-site-page-detail-step').count()) > 0, `${name}: missing section`);
         assert(await page.getByRole('button', { name: 'Manage Connection' }).isVisible(), `${name}: connection action missing`);
         await page.screenshot({ path: `${output}/site-page-detail-${name}.png` });
