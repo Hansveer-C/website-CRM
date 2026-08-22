@@ -86,7 +86,7 @@ describe('Marketing Pages legacy path', () => {
     expect(source).toContain("if (mode === 'website') {");
     expect(source).toContain('renderSitePagesContent({');
     expect(source).toContain("const rowsHtml = displayFunnels.map(funnel => {");
-    expect(source).toContain("mode === 'website' ? '📄' : '🎯'");
+    expect(source).toContain("legacyMode === 'website' ? '📄' : '🎯'");
     expect(source).toContain("window.openNewPageModal('template')");
   });
 });
