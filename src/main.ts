@@ -61,6 +61,7 @@ import { renderOpportunitiesContent } from './ui/opportunities';
 import { renderNewQuoteContent, renderQuotePreviewContent, renderQuotesContent } from './ui/quotes';
 import { renderInvoicesContent, type InvoiceFilter } from './ui/invoices';
 import { createReportsViewModel, renderReportsContent, type ReportsAvailability } from './ui/reports';
+import { renderWebsiteDashboardReady } from './ui/website-management';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
   BUILDER_PAGE_SLUG_MAX_LENGTH,
@@ -10804,7 +10805,7 @@ function dashboardActionButton(model: WebsiteDashboardModel, action: BuilderNavi
   const availability = model.actions[key];
   const reason = availability.reason ? ` aria-describedby="dashboard-${key}-reason" title="${escapeBuilderInspectorHtml(availability.reason)}"` : '';
   const pageArgument = pageId ? `, ${builderInspectorJsArgument(pageId)}` : '';
-  return `<div class="website-dashboard-action-wrap"><button type="button" class="website-dashboard-action" onclick='window.openDashboardBuilder(${builderInspectorJsArgument(action)}${pageArgument})' ${availability.enabled ? '' : 'disabled'}${reason}>${escapeBuilderInspectorHtml(label)}</button>${availability.reason ? `<span id="dashboard-${key}-reason" class="website-dashboard-action-reason">${escapeBuilderInspectorHtml(availability.reason)}</span>` : ''}</div>`;
+  return `<div class="wo-website-dashboard-action-wrap"><button type="button" class="wo-button wo-button--secondary wo-website-dashboard-action" onclick='window.openDashboardBuilder(${builderInspectorJsArgument(action)}${pageArgument})' ${availability.enabled ? '' : 'disabled'}${reason}>${escapeBuilderInspectorHtml(label)}</button>${availability.reason ? `<span id="dashboard-${key}-reason" class="wo-website-dashboard-action-reason">${escapeBuilderInspectorHtml(availability.reason)}</span>` : ''}</div>`;
 }
 
 (window as any).openDashboardBuilder = (action: BuilderNavigationAction, requestedPageId?: string) => {
@@ -10944,24 +10945,13 @@ async function renderWebsiteDashboard(force = false) {
   const model = state.model;
   activeDashboardWebsiteId = model.website.id;
   const selected = state.websites.find(item => item.id === model.website.id);
-  const warning = state.status === 'partial' ? `<div class="website-dashboard-warning" role="alert">${escapeBuilderInspectorHtml(state.warning)} <button type="button" onclick="window.refreshWebsiteDashboard()">Retry</button></div>` : '';
-  const liveLink = model.publicUrl ? `<a class="btn-primary website-dashboard-live" href="${escapeBuilderInspectorHtml(model.publicUrl)}" target="_blank" rel="noopener noreferrer">View Live Site <span aria-hidden="true">↗</span><span class="sr-only"> (opens in a new tab)</span></a>` : `<button type="button" class="btn-outline website-dashboard-live" disabled title="${escapeBuilderInspectorHtml(model.actions.viewLive.reason)}">View Live Site</button>`;
   renderAppWithShell({
     activeView: 'website-dashboard',
     title: 'Website Dashboard',
     subtitle: 'Manage the draft and published experience for this website.',
-    headerActionsHtml: `<button type="button" class="btn-outline" onclick="window.refreshWebsiteDashboard()">Refresh</button>`,
+    headerActionsHtml: `<button type="button" class="wo-button wo-button--secondary" onclick="window.refreshWebsiteDashboard()">Refresh</button>`,
     contentVariant: 'wide',
-    contentHtml: `
-      ${warning}
-      ${state.websites.length > 1 ? `<div class="website-dashboard-selector"><label for="dashboard-website-select">Active website</label><select id="dashboard-website-select" onchange="window.selectDashboardWebsite(this.value)">${state.websites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}" ${site.id === model.website.id ? 'selected' : ''}>${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></div>` : ''}
-      <section class="card website-dashboard-identity" aria-labelledby="dashboard-site-heading"><div><span class="website-dashboard-eyebrow">Active website</span><h2 id="dashboard-site-heading">${escapeBuilderInspectorHtml(model.website.name)}</h2><p>${escapeBuilderInspectorHtml(model.website.publicHost ?? selected?.subdomain ?? 'Public domain not configured')}</p></div>${liveLink}</section>
-      <div class="website-dashboard-grid"><section class="card website-dashboard-home" aria-labelledby="dashboard-home-heading"><div class="website-dashboard-card-heading"><div><span class="website-dashboard-eyebrow">Homepage</span><h2 id="dashboard-home-heading">${escapeBuilderInspectorHtml(model.homepage.name ?? 'No editable homepage found')}</h2></div><span class="website-dashboard-status status-${model.homepage.publicationState}">${escapeBuilderInspectorHtml(publicationDashboardLabel(model.homepage.publicationState))}</span></div>
-      ${model.homepage.name ? `<dl class="website-dashboard-facts"><div><dt>Path</dt><dd>${escapeBuilderInspectorHtml(model.homepage.path)}</dd></div><div><dt>Page row status</dt><dd>${escapeBuilderInspectorHtml(model.homepage.legacyPageStatus)}</dd></div><div><dt>Last published</dt><dd>${model.homepage.lastPublishedAt ? escapeBuilderInspectorHtml(new Date(model.homepage.lastPublishedAt).toLocaleString()) : 'Not available'}</dd></div></dl>` : `<p>No editable homepage was found for this website. Open Pages to review the website structure.</p>`}
-      <div class="website-dashboard-primary-actions">${dashboardActionButton(model, 'edit', 'Edit Home Page', 'edit', model.homepage.id)}${dashboardActionButton(model, 'preview', 'Preview Draft', 'preview', model.homepage.id)}${dashboardActionButton(model, 'publish', 'Publish', 'publish', model.homepage.id)}</div></section>
-      <aside class="card website-dashboard-quick" aria-labelledby="dashboard-quick-heading"><h2 id="dashboard-quick-heading">Quick actions</h2>${dashboardActionButton(model, 'pages', 'Manage Pages', 'pages')}${dashboardActionButton(model, 'guided-setup', 'Guided Setup', 'guidedSetup')}${dashboardActionButton(model, 'assets', 'Assets', 'assets')}${dashboardActionButton(model, 'settings', 'Page Settings', 'settings')}</aside></div>
-      <section class="website-dashboard-summary" aria-label="Website summary"><article class="card"><strong>${model.counts.pages}</strong><span>Website pages</span></article><article class="card"><strong>${model.counts.draftPages}</strong><span>Draft page rows</span></article><article class="card"><strong>${model.counts.mediaAssets ?? '—'}</strong><span>${model.counts.mediaAssets === null ? 'Media count unavailable' : 'Media assets'}</span></article><article class="card"><strong>${model.readiness.setupBriefVersion ? `v${model.readiness.setupBriefVersion}` : '—'}</strong><span>Guided setup brief</span></article></section>
-    `
+    contentHtml: renderWebsiteDashboardReady({ model, websites: state.websites, selectedSubdomain: selected?.subdomain, warning: state.status === 'partial' ? state.warning : undefined, publicationLabel: publicationDashboardLabel(model.homepage.publicationState), renderAction: (key, label, pageId) => dashboardActionButton(model, key === 'guidedSetup' ? 'guided-setup' : key, label, key, pageId) })
   });
 }
 
