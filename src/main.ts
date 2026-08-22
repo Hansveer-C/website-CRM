@@ -30,6 +30,7 @@ import {
 } from './builder_history_controller';
 import {
   renderCard,
+  renderButton,
   renderField,
   renderSelect,
   renderStatusBadge,
@@ -69,7 +70,9 @@ import {
   renderWebsiteDashboardSelectionRequired,
   renderWebsiteDashboardUnavailable,
   renderWebsiteManagementSelectorContent,
-  renderWebsiteManagementSwitcher as renderWebsiteManagementSwitcherControl
+  renderWebsiteManagementSwitcher as renderWebsiteManagementSwitcherControl,
+  createSitePagesViewModel,
+  renderSitePagesContent
 } from './ui/website-management';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
@@ -10946,6 +10949,43 @@ function renderFunnels(mode: 'website' | 'marketing' = 'website') {
   const viewDesc = mode === 'website' 
     ? 'Manage the core pages that make up your business website.' 
     : 'Standalone lead-capture pages for ads and seasonal marketing.';
+
+  if (mode === 'website') {
+    const sitePages = createSitePagesViewModel({
+      userId,
+      activeWebsiteId: activeDashboardWebsiteId,
+      websites: mockWebsites,
+      routes: mockWebsiteRoutes,
+      funnels: mockFunnels
+    });
+    renderAppWithShell({
+      activeView: 'funnels',
+      title: viewTitle,
+      subtitle: viewDesc,
+      headerActionsHtml: renderButton({
+        label: '+ New Website Page',
+        variant: 'primary',
+        attributes: { onclick: `window.showAddPageModal(${builderInspectorJsArgument(website!.id)})` }
+      }),
+      contentVariant: 'wide',
+      contentHtml: `${renderWebsiteManagementSwitcher('funnels')}${renderSitePagesContent({
+        model: sitePages,
+        renderManageAction: funnelId => renderButton({
+          label: 'Manage',
+          variant: 'secondary',
+          size: 'sm',
+          attributes: { onclick: `window.navigateTo('funnel-detail', ${builderInspectorJsArgument(funnelId)})` }
+        }),
+        renderDeleteAction: (routeId, funnelId) => renderButton({
+          label: 'Delete',
+          variant: 'danger',
+          size: 'sm',
+          attributes: { onclick: `window.deletePage(${builderInspectorJsArgument(routeId)}, ${builderInspectorJsArgument(funnelId)})` }
+        })
+      })}`
+    });
+    return;
+  }
 
   const rowsHtml = displayFunnels.map(funnel => {
     const route = siteRoutes.find(r => r.funnel_id === funnel.id);
