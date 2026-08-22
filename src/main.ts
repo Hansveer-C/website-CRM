@@ -75,7 +75,9 @@ import {
   renderSitePagesContent,
   renderSitePageDetail,
   renderSitePageDetailError,
-  renderSitePageDetailLoading
+  renderSitePageDetailLoading,
+  renderWebsiteNavigationContent,
+  type WebsiteNavigationModel
 } from './ui/website-management';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
@@ -182,6 +184,8 @@ import { BuilderUnifiedPublicationController } from './builder_unified_publicati
 import { SupabaseBuilderUnifiedPublicationRepository } from './builder_unified_publication_repository_supabase';
 import { renderUnifiedPublishModal } from './builder_unified_publication_ui';
 import type { NavigationMenuScope } from './builder_site_navigation_domain';
+import { validateNavigationItem } from './builder_site_navigation_domain';
+import { generateNavigationUuid } from './builder_site_navigation_ui';
 import { WebsiteDashboardController, type WebsiteDashboardCoreData } from './website_dashboard_controller';
 import { getWebsiteScopedPages, resolveWebsiteHomepage, type WebsiteDashboardModel, type WebsiteDashboardSummaryInput } from './website_dashboard_model';
 import { createBrowserCallSimulator } from './browser_call_simulation';
@@ -9549,6 +9553,30 @@ function renderWebsiteNavigation() {
     renderWebsiteRepositoryUnavailable('website-navigation');
     return;
   }
+  const managedWebsite = website;
+  const navigationManager = getBuilderSiteNavigationManager();
+  const navigationController = builderSiteNavigationController;
+  const navigationContext = getNavUiContext();
+  if (!navigationContext || !navigationController) {
+    renderWebsiteRepositoryUnavailable('website-navigation');
+    return;
+  }
+  const renderCanonical = () => {
+    const current = navigationController.getState();
+    const legacyItems = (navigationContext.layout?.header_config.nav_items ?? []).map(item => ({ label: String(item.label ?? ''), path: String(item.path ?? ''), visible: item.visible !== false }));
+    const model: WebsiteNavigationModel = current.status === 'ready'
+      ? { websiteName: managedWebsite.name, authority: current.isConflict ? 'conflict' : current.isDraft ? 'draft' : current.liveRevision > 0 ? 'live' : 'legacy', items: current.items, legacyItems, error: current.errorMessage ?? undefined }
+      : { websiteName: managedWebsite.name, authority: current.status === 'error' ? 'error' : 'loading', items: [], legacyItems, error: current.status === 'error' ? current.error : undefined };
+    const action = (code: string) => `window.${code}`;
+    renderAppWithShell({ activeView: 'website-navigation', title: 'Website Navigation', subtitle: 'Manage your primary website navigation.', contentVariant: 'wide', contentHtml: `${renderWebsiteManagementSwitcher('website-navigation')}${renderWebsiteNavigationContent(model, { add: `<button type="button" class="wo-button wo-button--primary" onclick="${action('addWebsiteNavigationItem()')}">Add menu item</button>`, edit: id => `<button type="button" class="wo-button wo-button--secondary" onclick='window.editWebsiteNavigationItem(${builderInspectorJsArgument(id)})'>Edit</button>`, remove: id => `<button type="button" class="wo-button wo-button--danger" onclick='window.removeWebsiteNavigationItem(${builderInspectorJsArgument(id)})'>Delete</button>`, move: (id, direction) => `<button type="button" class="wo-button wo-button--ghost wo-button--sm" aria-label="Move ${direction}" onclick='window.moveWebsiteNavigationItem(${builderInspectorJsArgument(id)}, ${builderInspectorJsArgument(direction)})'>${direction === 'up' ? '↑' : '↓'}</button>`, toggle: id => `<button type="button" class="wo-button wo-button--ghost wo-button--sm" onclick='window.toggleWebsiteNavigationItem(${builderInspectorJsArgument(id)})'>Toggle visibility</button>`, adopt: action('adoptWebsiteNavigation()'), revert: `<button type="button" class="wo-button wo-button--secondary" onclick="${action('revertWebsiteNavigation()')}">Reload latest navigation</button>` })}` });
+  };
+  if (navigationController.getState().status === 'uninitialized' || navigationController.getActiveWebsiteId() !== managedWebsite.id) {
+    renderAppWithShell({ activeView: 'website-navigation', title: 'Website Navigation', contentVariant: 'wide', contentHtml: `${renderWebsiteManagementSwitcher('website-navigation')}${renderWebsiteNavigationContent({ websiteName: managedWebsite.name, authority: 'loading', items: [], legacyItems: [] }, { add: '', edit: () => '', remove: () => '', move: () => '', toggle: () => '', adopt: '', revert: '' })}` });
+    void navigationController.hydrate(managedWebsite.id, { effectiveRoutes: navigationContext.effectiveRoutes, homepageFunnelId: managedWebsite.homepage_funnel_id }).then(renderCanonical);
+    return;
+  }
+  renderCanonical();
+  return;
   if (editorUsesSupabase() && websiteLayoutHydrator.state.status === 'loading') {
     renderAppWithShell({
       activeView: 'website-navigation',
@@ -9567,12 +9595,12 @@ function renderWebsiteNavigation() {
     });
     return;
   }
-  const layout = mockWebsiteLayouts.find(l => l.website_id === website.id);
+  const layout = mockWebsiteLayouts.find(l => l.website_id === managedWebsite.id);
   
   const navItems = layout?.header_config.nav_items ?? [];
 
   // 🌿 Fix.2: Get available pages for the dropdown
-  const siteRoutes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
+  const siteRoutes = mockWebsiteRoutes.filter(r => r.website_id === managedWebsite.id);
 
   const itemsHtml = navItems.map((item: any, index: number) => `
     <div class="card" style="display: flex; align-items: center; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; padding: 20px; border: 1px solid #eef2f6; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
@@ -9628,6 +9656,23 @@ function renderWebsiteNavigation() {
     `
   });
 }
+
+(window as any).addWebsiteNavigationItem = async () => {
+  const context = getNavUiContext(); const controller = builderSiteNavigationController;
+  if (!context || !controller || controller.getState().status !== 'ready') return;
+  const label = window.prompt('Menu label', 'New link'); if (!label) return;
+  const target = window.prompt('Destination URL or funnel ID', '__homepage__') ?? '';
+  const target_kind = target === '__homepage__' ? 'homepage' : /^https?:\/\//i.test(target) ? 'external' : 'internal';
+  const checked = validateNavigationItem({ id: generateNavigationUuid(), label, target_kind, target_value: target, position: (controller.getState() as any).rawItems.length, visible: true, is_cta: false });
+  if (!checked.valid) { (window as any).showToast(checked.error, 'error'); return; }
+  await controller.stageDraft([...(controller.getState() as any).rawItems, checked.item], { effectiveRoutes: context.effectiveRoutes, homepageFunnelId: context.website.homepage_funnel_id }); renderWebsiteNavigation();
+};
+(window as any).removeWebsiteNavigationItem = async (id: string) => { const context = getNavUiContext(); const controller = builderSiteNavigationController; if (!context || !controller || controller.getState().status !== 'ready') return; await controller.stageDraft((controller.getState() as any).rawItems.filter((item: any) => item.id !== id), { effectiveRoutes: context.effectiveRoutes, homepageFunnelId: context.website.homepage_funnel_id }); renderWebsiteNavigation(); };
+(window as any).toggleWebsiteNavigationItem = async (id: string) => { const context = getNavUiContext(); const controller = builderSiteNavigationController; if (!context || !controller || controller.getState().status !== 'ready') return; const items = (controller.getState() as any).rawItems.map((item: any) => item.id === id ? { ...item, visible: !item.visible } : item); await controller.stageDraft(items, { effectiveRoutes: context.effectiveRoutes, homepageFunnelId: context.website.homepage_funnel_id }); renderWebsiteNavigation(); };
+(window as any).moveWebsiteNavigationItem = async (id: string, direction: 'up' | 'down') => { const context = getNavUiContext(); const controller = builderSiteNavigationController; if (!context || !controller || controller.getState().status !== 'ready') return; const items = [...(controller.getState() as any).rawItems]; const index = items.findIndex((item: any) => item.id === id); const next = direction === 'up' ? index - 1 : index + 1; if (index < 0 || next < 0 || next >= items.length) return; [items[index], items[next]] = [items[next], items[index]]; await controller.stageDraft(items.map((item: any, position: number) => ({ ...item, position })), { effectiveRoutes: context.effectiveRoutes, homepageFunnelId: context.website.homepage_funnel_id }); renderWebsiteNavigation(); };
+(window as any).editWebsiteNavigationItem = async (id: string) => { const context = getNavUiContext(); const controller = builderSiteNavigationController; if (!context || !controller || controller.getState().status !== 'ready') return; const current = (controller.getState() as any).rawItems.find((item: any) => item.id === id); if (!current) return; const label = window.prompt('Menu label', current.label); if (!label) return; const checked = validateNavigationItem({ ...current, label }); if (!checked.valid) { (window as any).showToast(checked.error, 'error'); return; } await controller.stageDraft((controller.getState() as any).rawItems.map((item: any) => item.id === id ? checked.item : item), { effectiveRoutes: context.effectiveRoutes, homepageFunnelId: context.website.homepage_funnel_id }); renderWebsiteNavigation(); };
+(window as any).adoptWebsiteNavigation = () => { const manager = getBuilderSiteNavigationManager(); const context = getNavUiContext(); if (context) manager.startLegacyAdoptionReview(context.layout, { effectiveRoutes: context.effectiveRoutes, funnels: context.funnels, pages: context.pages }); renderWebsiteNavigation(); };
+(window as any).revertWebsiteNavigation = async () => { const context = getNavUiContext(); const controller = builderSiteNavigationController; if (!context || !controller) return; await controller.hydrate(context.website.id, { effectiveRoutes: context.effectiveRoutes, homepageFunnelId: context.website.homepage_funnel_id }); renderWebsiteNavigation(); };
 
 (window as any).addNavItem = () => {
     const userId = getActingUserId();
