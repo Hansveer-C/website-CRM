@@ -30,6 +30,7 @@ import {
 } from './builder_history_controller';
 import {
   renderCard,
+  renderButton,
   renderField,
   renderSelect,
   renderStatusBadge,
@@ -69,7 +70,9 @@ import {
   renderWebsiteDashboardSelectionRequired,
   renderWebsiteDashboardUnavailable,
   renderWebsiteManagementSelectorContent,
-  renderWebsiteManagementSwitcher as renderWebsiteManagementSwitcherControl
+  renderWebsiteManagementSwitcher as renderWebsiteManagementSwitcherControl,
+  createSitePagesViewModel,
+  renderSitePagesContent
 } from './ui/website-management';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
@@ -10947,13 +10950,51 @@ function renderFunnels(mode: 'website' | 'marketing' = 'website') {
     ? 'Manage the core pages that make up your business website.' 
     : 'Standalone lead-capture pages for ads and seasonal marketing.';
 
+  if (mode === 'website') {
+    const sitePages = createSitePagesViewModel({
+      userId,
+      activeWebsiteId: activeDashboardWebsiteId,
+      websites: mockWebsites,
+      routes: mockWebsiteRoutes,
+      funnels: mockFunnels
+    });
+    renderAppWithShell({
+      activeView: 'funnels',
+      title: viewTitle,
+      subtitle: viewDesc,
+      headerActionsHtml: renderButton({
+        label: '+ New Website Page',
+        variant: 'primary',
+        attributes: { onclick: `window.showAddPageModal(${builderInspectorJsArgument(website!.id)})` }
+      }),
+      contentVariant: 'wide',
+      contentHtml: `${renderWebsiteManagementSwitcher('funnels')}${renderSitePagesContent({
+        model: sitePages,
+        renderManageAction: funnelId => renderButton({
+          label: 'Manage',
+          variant: 'secondary',
+          size: 'sm',
+          attributes: { onclick: `window.navigateTo('funnel-detail', ${builderInspectorJsArgument(funnelId)})` }
+        }),
+        renderDeleteAction: (routeId, funnelId) => renderButton({
+          label: 'Delete',
+          variant: 'danger',
+          size: 'sm',
+          attributes: { onclick: `window.deletePage(${builderInspectorJsArgument(routeId)}, ${builderInspectorJsArgument(funnelId)})` }
+        })
+      })}`
+    });
+    return;
+  }
+
+  const legacyMode = mode as 'website' | 'marketing';
   const rowsHtml = displayFunnels.map(funnel => {
     const route = siteRoutes.find(r => r.funnel_id === funnel.id);
     return `
       <tr class="clickable-row" onclick="window.navigateTo('funnel-detail', '${funnel.id}')">
         <td style="font-weight: 600; color: var(--primary-color); padding-left: 20px;">
           <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 1.2rem;">${mode === 'website' ? '📄' : '🎯'}</span>
+            <span style="font-size: 1.2rem;">${legacyMode === 'website' ? '📄' : '🎯'}</span>
             ${funnel.name || 'Untitled Page'}
           </div>
         </td>
@@ -10968,12 +11009,12 @@ function renderFunnels(mode: 'website' | 'marketing' = 'website') {
   }).join('');
 
   renderAppWithShell({
-    activeView: mode === 'website' ? 'funnels' : 'marketing-funnels',
+    activeView: legacyMode === 'website' ? 'funnels' : 'marketing-funnels',
     title: viewTitle,
     subtitle: viewDesc,
     headerActionsHtml: `
       <div style="display: flex; gap: 12px;">
-        ${mode === 'website'
+        ${legacyMode === 'website'
           ? `<button class="btn-primary" onclick="window.showAddPageModal('${website!.id}')">+ New Website Page</button>`
           : `<button class="btn-primary" style="background: #4f46e5; border: none;" onclick="window.openNewPageModal('template')">+ New Marketing Page</button>`
         }
@@ -10981,21 +11022,21 @@ function renderFunnels(mode: 'website' | 'marketing' = 'website') {
     `,
     contentVariant: 'wide',
     contentHtml: `
-      ${mode === 'website' ? renderWebsiteManagementSwitcher('funnels') : ''}
+      ${legacyMode === 'website' ? renderWebsiteManagementSwitcher('funnels') : ''}
       
       <div id="pages-list-container" style="padding: 10px 0;">
         <div class="card" style="padding: 0; overflow: hidden;">
           <table class="clients-table" style="box-shadow: none; margin-top: 0;">
             <thead>
               <tr>
-                <th style="padding-left: 20px;">${mode === 'website' ? 'Page Name' : 'Page Name'}</th>
+                <th style="padding-left: 20px;">${legacyMode === 'website' ? 'Page Name' : 'Page Name'}</th>
                 <th>Web Address</th>
                 <th>Status</th>
                 <th style="text-align: right; padding-right: 20px;">Actions</th>
               </tr>
             </thead>
             <tbody>
-              ${rowsHtml || `<tr><td colspan="4" style="text-align: center; padding: 60px; color: #94a3b8;">No ${mode === 'website' ? 'pages' : 'funnels'} found.</td></tr>`}
+              ${rowsHtml || `<tr><td colspan="4" style="text-align: center; padding: 60px; color: #94a3b8;">No ${legacyMode === 'website' ? 'pages' : 'funnels'} found.</td></tr>`}
             </tbody>
           </table>
         </div>
