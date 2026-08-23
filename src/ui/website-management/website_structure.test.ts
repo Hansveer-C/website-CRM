@@ -52,7 +52,16 @@ describe('Website Structure route ownership', () => {
     const main = readFileSync(resolve(process.cwd(), 'src/main.ts'), 'utf8');
     expect(main).toContain('isWebsiteStructureRouteDestination({ actingUserId: userId, website, funnel: destination })');
     expect(main).toContain('if (!canDeleteWebsiteStructureRoute(route))');
-    expect(main).toContain('candidate.website_id === website.id');
+    const editStart = main.indexOf('(window as any).editWebsiteStructureRoute =');
+    const viewStart = main.indexOf('(window as any).viewWebsiteStructureRoute =');
+    const nextHandlerStart = main.indexOf('(window as any).updateSettingsField =');
+    expect(editStart).toBeGreaterThan(-1);
+    expect(viewStart).toBeGreaterThan(editStart);
+    expect(nextHandlerStart).toBeGreaterThan(viewStart);
+    const editHandler = main.slice(editStart, viewStart);
+    const viewHandler = main.slice(viewStart, nextHandlerStart);
+    expect(editHandler).toContain('isWebsiteStructureRouteDestination');
+    expect(viewHandler).toContain('isWebsiteStructureRouteDestination');
   });
 });
 

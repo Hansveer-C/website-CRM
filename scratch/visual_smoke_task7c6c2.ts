@@ -54,11 +54,20 @@ async function structure(page: any, name: string) {
     const existingB = db.mockWebsites.find(website => website.id === 'ws-2');
     if (existingB) Object.assign(existingB, { user_id: user, name: 'Site B', domain: 'b.example', homepage_funnel_id: null });
     else db.mockWebsites.push({ ...original, id: 'ws-2', user_id: user, name: 'Site B', domain: 'b.example', homepage_funnel_id: null });
+    db.mockWebsiteRoutes.push({ id: 'route-b', website_id: 'ws-2', path: '/site-b-only', funnel_id: 'funnel-b', created_at: '' });
   });
 
   await selectWebsite(page, 'ws-1');
   await shell(page, `${name} Site A`);
   assert(await page.locator('.wo-website-structure-list').count() === 0, `${name}: Site A must begin with zero routes`);
+  const forgedRouteResult = await page.evaluate(() => {
+    let opened = false;
+    (window as any).open = () => { opened = true; return null; };
+    (window as any).editWebsiteStructureRoute('route-b');
+    (window as any).viewWebsiteStructureRoute('route-b');
+    return { opened, route: location.hash };
+  });
+  assert(!forgedRouteResult.opened && forgedRouteResult.route.includes('website-structure'), `${name}: forged Site B route action was not rejected`);
   await page.locator('#website-structure-add-route').click();
   assert((await destinationIds(page)).join(',') === 'funnel-a', `${name}: Site A destination isolation failed`);
   assert(await page.locator('#route-modal').count() === 1, `${name}: expected one route modal`);

@@ -9911,7 +9911,9 @@ function renderWebsiteStructure() {
 
 (window as any).deleteRoute = (id: string) => {
   if (editorUsesSupabase()) { (window as any).showToast('Route deletion is temporarily unavailable.', 'error'); return; }
-  const websiteId = activeDashboardWebsiteId;
+  const website = getActiveWebsiteStructureWebsite();
+  if (!website) return;
+  const websiteId = website.id;
   const route = mockWebsiteRoutes.find(candidate => candidate.id === id && candidate.website_id === websiteId);
   if (!route) return;
   if (!canDeleteWebsiteStructureRoute(route)) { (window as any).showToast('The homepage route cannot be deleted here.', 'error'); return; }
