@@ -82,6 +82,7 @@ import {
   renderWebsiteStructureRouteModal,
   canDeleteWebsiteStructureRoute,
   getEligibleWebsiteStructureFunnels,
+  isWebsiteStructureRouteModalCurrent,
   isWebsiteStructureRouteDestination,
   type WebsiteNavigationModel
 } from './ui/website-management';
@@ -9460,6 +9461,7 @@ function renderWebsiteSettingsSelector(websites: readonly Website[], invalid = f
 }
 
 function renderWebsiteManagementSelector(view: WebsiteManagementView, websites: readonly Website[], invalid = false) {
+  if (view === 'website-structure') closeWebsiteStructureRouteModal({ restoreFocus: false });
   const labels: Record<WebsiteManagementView, string> = {
     'website-settings': 'Website Settings',
     'funnels': 'Site Pages',
@@ -9802,6 +9804,17 @@ function renderWebsiteNavigation() {
 };
 let websiteStructureModalReturnFocus: HTMLElement | null = null;
 let websiteStructureModalEscapeHandler: ((event: KeyboardEvent) => void) | null = null;
+let websiteStructureModalWebsiteId: string | null = null;
+
+function closeWebsiteStructureRouteModal(options: { restoreFocus?: boolean } = {}): void {
+  document.getElementById('route-modal')?.remove();
+  if (websiteStructureModalEscapeHandler) document.removeEventListener('keydown', websiteStructureModalEscapeHandler, true);
+  websiteStructureModalEscapeHandler = null;
+  websiteStructureModalWebsiteId = null;
+  const returnFocus = websiteStructureModalReturnFocus;
+  websiteStructureModalReturnFocus = null;
+  if (options.restoreFocus !== false && returnFocus?.isConnected) returnFocus.focus();
+}
 
 function getActiveWebsiteStructureWebsite(): Website | undefined {
   const userId = getActingUserId();
@@ -9812,8 +9825,12 @@ function renderWebsiteStructure() {
   const userId = getActingUserId();
   const website = getActiveWebsiteStructureWebsite();
   if (!website) {
+    closeWebsiteStructureRouteModal({ restoreFocus: false });
     renderWebsiteRepositoryUnavailable('website-structure');
     return;
+  }
+  if (websiteStructureModalWebsiteId && !isWebsiteStructureRouteModalCurrent(websiteStructureModalWebsiteId, website)) {
+    closeWebsiteStructureRouteModal({ restoreFocus: false });
   }
   const routes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
   const websiteUrl = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
@@ -9831,16 +9848,20 @@ function renderWebsiteStructure() {
 }
 
 (window as any).showAddRouteModal = () => {
-  const existingModal = document.getElementById('route-modal');
-  if (existingModal) {
-    (existingModal.querySelector('#route-path') as HTMLInputElement | null)?.focus();
-    return;
-  }
   const userId = getActingUserId();
   const website = getActiveWebsiteStructureWebsite();
   if (!website || editorUsesSupabase()) return;
+  const existingModal = document.getElementById('route-modal');
+  if (existingModal) {
+    if (isWebsiteStructureRouteModalCurrent(websiteStructureModalWebsiteId, website)) {
+      (existingModal.querySelector('#route-path') as HTMLInputElement | null)?.focus();
+      return;
+    }
+    closeWebsiteStructureRouteModal({ restoreFocus: false });
+  }
   const funnels = getEligibleWebsiteStructureFunnels({ actingUserId: userId, website, funnels: mockFunnels });
   websiteStructureModalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  websiteStructureModalWebsiteId = website.id;
   const modal = document.createElement('div');
   modal.id = 'route-modal';
   modal.innerHTML = renderWebsiteStructureRouteModal({ funnels });
@@ -9855,12 +9876,7 @@ function renderWebsiteStructure() {
 };
 
 (window as any).closeWebsiteStructureRouteModal = () => {
-  document.getElementById('route-modal')?.remove();
-  if (websiteStructureModalEscapeHandler) document.removeEventListener('keydown', websiteStructureModalEscapeHandler, true);
-  websiteStructureModalEscapeHandler = null;
-  const returnFocus = websiteStructureModalReturnFocus;
-  websiteStructureModalReturnFocus = null;
-  if (returnFocus?.isConnected) returnFocus.focus();
+  closeWebsiteStructureRouteModal();
 };
 
 (window as any).saveRoute = async () => {

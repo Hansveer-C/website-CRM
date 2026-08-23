@@ -23,6 +23,13 @@ export function canDeleteWebsiteStructureRoute(route: Pick<WebsiteRoute, 'path'>
   return !!route && route.path !== '/';
 }
 
+export function isWebsiteStructureRouteModalCurrent(
+  modalWebsiteId: string | null,
+  website: Pick<Website, 'id'> | undefined
+): boolean {
+  return !!website && modalWebsiteId === website.id;
+}
+
 export interface WebsiteStructureRoute {
   id: string;
   path: string;

@@ -5,6 +5,7 @@ import type { Funnel, Website, WebsiteRoute } from '../../types';
 import {
   canDeleteWebsiteStructureRoute,
   getEligibleWebsiteStructureFunnels,
+  isWebsiteStructureRouteModalCurrent,
   isWebsiteStructureRouteDestination,
   renderWebsiteStructureContent,
   renderWebsiteStructureRouteModal
@@ -48,10 +49,19 @@ describe('Website Structure route ownership', () => {
     expect(canDeleteWebsiteStructureRoute(undefined)).toBe(false);
   });
 
+  it('reuses a route modal only for its owning Website and closes it on a Website change', () => {
+    expect(isWebsiteStructureRouteModalCurrent('site-a', siteA)).toBe(true);
+    expect(isWebsiteStructureRouteModalCurrent('site-a', siteB)).toBe(false);
+    expect(isWebsiteStructureRouteModalCurrent('site-a', undefined)).toBe(false);
+    expect(isWebsiteStructureRouteModalCurrent(null, siteA)).toBe(false);
+  });
+
   it('wires the local mutation handlers through canonical ownership and root-delete guards', () => {
     const main = readFileSync(resolve(process.cwd(), 'src/main.ts'), 'utf8');
     expect(main).toContain('isWebsiteStructureRouteDestination({ actingUserId: userId, website, funnel: destination })');
     expect(main).toContain('if (!canDeleteWebsiteStructureRoute(route))');
+    expect(main).toContain('websiteStructureModalWebsiteId');
+    expect(main).toContain('closeWebsiteStructureRouteModal({ restoreFocus: false })');
     const editStart = main.indexOf('(window as any).editWebsiteStructureRoute =');
     const viewStart = main.indexOf('(window as any).viewWebsiteStructureRoute =');
     const nextHandlerStart = main.indexOf('(window as any).updateSettingsField =');
