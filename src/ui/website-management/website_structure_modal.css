@@ -1,0 +1,6 @@
+@media (max-width: 639px) {
+  .wo-website-structure-modal .wo-website-structure-heading {
+    align-items: flex-start;
+    flex-direction: row;
+  }
+}
