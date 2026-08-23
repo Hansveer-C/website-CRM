@@ -193,6 +193,42 @@ jobs:
         run: |
           TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" BUILDER_ROUTE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run --no-file-parallelism supabase/tests/builder_route_lifecycle.test.ts supabase/tests/builder_route_publication.test.ts
 
+  standalone-funnel-website-ownership-db-integration:
+    name: Standalone Funnel Website Ownership DB Integration (PostgreSQL 17)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Standalone Funnel Website Ownership DB Tests
+        run: |
+          FUNNEL_WEBSITE_OWNERSHIP_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run --no-file-parallelism supabase/tests/funnel_website_ownership.test.ts
+
   standalone-navigation-db-integration:
     name: Standalone Navigation DB Integration (PostgreSQL 17)
     runs-on: ubuntu-latest

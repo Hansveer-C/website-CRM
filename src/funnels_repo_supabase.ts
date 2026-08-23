@@ -5,6 +5,16 @@ import { mockFunnels, mockWebsites } from './db';
 const isBrowser = typeof window !== 'undefined';
 const hasSupabase = isBrowser ? ((window as any).process?.env?.SUPABASE_URL || '').startsWith('https://') : !!process.env.SUPABASE_URL;
 
+/** Fields supported by ordinary Funnel metadata editing. Ownership is immutable here. */
+export type FunnelMetadataPatch = Partial<Pick<Funnel, 'name' | 'status' | 'service_type' | 'city'>>;
+
+function funnelMetadataPatch(data: FunnelMetadataPatch): FunnelMetadataPatch {
+  const { name, status, service_type, city } = data;
+  return Object.fromEntries(
+    Object.entries({ name, status, service_type, city }).filter(([, value]) => value !== undefined)
+  ) as FunnelMetadataPatch;
+}
+
 /**
  * 🔒 SERVER-ONLY REPOSITORY
  * Handles database operations for Funnels.
@@ -14,10 +24,10 @@ export const FunnelsRepo = {
    * Creates a new funnel.
    */
   async createFunnel(userId: string, name: string, service_type?: string, city?: string, websiteId?: string | null): Promise<RepoResponse<Funnel>> {
-    if (websiteId && !mockWebsites.some(website => website.id === websiteId && website.user_id === userId)) {
-      return { success: false, error: 'WEBSITE_NOT_FOUND' };
-    }
     if (!hasSupabase) {
+      if (websiteId && !mockWebsites.some(website => website.id === websiteId && website.user_id === userId)) {
+        return { success: false, error: 'WEBSITE_NOT_FOUND' };
+      }
       const offlineFunnel: Funnel = {
         id: `fnl_${Date.now()}`,
         user_id: userId,
@@ -90,13 +100,14 @@ export const FunnelsRepo = {
   /**
    * Updates an existing funnel.
    */
-  async updateFunnel(userId: string, funnelId: string, data: Partial<Funnel>): Promise<RepoResponse<Funnel>> {
+  async updateFunnel(userId: string, funnelId: string, data: FunnelMetadataPatch): Promise<RepoResponse<Funnel>> {
+    const metadata = funnelMetadataPatch(data);
     if (!hasSupabase) {
       const idx = mockFunnels.findIndex(f => f.id === funnelId && f.user_id === userId);
       if (idx !== -1) {
         mockFunnels[idx] = {
           ...mockFunnels[idx],
-          ...data,
+          ...metadata,
           updated_at: new Date().toISOString()
         };
         return { success: true, data: mockFunnels[idx] };
@@ -105,7 +116,7 @@ export const FunnelsRepo = {
     }
 
     const payload = {
-      ...data,
+      ...metadata,
       updated_at: new Date().toISOString()
     };
 

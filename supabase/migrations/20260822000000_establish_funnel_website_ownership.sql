@@ -78,6 +78,31 @@ begin
   return new;
 end $$;
 
+-- Reference writes are validated above. This reciprocal deferred trigger closes
+-- the other direction: an existing graph cannot be invalidated by changing a
+-- Funnel's canonical Website or tenant after it has been referenced.
+create or replace function private.enforce_funnel_reference_ownership()
+returns trigger language plpgsql security definer set search_path = '' as $$
+declare reference_row record;
+begin
+  if new.website_id is not distinct from old.website_id and new.user_id is not distinct from old.user_id then
+    return new;
+  end if;
+
+  for reference_row in
+    select website_id from public.website_routes where funnel_id = new.id
+    union all
+    select website_id from public.builder_route_drafts where funnel_id = new.id
+    union all
+    select id as website_id from public.websites where homepage_funnel_id = new.id
+    union all
+    select id as website_id from public.websites where draft_homepage_funnel_id = new.id
+  loop
+    perform private.assert_website_funnel_ownership(reference_row.website_id, new.id);
+  end loop;
+  return new;
+end $$;
+
 drop trigger if exists website_routes_funnel_website_ownership on public.website_routes;
 create constraint trigger website_routes_funnel_website_ownership
 after insert or update on public.website_routes
@@ -92,6 +117,11 @@ drop trigger if exists websites_homepage_funnel_website_ownership on public.webs
 create constraint trigger websites_homepage_funnel_website_ownership
 after insert or update on public.websites
 deferrable initially deferred for each row execute function private.enforce_website_homepage_funnel_ownership();
+
+drop trigger if exists funnels_reference_website_ownership on public.funnels;
+create constraint trigger funnels_reference_website_ownership
+after update on public.funnels
+deferrable initially deferred for each row execute function private.enforce_funnel_reference_ownership();
 
 -- The legacy bootstrap creates its Funnel before its Website. Keep the public
 -- contract intact, but assign canonical ownership before deferred checks fire.
