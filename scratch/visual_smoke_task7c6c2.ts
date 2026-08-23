@@ -85,6 +85,20 @@ async function structure(page: any, name: string) {
   assert(await page.locator('#route-modal').count() === 0, `${name}: Site B modal survived Website A switch`);
   await page.locator('#website-structure-add-route').click();
   assert((await destinationIds(page)).join(',') === 'funnel-a', `${name}: Site A destinations did not refresh after repeated switch`);
+  const forgedSave = await page.evaluate(async () => {
+    const db = await import('/src/db.ts');
+    const before = db.mockWebsiteRoutes.length;
+    const pathInput = document.getElementById('route-path') as HTMLInputElement;
+    const funnelSelect = document.getElementById('route-funnel-id') as HTMLSelectElement;
+    for (const funnelId of ['funnel-b', 'standalone', 'foreign', 'missing']) {
+      if (![...funnelSelect.options].some(option => option.value === funnelId)) funnelSelect.add(new Option(funnelId, funnelId));
+      pathInput.value = `forged-${funnelId}`;
+      funnelSelect.value = funnelId;
+      await (window as any).saveRoute();
+    }
+    return { before, after: db.mockWebsiteRoutes.length };
+  });
+  assert(forgedSave.before === forgedSave.after, `${name}: forged destination was persisted`);
   await page.locator('#route-path').fill('first-route');
   await page.locator('#route-funnel-id').selectOption('funnel-a');
   await page.getByRole('button', { name: 'Create route' }).click();
@@ -98,6 +112,8 @@ async function structure(page: any, name: string) {
     (window as any).deleteRoute('root-route');
   });
   assert(await page.evaluate(async () => (await import('/src/db.ts')).mockWebsiteRoutes.some(route => route.id === 'root-route')), `${name}: root direct deletion was not rejected`);
+  await page.evaluate(() => (window as any).deleteRoute('route-b'));
+  assert(await page.evaluate(async () => (await import('/src/db.ts')).mockWebsiteRoutes.some(route => route.id === 'route-b')), `${name}: forged cross-site deletion was not rejected`);
   await page.evaluate(async () => (window as any).deleteRoute((await import('/src/db.ts')).mockWebsiteRoutes.find(route => route.path === '/first-route')?.id));
   assert(!await page.evaluate(async () => (await import('/src/db.ts')).mockWebsiteRoutes.some(route => route.path === '/first-route')), `${name}: non-root local deletion failed`);
 
