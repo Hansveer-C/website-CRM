@@ -34,7 +34,9 @@ with candidates as (
   union all select homepage_funnel_id, id from public.websites where homepage_funnel_id is not null
   union all select draft_homepage_funnel_id, id from public.websites where draft_homepage_funnel_id is not null
 ), deterministic as (
-  select funnel_id, min(website_id) as website_id
+  -- UUID has no min aggregate. The preflight guarantees exactly one distinct
+  -- Website per Funnel here; text conversion merely selects that same value.
+  select funnel_id, min(website_id::text)::uuid as website_id
   from candidates group by funnel_id having count(distinct website_id) = 1
 )
 update public.funnels funnel
