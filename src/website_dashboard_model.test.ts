@@ -3,7 +3,7 @@ import type { Funnel, Page, Website, WebsiteRoute } from './types';
 import { createWebsiteDashboardModel, getWebsiteScopedPages, resolveActiveWebsite, resolveDashboardCurrentPage, resolveWebsiteHomepage } from './website_dashboard_model';
 
 const site = (id: string, owner = 'u1', home: string | null = 'f-home'): Website => ({ id, user_id: owner, name: `Site ${id}`, domain: 'example.com', subdomain: 'example', homepage_funnel_id: home, created_at: '', updated_at: '' });
-const funnel = (id: string, owner = 'u1'): Funnel => ({ id, user_id: owner, name: id, status: 'draft', created_at: '', updated_at: '' });
+const funnel = (id: string, owner = 'u1', websiteId: string | null = 'one'): Funnel => ({ id, user_id: owner, website_id: websiteId, name: id, status: 'draft', created_at: '', updated_at: '' });
 const page = (id: string, funnelId = 'f-home', values: Partial<Page> = {}): Page => ({ id, user_id: 'u1', name: id, slug: id, status: 'draft', seo_title: '', seo_description: '', seo_keywords: [], created_at: '', funnel_id: funnelId, ...values });
 const route = (websiteId: string, funnelId: string, path = '/'): WebsiteRoute => ({ id: `${websiteId}-${path}`, website_id: websiteId, funnel_id: funnelId, path, created_at: '' });
 
@@ -63,7 +63,7 @@ describe('homepage and page scope', () => {
 
   it('scopes and deduplicates pages through owned website funnels only', () => {
     const pages = [page('home'), page('service', 'f-service'), page('other', 'f-other'), page('foreign', 'f-home', { user_id: 'u2' })];
-    const scoped = getWebsiteScopedPages({ actingUserId: 'u1', website: site('one'), routes: [route('one', 'f-service'), route('other-site', 'f-other')], funnels: [funnel('f-home'), funnel('f-service'), funnel('f-other')], pages });
+    const scoped = getWebsiteScopedPages({ actingUserId: 'u1', website: site('one'), routes: [route('one', 'f-service'), route('other-site', 'f-other')], funnels: [funnel('f-home'), funnel('f-service'), funnel('f-other', 'u1', 'other-site')], pages });
     expect(scoped.map(item => item.id)).toEqual(['home', 'service']);
   });
 

@@ -127,6 +127,8 @@ export type FunnelStatus = 'draft' | 'published';
 export interface Funnel {
   id: string;
   user_id: string;
+  /** Nullable for standalone/marketing funnels; set for a website-owned funnel. */
+  website_id?: string | null;
   name: string;
   status: FunnelStatus;
   created_at: string;
