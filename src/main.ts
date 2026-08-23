@@ -2325,6 +2325,7 @@ let mockGlobalSettings = {
 
 (window as any).saveGlobalSettings = async () => {
   const s = getWebsiteSettings();
+  const operationWebsiteId = getActiveSettingsWebsite()?.id ?? null;
   const readInput = (selector: string): string | undefined => {
     const el = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | null;
     return el ? el.value : undefined;
@@ -2362,6 +2363,8 @@ let mockGlobalSettings = {
       body: JSON.stringify(candidate)
     }).then(r => r.json());
 
+    if (getActiveSettingsWebsite()?.id !== operationWebsiteId) return;
+
     if (res.success) {
       if (res.data) Object.assign(s, res.data);
       applyPrimaryColor(s.primary_color);
@@ -2371,7 +2374,9 @@ let mockGlobalSettings = {
       (window as any).showToast?.(`Settings could not be saved: ${res.error || 'Unknown error'}`, 'error');
     }
   } catch (err: any) {
-    (window as any).showToast?.(`Save failed: ${err.message}`, 'error');
+    if (getActiveSettingsWebsite()?.id === operationWebsiteId) {
+      (window as any).showToast?.(`Save failed: ${err.message}`, 'error');
+    }
   } finally {
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Settings'; }
   }
@@ -9500,85 +9505,6 @@ function renderWebsiteSettings() {
   });
 }
 
-function renderLegacyWebsiteSettings() {
-  const settings = getWebsiteSettings();
-  const userId = getActingUserId();
-  const ownedWebsites = mockWebsites.filter(website => website.user_id === userId);
-  applyPrimaryColor(settings.primary_color);
-  const contentHtml = `
-    ${ownedWebsites.length > 1 ? `<div class="website-dashboard-selector"><label for="settings-website-select">Active website</label><select id="settings-website-select" onchange="window.selectWebsiteForSettings(this.value)">${ownedWebsites.map(site => `<option value="${escapeBuilderInspectorHtml(site.id)}" ${site.id === activeSettingsWebsiteId ? 'selected' : ''}>${escapeBuilderInspectorHtml(site.name)}${site.domain ? ` — ${escapeBuilderInspectorHtml(site.domain)}` : ''}</option>`).join('')}</select></div>` : ''}
-    <div style="max-width: 800px;">
-      <div class="card" style="margin-bottom: 24px;">
-        <h3>Business Profile</h3>
-        <div style="display: flex; flex-direction: column; gap: 15px;">
-          <div class="form-group">
-            <label>Business Name</label>
-            <input type="text" data-settings-field="business_name" value="${settings.business_name}" onchange="window.updateSettingsField('business_name', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-          </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
-             <div class="form-group">
-               <label>Public Phone</label>
-               <input type="text" id="settings-phone-input" value="${settings.phone}" onchange="window.updateSettingsField('phone', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-             </div>
-             <div class="form-group">
-               <label>Text/SMS Number</label>
-               <input type="text" id="settings-sms-number-input" value="${settings.sms_number || ''}" onchange="window.updateSettingsField('sms_number', this.value)" placeholder="${settings.phone}" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-               <small style="color: #94a3b8; font-size: 0.75rem;">Used for text-message CTAs. Leave blank to use your public phone number.</small>
-             </div>
-             <div class="form-group">
-               <label>Public Email</label>
-               <input type="email" id="settings-email-input" value="${settings.email}" onchange="window.updateSettingsField('email', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-             </div>
-          </div>
-          <div style="display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center;">
-             <div class="form-group" style="margin: 0;">
-               <label>Brand Color</label>
-               <div style="display: flex; align-items: center; gap: 12px; margin-top: 6px;">
-                 <input type="color" id="settings-primary-color-input" value="${settings.primary_color || '#4f46e5'}" onchange="window.updateSettingsField('primary_color', this.value)" oninput="window.updateSettingsField('primary_color', this.value)" style="width: 48px; height: 40px; border: 1px solid #ddd; border-radius: 6px; padding: 2px; cursor: pointer;">
-                 <code style="font-size: 0.85rem; color: #475569; font-weight: 600;" id="settings-primary-color-display">${settings.primary_color || '#4f46e5'}</code>
-               </div>
-             </div>
-             <div style="padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 0.85rem; color: #64748b; margin-top: 20px;">
-               Changes button and accent colors across your public website and CRM dashboard.
-             </div>
-          </div>
-          <div class="form-group">
-            <label>Logo URL</label>
-            <div style="display: flex; gap: 10px;">
-               <input type="text" id="settings-logo-url-input" value="${settings.logo_url || ''}" onchange="window.updateSettingsField('logo_url', this.value)" style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-               ${settings.logo_url ? `<img id="settings-logo-img" src="${settings.logo_url}" style="height: 42px; width: 42px; border-radius: 4px; object-fit: cover; border: 1px solid #ddd;">` : ''}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>Tracking & Marketing</h3>
-        <p style="color: #666; font-size: 0.9rem; margin-bottom: 20px;">Connect your marketing tools for analytics and ad tracking.</p>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-          <div class="form-group">
-            <label>Facebook Pixel ID</label>
-            <input type="text" data-settings-field="facebook_pixel_id" placeholder="e.g. 1234567890" value="${settings.facebook_pixel_id || ''}" onchange="window.updateSettingsField('facebook_pixel_id', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-          </div>
-          <div class="form-group">
-            <label>GTM Container ID</label>
-            <input type="text" data-settings-field="gtm_id" placeholder="e.g. GTM-XXXXXX" value="${settings.gtm_id || ''}" onchange="window.updateSettingsField('gtm_id', this.value)" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  renderAppWithShell({
-    activeView: 'website-settings',
-    title: 'Website Branding & Tracking',
-    headerActionsHtml: '<div style="display: flex; gap: 10px;"><button class="btn-primary" style="background: var(--primary-color);" onclick="window.saveGlobalSettings()">Save Settings</button></div>',
-    contentVariant: 'standard',
-    user: getCurrentShellUser(),
-    contentHtml
-  });
-}
-
 function renderWebsiteNavigation() {
   const userId = getActingUserId();
   const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
@@ -9979,6 +9905,7 @@ function renderWebsiteStructure() {
 
 (window as any).updateSettingsField = async (field: string, value: string) => {
     const s = getWebsiteSettings();
+    const operationWebsiteId = getActiveSettingsWebsite()?.id ?? null;
     const previous = (s as any)[field];
     const response = await fetch('/api/settings', {
         method: 'POST',
@@ -9986,6 +9913,7 @@ function renderWebsiteStructure() {
         body: JSON.stringify({ [field]: value })
     });
     const result = await response.json();
+    if (getActiveSettingsWebsite()?.id !== operationWebsiteId) return result;
     if (!response.ok || result.success !== true || !result.data) {
       (s as any)[field] = previous;
       (window as any).showToast('Website setting could not be saved.', 'error');
