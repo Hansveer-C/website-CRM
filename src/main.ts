@@ -80,6 +80,9 @@ import {
   renderWebsiteNavigationContent,
   renderWebsiteStructureContent,
   renderWebsiteStructureRouteModal,
+  canDeleteWebsiteStructureRoute,
+  getEligibleWebsiteStructureFunnels,
+  isWebsiteStructureRouteDestination,
   type WebsiteNavigationModel
 } from './ui/website-management';
 import {
@@ -1101,7 +1104,7 @@ async function loadBuilderNewPageServerContext(
             .eq('id', website.id).eq('user_id', userId).limit(1).maybeSingle(),
         client.from('website_routes').select('id,website_id,path,funnel_id,created_at')
             .eq('website_id', website.id),
-        client.from('funnels').select('id,user_id,name,status,created_at,updated_at,service_type,city')
+        client.from('funnels').select('id,user_id,website_id,name,status,created_at,updated_at,service_type,city')
             .eq('user_id', userId),
         client.from('pages').select('id,user_id,name,slug,status,seo_title,seo_description,seo_keywords,created_at,funnel_id,step_type,step_order')
             .eq('user_id', userId)
@@ -9797,19 +9800,24 @@ function renderWebsiteNavigation() {
       (window as any).showToast('Navigation could not be saved. Please try again.', 'error');
     }
 };
+let websiteStructureModalReturnFocus: HTMLElement | null = null;
+let websiteStructureModalEscapeHandler: ((event: KeyboardEvent) => void) | null = null;
+
+function getActiveWebsiteStructureWebsite(): Website | undefined {
+  const userId = getActingUserId();
+  return mockWebsites.find(website => website.user_id === userId && website.id === activeDashboardWebsiteId);
+}
+
 function renderWebsiteStructure() {
   const userId = getActingUserId();
-  const website = mockWebsites.find(w => w.user_id === userId && w.id === activeDashboardWebsiteId);
+  const website = getActiveWebsiteStructureWebsite();
   if (!website) {
     renderWebsiteRepositoryUnavailable('website-structure');
     return;
   }
   const routes = mockWebsiteRoutes.filter(r => r.website_id === website.id);
   const websiteUrl = website.domain ? `https://${website.domain}` : `https://${website.subdomain}.pressurepro.io`;
-  const associatedFunnelIds = new Set(routes.map(route => route.funnel_id));
-  if (website.homepage_funnel_id) associatedFunnelIds.add(website.homepage_funnel_id);
-  if (website.draft_homepage_funnel_id) associatedFunnelIds.add(website.draft_homepage_funnel_id);
-  const siteFunnels = mockFunnels.filter(funnel => funnel.user_id === userId && associatedFunnelIds.has(funnel.id));
+  const siteFunnels = getEligibleWebsiteStructureFunnels({ actingUserId: userId, website, funnels: mockFunnels });
   const canManageRoutes = !editorUsesSupabase();
   const action = (code: string) => `window.${code}`;
 
@@ -9818,27 +9826,47 @@ function renderWebsiteStructure() {
     title: 'Website Structure',
     subtitle: 'Map your custom URLs to website pages.',
     contentVariant: 'wide',
-    contentHtml: `${renderWebsiteManagementSwitcher('website-structure')}${renderWebsiteStructureContent({ websiteName: website.name, websiteUrl, canManageRoutes, unavailableReason: 'Route changes are unavailable while connected to the production repository.', routes: routes.map(route => ({ id: route.id, path: route.path, destinationName: siteFunnels.find(funnel => funnel.id === route.funnel_id)?.name ?? 'Unknown page', isHomepage: route.path === '/' })) }, { add: canManageRoutes ? renderButton({ label: 'Add route', variant: 'primary', attributes: { onclick: action('showAddRouteModal()') } }) : renderButton({ label: 'Add route', variant: 'primary', disabled: true, attributes: { 'aria-describedby': 'website-structure-unavailable' } }), edit: routeId => renderButton({ label: 'Edit page', variant: 'secondary', attributes: { onclick: `window.editWebsiteStructureRoute(${builderInspectorJsArgument(routeId)})` } }), view: routeId => routeId ? renderButton({ label: 'View live', variant: 'ghost', attributes: { onclick: `window.viewWebsiteStructureRoute(${builderInspectorJsArgument(routeId)})` } }) : `<a class="wo-button wo-button--secondary wo-button--md" href="${escapeHtmlText(websiteUrl)}" target="_blank" rel="noreferrer">Visit site</a>`, remove: routeId => canManageRoutes ? renderButton({ label: 'Delete', variant: 'danger', attributes: { onclick: `window.deleteRoute(${builderInspectorJsArgument(routeId)})` } }) : renderButton({ label: 'Delete unavailable', variant: 'danger', disabled: true, attributes: { 'aria-describedby': 'website-structure-unavailable' } }) })}`
+    contentHtml: `${renderWebsiteManagementSwitcher('website-structure')}${renderWebsiteStructureContent({ websiteName: website.name, websiteUrl, canManageRoutes, unavailableReason: 'Route changes are unavailable while connected to the production repository.', routes: routes.map(route => ({ id: route.id, path: route.path, destinationName: siteFunnels.find(funnel => funnel.id === route.funnel_id)?.name ?? 'Unknown page', isHomepage: route.path === '/' })) }, { add: canManageRoutes ? renderButton({ label: 'Add route', variant: 'primary', attributes: { id: 'website-structure-add-route', onclick: action('showAddRouteModal()') } }) : renderButton({ label: 'Add route', variant: 'primary', disabled: true, attributes: { 'aria-describedby': 'website-structure-unavailable' } }), edit: routeId => renderButton({ label: 'Edit page', variant: 'secondary', attributes: { onclick: `window.editWebsiteStructureRoute(${builderInspectorJsArgument(routeId)})` } }), view: routeId => routeId ? renderButton({ label: 'View live', variant: 'ghost', attributes: { onclick: `window.viewWebsiteStructureRoute(${builderInspectorJsArgument(routeId)})` } }) : `<a class="wo-button wo-button--secondary wo-button--md" href="${escapeHtmlText(websiteUrl)}" target="_blank" rel="noreferrer">Visit site</a>`, remove: routeId => canManageRoutes ? renderButton({ label: 'Delete', variant: 'danger', attributes: { onclick: `window.deleteRoute(${builderInspectorJsArgument(routeId)})` } }) : renderButton({ label: 'Delete unavailable', variant: 'danger', disabled: true, attributes: { 'aria-describedby': 'website-structure-unavailable' } }) })}`
   });
 }
 
 (window as any).showAddRouteModal = () => {
-  const website = mockWebsites.find(candidate => candidate.user_id === getActingUserId() && candidate.id === activeDashboardWebsiteId);
+  const existingModal = document.getElementById('route-modal');
+  if (existingModal) {
+    (existingModal.querySelector('#route-path') as HTMLInputElement | null)?.focus();
+    return;
+  }
+  const userId = getActingUserId();
+  const website = getActiveWebsiteStructureWebsite();
   if (!website || editorUsesSupabase()) return;
-  const routeFunnelIds = new Set(mockWebsiteRoutes.filter(route => route.website_id === website.id).map(route => route.funnel_id));
-  if (website.homepage_funnel_id) routeFunnelIds.add(website.homepage_funnel_id);
-  const funnels = mockFunnels.filter(funnel => funnel.user_id === getActingUserId() && routeFunnelIds.has(funnel.id));
+  const funnels = getEligibleWebsiteStructureFunnels({ actingUserId: userId, website, funnels: mockFunnels });
+  websiteStructureModalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const modal = document.createElement('div');
   modal.id = 'route-modal';
   modal.innerHTML = renderWebsiteStructureRouteModal({ funnels });
+  websiteStructureModalEscapeHandler = event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    (window as any).closeWebsiteStructureRouteModal();
+  };
+  document.addEventListener('keydown', websiteStructureModalEscapeHandler, true);
   document.body.appendChild(modal);
+  setTimeout(() => (modal.querySelector('#route-path') as HTMLInputElement | null)?.focus(), 0);
 };
 
-(window as any).closeWebsiteStructureRouteModal = () => document.getElementById('route-modal')?.remove();
+(window as any).closeWebsiteStructureRouteModal = () => {
+  document.getElementById('route-modal')?.remove();
+  if (websiteStructureModalEscapeHandler) document.removeEventListener('keydown', websiteStructureModalEscapeHandler, true);
+  websiteStructureModalEscapeHandler = null;
+  const returnFocus = websiteStructureModalReturnFocus;
+  websiteStructureModalReturnFocus = null;
+  if (returnFocus?.isConnected) returnFocus.focus();
+};
 
 (window as any).saveRoute = async () => {
   if (editorUsesSupabase()) { (window as any).showToast('Route creation is temporarily unavailable.', 'error'); return; }
-  const website = mockWebsites.find(candidate => candidate.user_id === getActingUserId() && candidate.id === activeDashboardWebsiteId);
+  const userId = getActingUserId();
+  const website = getActiveWebsiteStructureWebsite();
   if (!website) return;
   const websiteId = website.id;
   const pathInput = document.getElementById('route-path') as HTMLInputElement;
@@ -9848,9 +9876,8 @@ function renderWebsiteStructure() {
   
   const path = pathInput.value.trim().replace(/^\/+/, '');
   const funnelId = funnelSelect.value;
-  const allowedFunnelIds = new Set(mockWebsiteRoutes.filter(route => route.website_id === websiteId).map(route => route.funnel_id));
-  if (website.homepage_funnel_id) allowedFunnelIds.add(website.homepage_funnel_id);
-  if (!allowedFunnelIds.has(funnelId) || !mockFunnels.some(funnel => funnel.id === funnelId && funnel.user_id === getActingUserId())) {
+  const destination = mockFunnels.find(funnel => funnel.id === funnelId);
+  if (!isWebsiteStructureRouteDestination({ actingUserId: userId, website, funnel: destination })) {
     (window as any).showToast('Choose a destination from this website.', 'error');
     return;
   }
@@ -9877,7 +9904,7 @@ function renderWebsiteStructure() {
   };
 
   mockWebsiteRoutes.push(newRoute);
-  document.getElementById('route-modal')?.remove();
+  (window as any).closeWebsiteStructureRouteModal();
   renderWebsiteStructure();
   console.log('[UI: ROUTES] Added new route:', newRoute);
 };
@@ -9887,6 +9914,7 @@ function renderWebsiteStructure() {
   const websiteId = activeDashboardWebsiteId;
   const route = mockWebsiteRoutes.find(candidate => candidate.id === id && candidate.website_id === websiteId);
   if (!route) return;
+  if (!canDeleteWebsiteStructureRoute(route)) { (window as any).showToast('The homepage route cannot be deleted here.', 'error'); return; }
   if (!confirm('Are you sure you want to delete this route? This path will no longer load its page.')) return;
   
   const index = mockWebsiteRoutes.findIndex(r => r.id === id && r.website_id === websiteId);
@@ -9897,16 +9925,22 @@ function renderWebsiteStructure() {
 };
 
 (window as any).editWebsiteStructureRoute = (routeId: string) => {
-  const route = mockWebsiteRoutes.find(candidate => candidate.id === routeId && candidate.website_id === activeDashboardWebsiteId);
-  if (!route) return;
-  const page = mockPages.find(candidate => candidate.funnel_id === route.funnel_id && candidate.user_id === getActingUserId());
+  const userId = getActingUserId();
+  const website = getActiveWebsiteStructureWebsite();
+  const route = website && mockWebsiteRoutes.find(candidate => candidate.id === routeId && candidate.website_id === website.id);
+  const funnel = route && mockFunnels.find(candidate => candidate.id === route.funnel_id);
+  if (!route || !isWebsiteStructureRouteDestination({ actingUserId: userId, website, funnel })) return;
+  const page = mockPages.find(candidate => candidate.funnel_id === route.funnel_id && candidate.user_id === userId);
   if (page) { (window as any).switchBuilderPage(page.id); (window as any).navigateTo('builder'); }
   else (window as any).navigateTo('funnel-detail', route.funnel_id);
 };
 
 (window as any).viewWebsiteStructureRoute = (routeId: string) => {
-  const route = mockWebsiteRoutes.find(candidate => candidate.id === routeId && candidate.website_id === activeDashboardWebsiteId);
-  if (route) window.open(`/site${route.path}`, '_blank');
+  const userId = getActingUserId();
+  const website = getActiveWebsiteStructureWebsite();
+  const route = website && mockWebsiteRoutes.find(candidate => candidate.id === routeId && candidate.website_id === website.id);
+  const funnel = route && mockFunnels.find(candidate => candidate.id === route.funnel_id);
+  if (route && isWebsiteStructureRouteDestination({ actingUserId: userId, website, funnel })) window.open(`/site${route.path}`, '_blank');
 };
 
 (window as any).updateSettingsField = async (field: string, value: string) => {
