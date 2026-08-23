@@ -84,7 +84,9 @@ import {
   getEligibleWebsiteStructureFunnels,
   isWebsiteStructureRouteModalCurrent,
   isWebsiteStructureRouteDestination,
-  type WebsiteNavigationModel
+  type WebsiteNavigationModel,
+  renderWebsiteSettingsContent,
+  renderWebsiteSettingsSaveAction
 } from './ui/website-management';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
@@ -9485,6 +9487,20 @@ function renderWebsiteManagementSwitcher(view: WebsiteManagementView): string {
 }
 
 function renderWebsiteSettings() {
+  const settings = getWebsiteSettings();
+  const userId = getActingUserId();
+  const ownedWebsites = mockWebsites.filter(website => website.user_id === userId);
+  renderAppWithShell({
+    activeView: 'website-settings',
+    title: 'Website Settings',
+    headerActionsHtml: renderWebsiteSettingsSaveAction(),
+    contentVariant: 'standard',
+    user: getCurrentShellUser(),
+    contentHtml: renderWebsiteSettingsContent({ settings, websites: ownedWebsites, activeWebsiteId: activeSettingsWebsiteId })
+  });
+}
+
+function renderLegacyWebsiteSettings() {
   const settings = getWebsiteSettings();
   const userId = getActingUserId();
   const ownedWebsites = mockWebsites.filter(website => website.user_id === userId);
