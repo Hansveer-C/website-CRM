@@ -67,12 +67,14 @@ describeDatabase('funnel Website ownership migration (PostgreSQL 17)', () => {
   it('backfills route, homepage-only, draft-homepage-only, and repeated same-Website associations', async () => {
     const a = await website();
     const routed = await funnel(); await route(a, routed);
-    const homepage = await funnel(); await pool.query('update public.websites set homepage_funnel_id = $1 where id = $2', [homepage, a]);
-    const draft = await funnel(); await pool.query('update public.websites set draft_homepage_funnel_id = $1 where id = $2', [draft, a]);
+    const homepageWebsite = await website();
+    const homepage = await funnel(); await pool.query('update public.websites set homepage_funnel_id = $1 where id = $2', [homepage, homepageWebsite]);
+    const draftWebsite = await website();
+    const draft = await funnel(); await pool.query('update public.websites set draft_homepage_funnel_id = $1 where id = $2', [draft, draftWebsite]);
     const repeated = await funnel(); await route(a, repeated); await pool.query('update public.websites set homepage_funnel_id = $1 where id = $2', [repeated, a]);
     await migrate();
     const rows = await pool.query('select id, website_id from public.funnels where id = any($1::text[])', [[routed, homepage, draft, repeated]]);
-    expect(Object.fromEntries(rows.rows.map(row => [row.id, row.website_id]))).toEqual({ [routed]: a, [homepage]: a, [draft]: a, [repeated]: a });
+    expect(Object.fromEntries(rows.rows.map(row => [row.id, row.website_id]))).toEqual({ [routed]: a, [homepage]: homepageWebsite, [draft]: draftWebsite, [repeated]: a });
   });
 
   it('fails migration rather than selecting an arbitrary Website for an ambiguous Funnel', async () => {
