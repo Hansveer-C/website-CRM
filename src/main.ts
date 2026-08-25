@@ -86,7 +86,11 @@ import {
   isWebsiteStructureRouteDestination,
   type WebsiteNavigationModel,
   renderWebsiteSettingsContent,
-  renderWebsiteSettingsSaveAction
+  renderWebsiteSettingsSaveAction,
+  createLocalSeoViewModel,
+  renderLocalSeoList,
+  renderLocalSeoWizard,
+  type LocalSeoWizardState
 } from './ui/website-management';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
@@ -13257,11 +13261,14 @@ window.addEventListener('scroll', () => {
   (window as any).toggleCheckItem('test');
 };
 
-let seoWizardState = {
+let seoWizardState: any = {
     mode: 'list' as 'list' | 'wizard',
-    step: 1,
+    step: 1 as 1,
     services: [] as string[],
-    cities: [] as string[]
+    cities: [] as string[],
+    websiteId: null,
+    error: undefined,
+    isSubmitting: false
 };
 
 (window as any).renderSeoPages = async () => {
@@ -13384,8 +13391,8 @@ function renderSeoWizard() {
         `;
     } else if (seoWizardState.step === 3) {
         const previews: string[] = [];
-        seoWizardState.services.forEach(s => {
-            seoWizardState.cities.forEach(c => {
+        seoWizardState.services.forEach((s: string) => {
+            seoWizardState.cities.forEach((c: string) => {
                 const slug = (s + '-' + c).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
                 previews.push(`/${slug}`);
             });
@@ -13475,6 +13482,70 @@ function renderSeoWizard() {
     } catch (err: any) {
         alert('Exception: ' + err.message);
     }
+};
+
+// Task 7C.6E owns presentation here; the existing endpoint remains the authority
+// for the currently active, owned Website.
+function resetSeoWizardForWebsite(websiteId: string, mode: 'list' | 'wizard' = 'list') {
+  seoWizardState = { mode, step: 1, services: [], cities: [], websiteId, error: undefined, isSubmitting: false };
+}
+
+(window as any).renderSeoPages = async () => {
+  const model = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, routes: mockWebsiteRoutes });
+  if (!model.website) {
+    renderWebsiteRepositoryUnavailable('seo-pages');
+    return;
+  }
+  if (seoWizardState.websiteId !== model.website.id) resetSeoWizardForWebsite(model.website.id);
+  if (model.pages.length === 0) seoWizardState.mode = 'wizard';
+  const content = seoWizardState.mode === 'wizard'
+    ? renderLocalSeoWizard({ state: seoWizardState, website: model.website, nextAction: step => `window.nextSeoStep(${step})`, generateAction: 'window.finalizeSeoGen()' })
+    : renderLocalSeoList({ website: model.website, pages: model.pages, batchAction: 'window.startSeoWizard()', viewAction: page => renderButton({ label: 'View live', variant: 'secondary', size: 'sm', attributes: { onclick: `window.open(${builderInspectorJsArgument(page.path)}, '_blank')` } }), deleteAction: page => renderButton({ label: 'Delete', variant: 'danger', size: 'sm', attributes: { onclick: `window.deleteSeoPage(${builderInspectorJsArgument(page.id)})` } }) });
+  renderAppWithShell({ activeView: 'seo-pages', title: 'Local SEO Hub', subtitle: seoWizardState.mode === 'wizard' ? `Step ${seoWizardState.step} of 3` : 'Generate focused service and location pages for local search.', contentVariant: 'wide', contentHtml: `${renderWebsiteManagementSwitcher('seo-pages')}${content}` });
+};
+
+(window as any).startSeoWizard = () => {
+  const website = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, routes: mockWebsiteRoutes }).website;
+  if (!website) return;
+  resetSeoWizardForWebsite(website.id, 'wizard');
+  (window as any).renderSeoPages();
+};
+
+(window as any).nextSeoStep = (step: 1 | 2 | 3) => {
+  const website = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, routes: mockWebsiteRoutes }).website;
+  if (!website || website.id !== seoWizardState.websiteId) return;
+  seoWizardState.error = undefined;
+  if (seoWizardState.step === 1 && step === 2) {
+    seoWizardState.services = ((document.getElementById('wizard-services') as HTMLTextAreaElement | null)?.value || '').split(',').map(value => value.trim()).filter(Boolean);
+    if (!seoWizardState.services.length) { seoWizardState.error = 'Enter at least one service.'; (window as any).renderSeoPages(); return; }
+  }
+  if (seoWizardState.step === 2 && step === 3) {
+    seoWizardState.cities = ((document.getElementById('wizard-cities') as HTMLTextAreaElement | null)?.value || '').split(',').map(value => value.trim()).filter(Boolean);
+    if (!seoWizardState.cities.length) { seoWizardState.error = 'Enter at least one location.'; (window as any).renderSeoPages(); return; }
+  }
+  seoWizardState.step = step;
+  (window as any).renderSeoPages();
+};
+
+(window as any).finalizeSeoGen = async () => {
+  const operationWebsiteId = seoWizardState.websiteId;
+  const active = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, routes: mockWebsiteRoutes }).website;
+  if (!active || active.id !== operationWebsiteId || seoWizardState.isSubmitting) return;
+  seoWizardState.isSubmitting = true;
+  seoWizardState.error = undefined;
+  (window as any).renderSeoPages();
+  try {
+    const res = await fetch('/api/websites/bulk-seo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ services: seoWizardState.services, cities: seoWizardState.cities }) }).then(response => response.json());
+    const current = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, routes: mockWebsiteRoutes }).website;
+    if (!current || current.id !== operationWebsiteId) return;
+    if (!res.success) { seoWizardState.isSubmitting = false; seoWizardState.error = res.error || 'Pages could not be generated.'; (window as any).renderSeoPages(); return; }
+    (window as any).showToast(`${res.count} Local SEO pages generated.`, 'success');
+    seoWizardState = { mode: 'list', step: 1, services: [], cities: [], websiteId: operationWebsiteId, error: undefined, isSubmitting: false };
+    (window as any).renderSeoPages();
+  } catch {
+    const current = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, routes: mockWebsiteRoutes }).website;
+    if (current?.id === operationWebsiteId) { seoWizardState.isSubmitting = false; seoWizardState.error = 'Pages could not be generated.'; (window as any).renderSeoPages(); }
+  }
 };
 
 function renderPagesSeoLanding() {
