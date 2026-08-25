@@ -1,6 +1,6 @@
 import { escapeHtmlText } from '../../crm_html_output';
 import type { Website, WebsiteRoute } from '../../types';
-import { renderButton, renderCard, renderEmptyState, renderField, renderStatusBadge, renderTextarea } from '../primitives';
+import { renderButton, renderCard, renderEmptyState, renderField, renderTextarea } from '../primitives';
 
 export interface LocalSeoWizardState {
   mode: 'list' | 'wizard';
@@ -19,14 +19,28 @@ export function createLocalSeoPreviews(services: readonly string[], cities: read
   }));
 }
 
+export function withLocalSeoWizardDraft(state: LocalSeoWizardState, nextStep: 1 | 2 | 3, values: { services?: string; cities?: string }): LocalSeoWizardState {
+  const split = (value: string | undefined) => (value || '').split(',').map(entry => entry.trim()).filter(Boolean);
+  if (state.step === 1 && nextStep === 2) return { ...state, services: split(values.services) };
+  if (state.step === 2 && (nextStep === 1 || nextStep === 3)) return { ...state, cities: split(values.cities) };
+  return state;
+}
+
+export function createLocalSeoPublicUrl(website: Website, path: string): string | null {
+  const host = website.domain || `${website.subdomain}.pressurepro.io`;
+  if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(host)) return null;
+  if (path.startsWith('//') || !/^\/[A-Za-z0-9._~!$&'()*+,;=:@/%-]*$/.test(path)) return null;
+  return `https://${host}${path}`;
+}
+
 export function createLocalSeoViewModel(input: { userId: string; activeWebsiteId: string | null; websites: readonly Website[]; routes: readonly WebsiteRoute[] }) {
   const website = input.websites.find(site => site.user_id === input.userId && site.id === input.activeWebsiteId);
   return { website, pages: website ? input.routes.filter(route => route.website_id === website.id && route.is_seo_page) : [] };
 }
 
 export function renderLocalSeoList(input: { website: Website; pages: readonly WebsiteRoute[]; batchAction: string; viewAction: (route: WebsiteRoute) => string; deleteAction: (route: WebsiteRoute) => string }): string {
-  const rows = input.pages.map(page => `<tr class="wo-local-seo-row"><td data-label="Service"><strong>${escapeHtmlText(page.service || 'Service page')}</strong><span>${escapeHtmlText(page.city || 'Location not specified')}</span></td><td data-label="Route"><code>${escapeHtmlText(page.path || `/${page.slug || ''}`)}</code></td><td data-label="Status">${renderStatusBadge('active')}</td><td data-label="Actions"><div class="wo-local-seo-actions">${input.viewAction(page)}${input.deleteAction(page)}</div></td></tr>`).join('');
-  const inventory = rows ? `<div class="wo-local-seo-table-wrap"><table class="wo-local-seo-table"><thead><tr><th>Service &amp; location</th><th>Route</th><th>Status</th><th><span class="wo-sr-only">Actions</span></th></tr></thead><tbody>${rows}</tbody></table></div>` : renderEmptyState({ title: 'No Local SEO pages yet', description: 'Add service and location combinations to create focused local landing pages.' });
+  const rows = input.pages.map(page => `<tr class="wo-local-seo-row"><td data-label="Service"><strong>${escapeHtmlText(page.service || 'Service page')}</strong><span>${escapeHtmlText(page.city || 'Location not specified')}</span></td><td data-label="Route"><code>${escapeHtmlText(page.path || `/${page.slug || ''}`)}</code></td><td data-label="Actions"><div class="wo-local-seo-actions">${input.viewAction(page)}${input.deleteAction(page)}</div></td></tr>`).join('');
+  const inventory = rows ? `<div class="wo-local-seo-table-wrap"><table class="wo-local-seo-table"><thead><tr><th>Service &amp; location</th><th>Route</th><th><span class="wo-sr-only">Actions</span></th></tr></thead><tbody>${rows}</tbody></table></div>` : renderEmptyState({ title: 'No Local SEO pages yet', description: 'Add service and location combinations to create focused local landing pages.' });
   return `<section class="wo-local-seo" aria-label="Local SEO Hub"><div class="wo-local-seo-heading"><div><span class="wo-local-seo-eyebrow">${escapeHtmlText(input.website.name)}</span><h2>Local SEO pages</h2><p>${input.pages.length} generated ${input.pages.length === 1 ? 'page' : 'pages'} for this website.</p></div>${renderButton({ label: 'Batch Generate Pages', variant: 'primary', attributes: { onclick: input.batchAction } })}</div>${renderCard({ className: 'wo-local-seo-card', bodyHtml: inventory })}</section>`;
 }
 
