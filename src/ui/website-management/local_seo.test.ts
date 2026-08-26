@@ -31,7 +31,7 @@ describe('Local SEO presentation', () => {
   it('renders escaped combinations and semantic progress for preview', () => {
     const previews = createLocalSeoPreviews(['<b>Driveway</b>'], ['Port <img>']);
     const html = renderLocalSeoWizard({ state: state({ step: 3, services: ['<b>Driveway</b>'], cities: ['Port <img>'] }), website: website(), nextAction: step => `window.nextSeoStep(${step})`, generateAction: 'window.finalizeSeoGen()' });
-    expect(previews).toEqual(['/bdrivewayb-port-img']); expect(html).toContain('aria-valuenow="3"'); expect(html).toContain('/bdrivewayb-port-img'); expect(html).not.toContain('<b>Driveway</b>'); expect(html).toContain('pages to generate');
+    expect(previews).toEqual(['/bdrivewayb-port-img']); expect(html).toContain('aria-valuenow="3"'); expect(html).toContain('/bdrivewayb-port-img'); expect(html).not.toContain('<b>Driveway</b>'); expect(html).toContain('draft pages to create');
   });
 
   it('preserves a typed Step-2 location draft when navigating back before preview', () => {

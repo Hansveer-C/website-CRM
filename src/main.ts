@@ -8,6 +8,7 @@ import type { BuilderInspectorFieldDefinition, BuilderInspectorTab } from './bui
 import { createBuilderInspectorPatch, getBuilderInspectorField, getBuilderInspectorFieldValue, getBuilderInspectorSchema } from './builder_inspector_schema';
 import { resolveWebsiteRequest } from './website_resolver';
 import { normalizePhone, normalizeEmail, normalizeName } from './utils/validators';
+import { isValidLocalSeoIdempotencyKey, validateLocalSeoGenerationInput } from './local_seo_generation_contract';
 import { LocalStorageBuilderPublicationRepository } from './builder_publication_repository_local';
 import { SupabaseBuilderPublicationRepository } from './builder_publication_repository_supabase';
 import { handleBuilderPublicationRuntimeBrowserRequest, isBuilderPublicationBrowserRequest } from './builder_publication_browser';
@@ -1387,6 +1388,7 @@ export async function handleBuilderSetHomepageBrowserPost(input: RequestInfo | U
 }
 
 const originalFetch = window.fetch;
+const browserFixtureLocalSeoReceipts = new Map<string, { payload: string; response: Record<string, unknown> }>();
 const browserCallSimulator = createBrowserCallSimulator();
 const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = getBuilderSectionsRequestUrl(input) ?? '';
@@ -1437,7 +1439,8 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
         const reqContext: any = { 
             method, 
             url,
-            body: bodyString ? JSON.parse(bodyString) : undefined 
+            body: bodyString ? JSON.parse(bodyString) : undefined,
+            headers: new Headers(init?.headers)
         };
 
         // Simulating the Backend Dispatcher/Router
@@ -1929,13 +1932,24 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
 
         if (url === '/api/websites/bulk-seo' && method === 'POST') {
             if (!editorUsesLocalData()) return builderSectionsJsonResponse({ success: false, error: 'SEO route generation is temporarily unavailable.' }, 501);
-            const { services, cities } = reqContext.body || {};
+            const input = validateLocalSeoGenerationInput(reqContext.body);
+            if (!input.success) return builderSectionsJsonResponse({ success: false, error: 'Invalid Local SEO draft input.' }, 422);
+            const { website_id, services, cities } = input.data;
+            const idempotencyKey = reqContext.headers.get('idempotency-key') || '';
+            if (!isValidLocalSeoIdempotencyKey(idempotencyKey)) return builderSectionsJsonResponse({ success: false, error: 'Invalid idempotency key.' }, 400);
             console.log(`[MOCK] Bulk SEO Generation for ${services.length} services in ${cities.length} cities`);
             
             // Simulation of generation
             const website = getActiveSettingsWebsite();
-            if (!website || website.user_id !== getActingUserId()) {
+            if (!website || website.id !== website_id || website.user_id !== getActingUserId() || reqContext.headers.get('authorization') !== 'Bearer browser-fixture-session') {
                 return builderSectionsJsonResponse({ success: false, error: 'Website not found' }, 404);
+            }
+            const receiptKey = `${website.user_id}:${idempotencyKey}`;
+            const payload = JSON.stringify(input.data);
+            const prior = browserFixtureLocalSeoReceipts.get(receiptKey);
+            if (prior) {
+                if (prior.payload !== payload) return builderSectionsJsonResponse({ success: false, error: 'Idempotency conflict.' }, 409);
+                return builderSectionsJsonResponse(prior.response, 200);
             }
             const timestamp = new Date().toISOString();
             
@@ -1959,7 +1973,9 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
                 });
             });
 
-            return new Response(JSON.stringify({ success: true, count: services.length * cities.length }), { 
+            const response = { success: true, data: { website_id, created_count: services.length * cities.length, replayed: false, pages: [] } };
+            browserFixtureLocalSeoReceipts.set(receiptKey, { payload, response });
+            return new Response(JSON.stringify(response), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -13272,6 +13288,8 @@ let seoWizardState: LocalSeoWizardState = {
   error: undefined,
   isSubmitting: false
 };
+let seoGenerationAttemptKey: string | null = null;
+let seoGenerationAttemptPayload: string | null = null;
 
 // Task 7C.6E owns presentation here; the existing endpoint remains the authority
 // for the currently active, owned Website.
@@ -13293,7 +13311,7 @@ function resetSeoWizardForWebsite(websiteId: string, mode: 'list' | 'wizard' = '
     : renderLocalSeoList({ website, pages: model.pages, batchAction: 'window.startSeoWizard()', viewAction: page => {
       const publicUrl = createLocalSeoPublicUrl(website, page.path);
       return publicUrl ? renderButton({ label: 'View live', variant: 'secondary', size: 'sm', attributes: { onclick: `window.open(${builderInspectorJsArgument(publicUrl)}, '_blank', 'noopener,noreferrer')` } }) : '';
-    }, deleteAction: page => renderButton({ label: 'Delete', variant: 'danger', size: 'sm', attributes: { onclick: `window.deleteSeoPage(${builderInspectorJsArgument(page.id)})` } }) });
+    }, deleteAction: page => editorUsesLocalData() ? renderButton({ label: 'Delete', variant: 'danger', size: 'sm', attributes: { onclick: `window.deleteSeoPage(${builderInspectorJsArgument(page.id)})` } }) : '' });
   renderAppWithShell({ activeView: 'seo-pages', title: 'Local SEO Hub', subtitle: seoWizardState.mode === 'wizard' ? `Step ${seoWizardState.step} of 3` : 'Generate focused service and location pages for local search.', contentVariant: 'wide', contentHtml: `${renderWebsiteManagementSwitcher('seo-pages')}${content}` });
 };
 
@@ -13328,11 +13346,25 @@ function resetSeoWizardForWebsite(websiteId: string, mode: 'list' | 'wizard' = '
   seoWizardState.error = undefined;
   (window as any).renderSeoPages();
   try {
-    const res = await fetch('/api/websites/bulk-seo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ services: seoWizardState.services, cities: seoWizardState.cities }) }).then(response => response.json());
+    const accessToken = await getBuilderSaveAccessToken();
+    if (!accessToken) throw new Error('UNAUTHENTICATED');
+    const input = { website_id: operationWebsiteId, services: seoWizardState.services, cities: seoWizardState.cities };
+    const validated = validateLocalSeoGenerationInput(input);
+    if (!validated.success) throw new Error('INVALID_INPUT');
+    const canonical = JSON.stringify(validated.data);
+    if (!seoGenerationAttemptKey || seoGenerationAttemptPayload !== canonical) {
+      seoGenerationAttemptKey = `local-seo:${crypto.randomUUID()}`;
+      seoGenerationAttemptPayload = canonical;
+    }
+    if (!isValidLocalSeoIdempotencyKey(seoGenerationAttemptKey)) throw new Error('INVALID_IDEMPOTENCY_KEY');
+    const response = await fetch('/api/websites/bulk-seo', { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', 'Idempotency-Key': seoGenerationAttemptKey }, body: JSON.stringify(validated.data) });
+    const res = await response.json();
     const current = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, routes: mockWebsiteRoutes }).website;
     if (!current || current.id !== operationWebsiteId) return;
-    if (!res.success) { seoWizardState.isSubmitting = false; seoWizardState.error = res.error || 'Pages could not be generated.'; (window as any).renderSeoPages(); return; }
-    (window as any).showToast(`${res.count} Local SEO pages generated.`, 'success');
+    if (!response.ok || !res.success) { seoWizardState.isSubmitting = false; seoWizardState.error = res.error?.message || res.error || 'Pages could not be generated.'; (window as any).renderSeoPages(); return; }
+    seoGenerationAttemptKey = null;
+    seoGenerationAttemptPayload = null;
+    (window as any).showToast(`${res.data.created_count} Local SEO drafts created. Publish your website to make them live.`, 'success');
     seoWizardState = { mode: 'list', step: 1, services: [], cities: [], websiteId: operationWebsiteId, error: undefined, isSubmitting: false };
     (window as any).renderSeoPages();
   } catch {
