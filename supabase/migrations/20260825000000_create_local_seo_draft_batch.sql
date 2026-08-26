@@ -35,6 +35,7 @@ declare
   v_sections jsonb;
   v_services text[];
   v_cities text[];
+  v_website_exists boolean;
 begin
   if v_user_id is null or v_user_id = '' then raise sqlstate 'PT401' using message = 'Authentication required'; end if;
   if p_website_id is null or not exists (select 1 from public.websites where id = p_website_id and user_id = v_user_id) then raise sqlstate 'PT404' using message = 'Website not found'; end if;
@@ -54,6 +55,14 @@ begin
     if v_receipt.payload = v_payload then return jsonb_set(v_receipt.result, '{data,replayed}', 'true'::jsonb); end if;
     raise sqlstate 'PT409' using message = 'Idempotency key already used with different input';
   end if;
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('builder-website-lifecycle:' || v_user_id || ':' || p_website_id::text, 0)
+  );
+  select true into v_website_exists
+  from public.websites
+  where id = p_website_id and user_id = v_user_id
+  for update;
+  if not found or v_website_exists is not true then raise sqlstate 'PT404' using message = 'Website not found'; end if;
   for v_service in select value from unnest(v_services) value loop
     for v_city in select value from unnest(v_cities) value loop
       v_slug := lower(regexp_replace(regexp_replace(v_service || '-' || v_city, '[^a-zA-Z0-9]+', '-', 'g'), '(^-+|-+$)', '', 'g'));
