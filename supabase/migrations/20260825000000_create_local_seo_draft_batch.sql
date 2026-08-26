@@ -39,6 +39,7 @@ begin
   if v_user_id is null or v_user_id = '' then raise sqlstate 'PT401' using message = 'Authentication required'; end if;
   if p_website_id is null or not exists (select 1 from public.websites where id = p_website_id and user_id = v_user_id) then raise sqlstate 'PT404' using message = 'Website not found'; end if;
   if p_idempotency_key is null or length(p_idempotency_key) < 16 or length(p_idempotency_key) > 128 or p_idempotency_key !~ '^[A-Za-z0-9._:-]+$' then raise sqlstate 'PT400' using message = 'Invalid idempotency key'; end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('local-seo-batch:' || v_user_id || ':' || p_idempotency_key, 0));
   if coalesce(array_length(p_services, 1), 0) < 1 or coalesce(array_length(p_services, 1), 0) > 12 or coalesce(array_length(p_cities, 1), 0) < 1 or coalesce(array_length(p_cities, 1), 0) > 12 then raise sqlstate 'PT422' using message = 'Invalid Local SEO batch size'; end if;
   if array_length(p_services, 1) * array_length(p_cities, 1) > 48 then raise sqlstate 'PT422' using message = 'Too many Local SEO drafts'; end if;
   select array_agg(trim(value) order by lower(trim(value))) into v_services from unnest(p_services) value;
@@ -63,8 +64,8 @@ begin
       insert into public.funnels (id, user_id, website_id, name, status, service_type, city, created_at, updated_at)
       values (v_funnel_id, v_user_id, p_website_id, v_service || ' - ' || v_city, 'draft', v_service, v_city, now(), now());
       select public.create_builder_page(v_service || ' in ' || v_city, v_slug, v_funnel_id, 'pg_seo_' || replace(gen_random_uuid()::text, '-', '')) into v_page;
-      v_sections := jsonb_build_array(jsonb_build_object('id', 'sec_seo_' || replace(gen_random_uuid()::text, '-', ''), 'type', 'hero', 'content', jsonb_build_object('heading', v_service || ' in ' || v_city, 'subheading', 'Request a quote for professional exterior cleaning.'), 'order', 0, 'styles', '{}'::jsonb));
-      perform public.save_page_sections_document(v_page->>'id', v_sections, 0, 0);
+      v_sections := jsonb_build_array(jsonb_build_object('id', 'sec_seo_' || replace(gen_random_uuid()::text, '-', ''), 'page_id', v_page->>'id', 'type', 'hero', 'content', jsonb_build_object('heading', v_service || ' in ' || v_city, 'subheading', 'Request a quote for professional exterior cleaning.'), 'order', 0, 'styles', '{}'::jsonb));
+      perform public.save_page_sections_document(v_page->>'id', v_sections, 1, 0);
       perform public.set_builder_route_draft(p_website_id, v_funnel_id, '/' || v_slug, null, null, null);
       v_pages := v_pages || jsonb_build_array(jsonb_build_object('service', v_service, 'city', v_city, 'path', '/' || v_slug, 'funnel_id', v_funnel_id, 'page_id', v_page->>'id'));
     end loop;

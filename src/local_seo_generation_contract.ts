@@ -58,8 +58,21 @@ export function isValidLocalSeoIdempotencyKey(value: string): boolean {
 export function isLocalSeoGenerationResponse(value: unknown): value is LocalSeoGenerationResponse {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const data = value as Record<string, unknown>;
-  if (data.success === false) return !!data.error && typeof data.error === 'object';
+  if (data.success === false) {
+    if (!data.error || typeof data.error !== 'object' || Array.isArray(data.error)) return false;
+    const error = data.error as Record<string, unknown>;
+    const codes: LocalSeoGenerationErrorCode[] = ['INVALID_INPUT', 'INVALID_IDEMPOTENCY_KEY', 'METHOD_NOT_ALLOWED', 'UNAUTHORIZED', 'NOT_FOUND', 'CONFLICT', 'CONFIGURATION_ERROR', 'UPSTREAM_UNAVAILABLE'];
+    if (typeof error.code !== 'string' || !codes.includes(error.code as LocalSeoGenerationErrorCode) || typeof error.message !== 'string' || !error.message.trim()) return false;
+    return error.fields === undefined || (!!error.fields && typeof error.fields === 'object' && !Array.isArray(error.fields) && Object.values(error.fields).every(field => typeof field === 'string'));
+  }
   if (data.success !== true || !data.data || typeof data.data !== 'object') return false;
   const payload = data.data as Record<string, unknown>;
-  return typeof payload.website_id === 'string' && typeof payload.created_count === 'number' && typeof payload.replayed === 'boolean' && Array.isArray(payload.pages);
+  const createdCount = payload.created_count;
+  if (typeof createdCount !== 'number' || typeof payload.website_id !== 'string' || !uuid(payload.website_id) || !Number.isInteger(createdCount) || createdCount < 0 || typeof payload.replayed !== 'boolean' || !Array.isArray(payload.pages) || createdCount !== payload.pages.length) return false;
+  return payload.pages.every(page => {
+    if (!page || typeof page !== 'object' || Array.isArray(page)) return false;
+    const item = page as Record<string, unknown>;
+    return ['service', 'city', 'path', 'funnel_id', 'page_id'].every(key => typeof item[key] === 'string' && (item[key] as string).trim().length > 0)
+      && typeof item.path === 'string' && item.path.startsWith('/');
+  });
 }

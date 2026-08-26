@@ -1955,6 +1955,7 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
                 }, 200);
             }
             const timestamp = new Date().toISOString();
+            const generatedPages: Array<{ service: string; city: string; path: string; funnel_id: string; page_id: string }> = [];
             
             services.forEach((s: string) => {
                 cities.forEach((c: string) => {
@@ -1972,11 +1973,12 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
                             service: s,
                             created_at: timestamp
                         });
+                        generatedPages.push({ service: s, city: c, path: `/${slug}`, funnel_id: 'fnl-1', page_id: `pg-fixture-${slug}` });
                     }
                 });
             });
 
-            const response = { success: true, data: { website_id, created_count: services.length * cities.length, replayed: false, pages: [] } };
+            const response = { success: true, data: { website_id, created_count: generatedPages.length, replayed: false, pages: generatedPages } };
             browserFixtureLocalSeoReceipts.set(receiptKey, { payload, response });
             return new Response(JSON.stringify(response), {
                 status: 200,

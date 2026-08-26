@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isValidLocalSeoIdempotencyKey, validateLocalSeoGenerationInput } from './local_seo_generation_contract';
+import { isLocalSeoGenerationResponse, isValidLocalSeoIdempotencyKey, validateLocalSeoGenerationInput } from './local_seo_generation_contract';
 
 describe('Local SEO generation contract', () => {
   const website_id = '11111111-1111-4111-8111-111111111111';
@@ -14,5 +14,12 @@ describe('Local SEO generation contract', () => {
   it('validates durable idempotency keys', () => {
     expect(isValidLocalSeoIdempotencyKey('local-seo:1234567890')).toBe(true);
     expect(isValidLocalSeoIdempotencyKey('short')).toBe(false);
+  });
+  it('rejects malformed nested RPC responses', () => {
+    const valid = { success: true, data: { website_id, created_count: 1, replayed: false, pages: [{ service: 'Wash', city: 'City', path: '/wash-city', funnel_id: 'fnl-1', page_id: 'pg-1' }] } };
+    expect(isLocalSeoGenerationResponse(valid)).toBe(true);
+    expect(isLocalSeoGenerationResponse({ ...valid, data: { ...valid.data, pages: [null] } })).toBe(false);
+    expect(isLocalSeoGenerationResponse({ ...valid, data: { ...valid.data, created_count: -1 } })).toBe(false);
+    expect(isLocalSeoGenerationResponse({ success: false, error: {} })).toBe(false);
   });
 });

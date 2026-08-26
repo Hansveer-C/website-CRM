@@ -36,6 +36,7 @@ export function createLocalSeoBatchHandler(deps: LocalSeoBatchHandlerDependencie
         return fail(503, 'UPSTREAM_UNAVAILABLE', 'Local SEO generation is temporarily unavailable.');
       }
       if (!isLocalSeoGenerationResponse(data)) return fail(503, 'UPSTREAM_UNAVAILABLE', 'Local SEO generation returned an invalid response.');
+      if (data.success && data.data.website_id !== validated.data.website_id) return fail(503, 'UPSTREAM_UNAVAILABLE', 'Local SEO generation returned an invalid response.');
       return reply(data, 200);
     } catch { return fail(503, 'UPSTREAM_UNAVAILABLE', 'Local SEO generation is temporarily unavailable.'); }
   };
