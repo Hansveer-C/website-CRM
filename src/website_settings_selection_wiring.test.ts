@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(fileURLToPath(new URL('./main.ts', import.meta.url)), 'utf8').replace(/\r\n/g, '\n');
+const localSeoSource = readFileSync(fileURLToPath(new URL('./ui/website-management/local_seo.ts', import.meta.url)), 'utf8').replace(/\r\n/g, '\n');
 
 describe('Website Settings explicit-selection wiring', () => {
   it('resolves the owned Website before querying settings', () => {
@@ -58,7 +59,7 @@ describe('Website Settings explicit-selection wiring', () => {
     expect(source).not.toMatch(/mockWebsites\.find\([^\n]+\)\s*\|\|\s*mockWebsites\[0\]/);
     expect(source).not.toContain('const websiteId = mockWebsites[0].id');
     expect(source).not.toContain('const website = mockWebsites[0]; // Assuming user has one website');
-    expect(source).toContain('r.website_id === website.id && r.is_seo_page');
+    expect(localSeoSource).toContain('page.website_id === website.id');
     expect(source).toContain('site.id === websiteId && site.user_id === userId');
   });
 });

@@ -5,3 +5,4 @@ export * from './site_page_detail';
 export * from './website_navigation';
 export * from './website_structure';
 export * from './website_settings';
+export * from './local_seo';

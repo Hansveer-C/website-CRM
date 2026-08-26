@@ -8,6 +8,7 @@ import type { BuilderInspectorFieldDefinition, BuilderInspectorTab } from './bui
 import { createBuilderInspectorPatch, getBuilderInspectorField, getBuilderInspectorFieldValue, getBuilderInspectorSchema } from './builder_inspector_schema';
 import { resolveWebsiteRequest } from './website_resolver';
 import { normalizePhone, normalizeEmail, normalizeName } from './utils/validators';
+import { createLocalSeoRoutePath, isLocalSeoGenerationResponse, isLocalSeoInventoryResponse, isValidLocalSeoIdempotencyKey, validateLocalSeoGenerationInput, type LocalSeoInventoryItem } from './local_seo_generation_contract';
 import { LocalStorageBuilderPublicationRepository } from './builder_publication_repository_local';
 import { SupabaseBuilderPublicationRepository } from './builder_publication_repository_supabase';
 import { handleBuilderPublicationRuntimeBrowserRequest, isBuilderPublicationBrowserRequest } from './builder_publication_browser';
@@ -86,7 +87,13 @@ import {
   isWebsiteStructureRouteDestination,
   type WebsiteNavigationModel,
   renderWebsiteSettingsContent,
-  renderWebsiteSettingsSaveAction
+  renderWebsiteSettingsSaveAction,
+  createLocalSeoViewModel,
+  createLocalSeoPublicUrl,
+  withLocalSeoWizardDraft,
+  renderLocalSeoList,
+  renderLocalSeoWizard,
+  type LocalSeoWizardState
 } from './ui/website-management';
 import {
   BUILDER_PAGE_NAME_MAX_LENGTH,
@@ -1381,6 +1388,7 @@ export async function handleBuilderSetHomepageBrowserPost(input: RequestInfo | U
 }
 
 const originalFetch = window.fetch;
+const browserFixtureLocalSeoReceipts = new Map<string, { payload: string; response: Record<string, unknown> }>();
 const browserCallSimulator = createBrowserCallSimulator();
 const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = getBuilderSectionsRequestUrl(input) ?? '';
@@ -1431,7 +1439,8 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
         const reqContext: any = { 
             method, 
             url,
-            body: bodyString ? JSON.parse(bodyString) : undefined 
+            body: bodyString ? JSON.parse(bodyString) : undefined,
+            headers: new Headers(init?.headers)
         };
 
         // Simulating the Backend Dispatcher/Router
@@ -1923,19 +1932,35 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
 
         if (url === '/api/websites/bulk-seo' && method === 'POST') {
             if (!editorUsesLocalData()) return builderSectionsJsonResponse({ success: false, error: 'SEO route generation is temporarily unavailable.' }, 501);
-            const { services, cities } = reqContext.body || {};
+            const input = validateLocalSeoGenerationInput(reqContext.body);
+            if (!input.success) return builderSectionsJsonResponse({ success: false, error: 'Invalid Local SEO draft input.' }, 422);
+            const { website_id, services, cities } = input.data;
+            const idempotencyKey = reqContext.headers.get('idempotency-key') || '';
+            if (!isValidLocalSeoIdempotencyKey(idempotencyKey)) return builderSectionsJsonResponse({ success: false, error: 'Invalid idempotency key.' }, 400);
             console.log(`[MOCK] Bulk SEO Generation for ${services.length} services in ${cities.length} cities`);
             
             // Simulation of generation
             const website = getActiveSettingsWebsite();
-            if (!website || website.user_id !== getActingUserId()) {
+            if (!website || website.id !== website_id || website.user_id !== getActingUserId() || reqContext.headers.get('authorization') !== 'Bearer browser-fixture-session') {
                 return builderSectionsJsonResponse({ success: false, error: 'Website not found' }, 404);
             }
+            const receiptKey = `${website.user_id}:${idempotencyKey}`;
+            const payload = JSON.stringify(input.data);
+            const prior = browserFixtureLocalSeoReceipts.get(receiptKey);
+            if (prior) {
+                if (prior.payload !== payload) return builderSectionsJsonResponse({ success: false, error: 'Idempotency conflict.' }, 409);
+                return builderSectionsJsonResponse({
+                    ...prior.response,
+                    data: { ...(prior.response.data as Record<string, unknown>), replayed: true }
+                }, 200);
+            }
             const timestamp = new Date().toISOString();
+            const generatedPages: Array<{ service: string; city: string; path: string; funnel_id: string; page_id: string }> = [];
             
             services.forEach((s: string) => {
                 cities.forEach((c: string) => {
-                    const slug = (s + '-' + c).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+                    const path = createLocalSeoRoutePath(s, c);
+                    const slug = path.slice(1);
                     const existing = mockWebsiteRoutes.find(r => r.website_id === website.id && r.slug === slug);
                     if (!existing) {
                         mockWebsiteRoutes.push({
@@ -1947,13 +1972,17 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
                             is_seo_page: true,
                             city: c,
                             service: s,
+                            ...( { local_seo_publication_state: 'draft' } as any),
                             created_at: timestamp
                         });
+                        generatedPages.push({ service: s, city: c, path: `/${slug}`, funnel_id: 'fnl-1', page_id: `pg-fixture-${slug}` });
                     }
                 });
             });
 
-            return new Response(JSON.stringify({ success: true, count: services.length * cities.length }), { 
+            const response = { success: true, data: { website_id, created_count: generatedPages.length, replayed: false, pages: generatedPages } };
+            browserFixtureLocalSeoReceipts.set(receiptKey, { payload, response });
+            return new Response(JSON.stringify(response), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json' }
             });
@@ -13257,224 +13286,145 @@ window.addEventListener('scroll', () => {
   (window as any).toggleCheckItem('test');
 };
 
-let seoWizardState = {
-    mode: 'list' as 'list' | 'wizard',
-    step: 1,
-    services: [] as string[],
-    cities: [] as string[]
+let seoWizardState: LocalSeoWizardState = {
+  mode: 'list',
+  step: 1,
+  services: [],
+  cities: [],
+  websiteId: null,
+  error: undefined,
+  isSubmitting: false
 };
+let seoGenerationAttemptKey: string | null = null;
+let seoGenerationAttemptPayload: string | null = null;
+let seoInventory: { websiteId: string | null; status: 'idle' | 'loading' | 'loaded' | 'error'; pages: LocalSeoInventoryItem[]; error?: string } = { websiteId: null, status: 'idle', pages: [] };
+
+// Task 7C.6E owns presentation here; the existing endpoint remains the authority
+// for the currently active, owned Website.
+function resetSeoWizardForWebsite(websiteId: string, mode: 'list' | 'wizard' = 'list') {
+  seoWizardState = { mode, step: 1, services: [], cities: [], websiteId, error: undefined, isSubmitting: false };
+}
+
+function localSeoFixtureInventory(websiteId: string): LocalSeoInventoryItem[] {
+  return mockWebsiteRoutes.filter(route => route.website_id === websiteId && route.is_seo_page).map(route => ({
+    website_id: websiteId, funnel_id: route.funnel_id, page_id: route.id, service: route.service || 'Service page', city: route.city || 'Location not specified', path: route.path, publication_state: (route as any).local_seo_publication_state === 'draft' ? 'draft' : 'live'
+  }));
+}
+
+async function hydrateLocalSeoInventory(websiteId: string): Promise<void> {
+  if (seoInventory.websiteId === websiteId && (seoInventory.status === 'loading' || seoInventory.status === 'loaded')) return;
+  seoInventory = { websiteId, status: 'loading', pages: [] };
+  if (editorUsesLocalData()) {
+    seoInventory = { websiteId, status: 'loaded', pages: localSeoFixtureInventory(websiteId) };
+    return;
+  }
+  try {
+    const token = await getBuilderSaveAccessToken();
+    if (!token) throw new Error('UNAUTHORIZED');
+    const response = await fetch(`/api/websites/local-seo?website_id=${encodeURIComponent(websiteId)}`, { headers: { Authorization: `Bearer ${token}` } });
+    const payload = await response.json();
+    const current = activeDashboardWebsiteId;
+    if (current !== websiteId) return;
+    if (!response.ok || !isLocalSeoInventoryResponse(payload) || !payload.success || payload.data.website_id !== websiteId) throw new Error('UNAVAILABLE');
+    seoInventory = { websiteId, status: 'loaded', pages: payload.data.pages };
+  } catch {
+    if (activeDashboardWebsiteId === websiteId) seoInventory = { websiteId, status: 'error', pages: [], error: 'Local SEO inventory is temporarily unavailable.' };
+  }
+}
 
 (window as any).renderSeoPages = async () => {
-    const userId = getActingUserId();
-    const website = mockWebsites.find(site => site.user_id === userId && site.id === activeDashboardWebsiteId);
-    if (!website) {
-        renderWebsiteRepositoryUnavailable('seo-pages');
-        return;
-    }
-    const seoPages = mockWebsiteRoutes.filter(r => r.website_id === website.id && r.is_seo_page);
-    
-    // Auto-switch to wizard if empty
-    if (seoPages.length === 0 && seoWizardState.mode !== 'wizard') {
-        seoWizardState.mode = 'wizard';
-        seoWizardState.step = 1;
-    }
+  let model = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, pages: seoInventory.pages });
+  const website = model.website;
+  if (!website) {
+    renderWebsiteRepositoryUnavailable('seo-pages');
+    return;
+  }
+  if (seoWizardState.websiteId !== website.id) resetSeoWizardForWebsite(website.id);
+  if (seoInventory.websiteId !== website.id || seoInventory.status === 'idle') {
+    void hydrateLocalSeoInventory(website.id).then(() => activeDashboardWebsiteId === website.id && (window as any).renderSeoPages());
+    model = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, pages: seoInventory.pages });
+  }
+  if (seoInventory.websiteId === website.id && seoInventory.status === 'loaded' && model.pages.length === 0) seoWizardState.mode = 'wizard';
+  const content = seoInventory.websiteId === website.id && seoInventory.status === 'loading'
+    ? renderCard({ className: 'wo-local-seo-card', bodyHtml: '<p>Loading Local SEO pages…</p>' })
+    : seoInventory.websiteId === website.id && seoInventory.status === 'error'
+      ? renderCard({ className: 'wo-local-seo-card', bodyHtml: `<p role="alert">${escapeHtmlText(seoInventory.error || 'Local SEO inventory is temporarily unavailable.')}</p>${renderButton({ label: 'Retry', variant: 'secondary', attributes: { onclick: 'window.retryLocalSeoInventory()' } })}` })
+      : seoWizardState.mode === 'wizard'
+        ? renderLocalSeoWizard({ state: seoWizardState, website, nextAction: step => `window.nextSeoStep(${step})`, generateAction: 'window.finalizeSeoGen()' })
+        : renderLocalSeoList({ website, pages: model.pages, batchAction: 'window.startSeoWizard()', viewAction: page => page.publication_state === 'live' ? (() => { const publicUrl = createLocalSeoPublicUrl(website, page.path); return publicUrl ? renderButton({ label: 'View live', variant: 'secondary', size: 'sm', attributes: { onclick: `window.open(${builderInspectorJsArgument(publicUrl)}, '_blank', 'noopener,noreferrer')` } }) : ''; })() : '', deleteAction: () => '' });
+  renderAppWithShell({ activeView: 'seo-pages', title: 'Local SEO Hub', subtitle: seoWizardState.mode === 'wizard' ? `Step ${seoWizardState.step} of 3` : 'Generate focused service and location pages for local search.', contentVariant: 'wide', contentHtml: `${renderWebsiteManagementSwitcher('seo-pages')}${content}` });
+};
 
-    if (seoWizardState.mode === 'wizard') {
-        renderSeoWizard();
-        return;
-    }
-
-    renderAppWithShell({
-        activeView: 'seo-pages',
-        title: 'Local SEO Hub',
-        subtitle: 'Target specific neighborhoods and service types to dominate local search results.',
-        headerActionsHtml: `
-            <div style="display: flex; gap: 12px;">
-                <button class="btn-primary" onclick="window.startSeoWizard()" style="background: #10b981; border: none; padding: 10px 20px;">+ Batch Generate Pages</button>
-            </div>
-        `,
-        contentVariant: 'wide',
-        contentHtml: `
-            ${renderWebsiteManagementSwitcher('seo-pages')}
-
-            <div class="card" style="margin-bottom: 30px; padding: 24px; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border: 1px solid #bae6fd; border-radius: 16px;">
-                <div style="display: flex; gap: 24px; align-items: center;">
-                    <div style="font-size: 3rem; background: white; width: 80px; height: 80px; display: flex; align-items: center; justify-content: center; border-radius: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">📈</div>
-                    <div>
-                        <h4 style="margin: 0; color: #0369a1; font-size: 1.25rem;">Organic Search Strategy</h4>
-                        <p style="margin: 6px 0 0 0; color: #0c4a6e; font-size: 1rem; line-height: 1.5;">
-                            Generated pages target <strong>Service + City</strong> combinations to capture high-intent local traffic.
-                        </p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card" style="padding: 0; overflow-x: auto; border-radius: 16px;">
-                <table class="clients-table" style="box-shadow: none; border: none; margin-top: 0; min-width: 700px;">
-                    <thead style="background: #f8fafc;">
-                        <tr>
-                            <th style="padding: 16px 24px;">Service & Region</th>
-                            <th>Calculated URL Slug</th>
-                            <th>Live Status</th>
-                            <th style="text-align: right; padding: 16px 24px;">Management</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${seoPages.map(page => `
-                            <tr style="border-bottom: 1px solid #f1f5f9;">
-                                <td style="padding: 16px 24px;">
-                                    <div style="font-weight: 700; color: #1e293b; font-size: 1rem;">${page.service}</div>
-                                    <div style="font-size: 0.85rem; color: #64748b; font-weight: 500;">${page.city}</div>
-                                </td>
-                                <td>
-                                    <code style="background: #f1f5f9; padding: 6px 10px; border-radius: 8px; font-size: 0.9rem; color: #475569; border: 1px solid #e2e8f0;">/${page.slug}</code>
-                                </td>
-                                <td>
-                                    <span class="badge" style="background: #ecfdf5; color: #059669; border: 1px solid #d1fae5; padding: 4px 10px; font-size: 0.75rem; font-weight: 700;">ACTIVE</span>
-                                </td>
-                                <td style="text-align: right; padding: 16px 24px;">
-                                    <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                                        <button class="btn-primary" style="background: white; color: #64748b; border: 1px solid #e2e8f0; padding: 8px 16px; font-size: 0.85rem; font-weight: 600;" onclick="window.open('/${page.slug}', '_blank')">View Live</button>
-                                        <button class="btn-primary" style="background: #fff5f5; color: #ef4444; border: 1px solid #fee2e2; padding: 8px 12px;" onclick="window.deleteSeoPage('${page.id}')">
-                                            <svg style="width: 18px; height: 18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        `).join('') || '<tr><td colspan="4" style="text-align: center; padding: 80px; color: #94a3b8;">No SEO pages found. Use the Batched Generator to get started.</td></tr>'}
-                    </tbody>
-                </table>
-            </div>
-        `
-    });
+(window as any).retryLocalSeoInventory = () => {
+  if (!activeDashboardWebsiteId) return;
+  seoInventory = { websiteId: null, status: 'idle', pages: [] };
+  void (window as any).renderSeoPages();
 };
 
 (window as any).startSeoWizard = () => {
-    seoWizardState.mode = 'wizard';
-    seoWizardState.step = 1;
-    (window as any).renderSeoPages();
+  const website = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, pages: seoInventory.pages }).website;
+  if (!website) return;
+  resetSeoWizardForWebsite(website.id, 'wizard');
+  (window as any).renderSeoPages();
 };
 
-function renderSeoWizard() {
-    let content = '';
-    const progress = (seoWizardState.step / 3) * 100;
-
-    if (seoWizardState.step === 1) {
-        content = `
-            <div style="max-width: 600px; margin: 40px auto;">
-                <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Step 1: What services do you offer?</h3>
-                <p style="color: #64748b; margin-bottom: 24px;">Enter the services you want to rank for locally. Use commas to separate them.</p>
-                <textarea id="wizard-services" placeholder="e.g. Driveway Cleaning, Roof Cleaning, House Washing" style="width: 100%; height: 120px; padding: 15px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1.1rem; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'">${seoWizardState.services.join(', ')}</textarea>
-                <div style="margin-top: 30px; display: flex; justify-content: flex-end;">
-                    <button class="btn-primary" style="padding: 12px 32px; border-radius: 12px; font-weight: 800;" onclick="window.nextSeoStep(2)">Next: Location Selection →</button>
-                </div>
-            </div>
-        `;
-    } else if (seoWizardState.step === 2) {
-        content = `
-            <div style="max-width: 600px; margin: 40px auto;">
-                <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Step 2: Where do you offer them?</h3>
-                <p style="color: #64748b; margin-bottom: 24px;">Enter the cities or neighborhoods you target. Use commas to separate them.</p>
-                <textarea id="wizard-cities" placeholder="e.g. Seattle, Bellevue, Kirkland, Redmond" style="width: 100%; height: 120px; padding: 15px; border: 2px solid #e2e8f0; border-radius: 12px; font-size: 1.1rem; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='var(--primary-color)'">${seoWizardState.cities.join(', ')}</textarea>
-                <div style="margin-top: 30px; display: flex; justify-content: space-between;">
-                    <button class="btn-outline" style="padding: 12px 24px; border-radius: 12px; font-weight: 700;" onclick="window.nextSeoStep(1)">← Back</button>
-                    <button class="btn-primary" style="padding: 12px 32px; border-radius: 12px; font-weight: 800;" onclick="window.nextSeoStep(3)">Next: Preview Generation →</button>
-                </div>
-            </div>
-        `;
-    } else if (seoWizardState.step === 3) {
-        const previews: string[] = [];
-        seoWizardState.services.forEach(s => {
-            seoWizardState.cities.forEach(c => {
-                const slug = (s + '-' + c).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-                previews.push(`/${slug}`);
-            });
-        });
-
-        content = `
-            <div style="max-width: 800px; margin: 40px auto;">
-                <header style="text-align: center; margin-bottom: 40px;">
-                    <h3 style="font-size: 1.75rem; margin-bottom: 12px;">Step 3: Preview Local Strategy</h3>
-                    <p style="color: #64748b; font-size: 1.1rem;">We are about to generate <strong>${previews.length}</strong> targeted landing pages.</p>
-                </header>
-
-                <div class="card" style="background: #f8fafc; border: 2px dashed #e2e8f0; padding: 30px; margin-bottom: 40px;">
-                    <h4 style="margin-top: 0; color: #475569; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 1px; margin-bottom: 15px;">URL Structure Previews</h4>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                        ${previews.slice(0, 10).map(p => `<div style="color: var(--primary-color); font-weight: 600; font-family: monospace;">${p}</div>`).join('')}
-                        ${previews.length > 10 ? `<div style="color: #94a3b8; font-style: italic;">...and ${previews.length - 10} more pages</div>` : ''}
-                    </div>
-                </div>
-
-                <div style="display: flex; flex-direction: column; gap: 15px; background: #fffbeb; border: 1px solid #fde68a; padding: 20px; border-radius: 12px; margin-bottom: 40px;">
-                   <div style="display: flex; gap: 12px; align-items: flex-start;">
-                      <span style="font-size: 1.25rem;">💡</span>
-                      <p style="margin: 0; color: #92400e; font-size: 0.95rem;"><strong>Pro Tip:</strong> These pages will automatically be added to your Sitemap and linked within your website to boost search ranking.</p>
-                   </div>
-                </div>
-
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <button class="btn-outline" style="padding: 12px 24px; border-radius: 12px; font-weight: 700;" onclick="window.nextSeoStep(2)">← Change Inputs</button>
-                    <button class="btn-primary" style="padding: 15px 40px; border-radius: 12px; font-weight: 800; font-size: 1.1rem; background: #10b981; border: none; box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.4);" onclick="window.finalizeSeoGen()">🚀 Generate & Go Live</button>
-                </div>
-            </div>
-        `;
-    }
-
-    renderAppWithShell({
-        activeView: 'seo-pages',
-        title: 'Build Your Local Presence',
-        subtitle: `Step ${seoWizardState.step} of 3`,
-        headerActionsHtml: `
-            <div style="width: 200px; height: 10px; background: #e2e8f0; border-radius: 5px; overflow: hidden; position: relative;">
-                <div style="width: ${progress}%; height: 100%; background: var(--primary-color); transition: width 0.4s ease-out;"></div>
-            </div>
-        `,
-        contentVariant: 'wide',
-        contentHtml: `
-            ${renderWebsiteManagementSwitcher('seo-pages')}
-            ${content}
-        `
-    });
-}
-
-(window as any).nextSeoStep = (step: number) => {
-    if (seoWizardState.step === 1 && step === 2) {
-        const text = (document.getElementById('wizard-services') as HTMLTextAreaElement).value;
-        seoWizardState.services = text.split(',').map(s => s.trim()).filter(s => s);
-        if (seoWizardState.services.length === 0) { alert('Please enter at least one service.'); return; }
-    } else if (seoWizardState.step === 2 && step === 3) {
-        const text = (document.getElementById('wizard-cities') as HTMLTextAreaElement).value;
-        seoWizardState.cities = text.split(',').map(c => c.trim()).filter(c => c);
-        if (seoWizardState.cities.length === 0) { alert('Please enter at least one city.'); return; }
-    }
-    
-    seoWizardState.step = step;
-    (window as any).renderSeoPages();
+(window as any).nextSeoStep = (step: 1 | 2 | 3) => {
+  const website = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, pages: seoInventory.pages }).website;
+  if (!website || website.id !== seoWizardState.websiteId) return;
+  seoWizardState.error = undefined;
+  if (seoWizardState.step === 1 && step === 2) {
+    seoWizardState = withLocalSeoWizardDraft(seoWizardState, step, { services: (document.getElementById('wizard-services') as HTMLTextAreaElement | null)?.value });
+    if (!seoWizardState.services.length) { seoWizardState.error = 'Enter at least one service.'; (window as any).renderSeoPages(); return; }
+  }
+  if (seoWizardState.step === 2 && (step === 1 || step === 3)) {
+    seoWizardState = withLocalSeoWizardDraft(seoWizardState, step, { cities: (document.getElementById('wizard-cities') as HTMLTextAreaElement | null)?.value });
+    if (step === 3 && !seoWizardState.cities.length) { seoWizardState.error = 'Enter at least one location.'; (window as any).renderSeoPages(); return; }
+  }
+  seoWizardState.step = step;
+  (window as any).renderSeoPages();
 };
 
 (window as any).finalizeSeoGen = async () => {
-    (window as any).showToast(`Broadcasting Local Authority...`, 'info');
-    
-    try {
-        const res = await fetch('/api/websites/bulk-seo', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ services: seoWizardState.services, cities: seoWizardState.cities })
-        }).then(r => r.json());
-        
-        if (res.success) {
-            (window as any).showToast(`Mission Accomplished: ${res.count} SEO pages are now live!`, 'success');
-            seoWizardState.mode = 'list';
-            seoWizardState.services = [];
-            seoWizardState.cities = [];
-            (window as any).renderSeoPages();
-        } else {
-            alert('Generation error: ' + res.error);
-        }
-    } catch (err: any) {
-        alert('Exception: ' + err.message);
+  const operationWebsiteId = seoWizardState.websiteId;
+  const active = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, pages: seoInventory.pages }).website;
+  if (!active || active.id !== operationWebsiteId || seoWizardState.isSubmitting) return;
+  seoWizardState.isSubmitting = true;
+  seoWizardState.error = undefined;
+  (window as any).renderSeoPages();
+  try {
+    const accessToken = await getBuilderSaveAccessToken();
+    if (!accessToken) throw new Error('UNAUTHENTICATED');
+    const input = { website_id: operationWebsiteId, services: seoWizardState.services, cities: seoWizardState.cities };
+    const validated = validateLocalSeoGenerationInput(input);
+    if (!validated.success) throw new Error('INVALID_INPUT');
+    const canonical = JSON.stringify(validated.data);
+    if (!seoGenerationAttemptKey || seoGenerationAttemptPayload !== canonical) {
+      seoGenerationAttemptKey = `local-seo:${crypto.randomUUID()}`;
+      seoGenerationAttemptPayload = canonical;
     }
+    if (!isValidLocalSeoIdempotencyKey(seoGenerationAttemptKey)) throw new Error('INVALID_IDEMPOTENCY_KEY');
+    const response = await fetch('/api/websites/bulk-seo', { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', 'Idempotency-Key': seoGenerationAttemptKey }, body: JSON.stringify(validated.data) });
+    const res = await response.json();
+    const current = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, pages: seoInventory.pages }).website;
+    if (!current || current.id !== operationWebsiteId) return;
+    if (!isLocalSeoGenerationResponse(res)) throw new Error('INVALID_RESPONSE');
+    if (!response.ok || !res.success) {
+      seoWizardState.isSubmitting = false;
+      seoWizardState.error = !res.success ? res.error.message : 'Pages could not be generated.';
+      (window as any).renderSeoPages();
+      return;
+    }
+    seoGenerationAttemptKey = null;
+    seoGenerationAttemptPayload = null;
+    (window as any).showToast(`${res.data.created_count} Local SEO drafts created. Publish your website to make them live.`, 'success');
+    seoWizardState = { mode: 'list', step: 1, services: [], cities: [], websiteId: operationWebsiteId, error: undefined, isSubmitting: false };
+    seoInventory = { websiteId: null, status: 'idle', pages: [] };
+    await hydrateLocalSeoInventory(operationWebsiteId);
+    if (activeDashboardWebsiteId === operationWebsiteId) (window as any).renderSeoPages();
+  } catch {
+    const current = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, pages: seoInventory.pages }).website;
+    if (current?.id === operationWebsiteId) { seoWizardState.isSubmitting = false; seoWizardState.error = 'Pages could not be generated.'; (window as any).renderSeoPages(); }
+  }
 };
 
 function renderPagesSeoLanding() {
@@ -13562,6 +13512,12 @@ function renderPagesSeoLanding() {
 }
 
 (window as any).deleteSeoPage = async (routeId: string) => {
+    const website = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, pages: seoInventory.pages }).website;
+    const route = website && mockWebsiteRoutes.find(candidate => candidate.id === routeId && candidate.website_id === website.id && candidate.is_seo_page);
+    if (!route) {
+        (window as any).showToast('SEO page could not be found for this website.', 'error');
+        return;
+    }
     if (!confirm('Are you sure you want to delete this SEO page? It will be removed from your public website instantly.')) return;
     
     try {

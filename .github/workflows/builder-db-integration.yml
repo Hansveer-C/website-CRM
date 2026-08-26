@@ -301,6 +301,34 @@ jobs:
         run: |
           BUILDER_ROUTE_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run --no-file-parallelism supabase/tests/builder_unified_publication.test.ts
 
+  standalone-local-seo-batch-db-integration:
+    name: Standalone Local SEO Batch Generation DB Integration (PostgreSQL 17)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: |
+          LOCAL_SEO_BATCH_TEST_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/postgres" npx vitest run --no-file-parallelism \
+            supabase/tests/local_seo_draft_batch.test.ts \
+            supabase/tests/local_seo_draft_batch_real_stack.test.ts
+
   combined-db-integration:
     name: Combined Duplicate + Delete + Reorder + Homepage + Route + Navigation + Unified Publish DB Integration (PostgreSQL 17)
     runs-on: ubuntu-latest
