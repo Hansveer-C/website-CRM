@@ -21,6 +21,20 @@ export interface LocalSeoDraftPage {
   page_id: string;
 }
 
+export interface LocalSeoInventoryItem {
+  website_id: string;
+  funnel_id: string;
+  page_id: string;
+  service: string;
+  city: string;
+  path: string;
+  publication_state: 'draft' | 'live';
+}
+
+export type LocalSeoInventoryResponse =
+  | { success: true; data: { website_id: string; pages: LocalSeoInventoryItem[] } }
+  | { success: false; error: { code: 'METHOD_NOT_ALLOWED' | 'INVALID_INPUT' | 'UNAUTHORIZED' | 'NOT_FOUND' | 'UPSTREAM_UNAVAILABLE'; message: string } };
+
 export type LocalSeoGenerationResponse =
   | { success: true; data: { website_id: string; created_count: number; replayed: boolean; pages: LocalSeoDraftPage[] } }
   | { success: false; error: { code: LocalSeoGenerationErrorCode; message: string; fields?: Record<string, string> } };
@@ -74,5 +88,27 @@ export function isLocalSeoGenerationResponse(value: unknown): value is LocalSeoG
     const item = page as Record<string, unknown>;
     return ['service', 'city', 'path', 'funnel_id', 'page_id'].every(key => typeof item[key] === 'string' && (item[key] as string).trim().length > 0)
       && typeof item.path === 'string' && item.path.startsWith('/');
+  });
+}
+
+export function createLocalSeoRoutePath(service: string, city: string): string {
+  const slug = `${service}-${city}`.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase();
+  return `/${slug}`;
+}
+
+export function isLocalSeoInventoryResponse(value: unknown): value is LocalSeoInventoryResponse {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const payload = value as Record<string, unknown>;
+  if (payload.success === false) return !!payload.error && typeof payload.error === 'object' && !Array.isArray(payload.error)
+    && typeof (payload.error as Record<string, unknown>).code === 'string' && typeof (payload.error as Record<string, unknown>).message === 'string';
+  if (payload.success !== true || !payload.data || typeof payload.data !== 'object') return false;
+  const data = payload.data as Record<string, unknown>;
+  if (typeof data.website_id !== 'string' || !uuid(data.website_id) || !Array.isArray(data.pages)) return false;
+  return data.pages.every(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+    const page = item as Record<string, unknown>;
+    return ['website_id', 'funnel_id', 'page_id', 'service', 'city', 'path', 'publication_state'].every(key => typeof page[key] === 'string' && Boolean((page[key] as string).trim()))
+      && page.website_id === data.website_id && /^\/[A-Za-z0-9._~!$&'()*+,;=:@/%-]*$/.test(page.path as string)
+      && (page.publication_state === 'draft' || page.publication_state === 'live');
   });
 }

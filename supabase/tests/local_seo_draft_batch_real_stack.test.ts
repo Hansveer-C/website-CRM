@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
+import { createLocalSeoRoutePath } from '../../src/local_seo_generation_contract';
 
 const url = process.env.LOCAL_SEO_BATCH_TEST_DATABASE_URL;
 const suite = url ? describe : describe.skip;
@@ -44,6 +45,7 @@ suite('Local SEO real lifecycle migration-stack integration', () => {
   const site = async (user = owner) => { const id = randomUUID(); await pool.query('insert into public.websites(id,user_id,name) values($1,$2,$3)', [id, user, 'Site']); return id; };
   const call = async (website: string, services: string[], cities: string[], key: string, client: pg.Pool | pg.PoolClient = pool) => (await client.query('select public.create_local_seo_draft_batch($1,$2,$3,$4) result', [website, services, cities, key])).rows[0].result;
   const callAs = async (user: string, website: string, services: string[], cities: string[], key: string) => { const client = await pool.connect(); try { await client.query(`select set_config('request.jwt.claim.sub',$1,false)`, [user]); return await call(website, services, cities, key, client); } finally { client.release(); } };
+  const inventoryAs = async (user: string, website: string) => { const client = await pool.connect(); try { await client.query(`select set_config('request.jwt.claim.sub',$1,false)`, [user]); return (await client.query('select public.get_local_seo_inventory($1) result', [website])).rows[0].result; } finally { client.release(); } };
   type CallSpec = { user: string; website: string; services: string[]; cities: string[]; key: string };
   const raceCalls = async (specs: CallSpec[]) => {
     const clients = await Promise.all(specs.map(() => pool.connect()));
@@ -109,6 +111,16 @@ suite('Local SEO real lifecycle migration-stack integration', () => {
     expect((await pool.query('select * from public.website_routes where website_id=$1', [website])).rows).toHaveLength(0);
     expect((await pool.query('select * from public.builder_published_revisions where website_id=$1', [website])).rows).toHaveLength(0);
     expect((await pool.query('select * from public.builder_publication_targets where website_id=$1', [website])).rows).toHaveLength(0);
+    expect((await pool.query('select user_id,website_id,funnel_id,page_id from private.local_seo_pages')).rows).toEqual([expect.objectContaining({ user_id: owner, website_id: website, funnel_id: page.funnel_id, page_id: page.page_id })]);
+    expect(await inventoryAs(owner, website)).toEqual(expect.objectContaining({ data: { website_id: website, pages: [expect.objectContaining({ path: page.path, publication_state: 'draft' })] } }));
+  });
+
+  it('uses real SQL paths that match the shared client normalizer', async () => {
+    const cases = [['Driveway Cleaning','Port Moody'],['Roof & Gutter','Port Moody'],['House   Washing','New Westminster'],['  Roof Cleaning  ','  Burnaby'],['ROOF CLEANING','CoQuItLaM'],['Roof!!!Gutter','North Vancouver'],['--Roof--','--City--'],['Café Wash','Montréal']];
+    for (const [service, city] of cases) {
+      const website = await site(); const result = await callAs(owner, website, [service], [city], `local-seo:parity-${randomUUID()}`);
+      expect(result.data.pages[0].path).toBe(createLocalSeoRoutePath(service, city));
+    }
   });
 
   it('isolates two owned Websites and rejects foreign, missing, and unauthenticated Websites', async () => {

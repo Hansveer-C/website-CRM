@@ -11,6 +11,18 @@ create table if not exists private.local_seo_draft_batch_receipts (
 );
 revoke all on table private.local_seo_draft_batch_receipts from public, anon, authenticated;
 
+-- Explicit provenance survives Unified Publish, which consumes route drafts.
+create table if not exists private.local_seo_pages (
+  user_id text not null references public.users(id) on delete cascade,
+  website_id uuid not null references public.websites(id) on delete cascade,
+  funnel_id text not null references public.funnels(id) on delete cascade,
+  page_id text not null references public.pages(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (page_id),
+  unique (website_id, funnel_id)
+);
+revoke all on table private.local_seo_pages from public, anon, authenticated;
+
 create or replace function public.create_local_seo_draft_batch(
   p_website_id uuid,
   p_services text[],
@@ -76,6 +88,8 @@ begin
       v_sections := jsonb_build_array(jsonb_build_object('id', 'sec_seo_' || replace(gen_random_uuid()::text, '-', ''), 'page_id', v_page->>'id', 'type', 'hero', 'content', jsonb_build_object('heading', v_service || ' in ' || v_city, 'subheading', 'Request a quote for professional exterior cleaning.'), 'order', 0, 'styles', '{}'::jsonb));
       perform public.save_page_sections_document(v_page->>'id', v_sections, 1, 0);
       perform public.set_builder_route_draft(p_website_id, v_funnel_id, '/' || v_slug, null, null, null);
+      insert into private.local_seo_pages(user_id, website_id, funnel_id, page_id)
+      values (v_user_id, p_website_id, v_funnel_id, v_page->>'id');
       v_pages := v_pages || jsonb_build_array(jsonb_build_object('service', v_service, 'city', v_city, 'path', '/' || v_slug, 'funnel_id', v_funnel_id, 'page_id', v_page->>'id'));
     end loop;
   end loop;
@@ -86,3 +100,38 @@ end;
 $$;
 revoke all on function public.create_local_seo_draft_batch(uuid, text[], text[], text) from public, anon;
 grant execute on function public.create_local_seo_draft_batch(uuid, text[], text[], text) to authenticated;
+
+create or replace function public.get_local_seo_inventory(p_website_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id text := (select auth.uid())::text;
+  v_pages jsonb;
+begin
+  if v_user_id is null or v_user_id = '' then raise sqlstate 'PT401' using message = 'Authentication required'; end if;
+  if p_website_id is null or not exists (select 1 from public.websites where id = p_website_id and user_id = v_user_id) then raise sqlstate 'PT404' using message = 'Website not found'; end if;
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'website_id', registry.website_id,
+    'funnel_id', registry.funnel_id,
+    'page_id', registry.page_id,
+    'service', funnel.service_type,
+    'city', funnel.city,
+    -- A real live route wins over a staged replacement: never expose draft URL as public.
+    'path', coalesce(live.path, draft.path),
+    'publication_state', case when live.path is not null then 'live' else 'draft' end
+  ) order by coalesce(live.path, draft.path)), '[]'::jsonb)
+  into v_pages
+  from private.local_seo_pages registry
+  join public.funnels funnel on funnel.id = registry.funnel_id and funnel.user_id = v_user_id and funnel.website_id = p_website_id
+  left join public.builder_route_drafts draft on draft.website_id = p_website_id and draft.funnel_id = registry.funnel_id and draft.action = 'upsert'
+  left join public.website_routes live on live.website_id = p_website_id and live.funnel_id = registry.funnel_id
+  where registry.user_id = v_user_id and registry.website_id = p_website_id
+    and coalesce(live.path, draft.path) is not null;
+  return jsonb_build_object('success', true, 'data', jsonb_build_object('website_id', p_website_id, 'pages', v_pages));
+end;
+$$;
+revoke all on function public.get_local_seo_inventory(uuid) from public, anon;
+grant execute on function public.get_local_seo_inventory(uuid) to authenticated;

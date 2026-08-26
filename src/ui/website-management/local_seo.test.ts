@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import type { Website, WebsiteRoute } from '../../types';
+import type { Website } from '../../types';
+import type { LocalSeoInventoryItem } from '../../local_seo_generation_contract';
 import { createLocalSeoPreviews, createLocalSeoPublicUrl, createLocalSeoViewModel, renderLocalSeoList, renderLocalSeoWizard, withLocalSeoWizardDraft } from './local_seo';
 
 const website = (id = 'site-a', name = 'Wash Co'): Website => ({ id, user_id: 'u1', name, domain: 'wash.example', subdomain: '', homepage_funnel_id: null, created_at: '', updated_at: '' });
-const route = (overrides: Partial<WebsiteRoute> = {}): WebsiteRoute => ({ id: 'route-a', website_id: 'site-a', path: '/driveway-cleaning-port-moody', slug: 'driveway-cleaning-port-moody', funnel_id: 'f1', is_seo_page: true, service: 'Driveway Cleaning', city: 'Port Moody', created_at: '', ...overrides });
+const route = (overrides: Partial<LocalSeoInventoryItem> = {}): LocalSeoInventoryItem => ({ website_id: 'site-a', path: '/driveway-cleaning-port-moody', funnel_id: 'f1', page_id: 'pg-1', publication_state: 'draft', service: 'Driveway Cleaning', city: 'Port Moody', ...overrides });
 const state = (overrides = {}) => ({ mode: 'wizard' as const, step: 1 as const, services: [], cities: [], websiteId: 'site-a', ...overrides });
 
 describe('Local SEO presentation', () => {
   it('scopes list rows to the active owned website', () => {
-    const model = createLocalSeoViewModel({ userId: 'u1', activeWebsiteId: 'site-a', websites: [website(), website('site-b', 'Second'), { ...website('site-c', 'Foreign'), user_id: 'u2' }], routes: [route(), route({ id: 'b', website_id: 'site-b', path: '/foreign' }), route({ id: 'c', website_id: 'site-c', path: '/foreign-event' }), route({ id: 'ordinary', is_seo_page: false, path: '/ordinary' })] });
+    const model = createLocalSeoViewModel({ userId: 'u1', activeWebsiteId: 'site-a', websites: [website(), website('site-b', 'Second'), { ...website('site-c', 'Foreign'), user_id: 'u2' }], pages: [route(), route({ website_id: 'site-b', path: '/foreign' }), route({ website_id: 'site-c', path: '/foreign-event' })] });
     expect(model.website?.id).toBe('site-a'); expect(model.pages).toHaveLength(1); expect(model.pages[0].path).not.toContain('foreign');
   });
 
@@ -31,8 +32,12 @@ describe('Local SEO presentation', () => {
   it('renders escaped combinations and semantic progress for preview', () => {
     const previews = createLocalSeoPreviews(['<b>Driveway</b>'], ['Port <img>']);
     const html = renderLocalSeoWizard({ state: state({ step: 3, services: ['<b>Driveway</b>'], cities: ['Port <img>'] }), website: website(), nextAction: step => `window.nextSeoStep(${step})`, generateAction: 'window.finalizeSeoGen()' });
-    expect(previews).toEqual(['/bdrivewayb-port-img']); expect(html).toContain('aria-valuenow="3"'); expect(html).toContain('/bdrivewayb-port-img'); expect(html).not.toContain('<b>Driveway</b>'); expect(html).toContain('draft pages to create');
+    expect(previews).toEqual(['/b-driveway-b-port-img']); expect(html).toContain('aria-valuenow="3"'); expect(html).toContain('/b-driveway-b-port-img'); expect(html).not.toContain('<b>Driveway</b>'); expect(html).toContain('draft pages to create');
   });
+
+  it.each([
+    ['Driveway Cleaning', 'Port Moody', '/driveway-cleaning-port-moody'], ['Roof & Gutter', 'Port Moody', '/roof-gutter-port-moody'], ['House   Washing', 'New Westminster', '/house-washing-new-westminster'], ['  Roof Cleaning  ', '  Burnaby', '/roof-cleaning-burnaby'], ['ROOF CLEANING', 'CoQuItLaM', '/roof-cleaning-coquitlam'], ['Roof!!!Gutter', 'North Vancouver', '/roof-gutter-north-vancouver'], ['--Roof--', '--City--', '/roof-city'], ['Café Wash', 'Montréal', '/caf-wash-montr-al']
+  ])('uses SQL-parity route normalization for %s / %s', (service, city, path) => expect(createLocalSeoPreviews([service], [city])).toEqual([path]));
 
   it('preserves a typed Step-2 location draft when navigating back before preview', () => {
     const stepTwo = state({ step: 2, services: ['Driveway Cleaning'], cities: [] });

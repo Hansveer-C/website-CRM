@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { isLocalSeoGenerationResponse, isValidLocalSeoIdempotencyKey, validateLocalSeoGenerationInput, type LocalSeoGenerationResponse } from '../../src/local_seo_generation_contract.js';
+import { isLocalSeoGenerationResponse, isLocalSeoInventoryResponse, isValidLocalSeoIdempotencyKey, validateLocalSeoGenerationInput, type LocalSeoGenerationResponse, type LocalSeoInventoryResponse } from '../../src/local_seo_generation_contract.js';
 
 type Client = SupabaseClient & { auth: SupabaseClient['auth'] };
 export interface LocalSeoBatchHandlerDependencies { env?: Record<string, string | undefined>; createSupabase?: (url: string, key: string, token: string) => Client; }
@@ -39,5 +39,31 @@ export function createLocalSeoBatchHandler(deps: LocalSeoBatchHandlerDependencie
       if (data.success && data.data.website_id !== validated.data.website_id) return fail(503, 'UPSTREAM_UNAVAILABLE', 'Local SEO generation returned an invalid response.');
       return reply(data, 200);
     } catch { return fail(503, 'UPSTREAM_UNAVAILABLE', 'Local SEO generation is temporarily unavailable.'); }
+  };
+}
+
+export function createLocalSeoInventoryHandler(deps: LocalSeoBatchHandlerDependencies = {}) {
+  return async (request: Request): Promise<Response> => {
+    const failInventory = (status: number, code: Extract<LocalSeoInventoryResponse, { success: false }>['error']['code'], message: string, extra: Record<string, string> = {}) => {
+      const body: LocalSeoInventoryResponse = { success: false, error: { code, message } };
+      return new Response(JSON.stringify(body), { status, headers: { ...headers, ...extra } });
+    };
+    if (request.method !== 'GET') return failInventory(405, 'METHOD_NOT_ALLOWED', 'Use GET for this endpoint.', { Allow: 'GET' });
+    const websiteId = new URL(request.url).searchParams.get('website_id')?.trim() || '';
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(websiteId)) return failInventory(400, 'INVALID_INPUT', 'Select a valid website.');
+    const token = tokenFrom(request); if (!token) return failInventory(401, 'UNAUTHORIZED', 'Sign in to view Local SEO drafts.');
+    const env = deps.env ?? process.env;
+    const url = env.SUPABASE_URL?.trim() || env.VITE_SUPABASE_URL?.trim() || '';
+    const key = env.SUPABASE_PUBLISHABLE_KEY?.trim() || env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() || env.SUPABASE_ANON_KEY?.trim() || env.VITE_SUPABASE_ANON_KEY?.trim() || '';
+    if (!/^https:\/\//i.test(url) || !key) return failInventory(503, 'UPSTREAM_UNAVAILABLE', 'Local SEO inventory is temporarily unavailable.');
+    try {
+      const supabase = (deps.createSupabase ?? defaultClient)(url, key, token);
+      const auth = await supabase.auth.getUser(token);
+      if (auth.error || !auth.data.user?.id) return failInventory(401, 'UNAUTHORIZED', 'Your session is invalid or expired.');
+      const { data, error } = await supabase.rpc('get_local_seo_inventory', { p_website_id: websiteId });
+      if (error) return failInventory(error.code === 'PT404' ? 404 : error.code === 'PT401' ? 401 : 503, error.code === 'PT404' ? 'NOT_FOUND' : error.code === 'PT401' ? 'UNAUTHORIZED' : 'UPSTREAM_UNAVAILABLE', error.code === 'PT404' ? 'Website not found.' : 'Local SEO inventory is temporarily unavailable.');
+      if (!isLocalSeoInventoryResponse(data) || !data.success || data.data.website_id !== websiteId) return failInventory(503, 'UPSTREAM_UNAVAILABLE', 'Local SEO inventory returned an invalid response.');
+      return new Response(JSON.stringify(data), { status: 200, headers });
+    } catch { return failInventory(503, 'UPSTREAM_UNAVAILABLE', 'Local SEO inventory is temporarily unavailable.'); }
   };
 }

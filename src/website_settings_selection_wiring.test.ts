@@ -59,7 +59,7 @@ describe('Website Settings explicit-selection wiring', () => {
     expect(source).not.toMatch(/mockWebsites\.find\([^\n]+\)\s*\|\|\s*mockWebsites\[0\]/);
     expect(source).not.toContain('const websiteId = mockWebsites[0].id');
     expect(source).not.toContain('const website = mockWebsites[0]; // Assuming user has one website');
-    expect(localSeoSource).toContain('route.website_id === website.id && route.is_seo_page');
+    expect(localSeoSource).toContain('page.website_id === website.id');
     expect(source).toContain('site.id === websiteId && site.user_id === userId');
   });
 });
