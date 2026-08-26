@@ -8,7 +8,7 @@ import type { BuilderInspectorFieldDefinition, BuilderInspectorTab } from './bui
 import { createBuilderInspectorPatch, getBuilderInspectorField, getBuilderInspectorFieldValue, getBuilderInspectorSchema } from './builder_inspector_schema';
 import { resolveWebsiteRequest } from './website_resolver';
 import { normalizePhone, normalizeEmail, normalizeName } from './utils/validators';
-import { isValidLocalSeoIdempotencyKey, validateLocalSeoGenerationInput } from './local_seo_generation_contract';
+import { isLocalSeoGenerationResponse, isValidLocalSeoIdempotencyKey, validateLocalSeoGenerationInput } from './local_seo_generation_contract';
 import { LocalStorageBuilderPublicationRepository } from './builder_publication_repository_local';
 import { SupabaseBuilderPublicationRepository } from './builder_publication_repository_supabase';
 import { handleBuilderPublicationRuntimeBrowserRequest, isBuilderPublicationBrowserRequest } from './builder_publication_browser';
@@ -1949,7 +1949,10 @@ const browserFixtureFetch: typeof window.fetch = async (input: RequestInfo | URL
             const prior = browserFixtureLocalSeoReceipts.get(receiptKey);
             if (prior) {
                 if (prior.payload !== payload) return builderSectionsJsonResponse({ success: false, error: 'Idempotency conflict.' }, 409);
-                return builderSectionsJsonResponse(prior.response, 200);
+                return builderSectionsJsonResponse({
+                    ...prior.response,
+                    data: { ...(prior.response.data as Record<string, unknown>), replayed: true }
+                }, 200);
             }
             const timestamp = new Date().toISOString();
             
@@ -13361,7 +13364,13 @@ function resetSeoWizardForWebsite(websiteId: string, mode: 'list' | 'wizard' = '
     const res = await response.json();
     const current = createLocalSeoViewModel({ userId: getActingUserId(), activeWebsiteId: activeDashboardWebsiteId, websites: mockWebsites, routes: mockWebsiteRoutes }).website;
     if (!current || current.id !== operationWebsiteId) return;
-    if (!response.ok || !res.success) { seoWizardState.isSubmitting = false; seoWizardState.error = res.error?.message || res.error || 'Pages could not be generated.'; (window as any).renderSeoPages(); return; }
+    if (!isLocalSeoGenerationResponse(res)) throw new Error('INVALID_RESPONSE');
+    if (!response.ok || !res.success) {
+      seoWizardState.isSubmitting = false;
+      seoWizardState.error = !res.success ? res.error.message : 'Pages could not be generated.';
+      (window as any).renderSeoPages();
+      return;
+    }
     seoGenerationAttemptKey = null;
     seoGenerationAttemptPayload = null;
     (window as any).showToast(`${res.data.created_count} Local SEO drafts created. Publish your website to make them live.`, 'success');
