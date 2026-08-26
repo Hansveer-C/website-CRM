@@ -7,6 +7,7 @@ import pg from 'pg';
 const url = process.env.LOCAL_SEO_BATCH_TEST_DATABASE_URL;
 const suite = url ? describe : describe.skip;
 const migration = readFileSync(resolve(__dirname, '../migrations/20260825000000_create_local_seo_draft_batch.sql'), 'utf8');
+const inventoryMigration = readFileSync(resolve(__dirname, '../migrations/20260826000000_add_local_seo_inventory_provenance.sql'), 'utf8');
 
 suite('Local SEO draft batch RPC', () => {
   let pool: pg.Pool; const owner = '11111111-1111-4111-8111-111111111111'; const other = '22222222-2222-4222-8222-222222222222';
@@ -15,6 +16,7 @@ suite('Local SEO draft batch RPC', () => {
     await pool.query('drop schema if exists private cascade; drop schema if exists public cascade; drop schema if exists auth cascade; create schema public; create schema auth; create schema private;');
     await pool.query(`do $$begin create role anon; exception when duplicate_object then null; end$$; do $$begin create role authenticated; exception when duplicate_object then null; end$$; create extension if not exists pgcrypto; create table public.users(id text primary key); create table public.websites(id uuid primary key, user_id text not null, name text, subdomain text); create table public.funnels(id text primary key,user_id text not null,website_id uuid,name text,status text,service_type text,city text,created_at timestamptz,updated_at timestamptz); create table public.pages(id text primary key,user_id text,funnel_id text,status text); create table public.website_routes(website_id uuid,path text,funnel_id text); create table public.builder_route_drafts(website_id uuid,path text,funnel_id text,action text); create or replace function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$; create or replace function public.create_builder_page(text,text,text,text) returns jsonb language plpgsql as $$begin insert into public.pages values($4,(select auth.uid())::text,$3,'draft'); return jsonb_build_object('id',$4); end$$; create or replace function public.save_page_sections_document(text,jsonb,bigint,bigint) returns jsonb language sql as $$select '{}'::jsonb$$; create or replace function public.set_builder_route_draft(uuid,text,text,uuid,text,text) returns jsonb language plpgsql as $$begin insert into public.builder_route_drafts values($1,$3,$2,'upsert'); return '{}'::jsonb; end$$; insert into public.users values('${owner}'),('${other}');`);
     await pool.query(migration);
+    await pool.query(inventoryMigration);
   });
   const setUser = (id: string) => pool.query(`set "request.jwt.claim.sub" = '${id}'`);
   const website = async (user = owner) => { const id = randomUUID(); await pool.query('insert into public.websites values($1,$2,$3,$4)', [id, user, 'Site', `site-${id}`]); return id; };

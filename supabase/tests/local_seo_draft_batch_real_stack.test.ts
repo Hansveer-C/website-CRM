@@ -13,7 +13,8 @@ const migrations = [
   '20260817050100_duplicate_builder_page.sql',
   '20260817050500_create_builder_route_drafts.sql',
   '20260822000000_establish_funnel_website_ownership.sql',
-  '20260825000000_create_local_seo_draft_batch.sql'
+  '20260825000000_create_local_seo_draft_batch.sql',
+  '20260826000000_add_local_seo_inventory_provenance.sql'
 ].map(sql);
 const owner = '11111111-1111-4111-8111-111111111111';
 const other = '22222222-2222-4222-8222-222222222222';
@@ -38,8 +39,10 @@ suite('Local SEO real lifecycle migration-stack integration', () => {
       create table public.builder_publication_targets(website_id uuid not null,page_id text not null,published_revision_id uuid not null,primary key(website_id,page_id));
       create function public.create_initial_website_graph(text,text,text,text[],text) returns jsonb language sql as $$select '{}'::jsonb$$;
       insert into public.users values ('${owner}'),('${other}');`);
-    for (const migration of migrations.slice(0, -1)) await pool.query(migration);
+    for (const migration of migrations.slice(0, -2)) await pool.query(migration);
     grantsBefore = (await pool.query(`select table_schema,table_name,grantee,privilege_type from information_schema.role_table_grants where table_schema in ('public','private') and table_name in ('funnels','pages','page_sections','builder_route_drafts') order by 1,2,3,4`)).rows;
+    await pool.query(migrations.at(-2)!);
+    expect((await pool.query(`select to_regclass('private.local_seo_pages') provenance, to_regprocedure('public.get_local_seo_inventory(uuid)') inventory`)).rows[0]).toEqual({ provenance: null, inventory: null });
     await pool.query(migrations.at(-1)!);
   });
   const site = async (user = owner) => { const id = randomUUID(); await pool.query('insert into public.websites(id,user_id,name) values($1,$2,$3)', [id, user, 'Site']); return id; };
