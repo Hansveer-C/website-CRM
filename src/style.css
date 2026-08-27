@@ -7,6 +7,7 @@
 @import './ui/quotes/quotes.css';
 @import './ui/invoices/invoices.css';
 @import './ui/reports/reports.css';
+@import './ui/lead-capture/lead_capture.css';
 @import './ui/website-management/website_management.css';
 @import './ui/website-management/website_structure_modal.css';
 

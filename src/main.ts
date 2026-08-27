@@ -61,6 +61,7 @@ import {
 } from './ui/contacts';
 import { renderOpportunitiesContent } from './ui/opportunities';
 import { renderNewQuoteContent, renderQuotePreviewContent, renderQuotesContent } from './ui/quotes';
+import { renderLeadCaptureContent } from './ui/lead-capture';
 import { renderInvoicesContent, type InvoiceFilter } from './ui/invoices';
 import { createReportsViewModel, renderReportsContent, type ReportsAvailability } from './ui/reports';
 import {
@@ -10054,46 +10055,7 @@ function renderLeadCapture() {
     title: 'Lead Capture Form',
     subtitle: 'Complete the form below to register a new lead and create a sales opportunity.',
     contentVariant: 'standard',
-    contentHtml: `
-      <div class="lead-form-container">
-        <form id="lead-form">
-          <div class="form-group">
-            <label for="lead_name">Full Name</label>
-            <input type="text" id="lead_name" placeholder="John Doe" required>
-          </div>
-          <div class="form-group">
-            <label for="lead_phone">Phone Number</label>
-            <input type="tel" id="lead_phone" placeholder="555-012-3456" required>
-          </div>
-          <div class="form-group">
-            <label for="lead_email">Email Address</label>
-            <input type="email" id="lead_email" placeholder="john@example.com" required>
-          </div>
-          <div class="form-group">
-            <label for="lead_address">Service Address</label>
-            <input type="text" id="lead_address" placeholder="123 Main St, Anytown" required>
-          </div>
-          <div class="form-group">
-            <label for="lead_service_type">Service Type</label>
-            <select id="lead_service_type" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; background: white;">
-              <option value="">Select a service...</option>
-              <option value="Residential Pressure Washing">Residential Pressure Washing</option>
-              <option value="Commercial Exterior Cleaning">Commercial Exterior Cleaning</option>
-              <option value="Roof & Gutter Cleaning">Roof & Gutter Cleaning</option>
-              <option value="Driveway & Walkway Restore">Driveway & Walkway Restore</option>
-              <option value="Deck & Patio Wash">Deck & Patio Wash</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="lead_message">Message / Details</label>
-            <textarea id="lead_message" placeholder="Description of what needs cleaning..." required></textarea>
-          </div>
-          <div class="form-footer">
-            <button type="submit" class="btn-primary">Submit Lead Info</button>
-          </div>
-        </form>
-      </div>
-    `
+    contentHtml: renderLeadCaptureContent()
   });
 
   document.getElementById('lead-form')?.addEventListener('submit', handleLeadCaptureSubmission);
@@ -10112,6 +10074,12 @@ async function handleLeadCaptureSubmission(e: Event) {
     alert('Please provide at least a name.');
     return;
   }
+
+  const submitButton = document.getElementById('lead-submit') as HTMLButtonElement | null;
+  const submitStatus = document.getElementById('lead-submit-status');
+  if (submitButton?.disabled) return;
+  if (submitButton) submitButton.disabled = true;
+  if (submitStatus) submitStatus.textContent = 'Creating lead…';
 
   try {
     (window as any).showToast('Creating lead...', 2000);
@@ -10132,6 +10100,8 @@ async function handleLeadCaptureSubmission(e: Event) {
     window.navigateTo('clients');
 
   } catch (error: any) {
+    if (submitButton) submitButton.disabled = false;
+    if (submitStatus) submitStatus.textContent = 'Lead creation failed. You can try again.';
     console.error("Internal Lead Submission Error:", error);
     alert(`Failed to create lead: ${error.message}`);
   }
