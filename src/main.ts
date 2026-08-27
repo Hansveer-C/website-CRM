@@ -2066,6 +2066,16 @@ type BuilderViewport = 'desktop' | 'tablet' | 'mobile';
 let builderViewport: BuilderViewport = 'mobile'; // WB.3.4 — mobile-first default
 let builderHistoryController: BuilderHistoryController | null = null;
 let builderSectionClipboard: BuilderSectionClipboard | null = null;
+type BuilderLifecycleFocusRequest = {
+  pageId: string;
+  sectionId: string | null;
+  target: 'section' | 'add-control' | 'add-option';
+  generation: number;
+};
+let builderLifecycleFocusGeneration = 0;
+let builderLifecycleFocusRequest: BuilderLifecycleFocusRequest | null = null;
+let builderLifecycleAnnouncement = '';
+let builderLifecycleAnnouncementPageId = '';
 let builderPageSettingsController: BuilderPageSettingsController | null = null;
 let builderNewPageController: BuilderNewPageController | null = null;
 let builderNewPageControllerIdentity = '';
@@ -2210,6 +2220,7 @@ function clearProtectedRuntimeData(): void {
   builderPageId = '';
   builderHistoryController = null;
   builderSectionClipboard = null;
+  clearBuilderLifecycleUiState();
   builderPageSettingsController?.cancelPending();
   builderPageSettingsController = null;
   builderNewPageController = null;
@@ -2339,6 +2350,7 @@ async function ensureApplicationAuth(): Promise<ApplicationAuthState> {
   await builderSaveQueue.whenIdle();
   builderHistoryController = null;
   builderSectionClipboard = null;
+  clearBuilderLifecycleUiState();
   activeBuilderWebsiteId = null;
   activeDashboardWebsiteId = null;
   activeSettingsWebsiteId = null;
@@ -2907,16 +2919,93 @@ function applyLiveBuilderMutation(
   return true;
 }
 
+function clearBuilderLifecycleUiState(): void {
+  builderLifecycleFocusGeneration += 1;
+  builderLifecycleFocusRequest = null;
+  builderLifecycleAnnouncement = '';
+  builderLifecycleAnnouncementPageId = '';
+}
+
+function requestBuilderLifecycleFocus(
+  target: BuilderLifecycleFocusRequest['target'],
+  sectionId: string | null = null
+): void {
+  builderLifecycleFocusGeneration += 1;
+  builderLifecycleFocusRequest = {
+    pageId: builderPageId,
+    sectionId,
+    target,
+    generation: builderLifecycleFocusGeneration
+  };
+}
+
+function announceBuilderLifecycle(message: string): void {
+  builderLifecycleAnnouncement = message;
+  builderLifecycleAnnouncementPageId = builderPageId;
+  const liveRegion = document.getElementById('pb-lifecycle-live');
+  if (!liveRegion) return;
+  const pageId = builderPageId;
+  liveRegion.textContent = '';
+  requestAnimationFrame(() => {
+    if (builderPageId !== pageId || builderLifecycleAnnouncementPageId !== pageId) return;
+    const current = document.getElementById('pb-lifecycle-live');
+    if (current) current.textContent = message;
+  });
+}
+
+function scheduleBuilderLifecycleFocusRestore(): void {
+  const request = builderLifecycleFocusRequest;
+  if (!request) return;
+  requestAnimationFrame(() => {
+    if (
+      builderLifecycleFocusRequest !== request
+      || request.pageId !== builderPageId
+      || request.generation !== builderLifecycleFocusGeneration
+      || currentView !== 'builder'
+    ) return;
+
+    let target: HTMLElement | null = null;
+    if (request.target === 'section' && request.sectionId) {
+      target = Array.from(document.querySelectorAll<HTMLElement>('.pb-layer-row[data-builder-section-id]'))
+        .find(row => row.dataset.builderSectionId === request.sectionId) ?? null;
+    } else if (request.target === 'add-option') {
+      target = document.querySelector<HTMLElement>('.pb-component-item');
+    }
+    target ??= document.getElementById('pb-layers-add-section');
+    target?.focus();
+    if (builderLifecycleFocusRequest === request) builderLifecycleFocusRequest = null;
+  });
+}
+
+function prepareBuilderLifecycleUi(
+  result: BuilderSectionLifecycleResult,
+  announcement: string
+): void {
+  if (!result.changed) return;
+  builderLeftPanelTab = 'layers';
+  requestBuilderLifecycleFocus(
+    result.selectedSectionId ? 'section' : 'add-control',
+    result.selectedSectionId
+  );
+  builderLifecycleAnnouncement = announcement;
+  builderLifecycleAnnouncementPageId = builderPageId;
+}
+
 function applyLiveBuilderSectionLifecycleResult(
   result: BuilderSectionLifecycleResult,
-  fieldId: string
+  fieldId: string,
+  announcement: string
 ): boolean {
+  prepareBuilderLifecycleUi(result, announcement);
   const changed = applyBuilderSectionLifecycleResult(
     result,
     fieldId,
     applyLiveBuilderMutation
   );
-  if (!changed) return false;
+  if (!changed) {
+    if (result.changed) clearBuilderLifecycleUiState();
+    return false;
+  }
 
   persistBuilderContext({
     websiteId: activeBuilderWebsiteId ?? undefined,
@@ -2936,6 +3025,13 @@ function applyBuilderHistoryTransition(command: 'undo' | 'redo'): boolean {
   syncBuilderDocumentToPageSections(history.document);
   builderSelectedSectionId = history.selectedSectionId;
   builderViewport = history.viewport;
+  builderLeftPanelTab = 'layers';
+  requestBuilderLifecycleFocus(
+    history.selectedSectionId ? 'section' : 'add-control',
+    history.selectedSectionId
+  );
+  builderLifecycleAnnouncement = command === 'undo' ? 'Undo complete.' : 'Redo complete.';
+  builderLifecycleAnnouncementPageId = builderPageId;
   (window as any).triggerAutoSave();
   renderBuilder();
   return true;
@@ -3857,6 +3953,7 @@ function applyBuilderContext(context: BuilderContext | null): boolean {
   if (pageChanged) {
     builderHistoryController = null;
     builderSectionClipboard = null;
+    clearBuilderLifecycleUiState();
   }
   builderPageId = context.pageId;
   builderReturnTo = context.returnTo || builderReturnTo;
@@ -3870,7 +3967,7 @@ function applyBuilderContext(context: BuilderContext | null): boolean {
   } else if (pageChanged) {
     builderSelectedSectionId = null;
   }
-  builderInsertOrder = null;
+  if (pageChanged) builderInsertOrder = null;
 
   return mockPages.some((page: any) => page.id === context.pageId);
 }
@@ -4051,6 +4148,12 @@ function renderBuilderInspectorPanel(sections: PageSection[]): string {
       }
     }
   }
+  renderBuilder();
+};
+
+(window as any).openBuilderAddPanel = () => {
+  builderLeftPanelTab = 'add';
+  requestBuilderLifecycleFocus('add-option');
   renderBuilder();
 };
 
@@ -4262,26 +4365,27 @@ function renderBuilderLayersPanel(sections: PageSection[]): string {
     })
     .map(item => item.section);
 
-  if (orderedSections.length === 0) {
-    return `
-      <div class="pb-layers-empty">
-        <h4>No sections yet</h4>
-        <p>Use the Add tab to add the first section.</p>
-        <button type="button" onclick="window.setBuilderLeftPanelTab('add')">Go to Add</button>
-      </div>
-    `;
-  }
-
   return `
     <div class="pb-layers-panel">
       <div class="pb-layers-heading">
-        <div>
+        <div class="pb-layers-title-row">
           <span>Page sections</span>
           <strong>${orderedSections.length}</strong>
         </div>
+        <div class="pb-layers-primary-actions" role="group" aria-label="Section actions">
+          <button id="pb-layers-add-section" type="button" onclick="window.openBuilderAddPanel()">Add section</button>
+          <button id="pb-layers-paste-section" type="button" onclick="window.pasteBuilderSection()" ${builderSectionClipboard ? '' : 'disabled'}>Paste section</button>
+        </div>
       </div>
-      <div class="pb-layer-list">
-        ${orderedSections.map((section, index) => {
+      ${orderedSections.length === 0 ? `
+        <div class="pb-layers-empty">
+          <h4>No sections yet</h4>
+          <p>Add a section directly or use Guided Setup.</p>
+          <button type="button" onclick="window.openBuilderAddPanel()">Add section</button>
+        </div>
+      ` : `
+        <div class="pb-layer-list">
+          ${orderedSections.map((section, index) => {
           const definition = getBuilderSectionDefinition(section.type);
           const component = definition
             ? undefined
@@ -4297,7 +4401,7 @@ function renderBuilderLayersPanel(sections: PageSection[]): string {
           const isHidden = section.styles?.visible === false;
 
           return `
-            <article class="pb-layer-row ${isSelected ? 'active' : ''} ${isHidden ? 'hidden' : ''}">
+            <article class="pb-layer-row ${isSelected ? 'active' : ''} ${isHidden ? 'hidden' : ''}" data-builder-section-id="${escapeBuilderInspectorHtml(section.id)}" tabindex="-1">
               <button
                 type="button"
                 class="pb-layer-main"
@@ -4313,17 +4417,20 @@ function renderBuilderLayersPanel(sections: PageSection[]): string {
                   <span class="pb-layer-visibility">${isHidden ? 'Hidden' : 'Visible'}</span>
                 </span>
               </button>
-              <div class="pb-layer-actions" aria-label="${safeAccessibleSectionLabel} actions">
-                <button type="button" aria-label="Move ${safeLabel} up" title="Move up" onclick='event.stopPropagation(); window.moveSection(${sectionArg}, -1)' ${index === 0 ? 'disabled' : ''}>↑</button>
-                <button type="button" aria-label="Move ${safeLabel} down" title="Move down" onclick='event.stopPropagation(); window.moveSection(${sectionArg}, 1)' ${index === orderedSections.length - 1 ? 'disabled' : ''}>↓</button>
-                <button type="button" aria-label="${isHidden ? 'Show' : 'Hide'} ${safeLabel}" title="${isHidden ? 'Show section' : 'Hide section'}" onclick='event.stopPropagation(); window.toggleSectionVisibility(${sectionArg})'>${isHidden ? 'Show' : 'Hide'}</button>
-                <button type="button" aria-label="Duplicate ${safeLabel}" title="Duplicate section" onclick='event.stopPropagation(); window.duplicateBuilderSection(${sectionArg})'>Duplicate</button>
-                <button type="button" class="pb-layer-delete" aria-label="Delete ${safeLabel}" title="Delete section" onclick='event.stopPropagation(); window.removeSection(${sectionArg})'>Delete</button>
+              <div class="pb-layer-actions" role="group" aria-label="${safeAccessibleSectionLabel} actions">
+                <button type="button" aria-label="Move ${safeAccessibleSectionLabel} up" title="Move up" onclick='event.stopPropagation(); window.moveSection(${sectionArg}, -1)' ${index === 0 ? 'disabled' : ''}>↑</button>
+                <button type="button" aria-label="Move ${safeAccessibleSectionLabel} down" title="Move down" onclick='event.stopPropagation(); window.moveSection(${sectionArg}, 1)' ${index === orderedSections.length - 1 ? 'disabled' : ''}>↓</button>
+                <button type="button" aria-label="${isHidden ? 'Show' : 'Hide'} ${safeAccessibleSectionLabel}" title="${isHidden ? 'Show section' : 'Hide section'}" onclick='event.stopPropagation(); window.toggleSectionVisibility(${sectionArg})'>${isHidden ? 'Show' : 'Hide'}</button>
+                <button type="button" aria-label="Duplicate ${safeAccessibleSectionLabel}" title="Duplicate section" onclick='event.stopPropagation(); window.duplicateBuilderSection(${sectionArg})'>Duplicate</button>
+                ${definition ? `<button type="button" aria-label="Reset ${safeAccessibleSectionLabel}" title="Reset section" onclick='event.stopPropagation(); window.resetBuilderSection(${sectionArg})'>Reset</button>` : ''}
+                <button type="button" aria-label="Copy ${safeAccessibleSectionLabel}" title="Copy section" onclick='event.stopPropagation(); window.copyBuilderSection(${sectionArg})'>Copy</button>
+                <button type="button" class="pb-layer-delete" aria-label="Delete ${safeAccessibleSectionLabel}" title="Delete section" onclick='event.stopPropagation(); window.removeSection(${sectionArg})'>Delete</button>
               </div>
             </article>
           `;
         }).join('')}
-      </div>
+        </div>
+      `}
     </div>
   `;
 }
@@ -6536,10 +6643,10 @@ function _renderBuilder() {
         { id: 'comp-form', icon: '📋', label: 'Form' },
         { id: 'comp-faq', icon: '❓', label: 'FAQ' }
       ].map(item => `
-              <div class="pb-component-item" onclick="window.addStructuredSection('${item.id}')" style="display: flex; align-items: center; gap: 15px; padding: 15px; background: #1a1a1a; border-radius: 12px; border: 1px solid #222; cursor: pointer; margin-bottom: 12px; transition: all 200ms ease;">
-                <div style="font-size: 1.5rem;">${item.icon}</div>
-                <div style="font-weight: 700; font-size: 0.9rem; color: #eee;">${item.label}</div>
-              </div>
+              <button type="button" class="pb-component-item" aria-label="Add ${item.label} section" onclick="window.addStructuredSection('${item.id}')">
+                <span class="pb-component-item-icon" aria-hidden="true">${item.icon}</span>
+                <span class="pb-component-item-label">${item.label}</span>
+              </button>
             `).join('')}
           </div>
           ` : builderLeftPanelTab === 'pages'
@@ -6586,6 +6693,7 @@ function _renderBuilder() {
                 <span>Guided Website Setup</span>
                 <h3>Build a polished pressure-washing page in a few guided steps.</h3>
                 <p>Choose your services, confirmed trust signals, visual style, and uploaded media. Review the exact section plan before anything changes.</p>
+                <button type="button" class="pb-empty-add-section" onclick="window.openBuilderAddPanel()">Add section</button>
                 <button type="button" class="pb-guided-setup-empty-button" onclick="window.openBuilderSetup('.pb-guided-setup-empty-button')">Start Guided Setup</button>
                 <small>Applying setup does not publish the page.</small>
               </div>
@@ -6613,12 +6721,14 @@ function _renderBuilder() {
             ${['Add Initial', ...sections].map((item, insertionIndex) => {
         const isInitial = item === 'Add Initial';
         const section = isInitial ? null : (item as any);
+        const definition = section ? getBuilderSectionDefinition(section.type) : undefined;
+        const insertionLabel = isInitial
+          ? (sections.length === 0 ? 'Add section to empty page' : `Add section before ${getBuilderSectionDefinition(sections[0].type)?.label || sections[0].type}`)
+          : `Add section after ${definition?.label || section.type}`;
 
         return `
                 ${builderMode === 'edit' ? `
-                <div class="pb-add-between" onclick="window.addStructuredSectionAt('${insertionIndex}')" style="height: 12px; opacity: 0; transition: opacity 200ms; cursor: cell;">
-                   <div style="width: 100%; height: 2px; background: #2563EB;"></div>
-                </div>
+                <button type="button" class="pb-add-between" aria-label="${escapeBuilderInspectorHtml(insertionLabel)}" onclick="window.addStructuredSectionAt('${insertionIndex}')"><span aria-hidden="true">＋</span> Add section</button>
                 ` : ''}
                 ${!isInitial ? `
                   <div id="sec-preview-${escapeBuilderInspectorHtml(section.id)}" class="pb-section-preview ${builderSelectedSectionId === section.id ? 'active' : ''} ${section.styles?.visible === false ? 'pb-section--hidden' : ''}"
@@ -6673,19 +6783,19 @@ function _renderBuilder() {
                         </div>
                       </div>
 
-                      <div class="pb-section-controls" style="position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); display: none; gap: 4px; background: #111; border: 1px solid #333; padding: 4px; border-radius: 10px; z-index: 50; box-shadow: 0 10px 30px rgba(0,0,0,0.5); align-items: center;">
+                      <div class="pb-section-controls" style="position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); gap: 4px; background: #111; border: 1px solid #333; padding: 4px; border-radius: 10px; z-index: 50; box-shadow: 0 10px 30px rgba(0,0,0,0.5); align-items: center;">
                         <span style="font-size: 0.6rem; color: #555; text-transform: uppercase; font-weight: 800; letter-spacing: 0.1em; margin: 0 10px;">${section.type}</span>
                         <div style="width: 1px; height: 16px; background: #222;"></div>
-                        <button title="Switch Layout" onclick="event.stopPropagation(); window.switchSectionVariant('${section.id}')" style="background: transparent; border: none; color: #2563EB; cursor: pointer; padding: 8px 16px; font-size: 0.75rem; font-weight: 800; display: flex; align-items: center; gap: 6px;">
+                        <button type="button" aria-label="Switch ${escapeBuilderInspectorHtml(section.type)} section layout" title="Switch Layout" onclick="event.stopPropagation(); window.switchSectionVariant('${section.id}')" style="background: transparent; border: none; color: #2563EB; cursor: pointer; padding: 8px 16px; font-size: 0.75rem; font-weight: 800; display: flex; align-items: center; gap: 6px;">
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                           Switch Layout
                         </button>
                         <div style="width: 1px; height: 16px; background: #222;"></div>
-                        <button title="Move Up" onclick="event.stopPropagation(); window.moveSection('${section.id}', -1)" style="background: transparent; border: none; color: #eee; cursor: pointer; padding: 8px 12px; font-size: 0.9rem;">↑</button>
-                        <button title="Move Down" onclick="event.stopPropagation(); window.moveSection('${section.id}', 1)" style="background: transparent; border: none; color: #eee; cursor: pointer; padding: 8px 12px; font-size: 0.9rem;">↓</button>
-                        <button title="Toggle Visibility" onclick="event.stopPropagation(); window.toggleSectionVisibility('${section.id}')" style="background: transparent; border: none; color: ${section.styles?.visible === false ? '#10b981' : '#ff4d4d'}; cursor: pointer; padding: 8px 12px; font-size: 0.75rem; font-weight: 800;">${section.styles?.visible === false ? 'Show' : 'Hide'}</button>
+                        <button type="button" aria-label="Move ${escapeBuilderInspectorHtml(section.type)} section up" title="Move Up" onclick="event.stopPropagation(); window.moveSection('${section.id}', -1)" ${insertionIndex === 1 ? 'disabled' : ''} style="background: transparent; border: none; color: #eee; cursor: pointer; padding: 8px 12px; font-size: 0.9rem;">↑</button>
+                        <button type="button" aria-label="Move ${escapeBuilderInspectorHtml(section.type)} section down" title="Move Down" onclick="event.stopPropagation(); window.moveSection('${section.id}', 1)" ${insertionIndex === sections.length ? 'disabled' : ''} style="background: transparent; border: none; color: #eee; cursor: pointer; padding: 8px 12px; font-size: 0.9rem;">↓</button>
+                        <button type="button" aria-label="${section.styles?.visible === false ? 'Show' : 'Hide'} ${escapeBuilderInspectorHtml(section.type)} section" title="${section.styles?.visible === false ? 'Show section' : 'Hide section'}" onclick="event.stopPropagation(); window.toggleSectionVisibility('${section.id}')" style="background: transparent; border: none; color: ${section.styles?.visible === false ? '#10b981' : '#ff4d4d'}; cursor: pointer; padding: 8px 12px; font-size: 0.75rem; font-weight: 800;">${section.styles?.visible === false ? 'Show' : 'Hide'}</button>
                         <div style="width: 1px; height: 16px; background: #222;"></div>
-                        <button title="Delete" onclick="event.stopPropagation(); window.removeSection('${section.id}')" style="background: transparent; border: none; color: #666; cursor: pointer; padding: 8px 12px; font-size: 0.8rem;">🗑</button>
+                        <button type="button" aria-label="Delete ${escapeBuilderInspectorHtml(section.type)} section" title="Delete section" onclick="event.stopPropagation(); window.removeSection('${section.id}')" style="background: transparent; border: none; color: #666; cursor: pointer; padding: 8px 12px; font-size: 0.8rem;">🗑</button>
                       </div>
                   </div>
                 ` : ''}
@@ -6707,8 +6817,10 @@ function _renderBuilder() {
       ${renderBuilderPageRouteEditorDialog()}
       ${renderBuilderRoutePublishModal()}
       ${renderBuilderNavigationDialogs()}
+      <div id="pb-lifecycle-live" class="sr-only" role="status" aria-live="polite" aria-atomic="true">${builderLifecycleAnnouncementPageId === builderPageId ? escapeBuilderInspectorHtml(builderLifecycleAnnouncement) : ''}</div>
     </main>
   `;
+  scheduleBuilderLifecycleFocusRestore();
 }
 
 
@@ -7060,7 +7172,10 @@ function renderSectionPreviewContent(section: any) {
 };
 
 (window as any).openBuilderFromFunnel = (pageId: string, funnelId: string) => {
-  if (builderPageId !== pageId) builderSectionClipboard = null;
+  if (builderPageId !== pageId) {
+    builderSectionClipboard = null;
+    clearBuilderLifecycleUiState();
+  }
   builderPageId = pageId;
   builderReturnTo = 'funnels';
   builderReturnFunnelId = funnelId;
@@ -7118,6 +7233,7 @@ function renderSectionPreviewContent(section: any) {
   builderSetupController = null;
   document.body.classList.remove('pb-setup-modal-open');
   builderSectionClipboard = null;
+  clearBuilderLifecycleUiState();
   builderPageId = id;
   builderPageSettingsController?.cancelPending();
   builderPageSettingsController = null;
@@ -7210,7 +7326,7 @@ function synchronizeBuilderSelectionDom(id: string): void {
       sectionId: id,
       selectedSectionId: history.selectedSectionId
     }
-  ), 'reset-section');
+  ), 'reset-section', 'Section reset.');
 };
 (window as any).copyBuilderSection = (id: string) => {
   const history = getBuilderHistoryController();
@@ -7220,7 +7336,12 @@ function synchronizeBuilderSelectionDom(id: string): void {
     sectionId: id,
     selectedSectionId: history.selectedSectionId
   });
-  if (result.clipboard) builderSectionClipboard = result.clipboard;
+  if (result.clipboard) {
+    builderSectionClipboard = result.clipboard;
+    const pasteButton = document.getElementById('pb-layers-paste-section') as HTMLButtonElement | null;
+    if (pasteButton) pasteButton.disabled = false;
+    announceBuilderLifecycle('Section copied.');
+  }
 };
 (window as any).pasteBuilderSection = () => {
   const history = getBuilderHistoryController();
@@ -7233,7 +7354,7 @@ function synchronizeBuilderSelectionDom(id: string): void {
       newSectionId: createBuilderSectionId(),
       selectedSectionId: history.selectedSectionId
     }
-  ), 'paste-section');
+  ), 'paste-section', 'Section pasted.');
 };
 (window as any).toggleSectionVisibility = (id: string) => {
   const history = getBuilderHistoryController();
@@ -7241,14 +7362,15 @@ function synchronizeBuilderSelectionDom(id: string): void {
   const section = history.document.sections.find(item => item.id === id);
   if (!section) return;
 
+  const willShow = section.styles?.visible === false;
   applyLiveBuilderSectionLifecycleResult(setBuilderSectionVisibility(
     history.document,
     {
       sectionId: id,
-      visible: section.styles?.visible === false,
+      visible: willShow,
       selectedSectionId: history.selectedSectionId
     }
-  ), 'visibility');
+  ), 'visibility', willShow ? 'Section shown.' : 'Section hidden.');
 };
 
 (window as any).duplicateGalleryItem = (id: string) => {
@@ -7296,7 +7418,14 @@ function synchronizeBuilderSelectionDom(id: string): void {
     insertionIndex,
     selectedSectionId: history.selectedSectionId
   });
-  const added = applyLiveBuilderSectionLifecycleResult(result, 'add-section');
+  const addedLabel = getBuilderSectionDefinition(component.type)?.label
+    || component.name
+    || component.type;
+  const added = applyLiveBuilderSectionLifecycleResult(
+    result,
+    'add-section',
+    /section$/i.test(addedLabel) ? `${addedLabel} added.` : `${addedLabel} section added.`
+  );
   if (!added) return;
   // Scroll newly added section into view
   setTimeout(() => {
@@ -7320,13 +7449,13 @@ function synchronizeBuilderSelectionDom(id: string): void {
       newSectionId: createBuilderSectionId(),
       selectedSectionId: history.selectedSectionId
     }
-  ), 'duplicate-section');
+  ), 'duplicate-section', 'Section duplicated.');
 };
 
 (window as any).addStructuredSectionAt = (order: string) => {
   builderInsertOrder = parseFloat(order);
-  (window as any).showToast('Select a component to insert', 'info');
-  // Just show the toast, the user then clicks a component on the left
+  (window as any).showToast('Select a section type to insert', 'info');
+  (window as any).openBuilderAddPanel();
 };
 
 (window as any).removeSection = (id: string) => {
@@ -7340,7 +7469,7 @@ function synchronizeBuilderSelectionDom(id: string): void {
       sectionId: id,
       selectedSectionId: history.selectedSectionId
     }
-  ), 'delete-section');
+  ), 'delete-section', 'Section deleted.');
 };
 
 (window as any).moveSection = (id: string, direction: number) => {
@@ -7355,7 +7484,7 @@ function synchronizeBuilderSelectionDom(id: string): void {
       direction,
       selectedSectionId: history.selectedSectionId
     }
-  ), 'reorder-section');
+  ), 'reorder-section', direction === -1 ? 'Section moved up.' : 'Section moved down.');
 };
 
 (window as any).switchSectionVariant = (id: string) => {
@@ -11504,6 +11633,8 @@ async function hydrateAuthenticatedPreviewSections(
 
 async function initializeBuilderNavigation(context: BuilderContext | null): Promise<boolean> {
   builderSectionClipboard = null;
+  builderInsertOrder = null;
+  clearBuilderLifecycleUiState();
   builderRouteUnavailableReason = null;
   const parsedRoute = parseBuilderNavigationTarget(window.location.hash);
   if ((context?.websiteId || context?.action) && parsedRoute.status !== 'valid') {
@@ -11668,6 +11799,7 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
   currentView = view;
   if (previousView === 'builder' && view !== 'builder') {
     builderSectionClipboard = null;
+    clearBuilderLifecycleUiState();
   }
   if (view !== 'builder') consumedBuilderInitialAction = null;
   if (id) selectedContactId = id;
