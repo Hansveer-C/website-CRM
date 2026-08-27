@@ -251,10 +251,14 @@ import { WebsiteGenerationAuthority, type WebsiteGenerationAuthorityToken } from
 import { createBuilderSectionId } from './builder_section_id';
 import {
   addSection as addBuilderSection,
+  copySection as copyBuilderSection,
   deleteSection as deleteBuilderSection,
   duplicateSection as duplicateBuilderSection,
   moveSection as moveBuilderSection,
+  pasteSection as pasteBuilderSection,
+  resetSection as resetBuilderSection,
   setSectionVisibility as setBuilderSectionVisibility,
+  type BuilderSectionClipboard,
   type BuilderSectionLifecycleResult
 } from './builder_section_lifecycle';
 import { applyBuilderSectionLifecycleResult } from './builder_section_lifecycle_runtime';
@@ -2061,6 +2065,7 @@ let builderPagesPanelView: 'list' | 'settings' = 'list';
 type BuilderViewport = 'desktop' | 'tablet' | 'mobile';
 let builderViewport: BuilderViewport = 'mobile'; // WB.3.4 — mobile-first default
 let builderHistoryController: BuilderHistoryController | null = null;
+let builderSectionClipboard: BuilderSectionClipboard | null = null;
 let builderPageSettingsController: BuilderPageSettingsController | null = null;
 let builderNewPageController: BuilderNewPageController | null = null;
 let builderNewPageControllerIdentity = '';
@@ -2204,6 +2209,7 @@ function clearProtectedRuntimeData(): void {
   activeWebsiteContext = null;
   builderPageId = '';
   builderHistoryController = null;
+  builderSectionClipboard = null;
   builderPageSettingsController?.cancelPending();
   builderPageSettingsController = null;
   builderNewPageController = null;
@@ -2332,6 +2338,7 @@ async function ensureApplicationAuth(): Promise<ApplicationAuthState> {
   }
   await builderSaveQueue.whenIdle();
   builderHistoryController = null;
+  builderSectionClipboard = null;
   activeBuilderWebsiteId = null;
   activeDashboardWebsiteId = null;
   activeSettingsWebsiteId = null;
@@ -3847,7 +3854,10 @@ function applyBuilderContext(context: BuilderContext | null): boolean {
   if (context.websiteId) activeBuilderWebsiteId = context.websiteId;
 
   const pageChanged = builderPageId !== context.pageId;
-  if (pageChanged) builderHistoryController = null;
+  if (pageChanged) {
+    builderHistoryController = null;
+    builderSectionClipboard = null;
+  }
   builderPageId = context.pageId;
   builderReturnTo = context.returnTo || builderReturnTo;
   builderReturnFunnelId = context.funnelId || builderReturnFunnelId;
@@ -7050,6 +7060,7 @@ function renderSectionPreviewContent(section: any) {
 };
 
 (window as any).openBuilderFromFunnel = (pageId: string, funnelId: string) => {
+  if (builderPageId !== pageId) builderSectionClipboard = null;
   builderPageId = pageId;
   builderReturnTo = 'funnels';
   builderReturnFunnelId = funnelId;
@@ -7106,6 +7117,7 @@ function renderSectionPreviewContent(section: any) {
   builderSetupDraft = null;
   builderSetupController = null;
   document.body.classList.remove('pb-setup-modal-open');
+  builderSectionClipboard = null;
   builderPageId = id;
   builderPageSettingsController?.cancelPending();
   builderPageSettingsController = null;
@@ -7187,6 +7199,41 @@ function synchronizeBuilderSelectionDom(id: string): void {
 (window as any).showComponentPickerAt = (order: string) => {
   builderInsertOrder = parseFloat(order);
   (window as any).navigateTo('components');
+};
+(window as any).resetBuilderSection = (id: string) => {
+  const history = getBuilderHistoryController();
+  if (!history) return;
+
+  applyLiveBuilderSectionLifecycleResult(resetBuilderSection(
+    history.document,
+    {
+      sectionId: id,
+      selectedSectionId: history.selectedSectionId
+    }
+  ), 'reset-section');
+};
+(window as any).copyBuilderSection = (id: string) => {
+  const history = getBuilderHistoryController();
+  if (!history) return;
+
+  const result = copyBuilderSection(history.document, {
+    sectionId: id,
+    selectedSectionId: history.selectedSectionId
+  });
+  if (result.clipboard) builderSectionClipboard = result.clipboard;
+};
+(window as any).pasteBuilderSection = () => {
+  const history = getBuilderHistoryController();
+  if (!history || !builderSectionClipboard) return;
+
+  applyLiveBuilderSectionLifecycleResult(pasteBuilderSection(
+    history.document,
+    {
+      clipboard: builderSectionClipboard,
+      newSectionId: createBuilderSectionId(),
+      selectedSectionId: history.selectedSectionId
+    }
+  ), 'paste-section');
 };
 (window as any).toggleSectionVisibility = (id: string) => {
   const history = getBuilderHistoryController();
@@ -11456,6 +11503,7 @@ async function hydrateAuthenticatedPreviewSections(
 }
 
 async function initializeBuilderNavigation(context: BuilderContext | null): Promise<boolean> {
+  builderSectionClipboard = null;
   builderRouteUnavailableReason = null;
   const parsedRoute = parseBuilderNavigationTarget(window.location.hash);
   if ((context?.websiteId || context?.action) && parsedRoute.status !== 'valid') {
@@ -11618,6 +11666,9 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
   }
   const previousView = currentView;
   currentView = view;
+  if (previousView === 'builder' && view !== 'builder') {
+    builderSectionClipboard = null;
+  }
   if (view !== 'builder') consumedBuilderInitialAction = null;
   if (id) selectedContactId = id;
 

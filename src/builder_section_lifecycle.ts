@@ -7,6 +7,10 @@ import {
   createBuilderSection,
   isRegisteredBuilderSectionType
 } from './builder_section_registry';
+import {
+  PAGE_SECTION_SAVE_TYPES,
+  validatePageSectionSaveRequest
+} from './page_section_save_contract';
 
 export type BuilderSectionLifecycleNoopReason =
   | 'invalid-document'
@@ -16,7 +20,12 @@ export type BuilderSectionLifecycleNoopReason =
   | 'invalid-insertion-index'
   | 'section-not-found'
   | 'move-boundary'
-  | 'visibility-unchanged';
+  | 'visibility-unchanged'
+  | 'reset-unsupported-section-type'
+  | 'reset-unchanged'
+  | 'invalid-clipboard'
+  | 'clipboard-page-mismatch'
+  | 'section-type-not-saveable';
 
 export interface BuilderSectionLifecycleResult {
   document: BuilderDocument;
@@ -53,6 +62,41 @@ export interface MoveBuilderSectionOptions {
 export interface SetBuilderSectionVisibilityOptions {
   sectionId: string;
   visible: boolean;
+  selectedSectionId: string | null;
+}
+
+export interface ResetBuilderSectionOptions {
+  sectionId: string;
+  selectedSectionId: string | null;
+}
+
+export interface BuilderSectionClipboard {
+  sourcePageId: string;
+  sourceSectionType: string;
+  section: BuilderDocumentSection;
+}
+
+export type CopyBuilderSectionNoopReason =
+  | 'invalid-document'
+  | 'section-not-found'
+  | 'section-type-not-saveable'
+  | 'invalid-section-snapshot';
+
+export interface CopyBuilderSectionResult {
+  clipboard: BuilderSectionClipboard | null;
+  copiedSectionId: string | null;
+  selectedSectionId: string | null;
+  reason: CopyBuilderSectionNoopReason | null;
+}
+
+export interface CopyBuilderSectionOptions {
+  sectionId: string;
+  selectedSectionId: string | null;
+}
+
+export interface PasteBuilderSectionOptions {
+  clipboard: unknown;
+  newSectionId: string;
   selectedSectionId: string | null;
 }
 
@@ -107,6 +151,91 @@ function hasValidDocument(document: BuilderDocument): boolean {
 
 function normalizedId(id: string): string {
   return id.trim();
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function areValuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => areValuesEqual(value, right[index]));
+  }
+  if (isPlainObject(left) && isPlainObject(right)) {
+    const leftKeys = Object.keys(left);
+    const rightKeys = Object.keys(right);
+    return leftKeys.length === rightKeys.length
+      && leftKeys.every(key =>
+        Object.prototype.hasOwnProperty.call(right, key)
+        && areValuesEqual(left[key], right[key])
+      );
+  }
+  return false;
+}
+
+function isSaveableSectionType(type: string): boolean {
+  return (PAGE_SECTION_SAVE_TYPES as readonly string[]).includes(type);
+}
+
+function isSaveableSectionSnapshot(
+  section: unknown,
+  sourcePageId: string
+): section is BuilderDocumentSection {
+  if (
+    !isPlainObject(section)
+    || !Number.isSafeInteger(section.order)
+    || (section.order as number) < 0
+  ) {
+    return false;
+  }
+  return validatePageSectionSaveRequest({
+    generation: 1,
+    expected_revision: null,
+    sections: [{ ...section, order: 0 }]
+  }, sourcePageId).success;
+}
+
+function isWellFormedClipboardSection(
+  section: Record<string, unknown>,
+  sourcePageId: string
+): boolean {
+  if (!Number.isSafeInteger(section.order) || (section.order as number) < 0) {
+    return false;
+  }
+  return validatePageSectionSaveRequest({
+    generation: 1,
+    expected_revision: null,
+    sections: [{ ...section, type: 'hero', order: 0 }]
+  }, sourcePageId).success;
+}
+
+function validateClipboard(value: unknown): BuilderSectionClipboard | null {
+  if (!isPlainObject(value)) return null;
+  const sourcePageId = typeof value.sourcePageId === 'string'
+    ? value.sourcePageId.trim()
+    : '';
+  const sourceSectionType = typeof value.sourceSectionType === 'string'
+    ? value.sourceSectionType.trim()
+    : '';
+  if (!sourcePageId || !sourceSectionType || !isPlainObject(value.section)) {
+    return null;
+  }
+  if (
+    value.section.page_id !== sourcePageId
+    || value.section.type !== sourceSectionType
+    || !isWellFormedClipboardSection(value.section, sourcePageId)
+  ) {
+    return null;
+  }
+  return value as unknown as BuilderSectionClipboard;
 }
 
 function hasSectionId(document: BuilderDocument, sectionId: string): boolean {
@@ -279,4 +408,132 @@ export function setSectionVisibility(
   };
 
   return changed(next, options.sectionId, options.sectionId);
+}
+
+export function resetSection(
+  document: BuilderDocument,
+  options: ResetBuilderSectionOptions
+): BuilderSectionLifecycleResult {
+  if (!hasValidDocument(document)) {
+    return noChange(document, options.selectedSectionId, 'invalid-document');
+  }
+
+  const sectionIndex = document.sections.findIndex(
+    section => section.id === options.sectionId
+  );
+  if (sectionIndex === -1) {
+    return noChange(document, options.selectedSectionId, 'section-not-found');
+  }
+
+  const current = document.sections[sectionIndex];
+  if (!isRegisteredBuilderSectionType(current.type)) {
+    return noChange(
+      document,
+      options.selectedSectionId,
+      'reset-unsupported-section-type'
+    );
+  }
+
+  const reset = createBuilderSection(current.type, {
+    id: current.id,
+    pageId: current.page_id,
+    order: current.order,
+    ...(current.funnel_id !== undefined
+      ? { funnelId: current.funnel_id }
+      : {})
+  });
+  if (areValuesEqual(current, reset)) {
+    return noChange(document, options.selectedSectionId, 'reset-unchanged');
+  }
+
+  const next = cloneDocument(document);
+  next.sections[sectionIndex] = reset;
+  return changed(next, current.id, current.id);
+}
+
+export function copySection(
+  document: BuilderDocument,
+  options: CopyBuilderSectionOptions
+): CopyBuilderSectionResult {
+  const noCopy = (reason: CopyBuilderSectionNoopReason): CopyBuilderSectionResult => ({
+    clipboard: null,
+    copiedSectionId: null,
+    selectedSectionId: options.selectedSectionId,
+    reason
+  });
+  if (!hasValidDocument(document)) return noCopy('invalid-document');
+
+  const section = document.sections.find(item => item.id === options.sectionId);
+  if (!section) return noCopy('section-not-found');
+  if (!isSaveableSectionType(section.type)) {
+    return noCopy('section-type-not-saveable');
+  }
+  if (!isSaveableSectionSnapshot(section, document.page.id)) {
+    return noCopy('invalid-section-snapshot');
+  }
+
+  try {
+    return {
+      clipboard: {
+        sourcePageId: document.page.id,
+        sourceSectionType: section.type,
+        section: structuredClone(section)
+      },
+      copiedSectionId: section.id,
+      selectedSectionId: options.selectedSectionId,
+      reason: null
+    };
+  } catch {
+    return noCopy('invalid-section-snapshot');
+  }
+}
+
+export function pasteSection(
+  document: BuilderDocument,
+  options: PasteBuilderSectionOptions
+): BuilderSectionLifecycleResult {
+  if (!hasValidDocument(document)) {
+    return noChange(document, options.selectedSectionId, 'invalid-document');
+  }
+  if (!normalizedId(options.newSectionId)) {
+    return noChange(document, options.selectedSectionId, 'invalid-section-id');
+  }
+  if (hasSectionId(document, options.newSectionId)) {
+    return noChange(document, options.selectedSectionId, 'section-id-conflict');
+  }
+
+  const clipboard = validateClipboard(options.clipboard);
+  if (!clipboard) {
+    return noChange(document, options.selectedSectionId, 'invalid-clipboard');
+  }
+  if (clipboard.sourcePageId !== document.page.id) {
+    return noChange(document, options.selectedSectionId, 'clipboard-page-mismatch');
+  }
+  if (!isSaveableSectionType(clipboard.sourceSectionType)) {
+    return noChange(document, options.selectedSectionId, 'section-type-not-saveable');
+  }
+
+  const next = cloneDocument(document);
+  const selectedIndex = options.selectedSectionId === null
+    ? -1
+    : next.sections.findIndex(section => section.id === options.selectedSectionId);
+  const insertionIndex = selectedIndex === -1
+    ? next.sections.length
+    : selectedIndex + 1;
+  const pasted = structuredClone(clipboard.section);
+  pasted.id = options.newSectionId;
+  pasted.page_id = next.page.id;
+  pasted.order = insertionIndex;
+  if (next.page.funnel_id !== undefined) {
+    pasted.funnel_id = next.page.funnel_id;
+  } else {
+    delete pasted.funnel_id;
+  }
+  next.sections.splice(insertionIndex, 0, pasted);
+  const normalized = normalizeSectionOrders(next, next.sections);
+
+  if (!hasValidDocument(normalized)) {
+    return noChange(document, options.selectedSectionId, 'invalid-clipboard');
+  }
+  return changed(normalized, pasted.id, pasted.id);
 }

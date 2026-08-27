@@ -5,13 +5,18 @@ import { BuilderHistoryController } from './builder_history_controller';
 import type { BuilderMutationMetadata } from './builder_history_controller';
 import {
   addSection,
+  copySection,
   deleteSection,
   duplicateSection,
   moveSection,
+  pasteSection,
+  resetSection,
   setSectionVisibility,
+  type BuilderSectionClipboard,
   type BuilderSectionLifecycleResult
 } from './builder_section_lifecycle';
 import { applyBuilderSectionLifecycleResult } from './builder_section_lifecycle_runtime';
+import { createBuilderSection } from './builder_section_registry';
 import type { PageSection } from './types';
 
 function section(id: string, order: number): PageSection {
@@ -217,6 +222,93 @@ describe('section lifecycle runtime adapter', () => {
     expect(runtime.autosaveSchedules).toBe(2);
   });
 
+  it('applies reset once and restores exact prior/default states through undo/redo', () => {
+    const runtime = createRuntime();
+    const before = runtime.history.document;
+    const result = resetSection(before, {
+      sectionId: 'b',
+      selectedSectionId: runtime.history.selectedSectionId
+    });
+
+    expect(runtime.apply(result, 'reset-section')).toBe(true);
+    expect(runtime.history.document.sections[1]).toEqual(createBuilderSection('hero', {
+      id: 'b', pageId: 'page-1', order: 1
+    }));
+    expectOneStructuralStep(runtime, result);
+    expectUndoRedoExact(runtime, before, result.document, 'b');
+  });
+
+  it('keeps copy outside history, dirty state, autosave, and selection', () => {
+    const runtime = createRuntime();
+    const before = runtime.history.document;
+    const copied = copySection(before, {
+      sectionId: 'b',
+      selectedSectionId: runtime.history.selectedSectionId
+    });
+
+    expect(copied.clipboard?.section).toEqual(before.sections[1]);
+    expect(runtime.history.document).toEqual(before);
+    expect(runtime.history.selectedSectionId).toBe('b');
+    expect(runtime.history.snapshot.past).toHaveLength(0);
+    expect(runtime.history.isDirty).toBe(false);
+    expect(runtime.mutationCalls).toBe(0);
+    expect(runtime.autosaveSchedules).toBe(0);
+  });
+
+  it('applies paste once and restores the exact pasted ID through undo/redo', () => {
+    const runtime = createRuntime();
+    const before = runtime.history.document;
+    const copied = copySection(before, {
+      sectionId: 'a',
+      selectedSectionId: runtime.history.selectedSectionId
+    });
+    const clipboardBefore = structuredClone(copied.clipboard);
+    const result = pasteSection(before, {
+      clipboard: copied.clipboard,
+      newSectionId: 'sec-runtime-paste',
+      selectedSectionId: runtime.history.selectedSectionId
+    });
+
+    expect(runtime.apply(result, 'paste-section')).toBe(true);
+    expect(runtime.history.document.sections.map(item => item.id)).toEqual([
+      'a', 'b', 'sec-runtime-paste', 'c'
+    ]);
+    expectOneStructuralStep(runtime, result);
+    expectUndoRedoExact(runtime, before, result.document, 'sec-runtime-paste');
+    expect(copied.clipboard).toEqual(clipboardBefore);
+  });
+
+  it('reuses an unchanged clipboard for independent repeated paste', () => {
+    const runtime = createRuntime();
+    const copied = copySection(runtime.history.document, {
+      sectionId: 'a',
+      selectedSectionId: runtime.history.selectedSectionId
+    });
+    const clipboard = copied.clipboard as BuilderSectionClipboard;
+    const clipboardBefore = structuredClone(clipboard);
+    const first = pasteSection(runtime.history.document, {
+      clipboard,
+      newSectionId: 'paste-one',
+      selectedSectionId: runtime.history.selectedSectionId
+    });
+    expect(runtime.apply(first, 'paste-section')).toBe(true);
+    const second = pasteSection(runtime.history.document, {
+      clipboard,
+      newSectionId: 'paste-two',
+      selectedSectionId: runtime.history.selectedSectionId
+    });
+    expect(runtime.apply(second, 'paste-section')).toBe(true);
+
+    expect(runtime.history.document.sections.map(item => item.id)).toEqual([
+      'a', 'b', 'paste-one', 'paste-two', 'c'
+    ]);
+    expect(runtime.history.document.sections[2].content)
+      .not.toBe(runtime.history.document.sections[3].content);
+    expect(runtime.history.snapshot.past).toHaveLength(2);
+    expect(runtime.autosaveSchedules).toBe(2);
+    expect(clipboard).toEqual(clipboardBefore);
+  });
+
   it.each([
     ['missing delete', (document: BuilderDocument) => deleteSection(document, {
       sectionId: 'missing', selectedSectionId: 'b'
@@ -229,6 +321,21 @@ describe('section lifecycle runtime adapter', () => {
     })],
     ['same visibility', (document: BuilderDocument) => setSectionVisibility(document, {
       sectionId: 'b', visible: true, selectedSectionId: 'b'
+    })],
+    ['default reset', (document: BuilderDocument) => resetSection({
+      ...document,
+      sections: [createBuilderSection('hero', { id: 'default', pageId: 'page-1', order: 0 })]
+    }, {
+      sectionId: 'default', selectedSectionId: 'default'
+    })],
+    ['cross-page paste', (document: BuilderDocument) => pasteSection(document, {
+      clipboard: {
+        sourcePageId: 'other-page',
+        sourceSectionType: 'hero',
+        section: { ...section('source', 0), page_id: 'other-page' }
+      },
+      newSectionId: 'paste',
+      selectedSectionId: 'b'
     })]
   ])('keeps %s a clean no-op with no history or autosave', (_label, operation) => {
     const runtime = createRuntime();
@@ -264,6 +371,40 @@ describe('active Builder lifecycle wiring', () => {
       .toContain('duplicateBuilderSection(');
     expect(handler('removeSection', 'moveSection')).toContain('deleteBuilderSection(');
     expect(handler('moveSection', 'switchSectionVariant')).toContain('moveBuilderSection(');
+  });
+
+  it('wires reset and paste through history while keeping copy non-mutating', () => {
+    const reset = handler('resetBuilderSection', 'copyBuilderSection');
+    const copy = handler('copyBuilderSection', 'pasteBuilderSection');
+    const paste = handler('pasteBuilderSection', 'toggleSectionVisibility');
+
+    expect(reset).toContain('resetBuilderSection(');
+    expect(reset).toContain('applyLiveBuilderSectionLifecycleResult(');
+    expect(copy).toContain('copyBuilderSection(');
+    expect(copy).toContain('builderSectionClipboard = result.clipboard');
+    expect(copy).not.toContain('applyLiveBuilderMutation');
+    expect(copy).not.toContain('applyLiveBuilderSectionLifecycleResult');
+    expect(paste).toContain('pasteBuilderSection(');
+    expect(paste).toContain('applyLiveBuilderSectionLifecycleResult(');
+    expect(paste).toContain('selectedSectionId: history.selectedSectionId');
+  });
+
+  it('uses canonical IDs for paste and no local random-ID implementation', () => {
+    const paste = handler('pasteBuilderSection', 'toggleSectionVisibility');
+
+    expect(paste).toContain('createBuilderSectionId()');
+    expect(paste).not.toContain('crypto.randomUUID');
+    expect(paste).not.toContain('Date.now()');
+    expect(paste).not.toContain('Math.random');
+  });
+
+  it('keeps clipboard in memory and clears it on page/context/runtime transitions', () => {
+    expect(source).toContain('let builderSectionClipboard: BuilderSectionClipboard | null = null;');
+    expect(source).not.toMatch(/localStorage[^\n]*builderSectionClipboard/);
+    expect(source).not.toContain('navigator.clipboard');
+    expect(source).toMatch(/if \(pageChanged\) \{[\s\S]*?builderSectionClipboard = null;/);
+    expect(source).toMatch(/switchBuilderPage[\s\S]*?builderSectionClipboard = null;[\s\S]*?builderPageId = id;/);
+    expect(source).toMatch(/previousView === 'builder' && view !== 'builder'[\s\S]*?builderSectionClipboard = null;/);
   });
 
   it('uses only the canonical section ID generator in add and duplicate handlers', () => {

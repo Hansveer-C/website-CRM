@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { BuilderDocument } from './builder_document';
 import {
   addSection,
+  copySection,
   deleteSection,
   duplicateSection,
   moveSection,
+  pasteSection,
+  resetSection,
   setSectionVisibility
 } from './builder_section_lifecycle';
 import {
@@ -497,5 +500,359 @@ describe('section lifecycle unknown data preservation', () => {
     expect(result).toMatchObject({ changed: false, reason: 'invalid-document' });
     expect(result.document).toEqual(before);
     expect(input).toEqual(before);
+  });
+});
+
+describe('section lifecycle reset', () => {
+  it.each(registeredTypes)('restores all canonical %s defaults and preserves identity', type => {
+    const canonical = createBuilderSection(type, {
+      id: 'target',
+      pageId: 'page-1',
+      funnelId: 'funnel-1',
+      order: 0
+    });
+    const customized = {
+      ...canonical,
+      content: { replaced: { nested: ['custom'] } },
+      styles: { visible: false, custom: { padding: 999 } },
+      variant: 'custom-variant',
+      unknown_metadata: { remove: true }
+    } as PageSection;
+    const input = makeDocument([customized, section('tail', 1)]);
+    const before = structuredClone(input);
+    const result = resetSection(input, {
+      sectionId: 'target',
+      selectedSectionId: 'target'
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      affectedSectionId: 'target',
+      selectedSectionId: 'target',
+      reason: null
+    });
+    expect(result.document.sections[0]).toEqual(canonical);
+    expect(result.document.sections[0]).toMatchObject({
+      id: 'target',
+      page_id: 'page-1',
+      funnel_id: 'funnel-1',
+      order: 0,
+      type,
+      styles: { visible: true }
+    });
+    expect(input).toEqual(before);
+  });
+
+  it.each(['gallery', 'form', 'faq'])('creates independent nested %s defaults', type => {
+    const input = makeDocument([section('target', 0, {
+      type,
+      content: { stale: { nested: ['value'] } },
+      styles: { visible: false },
+      variant: 'stale'
+    })]);
+    const priorContent = input.sections[0].content;
+    const definition = getBuilderSectionDefinition(type)!;
+    const defaultSnapshot = structuredClone(definition.defaultContent);
+    const result = resetSection(input, {
+      sectionId: 'target',
+      selectedSectionId: 'target'
+    });
+
+    expect(result.document.sections[0].content).toEqual(defaultSnapshot);
+    expect(result.document.sections[0].content).not.toBe(definition.defaultContent);
+    expect(result.document.sections[0].styles).not.toBe(definition.defaultStyles);
+    expect(result.document.sections[0].content).not.toBe(priorContent);
+    const mutable = result.document.sections[0].content as Record<string, unknown>;
+    mutable.testMutation = true;
+    expect(definition.defaultContent).toEqual(defaultSnapshot);
+    expect(input.sections[0].content).toEqual({ stale: { nested: ['value'] } });
+  });
+
+  it.each([
+    ['missing target', makeDocument(), 'missing', 'section-not-found'],
+    ['legacy target', makeDocument([section('legacy', 0, { type: 'services' })]), 'legacy', 'reset-unsupported-section-type'],
+    ['already default', makeDocument([createBuilderSection('faq', {
+      id: 'default-faq', pageId: 'page-1', funnelId: 'funnel-1', order: 0
+    })]), 'default-faq', 'reset-unchanged']
+  ] as const)('returns an immutable no-op for %s', (_label, input, sectionId, reason) => {
+    const before = structuredClone(input);
+    const result = resetSection(input, { sectionId, selectedSectionId: sectionId });
+
+    expect(result).toMatchObject({
+      changed: false,
+      affectedSectionId: null,
+      selectedSectionId: sectionId,
+      reason
+    });
+    expect(result.document).toEqual(before);
+    expect(input).toEqual(before);
+  });
+});
+
+describe('section lifecycle copy', () => {
+  it.each(registeredTypes)('copies complete registered %s data without mutation', type => {
+    const input = makeDocument([section('target', 0, {
+      type,
+      content: { nested: { values: [type] } },
+      styles: { visible: false, nested: { color: type } },
+      variant: 'custom'
+    })]);
+    const before = structuredClone(input);
+    const result = copySection(input, {
+      sectionId: 'target',
+      selectedSectionId: 'target'
+    });
+
+    expect(result).toMatchObject({
+      copiedSectionId: 'target',
+      selectedSectionId: 'target',
+      reason: null,
+      clipboard: {
+        sourcePageId: 'page-1',
+        sourceSectionType: type,
+        section: before.sections[0]
+      }
+    });
+    expect(result.clipboard?.section).not.toBe(input.sections[0]);
+    expect(result.clipboard?.section.content).not.toBe(input.sections[0].content);
+    expect(input).toEqual(before);
+  });
+
+  it('copies an allowlisted legacy section with exact independent data', () => {
+    const input = makeDocument([section('legacy', 0, {
+      type: 'services',
+      content: { services: [{ name: 'Driveway' }] },
+      styles: { visible: false, layout: { columns: 3 } },
+      variant: 'legacy-grid'
+    })]);
+    const result = copySection(input, {
+      sectionId: 'legacy',
+      selectedSectionId: null
+    });
+
+    expect(result.reason).toBeNull();
+    expect(result.selectedSectionId).toBeNull();
+    expect(result.clipboard?.section).toEqual(input.sections[0]);
+    (input.sections[0].content.services as Array<{ name: string }>)[0].name = 'Changed';
+    expect(result.clipboard?.section.content.services[0].name).toBe('Driveway');
+  });
+
+  it.each([
+    ['missing target', makeDocument(), 'missing', 'section-not-found'],
+    ['unsupported text', makeDocument([section('unsupported', 0, { type: 'text' })]), 'unsupported', 'section-type-not-saveable'],
+    ['unsupported testimonials', makeDocument([section('unsupported', 0, { type: 'testimonials' })]), 'unsupported', 'section-type-not-saveable']
+  ] as const)('rejects %s without a clipboard payload', (_label, input, sectionId, reason) => {
+    const before = structuredClone(input);
+    const result = copySection(input, { sectionId, selectedSectionId: 'kept' });
+
+    expect(result).toEqual({
+      clipboard: null,
+      copiedSectionId: null,
+      selectedSectionId: 'kept',
+      reason
+    });
+    expect(input).toEqual(before);
+  });
+});
+
+describe('section lifecycle paste', () => {
+  function clipboardFor(
+    source: BuilderDocument,
+    sectionId = source.sections[0].id
+  ) {
+    const copied = copySection(source, { sectionId, selectedSectionId: sectionId });
+    expect(copied.reason).toBeNull();
+    return copied.clipboard!;
+  }
+
+  it('pastes immediately after canonical selection with new ownership, order, and selection', () => {
+    const source = makeDocument([section('source', 0, {
+      type: 'gallery',
+      content: { items: [{ before: 'a', after: 'b' }] },
+      styles: { visible: false },
+      variant: 'grid'
+    })]);
+    const clipboard = clipboardFor(source);
+    const input = makeDocument();
+    const before = structuredClone(input);
+    const clipboardBefore = structuredClone(clipboard);
+    const result = pasteSection(input, {
+      clipboard,
+      newSectionId: 'sec-pasted',
+      selectedSectionId: 'section-b'
+    });
+
+    expect(result).toMatchObject({
+      changed: true,
+      affectedSectionId: 'sec-pasted',
+      selectedSectionId: 'sec-pasted',
+      reason: null
+    });
+    expect(result.document.sections.map(item => item.id)).toEqual([
+      'section-a', 'section-b', 'sec-pasted', 'section-c'
+    ]);
+    expect(result.document.sections.map(item => item.order)).toEqual([0, 1, 2, 3]);
+    expect(result.document.sections[2]).toMatchObject({
+      id: 'sec-pasted',
+      page_id: 'page-1',
+      funnel_id: 'funnel-1',
+      type: 'gallery',
+      content: clipboard.section.content,
+      styles: clipboard.section.styles,
+      variant: 'grid'
+    });
+    expect(input).toEqual(before);
+    expect(clipboard).toEqual(clipboardBefore);
+    expect(result.document.sections[2].content).not.toBe(clipboard.section.content);
+  });
+
+  it.each([
+    ['null selection', null],
+    ['stale selection', 'removed']
+  ])('appends when %s is unavailable', (_label, selectedSectionId) => {
+    const input = makeDocument();
+    const clipboard = clipboardFor(makeDocument([section('source', 0)]));
+    const result = pasteSection(input, {
+      clipboard,
+      newSectionId: 'appended',
+      selectedSectionId
+    });
+
+    expect(result.document.sections.map(item => item.id)).toEqual([
+      'section-a', 'section-b', 'section-c', 'appended'
+    ]);
+    expect(result.selectedSectionId).toBe('appended');
+  });
+
+  it('pastes allowlisted legacy data independently on the current page', () => {
+    const source = makeDocument([section('legacy-source', 0, {
+      type: 'services',
+      content: { items: [{ title: 'Soft wash' }] },
+      styles: { visible: false, nested: { gap: 4 } },
+      variant: 'cards'
+    })]);
+    const clipboard = clipboardFor(source);
+    const input = makeDocument([section('a', 0)]);
+    const result = pasteSection(input, {
+      clipboard,
+      newSectionId: 'legacy-pasted',
+      selectedSectionId: 'a'
+    });
+    const pasted = result.document.sections[1];
+
+    expect(pasted).toEqual({
+      ...source.sections[0],
+      id: 'legacy-pasted',
+      page_id: 'page-1',
+      funnel_id: 'funnel-1',
+      order: 1
+    });
+    pasted.content.items[0].title = 'Changed paste';
+    expect(clipboard.section.content.items[0].title).toBe('Soft wash');
+  });
+
+  it('supports repeated independent paste from the original clipboard', () => {
+    const source = makeDocument([section('source', 0, {
+      type: 'faq',
+      content: { items: [{ question: 'Original?', answer: 'Yes' }] }
+    })]);
+    const clipboard = clipboardFor(source);
+    const first = pasteSection(makeDocument([section('a', 0)]), {
+      clipboard,
+      newSectionId: 'paste-one',
+      selectedSectionId: 'a'
+    });
+    first.document.sections[1].content.items[0].answer = 'Mutated';
+    const second = pasteSection(first.document, {
+      clipboard,
+      newSectionId: 'paste-two',
+      selectedSectionId: 'paste-one'
+    });
+
+    expect(second.document.sections.map(item => item.id)).toEqual(['a', 'paste-one', 'paste-two']);
+    expect(second.document.sections[2].content.items[0].answer).toBe('Yes');
+    expect(second.document.sections[2].content).not.toBe(clipboard.section.content);
+    expect(clipboard.section.content.items[0].answer).toBe('Yes');
+  });
+
+  it.each(['gallery', 'form', 'faq'])('keeps %s source, clipboard, and repeated pastes independent', type => {
+    const source = makeDocument([section('source', 0, {
+      type,
+      content: { nested: { values: [type] } },
+      styles: { visible: true, nested: { token: type } }
+    })]);
+    const clipboard = clipboardFor(source);
+    source.sections[0].content.nested.values[0] = 'source-mutated';
+    const first = pasteSection(makeDocument([section('anchor', 0)]), {
+      clipboard,
+      newSectionId: 'first',
+      selectedSectionId: 'anchor'
+    });
+    first.document.sections[1].content.nested.values[0] = 'paste-mutated';
+    const second = pasteSection(first.document, {
+      clipboard,
+      newSectionId: 'second',
+      selectedSectionId: 'first'
+    });
+
+    expect(clipboard.section.content.nested.values[0]).toBe(type);
+    expect(second.document.sections[2].content.nested.values[0]).toBe(type);
+    expect(second.document.sections[2].content).not.toBe(clipboard.section.content);
+    expect(second.document.sections[2].styles).not.toBe(clipboard.section.styles);
+  });
+
+  it('rejects a valid clipboard from a different page', () => {
+    const source = makeDocument([section('source', 0)]);
+    source.page.id = 'page-other';
+    source.sections[0].page_id = 'page-other';
+    const clipboard = clipboardFor(source);
+    const input = makeDocument();
+    const result = pasteSection(input, {
+      clipboard,
+      newSectionId: 'cross-page',
+      selectedSectionId: 'b'
+    });
+
+    expect(result).toMatchObject({
+      changed: false,
+      selectedSectionId: 'b',
+      reason: 'clipboard-page-mismatch'
+    });
+    expect(result.document).toEqual(input);
+  });
+
+  it.each([
+    ['missing copied section', { sourcePageId: 'page-1', sourceSectionType: 'hero' }, 'invalid-clipboard'],
+    ['malformed snapshot', { sourcePageId: 'page-1', sourceSectionType: 'hero', section: { id: 'x' } }, 'invalid-clipboard'],
+    ['unsupported type', {
+      sourcePageId: 'page-1',
+      sourceSectionType: 'text',
+      section: section('unsupported', 0, { type: 'text' })
+    }, 'section-type-not-saveable']
+  ] as const)('rejects %s', (_label, clipboard, reason) => {
+    const input = makeDocument();
+    const result = pasteSection(input, {
+      clipboard,
+      newSectionId: 'pasted',
+      selectedSectionId: 'b'
+    });
+
+    expect(result).toMatchObject({ changed: false, reason, selectedSectionId: 'b' });
+    expect(result.document).toEqual(input);
+  });
+
+  it('rejects a pasted ID collision without mutating document or clipboard', () => {
+    const input = makeDocument();
+    const clipboard = clipboardFor(makeDocument([section('source', 0)]));
+    const clipboardBefore = structuredClone(clipboard);
+    const result = pasteSection(input, {
+      clipboard,
+      newSectionId: 'section-b',
+      selectedSectionId: 'section-b'
+    });
+
+    expect(result).toMatchObject({ changed: false, reason: 'section-id-conflict' });
+    expect(result.document).toEqual(input);
+    expect(clipboard).toEqual(clipboardBefore);
   });
 });
