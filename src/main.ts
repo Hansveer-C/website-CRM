@@ -22,6 +22,7 @@ import { SupabaseBuilderMediaRepository } from './builder_media_repository_supab
 import { createBuilderMediaRuntime } from './builder_media_runtime';
 import { builderDocumentToPageSections, createBuilderDocument, validateBuilderDocument } from './builder_document';
 import type { BuilderDocument } from './builder_document';
+import { replaceBuilderPageSectionsForHydration } from './builder_section_rehydration';
 import { resolveBuilderFixtureSectionRoute } from './builder_fixture_section_route';
 import { BuilderPageRevisionAuthority } from './builder_page_revision_authority';
 import {
@@ -3851,19 +3852,12 @@ function hydrateBuilderSectionsFromLocalStorage(pageId: string): void {
   const userId = getActingUserId();
   const storageKey = `mock_sections_${userId}:${pageId}`;
   const cached = window.localStorage.getItem(storageKey);
-  if (!cached) return;
+  if (cached === null) return;
 
   try {
     const sections = JSON.parse(cached);
     if (!Array.isArray(sections)) throw new Error('Cached sections is not an array');
-    for (const section of sections) {
-      const idx = mockPageSections.findIndex((s: any) => s.id === section.id);
-      if (idx >= 0) {
-        mockPageSections[idx] = section;
-      } else {
-        mockPageSections.push(section);
-      }
-    }
+    replaceBuilderPageSectionsForHydration(mockPageSections, pageId, sections);
   } catch (err) {
     console.error('[Builder] Failed to hydrate cached sections; clearing corrupted cache:', err);
     window.localStorage.removeItem(storageKey);
