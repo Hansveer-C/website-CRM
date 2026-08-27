@@ -3,7 +3,7 @@ import { escapeHtmlText, safeTelHref, safeNavHref } from './crm_html_output';
 import { contactMatchesClientSearch, formatContactPhone, hasContactPhone } from './crm_contact_phone';
 import { templates } from './templates';
 import { Activity, Contact, Funnel, Page, PageSection, User, Website, WebsiteLayout, WebsiteRoute, WebsiteSettings } from './types';
-import { createBuilderSection, getBuilderSectionDefinition, isRegisteredBuilderSectionType } from './builder_section_registry';
+import { getBuilderSectionDefinition } from './builder_section_registry';
 import type { BuilderInspectorFieldDefinition, BuilderInspectorTab } from './builder_inspector_schema';
 import { createBuilderInspectorPatch, getBuilderInspectorField, getBuilderInspectorFieldValue, getBuilderInspectorSchema } from './builder_inspector_schema';
 import { resolveWebsiteRequest } from './website_resolver';
@@ -249,6 +249,15 @@ import { WebsiteGenerationClient, WebsiteGenerationClientError, createWebsiteGen
 import { isWebsiteGenerationResponse, validateWebsiteGenerationInput, type WebsiteGenerationData } from './website_generation_contract';
 import { WebsiteGenerationAuthority, type WebsiteGenerationAuthorityToken } from './website_generation_authority';
 import { createBuilderSectionId } from './builder_section_id';
+import {
+  addSection as addBuilderSection,
+  deleteSection as deleteBuilderSection,
+  duplicateSection as duplicateBuilderSection,
+  moveSection as moveBuilderSection,
+  setSectionVisibility as setBuilderSectionVisibility,
+  type BuilderSectionLifecycleResult
+} from './builder_section_lifecycle';
+import { applyBuilderSectionLifecycleResult } from './builder_section_lifecycle_runtime';
 import { createPageSectionRevisionClient, createPageSectionSaveClient } from './page_section_save_client';
 import { BuilderSaveStateController, builderSaveStatusLabel } from './builder_save_state';
 import { BuilderViewTransitionController } from './builder_view_transition';
@@ -2855,20 +2864,6 @@ function getCurrentBuilderSections(): PageSection[] {
   return document ? builderDocumentToPageSections(document) : [];
 }
 
-function normalizeBuilderDocumentOrders(document: BuilderDocument): BuilderDocument {
-  const orderedSections = document.sections
-    .map((section, inputIndex) => ({ section, inputIndex }))
-    .sort((left, right) => left.section.order - right.section.order || left.inputIndex - right.inputIndex)
-    .map(item => item.section);
-  return {
-    ...document,
-    sections: orderedSections.map((section, index) => ({
-      ...section,
-      order: index
-    }))
-  };
-}
-
 function updateBuilderHistoryControls(): void {
   const history = builderHistoryController?.pageId === builderPageId
     ? builderHistoryController
@@ -2902,6 +2897,27 @@ function applyLiveBuilderMutation(
   updateBuilderPublicationStatusBadge();
   updateBuilderHistoryControls();
   if (options.render !== false) renderBuilder();
+  return true;
+}
+
+function applyLiveBuilderSectionLifecycleResult(
+  result: BuilderSectionLifecycleResult,
+  fieldId: string
+): boolean {
+  const changed = applyBuilderSectionLifecycleResult(
+    result,
+    fieldId,
+    applyLiveBuilderMutation
+  );
+  if (!changed) return false;
+
+  persistBuilderContext({
+    websiteId: activeBuilderWebsiteId ?? undefined,
+    pageId: builderPageId,
+    sectionId: result.selectedSectionId,
+    returnTo: builderReturnTo,
+    funnelId: builderReturnFunnelId
+  });
   return true;
 }
 
@@ -6584,14 +6600,13 @@ function _renderBuilder() {
               </div>
             ` : ''}
 
-            ${['Add Initial', ...sections].map((item) => {
+            ${['Add Initial', ...sections].map((item, insertionIndex) => {
         const isInitial = item === 'Add Initial';
         const section = isInitial ? null : (item as any);
-        const order = isInitial ? 0 : section.order + 0.5;
 
         return `
                 ${builderMode === 'edit' ? `
-                <div class="pb-add-between" onclick="window.addStructuredSectionAt('${order}')" style="height: 12px; opacity: 0; transition: opacity 200ms; cursor: cell;">
+                <div class="pb-add-between" onclick="window.addStructuredSectionAt('${insertionIndex}')" style="height: 12px; opacity: 0; transition: opacity 200ms; cursor: cell;">
                    <div style="width: 100%; height: 2px; background: #2563EB;"></div>
                 </div>
                 ` : ''}
@@ -7174,24 +7189,19 @@ function synchronizeBuilderSelectionDom(id: string): void {
   (window as any).navigateTo('components');
 };
 (window as any).toggleSectionVisibility = (id: string) => {
-  applyLiveBuilderMutation(document => ({
-    ...document,
-    sections: document.sections.map(section => section.id === id
-      ? {
-          ...section,
-          styles: {
-            ...section.styles,
-            visible: section.styles?.visible === false
-          }
-        }
-      : section)
-  }), {
-    category: 'structural',
-    sectionId: id,
-    fieldId: 'visibility',
-    coalesce: false,
-    selectSectionId: id
-  });
+  const history = getBuilderHistoryController();
+  if (!history) return;
+  const section = history.document.sections.find(item => item.id === id);
+  if (!section) return;
+
+  applyLiveBuilderSectionLifecycleResult(setBuilderSectionVisibility(
+    history.document,
+    {
+      sectionId: id,
+      visible: section.styles?.visible === false,
+      selectedSectionId: history.selectedSectionId
+    }
+  ), 'visibility');
 };
 
 (window as any).duplicateGalleryItem = (id: string) => {
@@ -7225,58 +7235,25 @@ function synchronizeBuilderSelectionDom(id: string): void {
   const component = mockComponents.find((c: any) => c.id === componentId);
   if (!component) return;
 
-  const currentSections = getCurrentBuilderSections();
-  const orderToInsertAt = builderInsertOrder !== null
-    ? builderInsertOrder
-    : Math.max(...currentSections.map((s: any) => s.order), 0) + 1;
+  const history = getBuilderHistoryController();
+  if (!history) return;
+  const insertionIndex = builderInsertOrder ?? history.document.sections.length;
 
   builderInsertOrder = null;
 
   const sectionId = createBuilderSectionId();
-  let newSection: PageSection;
 
-  if (isRegisteredBuilderSectionType(component.type)) {
-    const currentPage = mockPages.find(page => page.id === builderPageId);
-
-    try {
-      newSection = createBuilderSection(component.type, {
-        id: sectionId,
-        pageId: builderPageId,
-        order: orderToInsertAt,
-        funnelId: currentPage?.funnel_id
-      });
-    } catch (error) {
-      console.error(
-        `[Builder] Failed to create registered section type "${component.type}".`,
-        error
-      );
-      return;
-    }
-  } else {
-    newSection = {
-      id: sectionId,
-      page_id: builderPageId,
-      type: component.type,
-      content: JSON.parse(JSON.stringify(component.default_content)),
-      styles: JSON.parse(JSON.stringify(component.default_styles)),
-      order: orderToInsertAt
-    };
-  }
-
-  const added = applyLiveBuilderMutation(document => normalizeBuilderDocumentOrders({
-    ...document,
-    sections: [...document.sections, structuredClone(newSection)]
-  }), {
-    category: 'structural',
-    sectionId: newSection.id,
-    fieldId: 'add-section',
-    coalesce: false,
-    selectSectionId: newSection.id
+  const result = addBuilderSection(history.document, {
+    type: component.type,
+    sectionId,
+    insertionIndex,
+    selectedSectionId: history.selectedSectionId
   });
+  const added = applyLiveBuilderSectionLifecycleResult(result, 'add-section');
   if (!added) return;
   // Scroll newly added section into view
   setTimeout(() => {
-    document.getElementById(`sec-preview-${newSection.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document.getElementById(`sec-preview-${result.affectedSectionId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, 80);
 };
 
@@ -7286,26 +7263,17 @@ function synchronizeBuilderSelectionDom(id: string): void {
 };
 
 (window as any).duplicateBuilderSection = (id: string) => {
-  const source = getCurrentBuilderSections().find(section => section.id === id);
-  if (!source) return;
-  const duplicateId = typeof crypto?.randomUUID === 'function'
-    ? `sec-${crypto.randomUUID()}`
-    : `sec-${Date.now()}-copy`;
-  const duplicate: PageSection = {
-    ...structuredClone(source),
-    id: duplicateId,
-    order: source.order + 0.5
-  };
-  applyLiveBuilderMutation(document => normalizeBuilderDocumentOrders({
-    ...document,
-    sections: [...document.sections, duplicate]
-  }), {
-    category: 'structural',
-    sectionId: duplicateId,
-    fieldId: 'duplicate-section',
-    coalesce: false,
-    selectSectionId: duplicateId
-  });
+  const history = getBuilderHistoryController();
+  if (!history) return;
+
+  applyLiveBuilderSectionLifecycleResult(duplicateBuilderSection(
+    history.document,
+    {
+      sectionId: id,
+      newSectionId: createBuilderSectionId(),
+      selectedSectionId: history.selectedSectionId
+    }
+  ), 'duplicate-section');
 };
 
 (window as any).addStructuredSectionAt = (order: string) => {
@@ -7315,52 +7283,32 @@ function synchronizeBuilderSelectionDom(id: string): void {
 };
 
 (window as any).removeSection = (id: string) => {
-  const sections = getCurrentBuilderSections();
-  const index = sections.findIndex(section => section.id === id);
-  if (index === -1) return;
-  const fallback = sections[index + 1]?.id ?? sections[index - 1]?.id ?? null;
+  const history = getBuilderHistoryController();
+  if (!history) return;
   builderInsertOrder = null;
-  applyLiveBuilderMutation(document => normalizeBuilderDocumentOrders({
-    ...document,
-    sections: document.sections.filter(section => section.id !== id)
-  }), {
-    category: 'structural',
-    sectionId: id,
-    fieldId: 'delete-section',
-    coalesce: false,
-    selectSectionId: fallback
-  });
+
+  applyLiveBuilderSectionLifecycleResult(deleteBuilderSection(
+    history.document,
+    {
+      sectionId: id,
+      selectedSectionId: history.selectedSectionId
+    }
+  ), 'delete-section');
 };
 
 (window as any).moveSection = (id: string, direction: number) => {
-  const pageSections = getCurrentBuilderSections();
+  if (direction !== -1 && direction !== 1) return;
+  const history = getBuilderHistoryController();
+  if (!history) return;
 
-  const index = pageSections.findIndex(s => s.id === id);
-  const newIndex = index + direction;
-
-  if (newIndex >= 0 && newIndex < pageSections.length) {
-    persistBuilderContext({
-      pageId: builderPageId,
+  applyLiveBuilderSectionLifecycleResult(moveBuilderSection(
+    history.document,
+    {
       sectionId: id,
-      returnTo: builderReturnTo,
-      funnelId: builderReturnFunnelId
-    });
-    applyLiveBuilderMutation(document => {
-      const sections = builderDocumentToPageSections(document);
-      const [moved] = sections.splice(index, 1);
-      sections.splice(newIndex, 0, moved);
-      return {
-        ...document,
-        sections: sections.map((section, order) => ({ ...section, order }))
-      };
-    }, {
-      category: 'structural',
-      sectionId: id,
-      fieldId: 'reorder-section',
-      coalesce: false,
-      selectSectionId: id
-    });
-  }
+      direction,
+      selectedSectionId: history.selectedSectionId
+    }
+  ), 'reorder-section');
 };
 
 (window as any).switchSectionVariant = (id: string) => {
