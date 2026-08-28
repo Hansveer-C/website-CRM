@@ -4126,6 +4126,9 @@ function renderBuilderInspectorPanel(sections: PageSection[]): string {
 }
 
 (window as any).setBuilderLeftPanelTab = (tab: BuilderMediaLeftPanelTab) => {
+  if (tab === 'add' || builderLeftPanelTab === 'add') {
+    builderInsertOrder = null;
+  }
   if (builderLeftPanelTab === tab) return;
   builderLeftPanelTab = tab;
   if (tab === 'assets') void ensureBuilderMediaController();
@@ -4145,10 +4148,15 @@ function renderBuilderInspectorPanel(sections: PageSection[]): string {
   renderBuilder();
 };
 
-(window as any).openBuilderAddPanel = () => {
+function showBuilderAddPanel(): void {
   builderLeftPanelTab = 'add';
   requestBuilderLifecycleFocus('add-option');
   renderBuilder();
+}
+
+(window as any).openBuilderAddPanel = () => {
+  builderInsertOrder = null;
+  showBuilderAddPanel();
 };
 
 async function ensureBuilderMediaController(): Promise<BuilderMediaController | null> {
@@ -7447,9 +7455,23 @@ function synchronizeBuilderSelectionDom(id: string): void {
 };
 
 (window as any).addStructuredSectionAt = (order: string) => {
-  builderInsertOrder = parseFloat(order);
+  builderInsertOrder = null;
+  const normalizedOrder = typeof order === 'string' ? order.trim() : '';
+  const insertionIndex = Number(normalizedOrder);
+  const sectionCount = getBuilderHistoryController()?.document.sections.length;
+  if (
+    normalizedOrder === ''
+    || !Number.isInteger(insertionIndex)
+    || insertionIndex < 0
+    || sectionCount === undefined
+    || insertionIndex > sectionCount
+  ) {
+    (window as any).showToast('Choose a valid section insertion point.', 'error');
+    return;
+  }
+  builderInsertOrder = insertionIndex;
   (window as any).showToast('Select a section type to insert', 'info');
-  (window as any).openBuilderAddPanel();
+  showBuilderAddPanel();
 };
 
 (window as any).removeSection = (id: string) => {

@@ -18,6 +18,14 @@ describe('Builder section lifecycle semantic UI contracts', () => {
     'type BuilderWebsitePageEntry'
   );
   const builderMarkup = sourceBetween('function _renderBuilder()', 'function setNestedValue(');
+  const addPanelHandlers = sourceBetween(
+    '(window as any).setBuilderLeftPanelTab',
+    'async function ensureBuilderMediaController'
+  );
+  const lifecycleHandlers = sourceBetween(
+    '(window as any).resetBuilderSection',
+    '(window as any).switchSectionVariant'
+  );
 
   it('renders all six Add options as named native buttons', () => {
     expect(builderMarkup).toContain('<button type="button" class="pb-component-item"');
@@ -97,5 +105,28 @@ describe('Builder section lifecycle semantic UI contracts', () => {
   it('retains the existing practical 980px compact inspector contract', () => {
     expect(css).toContain('@media (max-width: 980px)');
     expect(css).toMatch(/@media \(max-width: 980px\)[\s\S]*?\.pb-inspector-panel\s*\{[\s\S]*?width:\s*250px;/);
+  });
+
+  it('clears abandoned insertion intent from every ordinary Add-panel entry', () => {
+    expect(addPanelHandlers).toContain("if (tab === 'add' || builderLeftPanelTab === 'add')");
+    expect(addPanelHandlers).toMatch(/openBuilderAddPanel = \(\) => \{\s*builderInsertOrder = null;\s*showBuilderAddPanel\(\);/s);
+    expect(layers).toContain('onclick="window.openBuilderAddPanel()">Add section</button>');
+    expect(builderMarkup).toContain('class="pb-empty-add-section" onclick="window.openBuilderAddPanel()"');
+  });
+
+  it('keeps a valid explicit insertion intent scoped to its Add-panel session', () => {
+    expect(lifecycleHandlers).toContain('builderInsertOrder = insertionIndex;');
+    expect(lifecycleHandlers).toContain('showBuilderAddPanel();');
+    expect(lifecycleHandlers).not.toMatch(/addStructuredSectionAt[\s\S]*?openBuilderAddPanel\(\)/);
+    expect(lifecycleHandlers).toMatch(/const insertionIndex = builderInsertOrder \?\? history\.document\.sections\.length;[\s\S]*?builderInsertOrder = null;/);
+  });
+
+  it('rejects invalid insertion input without preserving a prior index', () => {
+    expect(lifecycleHandlers).toContain("builderInsertOrder = null;\n  const normalizedOrder = typeof order === 'string' ? order.trim() : '';\n  const insertionIndex = Number(normalizedOrder);");
+    expect(lifecycleHandlers).toContain("normalizedOrder === ''");
+    expect(lifecycleHandlers).toContain('!Number.isInteger(insertionIndex)');
+    expect(lifecycleHandlers).toContain('insertionIndex < 0');
+    expect(lifecycleHandlers).toContain('insertionIndex > sectionCount');
+    expect(lifecycleHandlers).not.toContain('parseFloat(order)');
   });
 });
