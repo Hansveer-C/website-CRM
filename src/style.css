@@ -412,8 +412,14 @@ button:active {
 }
 
 .pb-left-tabs button:focus-visible,
+.pb-component-item:focus-visible,
+.pb-add-between:focus-visible,
 .pb-layer-main:focus-visible,
+.pb-layer-row:focus-visible,
 .pb-layer-actions button:focus-visible,
+.pb-layers-primary-actions button:focus-visible,
+.pb-empty-add-section:focus-visible,
+.pb-section-controls button:focus-visible,
 .pb-layers-empty button:focus-visible {
     outline: 2px solid #60a5fa;
     outline-offset: 2px;
@@ -430,11 +436,40 @@ button:active {
     padding: 18px 16px 12px;
 }
 
-.pb-layers-heading > div {
+.pb-layers-title-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+}
+
+.pb-layers-primary-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.pb-layers-primary-actions button {
+    min-width: 0;
+    min-height: 44px;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    background: #1e293b;
+    color: #e2e8f0;
+    cursor: pointer;
+    font-size: 0.72rem;
+    font-weight: 800;
+}
+
+.pb-layers-primary-actions button:hover:not(:disabled) {
+    border-color: #60a5fa;
+    color: #fff;
+}
+
+.pb-layers-primary-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.42;
 }
 
 .pb-layers-heading span {
@@ -476,6 +511,11 @@ button:active {
 .pb-layer-row.active {
     border-color: #60a5fa;
     box-shadow: inset 3px 0 0 #60a5fa;
+}
+
+.pb-layer-row:focus-visible {
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.35);
 }
 
 .pb-layer-row.hidden .pb-layer-title {
@@ -531,14 +571,14 @@ button:active {
 
 .pb-layer-actions {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 4px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
     padding: 0 8px 8px;
 }
 
 .pb-layer-actions button,
 .pb-layers-empty button {
-    min-height: 30px;
+    min-height: 44px;
     border: 1px solid #30343b;
     border-radius: 6px;
     outline: none;
@@ -589,7 +629,20 @@ button:active {
 
 .pb-layers-empty button {
     min-width: 110px;
+    min-height: 44px;
     padding: 0 14px;
+}
+
+.pb-empty-add-section {
+    min-width: 132px;
+    min-height: 44px;
+    margin-right: 8px;
+    border: 1px solid #2563eb;
+    border-radius: 8px;
+    background: #2563eb;
+    color: #fff;
+    cursor: pointer;
+    font-weight: 800;
 }
 
 .pb-pages-panel {
@@ -1643,6 +1696,8 @@ body.pb-new-page-modal-open {
 }
 
 .pb-component-item {
+    width: 100%;
+    min-height: 56px;
     background: #1e1e1e;
     padding: 12px;
     border-radius: 8px;
@@ -1654,6 +1709,8 @@ body.pb-new-page-modal-open {
     gap: 12px;
     margin-bottom: 12px;
     color: #e0e0e0;
+    font: inherit;
+    text-align: left;
 }
 
 .pb-component-item:hover {
@@ -1674,6 +1731,16 @@ body.pb-new-page-modal-open {
     font-size: 1.1rem;
     color: #2563EB;
     flex-shrink: 0;
+}
+
+.pb-component-item-icon {
+    font-size: 1.5rem;
+}
+
+.pb-component-item-label {
+    color: #eee;
+    font-size: 0.9rem;
+    font-weight: 700;
 }
 
 .pb-canvas-area {
@@ -2508,22 +2575,31 @@ body.pb-setup-modal-open {
 }
 
 .pb-add-between {
-    height: 48px;
+    min-height: 44px;
     width: 100%;
-    margin-top: -24px;
-    margin-bottom: -24px;
+    margin: 6px 0;
     position: relative;
-    opacity: 0;
-    transition: opacity 0.2s;
+    border: 1px dashed #475569;
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.92);
+    color: #bfdbfe;
+    opacity: 0.82;
+    transition: opacity 0.2s, border-color 0.2s, background 0.2s;
     z-index: 5;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    font-weight: 800;
 }
 
-.pb-add-between:hover {
+.pb-add-between:hover,
+.pb-add-between:focus-visible {
     opacity: 1;
+    border-color: #60a5fa;
+    background: #172554;
 }
 
 .pb-add-btn {
@@ -2604,6 +2680,11 @@ body.pb-setup-modal-open {
     padding: 5px;
     border-radius: 4px;
     z-index: 20;
+}
+
+.pb-section-controls button {
+    min-width: 44px;
+    min-height: 44px;
 }
 
 .pb-section-preview:hover .pb-section-controls,
