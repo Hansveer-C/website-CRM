@@ -25,6 +25,21 @@ export interface QuoteSaveResult {
   replayed: boolean;
 }
 
+export interface QuoteAcceptanceInput {
+  quoteId: string;
+  quoteRevision: number;
+  requestKey: string;
+  signerName: string;
+  signatureDataUrl: string | null;
+  accessibleDeclaration: boolean;
+}
+
+export interface QuoteAcceptanceResult {
+  quote: Quote;
+  acceptance: Record<string, unknown>;
+  replayed: boolean;
+}
+
 export interface InternalLeadInput {
   requestKey: string;
   name: string;
@@ -50,11 +65,13 @@ export interface CrmMutationClient {
 }
 
 export class CrmMutationError extends Error {
-  constructor(public readonly code: 'UNAVAILABLE' | 'INVALID_RESPONSE' | 'INVALID_INPUT', message?: string) {
+  constructor(public readonly code: 'UNAVAILABLE' | 'INVALID_RESPONSE' | 'INVALID_INPUT' | 'CONFLICT', message?: string) {
     super(message ?? (code === 'UNAVAILABLE'
       ? 'This action is temporarily unavailable.'
       : code === 'INVALID_INPUT'
         ? 'The request is invalid.'
+        : code === 'CONFLICT'
+          ? 'This quote has changed or was already accepted. Refresh it before trying again.'
         : 'The server returned an invalid response.'));
   }
 }
@@ -67,6 +84,15 @@ function requireObject(value: unknown): Record<string, unknown> {
   const result = object(value);
   if (!result) throw new CrmMutationError('INVALID_RESPONSE');
   return result;
+}
+
+function isConflictError(error: unknown): boolean {
+  const value = object(error);
+  return value?.code === '40001' || value?.code === 'P0001' || value?.code === '23505';
+}
+
+function isInvalidInputError(error: unknown): boolean {
+  return object(error)?.code === '22023';
 }
 
 export async function saveProductionQuote(client: CrmMutationClient, input: QuoteSaveInput): Promise<QuoteSaveResult> {
@@ -97,6 +123,37 @@ export async function saveProductionQuote(client: CrmMutationClient, input: Quot
     opportunity: payload.opportunity ? requireObject(payload.opportunity) as unknown as Opportunity : null,
     replayed: payload.replayed === true
   };
+}
+
+export async function acceptProductionQuote(client: CrmMutationClient, input: QuoteAcceptanceInput): Promise<QuoteAcceptanceResult> {
+  if (!input.quoteId || !Number.isInteger(input.quoteRevision) || input.quoteRevision < 1
+    || !input.requestKey || !input.signerName.trim()
+    || (!input.signatureDataUrl && !input.accessibleDeclaration)) {
+    throw new CrmMutationError('INVALID_INPUT', 'Complete the signature and acceptance fields before submitting.');
+  }
+  const result = await client.rpc('accept_crm_quote', {
+    p_quote_id: input.quoteId,
+    p_quote_revision: input.quoteRevision,
+    p_request_key: input.requestKey,
+    p_signer_name: input.signerName,
+    p_signature_data_url: input.signatureDataUrl,
+    p_accessible_declaration: input.accessibleDeclaration
+  });
+  if (result.error) {
+    if (isConflictError(result.error)) throw new CrmMutationError('CONFLICT');
+    if (isInvalidInputError(result.error)) throw new CrmMutationError('INVALID_INPUT', 'The acceptance details are invalid. Review them and try again.');
+    throw new CrmMutationError('UNAVAILABLE');
+  }
+  const payload = requireObject(result.data);
+  const quote = requireObject(payload.quote);
+  const acceptance = requireObject(payload.acceptance);
+  if (quote.id !== input.quoteId || typeof quote.user_id !== 'string'
+    || quote.status !== 'approved' || typeof quote.revision !== 'number'
+    || typeof acceptance.id !== 'string' || acceptance.quote_id !== input.quoteId
+    || Object.hasOwn(acceptance, 'signature_bytes')) {
+    throw new CrmMutationError('INVALID_RESPONSE');
+  }
+  return { quote: quote as unknown as Quote, acceptance, replayed: payload.replayed === true };
 }
 
 export async function createProductionLead(client: CrmMutationClient, input: InternalLeadInput): Promise<InternalLeadResult> {

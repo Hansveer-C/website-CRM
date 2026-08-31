@@ -62,6 +62,14 @@ describe('WashOps quote workflow', () => {
     expect(html).not.toContain('wo-quote-signature-canvas');
     expect(html).toContain('Quote option and status changes are unavailable in production.');
   });
+  it('enables only the durable acceptance surface for a sent production quote', () => {
+    const html = renderQuotePreviewContent({ userId: owner, quoteId: 'q1', quotes: [{ ...quote, revision: 1 }], contacts: [contact], items: [item], editable: false, acceptanceEnabled: true, durableAcceptance: true });
+    expect(html).toContain('wo-quote-acceptance-card');
+    expect(html).toContain('Accept & Sign Quote');
+    expect(html).not.toContain('Demo mode only: this captures the signature');
+    expect(html).not.toContain('window.selectQuoteTier');
+    expect(html).not.toContain('Convert to invoice');
+  });
   it('renders accepted quote banner when quote is already approved and escapes signer name', () => {
     const approvedQuote = { ...quote, status: 'approved' as const, signer_name: '<script>alert("xss")</script>', accepted_at: '2026-08-30T12:00:00Z' };
     const html = renderQuotePreviewContent({ userId: owner, quoteId: 'q1', quotes: [approvedQuote as any], contacts: [contact], items: [item], editable: true });
@@ -70,5 +78,12 @@ describe('WashOps quote workflow', () => {
     expect(html).not.toContain('<script>alert("xss")</script>');
     expect(html).not.toContain('wo-quote-acceptance-card');
     expect(html).toContain('Demo mode only: this acceptance is not durably stored.');
+  });
+  it('renders durable acceptance summary without exposing signature data', () => {
+    const approvedQuote = { ...quote, status: 'approved' as const, accepted_signer_name: 'Morgan Taylor', accepted_at: '2026-08-30T12:00:00Z' };
+    const html = renderQuotePreviewContent({ userId: owner, quoteId: 'q1', quotes: [approvedQuote], contacts: [contact], items: [item], editable: false, durableAcceptance: true });
+    expect(html).toContain('Accepted by <strong>Morgan Taylor</strong>');
+    expect(html).not.toContain('Demo mode only');
+    expect(html).not.toContain('signature_bytes');
   });
 });

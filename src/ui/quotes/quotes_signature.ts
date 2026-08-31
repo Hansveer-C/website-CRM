@@ -60,6 +60,7 @@ export function initQuotesSignature(
   }
 
   let isDestroyed = false;
+  let isSubmitting = false;
 
   const signerNameInput = root.querySelector<HTMLInputElement>('.wo-quote-signer-name');
   const attestationCheckbox = root.querySelector<HTMLInputElement>('.wo-quote-attestation-checkbox');
@@ -179,7 +180,7 @@ export function initQuotesSignature(
     const result = getResult(false);
 
     if (submitBtn) {
-      submitBtn.disabled = !valid;
+      submitBtn.disabled = !valid || isSubmitting;
     }
 
     if (statusEl) {
@@ -217,7 +218,7 @@ export function initQuotesSignature(
     updateValidationState();
   };
 
-  const handleSubmit = (event: MouseEvent) => {
+  const handleSubmit = async (event: MouseEvent) => {
     event.preventDefault();
     if (!isFormValid()) {
       updateValidationState();
@@ -227,9 +228,22 @@ export function initQuotesSignature(
     const result = getResult();
     if (typeof options.onSubmitAcceptance === 'function') {
       try {
-        options.onSubmitAcceptance(result);
+        isSubmitting = true;
+        if (submitBtn) submitBtn.disabled = true;
+        if (statusEl) {
+          statusEl.textContent = 'Submitting acceptance…';
+          statusEl.className = 'wo-quote-signature-status';
+        }
+        await options.onSubmitAcceptance(result);
       } catch (err) {
         console.error('[QuotesSignature] onSubmitAcceptance error:', err);
+        if (!isDestroyed && statusEl) {
+          statusEl.textContent = err instanceof Error ? err.message : 'Acceptance could not be saved. Please try again.';
+          statusEl.className = 'wo-quote-signature-status';
+        }
+      } finally {
+        isSubmitting = false;
+        if (!isDestroyed) updateValidationState();
       }
     }
   };
