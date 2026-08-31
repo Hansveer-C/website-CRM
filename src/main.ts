@@ -60,7 +60,7 @@ import {
   renderContactDetailLoading,
   type ContactFilter
 } from './ui/contacts';
-import { renderOpportunitiesContent } from './ui/opportunities';
+import { renderOpportunitiesContent, initOpportunitiesSortable, type OpportunitiesSortableController } from './ui/opportunities';
 import { renderNewQuoteContent, renderQuotePreviewContent, renderQuotesContent } from './ui/quotes';
 import { renderLeadCaptureContent } from './ui/lead-capture';
 import { renderInvoicesContent, type InvoiceFilter } from './ui/invoices';
@@ -2521,8 +2521,12 @@ function handleShellNavigation(target: ShellNavigationTarget): void {
   }
 }
 
+let currentOpportunitiesSortableController: OpportunitiesSortableController | null = null;
+
 function renderAppWithShell(options: ApplicationShellOptions): void {
   currentShellController?.destroy();
+  currentOpportunitiesSortableController?.destroy();
+  currentOpportunitiesSortableController = null;
   const userId = getActingUserId();
   const newCount = mockContacts.filter(c => c.user_id === userId && isNew(c.created_at)).length;
   const navGroups = options.navGroups ?? getDefaultNavGroups(options.activeView, { clients: newCount });
@@ -7569,6 +7573,8 @@ function synchronizeBuilderSelectionDom(id: string): void {
 
   const toast = document.createElement('div');
   toast.className = `pb-toast-${type}`;
+  toast.setAttribute('role', 'status');
+  toast.setAttribute('aria-live', 'polite');
   const icon = document.createElement('span');
   icon.style.cssText = 'font-size:1rem;line-height:1;';
   icon.textContent = c.icon;
@@ -10248,14 +10254,28 @@ async function handleLeadCaptureSubmission(e: Event) {
 }
 
 function renderOpportunities() {
+  currentOpportunitiesSortableController?.destroy();
+  currentOpportunitiesSortableController = null;
+
   const userId = getActingUserId();
   const defaultPipeline = mockPipelines[0];
+  const editable = !editorUsesSupabase();
   renderAppWithShell({
     activeView: 'opportunities',
     title: `Sales Pipeline: ${defaultPipeline.name}`,
     contentVariant: 'wide',
-    contentHtml: renderOpportunitiesContent({ userId, pipeline: defaultPipeline, opportunities: mockOpportunities, contacts: mockContacts, editable: !editorUsesSupabase() })
+    contentHtml: renderOpportunitiesContent({ userId, pipeline: defaultPipeline, opportunities: mockOpportunities, contacts: mockContacts, editable })
   });
+
+  if (editable) {
+    const board = app.querySelector<HTMLElement>('.wo-pipeline-board');
+    if (board) {
+      currentOpportunitiesSortableController = initOpportunitiesSortable(board, {
+        editable,
+        onStageChange: (oppId, newStage) => updateOpportunityStage(oppId, newStage)
+      });
+    }
+  }
 }
 
 function renderQuotes() {
@@ -10566,10 +10586,16 @@ function renderNewQuote() {
   (window as any).navigateTo('quotes');
 };
 
-function updateOpportunityStage(opportunity_id: string, new_stage: string) {
-  if (editorUsesSupabase()) { (window as any).showToast('Opportunity updates are temporarily unavailable.', 'error'); return; }
+function updateOpportunityStage(opportunity_id: string, new_stage: string): boolean {
+  if (editorUsesSupabase()) {
+    (window as any).showToast('Opportunity updates are temporarily unavailable.', 'error');
+    return false;
+  }
   const opp = mockOpportunities.find(o => o.user_id === getActingUserId() && o.id === opportunity_id);
   if (opp) {
+    if (opp.pipeline_stage === new_stage) {
+      return true;
+    }
     opp.pipeline_stage = new_stage;
 
     // Simple logic to update status based on stage
@@ -10581,33 +10607,21 @@ function updateOpportunityStage(opportunity_id: string, new_stage: string) {
       opp.status = 'open';
     }
 
+    (window as any).showToast(`Opportunity moved to ${new_stage}.`, 'success');
+
     // UI Refresh without reload
     (window as any).navigateTo(currentView, selectedContactId || undefined);
     console.log(`Opportunity ${opportunity_id} updated: Stage=[${new_stage}], Status=[${opp.status}]`);
 
     // Trigger Automation
     runAutomations('OPPORTUNITY_STAGE_UPDATED', opp);
+    return true;
   }
+  (window as any).showToast('Opportunity could not be found.', 'error');
+  return false;
 }
 
 (window as any).updateOpportunityStage = updateOpportunityStage;
-
-// Drag & Drop Handlers
-(window as any).allowDrop = (ev: DragEvent) => {
-  ev.preventDefault();
-};
-
-(window as any).drag = (ev: DragEvent, id: string) => {
-  ev.dataTransfer?.setData("text", id);
-};
-
-(window as any).drop = (ev: DragEvent, stage: string) => {
-  ev.preventDefault();
-  const id = ev.dataTransfer?.getData("text");
-  if (id) {
-    updateOpportunityStage(id, stage);
-  }
-};
 
 function renderSkeleton(type: 'pages' | 'templates' | 'builder' | 'generic') {
   if (type === 'pages') {

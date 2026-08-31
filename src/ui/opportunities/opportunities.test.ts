@@ -28,9 +28,19 @@ describe('WashOps opportunities pipeline', () => {
     const html = renderOpportunitiesContent({ ...base, opportunities: [], editable: false });
     expect(html).toContain('No opportunities'); expect(html).toContain('Read-only in production'); expect(html).not.toContain('draggable="true"'); expect(html).not.toContain('window.allowDrop'); expect(html).not.toContain('window.drop'); expect(html).not.toContain('window.updateOpportunityField');
   });
-  it('wires editable stages to the existing tenant-safe drag and drop path', () => {
+  it('wires editable stages to Sortable-ready containers and accessible stage controls without inline handlers', () => {
     const html = renderOpportunitiesContent(base);
-    expect(html).toContain('data-stage="New Lead"'); expect(html).toContain('ondragover="window.allowDrop(event)"'); expect(html).toContain('ondrop="window.drop(event, this.dataset.stage)"'); expect(html).toContain('draggable="true"');
+    expect(html).toContain('data-stage="New Lead"');
+    expect(html).toContain('class="wo-pipeline-stage-cards" data-stage="New Lead"');
+    expect(html).toContain('class="wo-opportunity-card-handle"');
+    expect(html).toContain('class="wo-field-select wo-opportunity-stage-select"');
+    expect(html).toContain('data-opportunity-id="o1"');
+    expect(html).toContain('data-current-stage="New Lead"');
+    expect(html).not.toContain('draggable="true"');
+    expect(html).not.toContain('window.allowDrop');
+    expect(html).not.toContain('window.drop');
+    expect(html).not.toMatch(/class="[^"]*wo-opportunity-stage-select[^"]*"[^>]*onchange/i);
+    expect(html).not.toContain('window.updateOpportunityStage');
   });
   it('keeps card keyboard navigation on the card, not its editable value input', () => {
     const html = renderOpportunitiesContent(base);
