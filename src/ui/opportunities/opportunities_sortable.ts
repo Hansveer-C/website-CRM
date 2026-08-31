@@ -1,4 +1,4 @@
-﻿import Sortable from 'sortablejs';
+import Sortable from 'sortablejs';
 
 export interface OpportunitiesSortableOptions {
   editable?: boolean;
@@ -30,9 +30,9 @@ export async function normalizeTransitionResult(
 
 function revertDomElement(item: HTMLElement, fromContainer: HTMLElement, oldIndex: number | undefined): void {
   if (!item || !fromContainer) return;
-  const children = Array.from(fromContainer.children || []);
-  const targetChild = (oldIndex !== undefined && oldIndex >= 0 && oldIndex < children.length)
-    ? children[oldIndex]
+  const siblings = Array.from(fromContainer.children || []).filter(el => el !== item);
+  const targetChild = (oldIndex !== undefined && oldIndex >= 0 && oldIndex < siblings.length)
+    ? siblings[oldIndex]
     : null;
 
   if (typeof fromContainer.insertBefore === 'function') {
@@ -107,6 +107,7 @@ export function initOpportunitiesSortable(
     try {
       const instance = Sortable.create(column, {
         group: 'opportunities-pipeline',
+        sort: false,
         animation: 150,
         ghostClass: 'wo-opportunity-card--ghost',
         chosenClass: 'wo-opportunity-card--chosen',
@@ -138,7 +139,8 @@ export function initOpportunitiesSortable(
             || toContainer.closest('[data-stage]')?.getAttribute('data-stage')
             || '';
 
-          if (!toStage || fromStage === toStage) {
+          if (!fromStage || !toStage || fromStage === toStage) {
+            revertDomElement(itemEl, fromContainer, evt.oldIndex);
             return;
           }
 

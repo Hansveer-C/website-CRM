@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
@@ -8,7 +8,7 @@ import {
 } from './opportunities_sortable';
 import { renderOpportunitiesContent } from './opportunities';
 
-describe('Opportunities Sortable & Accessibility Controller (Phase OSS-1A1A)', () => {
+describe('Opportunities Sortable & Accessibility Controller (Phase OSS-1A1A / OSS-1A1G)', () => {
   let mockWindow: any;
   let mockDocument: any;
   let rootListeners: { [type: string]: ((event: any) => void)[] } = {};
@@ -66,16 +66,40 @@ describe('Opportunities Sortable & Accessibility Controller (Phase OSS-1A1A)', (
       querySelectorAll: vi.fn(() => []),
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
+      removeChild: vi.fn((item: any) => {
+        const idx = children.indexOf(item);
+        if (idx !== -1) {
+          children.splice(idx, 1);
+        }
+      }),
       insertBefore: vi.fn((item: any, ref: any) => {
+        if (item.parentNode && typeof item.parentNode.removeChild === 'function') {
+          item.parentNode.removeChild(item);
+        } else {
+          const existingIdx = children.indexOf(item);
+          if (existingIdx !== -1) {
+            children.splice(existingIdx, 1);
+          }
+        }
         const idx = children.indexOf(ref);
         if (idx !== -1) {
           children.splice(idx, 0, item);
         } else {
           children.push(item);
         }
+        item.parentNode = col;
       }),
       appendChild: vi.fn((item: any) => {
+        if (item.parentNode && typeof item.parentNode.removeChild === 'function') {
+          item.parentNode.removeChild(item);
+        } else {
+          const existingIdx = children.indexOf(item);
+          if (existingIdx !== -1) {
+            children.splice(existingIdx, 1);
+          }
+        }
         children.push(item);
+        item.parentNode = col;
       })
     };
     return col;
@@ -363,5 +387,178 @@ describe('Opportunities Sortable & Accessibility Controller (Phase OSS-1A1A)', (
   it('M. TypeScript compilation uses maintained @types and no local sortablejs.d.ts remains', () => {
     const localDtsPath = resolve(__dirname, '../../sortablejs.d.ts');
     expect(existsSync(localDtsPath)).toBe(false);
+  });
+
+  // Phase OSS-1A1G regression tests
+  it('N. Sortable configuration: enforces sort: false to prohibit intra-stage reordering', () => {
+    const col1 = createMockColumn('New Lead');
+    const root = createMockRoot([col1]);
+
+    initOpportunitiesSortable(root, { editable: true });
+    const Sortable = require('sortablejs');
+    const instance = Sortable.get(col1);
+    expect(instance.options.sort).toBe(false);
+  });
+
+  it('O. Same-stage drag: does NOT call onStageChange and restores original DOM position', async () => {
+    const col1 = createMockColumn('New Lead');
+    const cardA = createMockCard('opp-A');
+    const cardB = createMockCard('opp-B');
+    const cardC = createMockCard('opp-C');
+    col1.children.push(cardA, cardB, cardC);
+
+    const root = createMockRoot([col1]);
+    const onStageChange = vi.fn(() => true);
+    initOpportunitiesSortable(root, { editable: true, onStageChange });
+
+    const Sortable = require('sortablejs');
+    const instance = Sortable.get(col1);
+
+    // Simulate Sortable having moved cardC (oldIndex 2) to the front of col1: [cardC, cardA, cardB]
+    col1.children.splice(2, 1);
+    col1.children.unshift(cardC);
+    expect(col1.children.map((c: any) => c.getAttribute('data-opportunity-id'))).toEqual(['opp-C', 'opp-A', 'opp-B']);
+
+    await instance.options.onEnd({
+      item: cardC,
+      to: col1,
+      from: col1,
+      oldIndex: 2,
+      newIndex: 0
+    });
+
+    // Must NOT call transition callback
+    expect(onStageChange).not.toHaveBeenCalled();
+    // DOM must be restored to original order: [cardA, cardB, cardC]
+    expect(col1.children.map((c: any) => c.getAttribute('data-opportunity-id'))).toEqual(['opp-A', 'opp-B', 'opp-C']);
+  });
+
+  it('P. Missing destination stage: does NOT call onStageChange and restores original DOM position', async () => {
+    const col1 = createMockColumn('New Lead');
+    const invalidCol = createMockColumn(''); // Missing stage attribute
+    invalidCol.getAttribute = vi.fn(() => null);
+
+    const card = createMockCard('opp-1');
+    col1.appendChild(card);
+
+    const root = createMockRoot([col1, invalidCol]);
+    const onStageChange = vi.fn(() => true);
+    initOpportunitiesSortable(root, { editable: true, onStageChange });
+
+    const Sortable = require('sortablejs');
+    const instance = Sortable.get(col1);
+
+    // Simulate Sortable moving card from col1 to invalidCol
+    invalidCol.appendChild(card);
+
+    await instance.options.onEnd({
+      item: card,
+      to: invalidCol,
+      from: col1,
+      oldIndex: 0,
+      newIndex: 0
+    });
+
+    expect(onStageChange).not.toHaveBeenCalled();
+    // Card must be reverted back to col1
+    expect(col1.children).toContain(card);
+    expect(invalidCol.children).not.toContain(card);
+  });
+
+  it('Q. Missing Opportunity ID on drag: does NOT call onStageChange and restores original DOM position', async () => {
+    const col1 = createMockColumn('New Lead');
+    const col2 = createMockColumn('Scheduled');
+
+    const cardWithoutId = createMockCard('');
+    cardWithoutId.getAttribute = vi.fn(() => null);
+    col1.appendChild(cardWithoutId);
+
+    const root = createMockRoot([col1, col2]);
+    const onStageChange = vi.fn(() => true);
+    initOpportunitiesSortable(root, { editable: true, onStageChange });
+
+    const Sortable = require('sortablejs');
+    const instance = Sortable.get(col1);
+
+    col2.appendChild(cardWithoutId);
+
+    await instance.options.onEnd({
+      item: cardWithoutId,
+      to: col2,
+      from: col1,
+      oldIndex: 0,
+      newIndex: 0
+    });
+
+    expect(onStageChange).not.toHaveBeenCalled();
+    expect(col1.children).toContain(cardWithoutId);
+    expect(col2.children).not.toContain(cardWithoutId);
+  });
+
+  it('R. Valid cross-stage drag: calls onStageChange exactly once and updates select stage attribute', async () => {
+    const col1 = createMockColumn('New Lead');
+    const col2 = createMockColumn('Scheduled');
+    const card = createMockCard('opp-1');
+
+    const mockStageSelect = {
+      value: 'New Lead',
+      setAttribute: vi.fn()
+    };
+    card.querySelector = vi.fn((sel: string) => {
+      if (sel === '.wo-opportunity-stage-select') return mockStageSelect;
+      return null;
+    });
+
+    col1.appendChild(card);
+
+    const root = createMockRoot([col1, col2]);
+    const onStageChange = vi.fn(() => true);
+    initOpportunitiesSortable(root, { editable: true, onStageChange });
+
+    const Sortable = require('sortablejs');
+    const instance = Sortable.get(col1);
+
+    col2.appendChild(card);
+
+    await instance.options.onEnd({
+      item: card,
+      to: col2,
+      from: col1,
+      oldIndex: 0,
+      newIndex: 0
+    });
+
+    expect(onStageChange).toHaveBeenCalledTimes(1);
+    expect(onStageChange).toHaveBeenCalledWith('opp-1', 'Scheduled', 'New Lead');
+    expect(mockStageSelect.value).toBe('Scheduled');
+    expect(mockStageSelect.setAttribute).toHaveBeenCalledWith('data-current-stage', 'Scheduled');
+  });
+
+  it('S. Rejected cross-stage drag: restores original DOM position in source column', async () => {
+    const col1 = createMockColumn('New Lead');
+    const col2 = createMockColumn('Scheduled');
+    const card = createMockCard('opp-1');
+    col1.appendChild(card);
+
+    const root = createMockRoot([col1, col2]);
+    const onStageChange = vi.fn(() => false); // Explicit rejection
+    initOpportunitiesSortable(root, { editable: true, onStageChange });
+
+    const Sortable = require('sortablejs');
+    const instance = Sortable.get(col1);
+
+    col2.appendChild(card);
+
+    await instance.options.onEnd({
+      item: card,
+      to: col2,
+      from: col1,
+      oldIndex: 0,
+      newIndex: 0
+    });
+
+    expect(onStageChange).toHaveBeenCalledWith('opp-1', 'Scheduled', 'New Lead');
+    expect(col1.children).toContain(card);
+    expect(col2.children).not.toContain(card);
   });
 });
