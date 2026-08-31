@@ -45,4 +45,30 @@ describe('WashOps quote workflow', () => {
     expect(createQuote).toContain("new Date(b.created_at).getTime() - new Date(a.created_at).getTime()");
     expect(createQuote).toContain("newQuoteOpportunityId = activeOpp ? activeOpp.id : ''");
   });
+  it('renders accessible quote acceptance and signature UI in editable preview mode for sent quotes', () => {
+    const html = renderQuotePreviewContent({ userId: owner, quoteId: 'q1', quotes: [quote], contacts: [contact], items: [item], editable: true });
+    expect(html).toContain('wo-quote-acceptance-card');
+    expect(html).toContain('wo-quote-signer-name');
+    expect(html).toContain('wo-quote-signature-canvas');
+    expect(html).toContain('wo-quote-signature-clear');
+    expect(html).toContain('wo-quote-attestation-checkbox');
+    expect(html).toContain('wo-quote-accessible-sign-checkbox');
+    expect(html).toContain('Accept & Sign Quote');
+    expect(html).toContain('Demo mode only: this captures the signature in the current session');
+  });
+  it('suppresses quote acceptance UI and prevents action bypass in read-only production mode', () => {
+    const html = renderQuotePreviewContent({ userId: owner, quoteId: 'q1', quotes: [quote], contacts: [contact], items: [item], editable: false });
+    expect(html).not.toContain('wo-quote-acceptance-card');
+    expect(html).not.toContain('wo-quote-signature-canvas');
+    expect(html).toContain('Quote option and status changes are unavailable in production.');
+  });
+  it('renders accepted quote banner when quote is already approved and escapes signer name', () => {
+    const approvedQuote = { ...quote, status: 'approved' as const, signer_name: '<script>alert("xss")</script>', accepted_at: '2026-08-30T12:00:00Z' };
+    const html = renderQuotePreviewContent({ userId: owner, quoteId: 'q1', quotes: [approvedQuote as any], contacts: [contact], items: [item], editable: true });
+    expect(html).toContain('Quote Accepted');
+    expect(html).toContain('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+    expect(html).not.toContain('<script>alert("xss")</script>');
+    expect(html).not.toContain('wo-quote-acceptance-card');
+    expect(html).toContain('Demo mode only: this acceptance is not durably stored.');
+  });
 });
