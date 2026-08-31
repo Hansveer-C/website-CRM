@@ -77,6 +77,9 @@ export interface Quote {
   selected_tier?: 'basic' | 'standard' | 'premium';
   notes: string;
   created_at: string;
+  revision?: number;
+  accepted_at?: string | null;
+  accepted_signer_name?: string | null;
 }
 
 export interface QuoteItem {

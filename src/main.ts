@@ -236,6 +236,7 @@ import {
 } from './website_settings_selection';
 import { resolveSiteRenderPage } from './site_render_page_resolution';
 import {
+  acceptProductionQuote,
   createProductionLead,
   saveProductionQuote,
   type CrmMutationClient
@@ -729,6 +730,7 @@ if (!editorUsesLocalData()) {
 let applicationAuthInitialization: Promise<ApplicationAuthState> | null = null;
 let applicationAuthHasInitialized = false;
 let applicationAuthFormSubmissionInProgress = false;
+const quoteAcceptanceRequestKeys = new Map<string, string>();
 
 const builderPublicationRuntimeResolver = createBuilderPublicationRuntimeResolver({
     configuredMode: builderPublicationConfiguredMode,
@@ -12119,9 +12121,10 @@ function renderQuotePreview(quoteId: string) {
   const userId = getActingUserId();
   const quote = mockQuotes.find(q => q.user_id === userId && q.id === quoteId);
   const editable = !editorUsesSupabase();
+  const acceptanceEnabled = Boolean(quote && quote.status === 'sent');
   // Audit contract preserved in renderQuotePreviewContent:
   // escapeHtmlText(item.service_name), escapeHtmlText(item.description), escapeHtmlText(quote.notes)
-  const preview = renderQuotePreviewContent({ userId, quoteId, quotes: mockQuotes, contacts: mockContacts, items: mockQuoteItems, editable });
+  const preview = renderQuotePreviewContent({ userId, quoteId, quotes: mockQuotes, contacts: mockContacts, items: mockQuoteItems, editable, acceptanceEnabled, durableAcceptance: editorUsesSupabase() });
   renderAppWithShell({
     activeView: 'quote-preview',
     title: 'Quote preview',
@@ -12130,14 +12133,48 @@ function renderQuotePreview(quoteId: string) {
     contentHtml: preview
   });
 
-  if (editable && quote && quote.status === 'sent') {
+  if (acceptanceEnabled && quote) {
     const acceptanceRoot = app.querySelector<HTMLElement>('.wo-quote-acceptance-card');
     if (acceptanceRoot) {
       currentQuotesSignatureController = initQuotesSignature(acceptanceRoot, {
         quoteId,
-        editable,
-        onSubmitAcceptance: (result) => {
-          approveQuote(quoteId, result);
+        editable: true,
+        onSubmitAcceptance: async (result) => {
+          if (!editorUsesSupabase()) {
+            approveQuote(quoteId, result);
+            return;
+          }
+          const currentQuote = mockQuotes.find(candidate => candidate.user_id === getActingUserId() && candidate.id === quoteId);
+          if (!currentQuote || !Number.isInteger(currentQuote.revision) || (currentQuote.revision as number) < 1) {
+            throw new Error('This quote is stale. Refresh it before trying again.');
+          }
+          const requestKey = quoteAcceptanceRequestKeys.get(quoteId) || crypto.randomUUID();
+          quoteAcceptanceRequestKeys.set(quoteId, requestKey);
+          const userId = getActingUserId();
+          const operation = protectedAsyncOperationGuard.begin(`quote-acceptance:${requestKey}`, userId);
+          try {
+            const client = await getBuilderPublicationSupabaseClient();
+            if (!client) throw new Error('Quote acceptance is temporarily unavailable.');
+            const saved = await acceptProductionQuote(client as unknown as CrmMutationClient, {
+              quoteId,
+              quoteRevision: currentQuote.revision as number,
+              requestKey,
+              signerName: result.signerName,
+              signatureDataUrl: result.signatureDataUrl,
+              accessibleDeclaration: result.accessibleDeclaration
+            });
+            const committed = protectedAsyncOperationGuard.commitIfCurrent(operation, getActingUserId(), () => {
+              const index = mockQuotes.findIndex(candidate => candidate.user_id === userId && candidate.id === quoteId);
+              if (index >= 0) mockQuotes[index] = saved.quote;
+            });
+            if (!committed || currentView !== 'quote-preview') return;
+            quoteAcceptanceRequestKeys.delete(quoteId);
+            (window as any).showToast('Quote acceptance was saved.', 'success');
+            renderQuotePreview(quoteId);
+          } catch (error) {
+            if (isSupersededOperationError(error)) return;
+            throw error;
+          }
         }
       });
     }
@@ -13608,4 +13645,3 @@ function renderPagesSeoLanding() {
         alert('Error: ' + err.message);
     }
 };
-
