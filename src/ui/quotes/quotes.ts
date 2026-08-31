@@ -47,5 +47,54 @@ export function renderQuotePreviewContent(model: QuotePreviewModel): string {
   const resolved = getOwnedQuotePreview(model); if (!resolved) return renderEmptyState({ title: 'Quote unavailable', description: 'This quote is unavailable for the current account.' });
   const { quote, contact, items } = resolved;
   const tierHtml = tiers.map(tier => { const tierItems = items.filter(item => item.tier === tier || (!item.tier && tier === 'basic')); const total = tierItems.reduce((sum, item) => sum + item.total, 0); const selected = quote.selected_tier === tier; return renderCard({ className: `wo-quote-preview-tier${selected ? ' wo-quote-preview-tier--selected' : ''}`, bodyHtml: `${selected ? renderBadge({ label: 'Selected option', variant: 'success' }) : ''}<h2>${escapeHtmlText(tier)} service level</h2><strong class="wo-quote-preview-total">${escapeHtmlText(currency(total))}</strong>${model.editable ? `<button type="button" class="wo-button ${selected ? 'wo-button--secondary' : 'wo-button--primary'} no-print" onclick="window.selectQuoteTier('${quote.id}','${tier}')">${selected ? 'Selected' : `Choose ${tier}`}</button>` : ''}<ul>${tierItems.map(item => `<li><strong>${escapeHtmlText(item.service_name)}</strong><span>${escapeHtmlText(item.description)}</span><em>${escapeHtmlText(currency(item.total))}</em></li>`).join('') || '<li class="wo-quote-empty-tier">No items included.</li>'}</ul>` }); }).join('');
-  return `<article class="wo-quote-preview"><header class="wo-quote-preview-header"><div><p class="wo-quotes-tier">Quote Q-${escapeHtmlText(quote.id)}</p><h2>Service quote</h2><p>${renderStatusBadge(`quote-${quote.status}`)} <span>Quoted value ${escapeHtmlText(currency(quote.total_amount))}</span></p></div><div class="wo-quote-preview-contact"><strong>${escapeHtmlText(contact?.name ?? 'Contact unavailable')}</strong><span>${escapeHtmlText(contact?.address ?? '')}</span><span>${escapeHtmlText(contact?.email ?? '')}</span><span>${escapeHtmlText(contact ? formatContactPhone(contact.phone) : '')}</span></div></header><section class="wo-quote-preview-tiers" aria-label="Service levels">${tierHtml}</section>${quote.notes ? `<section class="wo-quote-preview-notes"><h2>Additional notes</h2><p>${escapeHtmlText(quote.notes)}</p></section>` : ''}${model.editable && quote.status === 'approved' ? `<div class="no-print"><button type="button" class="wo-button wo-button--primary" onclick="window.convertToInvoice('${quote.id}')">Convert to invoice</button></div>` : ''}${model.editable ? '' : `<p class="wo-quote-production-notice no-print">Quote option and status changes are unavailable in production.</p>`}</article>`;
+
+  const acceptanceHtml = model.editable && quote.status === 'sent'
+    ? `<section class="wo-quote-acceptance-card no-print" data-quote-id="${escapeHtmlText(quote.id)}">
+        <div class="wo-quote-acceptance-heading">
+          <h2>Accept & Approve Quote</h2>
+          <p>Please review your selected option, enter your name, and sign or attest below to accept this quote.</p>
+          <p class="wo-quote-acceptance-demo-notice">Demo mode only: this captures the signature in the current session and does not create a durable quote acceptance record.</p>
+        </div>
+        <div class="wo-quote-form-group">
+          <label for="quote-signer-name-${escapeHtmlText(quote.id)}" class="wo-field-label">Signer full name <span class="wo-required">*</span></label>
+          <input id="quote-signer-name-${escapeHtmlText(quote.id)}" class="wo-field-input wo-quote-signer-name" type="text" placeholder="e.g. Alex Morgan" autocomplete="name" required>
+        </div>
+        <div class="wo-quote-signature-group">
+          <div class="wo-quote-signature-header">
+            <label id="quote-sig-label-${escapeHtmlText(quote.id)}" class="wo-field-label">Signature <span class="wo-required">*</span></label>
+            <button type="button" class="wo-button wo-button--ghost wo-button--sm wo-quote-signature-clear" aria-label="Clear signature canvas">Clear signature</button>
+          </div>
+          <p id="quote-sig-desc-${escapeHtmlText(quote.id)}" class="wo-quote-signature-hint">Draw your signature in the box below using your finger, stylus, or mouse.</p>
+          <div class="wo-quote-signature-canvas-wrap">
+            <canvas class="wo-quote-signature-canvas" aria-labelledby="quote-sig-label-${escapeHtmlText(quote.id)}" aria-describedby="quote-sig-desc-${escapeHtmlText(quote.id)}"></canvas>
+          </div>
+        </div>
+        <div class="wo-quote-accessible-sign-group">
+          <label class="wo-quote-accessible-sign-label">
+            <input type="checkbox" class="wo-quote-accessible-sign-checkbox">
+            <span>Sign using typed legal name (accessible non-pointer alternative)</span>
+          </label>
+        </div>
+        <div class="wo-quote-attestation-group">
+          <label class="wo-quote-attestation-label">
+            <input type="checkbox" class="wo-quote-attestation-checkbox" required>
+            <span>I accept this estimate and agree to the applicable terms.</span>
+          </label>
+        </div>
+        <div class="wo-quote-acceptance-actions">
+          <button type="button" class="wo-button wo-button--primary wo-quote-accept-submit-btn" disabled>Accept & Sign Quote</button>
+          <span class="wo-quote-signature-status" role="status" aria-live="polite"></span>
+        </div>
+      </section>`
+    : '';
+
+  const acceptedBannerHtml = quote.status === 'approved'
+    ? `<section class="wo-quote-accepted-banner">
+        <div class="wo-quote-accepted-badge">${renderBadge({ label: 'Quote Accepted', variant: 'success' })}</div>
+        ${(quote as any).signer_name ? `<p class="wo-quote-accepted-signer">Accepted by <strong>${escapeHtmlText((quote as any).signer_name)}</strong>${(quote as any).accepted_at ? ` on ${escapeHtmlText(new Date((quote as any).accepted_at).toLocaleDateString())}` : ''}</p>` : ''}
+        ${(quote as any).signer_name ? '<p class="wo-quote-acceptance-demo-notice">Demo mode only: this acceptance is not durably stored.</p>' : ''}
+      </section>`
+    : '';
+
+  return `<article class="wo-quote-preview"><header class="wo-quote-preview-header"><div><p class="wo-quotes-tier">Quote Q-${escapeHtmlText(quote.id)}</p><h2>Service quote</h2><p>${renderStatusBadge(`quote-${quote.status}`)} <span>Quoted value ${escapeHtmlText(currency(quote.total_amount))}</span></p></div><div class="wo-quote-preview-contact"><strong>${escapeHtmlText(contact?.name ?? 'Contact unavailable')}</strong><span>${escapeHtmlText(contact?.address ?? '')}</span><span>${escapeHtmlText(contact?.email ?? '')}</span><span>${escapeHtmlText(contact ? formatContactPhone(contact.phone) : '')}</span></div></header><section class="wo-quote-preview-tiers" aria-label="Service levels">${tierHtml}</section>${quote.notes ? `<section class="wo-quote-preview-notes"><h2>Additional notes</h2><p>${escapeHtmlText(quote.notes)}</p></section>` : ''}${acceptanceHtml}${acceptedBannerHtml}${model.editable && quote.status === 'approved' ? `<div class="no-print"><button type="button" class="wo-button wo-button--primary" onclick="window.convertToInvoice('${quote.id}')">Convert to invoice</button></div>` : ''}${model.editable ? '' : `<p class="wo-quote-production-notice no-print">Quote option and status changes are unavailable in production.</p>`}</article>`;
 }

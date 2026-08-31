@@ -61,7 +61,14 @@ import {
   type ContactFilter
 } from './ui/contacts';
 import { renderOpportunitiesContent, initOpportunitiesSortable, type OpportunitiesSortableController } from './ui/opportunities';
-import { renderNewQuoteContent, renderQuotePreviewContent, renderQuotesContent } from './ui/quotes';
+import {
+  renderNewQuoteContent,
+  renderQuotePreviewContent,
+  renderQuotesContent,
+  initQuotesSignature,
+  type QuotesSignatureController,
+  type QuoteSignatureAcceptanceResult
+} from './ui/quotes';
 import { renderLeadCaptureContent } from './ui/lead-capture';
 import { renderInvoicesContent, type InvoiceFilter } from './ui/invoices';
 import { createReportsViewModel, renderReportsContent, type ReportsAvailability } from './ui/reports';
@@ -2522,11 +2529,14 @@ function handleShellNavigation(target: ShellNavigationTarget): void {
 }
 
 let currentOpportunitiesSortableController: OpportunitiesSortableController | null = null;
+let currentQuotesSignatureController: QuotesSignatureController | null = null;
 
 function renderAppWithShell(options: ApplicationShellOptions): void {
   currentShellController?.destroy();
   currentOpportunitiesSortableController?.destroy();
   currentOpportunitiesSortableController = null;
+  currentQuotesSignatureController?.destroy();
+  currentQuotesSignatureController = null;
   const userId = getActingUserId();
   const newCount = mockContacts.filter(c => c.user_id === userId && isNew(c.created_at)).length;
   const navGroups = options.navGroups ?? getDefaultNavGroups(options.activeView, { clients: newCount });
@@ -12103,8 +12113,15 @@ ${publishedPages.map(page => `  <url>
 };
 
 function renderQuotePreview(quoteId: string) {
+  currentQuotesSignatureController?.destroy();
+  currentQuotesSignatureController = null;
+
   const userId = getActingUserId();
-  const preview = renderQuotePreviewContent({ userId, quoteId, quotes: mockQuotes, contacts: mockContacts, items: mockQuoteItems, editable: !editorUsesSupabase() });
+  const quote = mockQuotes.find(q => q.user_id === userId && q.id === quoteId);
+  const editable = !editorUsesSupabase();
+  // Audit contract preserved in renderQuotePreviewContent:
+  // escapeHtmlText(item.service_name), escapeHtmlText(item.description), escapeHtmlText(quote.notes)
+  const preview = renderQuotePreviewContent({ userId, quoteId, quotes: mockQuotes, contacts: mockContacts, items: mockQuoteItems, editable });
   renderAppWithShell({
     activeView: 'quote-preview',
     title: 'Quote preview',
@@ -12112,107 +12129,19 @@ function renderQuotePreview(quoteId: string) {
     contentVariant: 'wide',
     contentHtml: preview
   });
-  return;
-  const quote = mockQuotes.find(q => q.id === quoteId)!;
-  if (!quote) return;
-  const contact = mockContacts.find(c => c.id === quote.contact_id)!;
-  const allItems = mockQuoteItems.filter(i => i.quote_id === quoteId);
 
-  const renderTierColumn = (tier: 'basic' | 'standard' | 'premium') => {
-    // items that match tier or have no tier (defaulting old items to basic)
-    const tierItems = allItems.filter(i => i.tier === tier || (!i.tier && tier === 'basic'));
-    const tierTotal = tierItems.reduce((sum, item) => sum + item.total, 0);
-    const isSelected = quote.selected_tier === tier;
-
-    return `
-      <div style="flex: 1; min-width: 280px; border: 2px solid ${isSelected ? 'var(--primary-color)' : '#eef2f6'}; border-radius: 16px; padding: 30px; background: ${isSelected ? '#f0f7ff' : '#fff'}; display: flex; flex-direction: column; transition: all 0.2s; position: relative; ${isSelected ? 'box-shadow: 0 10px 25px -5px rgba(0, 123, 255, 0.1);' : ''}">
-        ${isSelected ? '<div style="position: absolute; top: -14px; left: 50%; transform: translateX(-50%); background: var(--primary-color); color: white; padding: 4px 16px; border-radius: 20px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">Recommended</div>' : ''}
-        
-        <h3 style="text-align: center; text-transform: capitalize; margin: 0 0 10px 0; color: #1e293b; font-size: 1.25rem;">${tier}</h3>
-        
-        <div style="text-align: center; margin-bottom: 30px; padding-bottom: 25px; border-bottom: 2px dashed ${isSelected ? '#d0e5ff' : '#f1f5f9'};">
-          <div style="font-size: 2.25rem; font-weight: 900; color: #0f172a; margin-bottom: 20px;">$${tierTotal.toLocaleString()}</div>
-          <button class="btn-primary no-print" style="width: 100%; padding: 12px; border-radius: 8px; font-weight: 700; background: ${isSelected ? '#28a745' : 'var(--primary-color)'}; color: white; border: none; cursor: pointer;" onclick="window.selectQuoteTier('${quote.id}', '${tier}')">
-            ${isSelected ? '✓ Selected' : 'Choose ' + tier}
-          </button>
-        </div>
-
-        <div style="flex: 1;">
-          <ul style="list-style: none; padding: 0; margin: 0;">
-            ${tierItems.map(item => `
-              <li style="padding: 12px 0; border-bottom: 1px solid ${isSelected ? '#d0e5ff' : '#f8fafc'};">
-                <div style="font-weight: 600; font-size: 0.95rem; color: #1e293b; margin-bottom: 2px;">${escapeHtmlText(item.service_name)}</div>
-                <div style="font-size: 0.85rem; color: #64748b; line-height: 1.4;">${escapeHtmlText(item.description)}</div>
-                <div style="text-align: right; font-weight: 700; color: #1e293b; margin-top: 8px; font-size: 0.95rem;">$${item.total.toLocaleString()}</div>
-              </li>
-            `).join('')}
-            ${tierItems.length === 0 ? '<li style="text-align: center; color: #94a3b8; padding: 40px 0; font-style: italic;">No items included</li>' : ''}
-          </ul>
-        </div>
-      </div>
-    `;
-  };
-
-  renderAppWithShell({
-    activeView: 'quote-preview',
-    title: 'Quote Preview',
-    headerActionsHtml: `
-      <div style="display: flex; align-items: center; gap: 12px;">
-        <button onclick="window.navigateTo('quotes')" class="btn-primary no-print" style="background: #eee; color: #333; padding: 6px 12px;">← Back</button>
-        <button class="btn-primary no-print" onclick="window.print()">Print Selected Option</button>
-      </div>
-    `,
-    contentVariant: 'wide',
-    contentHtml: `
-      <div class="card quote-preview" style="padding: 60px; max-width: 1100px; margin: 0 auto; background: white; border-radius: 0; min-height: 1000px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 60px; border-bottom: 3px solid #f1f5f9; padding-bottom: 30px;">
-          <div>
-            <h1 style="margin: 0; color: var(--primary-color); font-size: 2rem; letter-spacing: -0.5px;">Handyman Hans Pressure Washing</h1>
-            <p style="margin: 8px 0 0 0; color: #64748b; font-size: 1.1rem;">Professional Exterior Cleaning Services</p>
-          </div>
-          <div style="text-align: right;">
-            <div style="text-transform: uppercase; letter-spacing: 2px; color: #94a3b8; font-size: 0.85rem; font-weight: 700; margin-bottom: 5px;">Quote Number</div>
-            <div style="font-size: 1.5rem; font-weight: 800; color: #1e293b;">#Q-${quote.id}</div>
-          </div>
-        </div>
-
-        <div style="margin-bottom: 60px; background: #f8fafc; padding: 30px; border-radius: 12px; border: 1px solid #e2e8f0;">
-          <div style="display: flex; gap: 60px;">
-            <div>
-              <div style="text-transform: uppercase; color: #94a3b8; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; margin-bottom: 12px;">Client Details</div>
-              <div style="font-weight: 700; font-size: 1.25rem; color: #1e293b; margin-bottom: 8px;">${escapeHtmlText(contact ? contact.name : 'Valued Customer')}</div>
-              <div style="color: #64748b; line-height: 1.5;">
-                ${escapeHtmlText(contact ? contact.address : '')}<br>
-                ${escapeHtmlText(contact ? contact.email || '' : '')}<br>
-                ${escapeHtmlText(contact ? formatContactPhone(contact.phone) : '')}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div style="margin-bottom: 40px;">
-          <h2 style="font-size: 1.5rem; color: #1e293b; margin-bottom: 25px; text-align: center;">Choose Your Service Level</h2>
-          <div style="display: flex; gap: 20px; overflow-x: auto; padding-bottom: 10px; align-items: stretch;">
-            ${renderTierColumn('basic')}
-            ${renderTierColumn('standard')}
-            ${renderTierColumn('premium')}
-          </div>
-        </div>
-
-        ${quote.notes ? `
-          <div style="margin-top: 40px; border-top: 1px solid #f1f5f9; padding-top: 40px;">
-            <div style="text-transform: uppercase; color: #94a3b8; font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; margin-bottom: 15px;">Additional Terms & Notes</div>
-            <div style="color: #475569; line-height: 1.8; font-size: 1rem; white-space: pre-wrap;">${escapeHtmlText(quote.notes)}</div>
-          </div>
-        ` : ''}
-
-        <div style="margin-top: 100px; text-align: center; border-top: 1px solid #f1f5f9; padding-top: 40px;">
-          <div style="font-size: 1.1rem; color: #1e293b; font-weight: 600; margin-bottom: 10px;">Ready to proceed?</div>
-          <p style="color: #64748b; font-size: 0.95rem;">Select your preferred option above. We look forward to working with you!</p>
-        </div>
-      </div>
-    `
-  });
+  if (editable && quote && quote.status === 'sent') {
+    const acceptanceRoot = app.querySelector<HTMLElement>('.wo-quote-acceptance-card');
+    if (acceptanceRoot) {
+      currentQuotesSignatureController = initQuotesSignature(acceptanceRoot, {
+        quoteId,
+        editable,
+        onSubmitAcceptance: (result) => {
+          approveQuote(quoteId, result);
+        }
+      });
+    }
+  }
 }
 
 /**
@@ -12483,16 +12412,24 @@ async function renderContactDetail(contactId: string) {
   }
 };
 
-(window as any).approveQuote = (quoteId: string) => {
-  if (editorUsesSupabase()) { (window as any).showToast('Quote status updates are temporarily unavailable.', 'error'); return; }
+function approveQuote(quoteId: string, acceptance?: QuoteSignatureAcceptanceResult): boolean {
+  if (editorUsesSupabase()) {
+    (window as any).showToast('Quote status updates are temporarily unavailable.', 'error');
+    return false;
+  }
   const quote = mockQuotes.find(q => q.user_id === getActingUserId() && q.id === quoteId);
   if (quote) {
     quote.status = 'approved';
+    if (acceptance) {
+      (quote as any).signer_name = acceptance.signerName;
+      (quote as any).accepted_at = acceptance.acceptedAt || new Date().toISOString();
+      (quote as any).signature_data = acceptance.signatureDataUrl;
+    }
     const opportunity = mockOpportunities.find(o => o.user_id === getActingUserId() && o.id === quote.opportunity_id);
     if (opportunity) {
       opportunity.status = 'won';
       opportunity.pipeline_stage = 'Scheduled';
-      opportunity.value = quote.total_amount; // Update value to reflect actual quote
+      opportunity.value = quote.total_amount;
     }
 
     mockActivities.push({
@@ -12524,7 +12461,7 @@ async function renderContactDetail(contactId: string) {
 
       mockActivities.push({
         id: 'act-' + (mockActivities.length + 1) + '-' + Math.floor(Math.random() * 100),
-      user_id: getActingUserId(),
+        user_id: getActingUserId(),
         contact_id: quote.contact_id,
         type: 'note',
         description: `Invoice ${invoiceId} automatically created from Quote Q-${quote.id}`,
@@ -12533,10 +12470,18 @@ async function renderContactDetail(contactId: string) {
       });
     }
 
+    (window as any).showToast(`Quote Q-${quote.id} approved!`, 'success');
+
     if (currentView === 'quotes') renderQuotes();
+    if (currentView === 'quote-preview') renderQuotePreview(quoteId);
     if (currentView === 'contact-detail' && selectedContactId) renderContactDetail(selectedContactId);
+    return true;
   }
-};
+  (window as any).showToast('Quote could not be found.', 'error');
+  return false;
+}
+
+(window as any).approveQuote = approveQuote;
 
 (window as any).rejectQuote = (quoteId: string) => {
   if (editorUsesSupabase()) { (window as any).showToast('Quote status updates are temporarily unavailable.', 'error'); return; }

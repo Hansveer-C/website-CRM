@@ -40,6 +40,7 @@
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.8.0",
     "jsonwebtoken": "^9.0.3",
+    "signature_pad": "5.0.5",
     "sortablejs": "1.15.7",
     "twilio": "^5.13.0"
   }
