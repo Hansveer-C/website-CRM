@@ -8,13 +8,16 @@ begin
   end if;
 end $$;
 
-set role authenticated;
-select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
-
 insert into public.quotes (id, user_id, contact_id, request_key, request_fingerprint, status, total_amount, selected_tier)
 values
   ('90000000-0000-4000-8000-000000000002', '11111111-1111-4111-8111-111111111111', 'contact-a', '90000000-0000-4000-8000-000000000020', 'fixture-stale', 'sent', 99, 'basic'),
-  ('90000000-0000-4000-8000-000000000003', '11111111-1111-4111-8111-111111111111', 'contact-a', '90000000-0000-4000-8000-000000000021', 'fixture-invalid', 'sent', 99, 'basic');
+  ('90000000-0000-4000-8000-000000000003', '11111111-1111-4111-8111-111111111111', 'contact-a', '90000000-0000-4000-8000-000000000021', 'fixture-invalid', 'sent', 99, 'basic'),
+  ('90000000-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'contact-a', '90000000-0000-4000-8000-000000000010', 'fixture', 'sent', 250, 'basic');
+insert into public.quote_items (user_id, quote_id, service_name, quantity, unit_price, tier, order_index)
+values ('11111111-1111-4111-8111-111111111111', '90000000-0000-4000-8000-000000000001', 'House wash', 1, 250, 'basic', 0);
+
+set role authenticated;
+select set_config('request.jwt.claim.sub', '11111111-1111-4111-8111-111111111111', false);
 
 do $$
 begin
@@ -34,11 +37,6 @@ begin
     raise exception 'failed acceptance changed quote state';
   end if;
 end $$;
-
-insert into public.quotes (id, user_id, contact_id, opportunity_id, request_key, request_fingerprint, status, total_amount, selected_tier)
-values ('90000000-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111', 'contact-a', 'opportunity-a', '90000000-0000-4000-8000-000000000010', 'fixture', 'sent', 250, 'basic');
-insert into public.quote_items (user_id, quote_id, service_name, quantity, unit_price, tier, order_index)
-values ('11111111-1111-4111-8111-111111111111', '90000000-0000-4000-8000-000000000001', 'House wash', 1, 250, 'basic', 0);
 
 select public.accept_crm_quote(
   '90000000-0000-4000-8000-000000000001', 1, '90000000-0000-4000-8000-000000000011',
@@ -65,7 +63,7 @@ end $$;
 do $$
 begin
   begin
-    perform public.accept_crm_quote('90000000-0000-4000-8000-000000000001', 1, '90000000-0000-4000-8000-000000000012', 'Morgan Taylor', null, true);
+    perform public.accept_crm_quote('90000000-0000-4000-8000-000000000001', 2, '90000000-0000-4000-8000-000000000012', 'Morgan Taylor', null, true);
     raise exception 'already accepted quote unexpectedly succeeded';
   exception when raise_exception then
     if sqlerrm <> 'quote already accepted' then raise; end if;
