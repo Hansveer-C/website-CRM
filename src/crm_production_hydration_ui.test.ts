@@ -21,7 +21,7 @@ describe('production CRM hydration integration', () => {
     expect(mainSource).toContain('retry before relying on empty results.');
   });
 
-  it('keeps durable invoice reads separate from the unavailable invoice UI', () => {
+  it('keeps durable invoice reads separate from the legacy local invoice UI', () => {
     const hydratorStart = mainSource.indexOf('const crmProductionHydrator = new CrmProductionHydrator');
     const hydrator = mainSource.slice(hydratorStart, hydratorStart + 700);
     expect(mainSource).toContain('const durableInvoices: DurableInvoice[] = [];');
@@ -29,8 +29,11 @@ describe('production CRM hydration integration', () => {
     expect(hydrator).toContain('invoices: durableInvoices');
     expect(hydrator).toContain('invoice_items: durableInvoiceItems');
     const invoiceRenderer = mainSource.slice(mainSource.indexOf('function renderInvoices()'), mainSource.indexOf('(window as any).updateInvoiceFilter'));
-    expect(invoiceRenderer).toContain('Invoices are not available yet');
-    expect(invoiceRenderer).toContain('production: true');
+    const productionBranch = invoiceRenderer.slice(0, invoiceRenderer.indexOf('return;'));
+    expect(productionBranch).toContain('renderProductionInvoiceWorkspace');
+    expect(productionBranch).toContain('invoices: durableInvoices');
+    expect(productionBranch).toContain('invoiceItems: durableInvoiceItems');
+    expect(productionBranch).not.toContain('mockInvoices');
   });
 
   it('awaits asynchronous CRM renderers before adding the hydration result notice', () => {

@@ -70,7 +70,7 @@ import {
   type QuoteSignatureAcceptanceResult
 } from './ui/quotes';
 import { renderLeadCaptureContent } from './ui/lead-capture';
-import { renderInvoicesContent, type InvoiceFilter } from './ui/invoices';
+import { renderInvoicesContent, renderProductionInvoiceWorkspace, type InvoiceFilter } from './ui/invoices';
 import { createReportsViewModel, renderReportsContent, type ReportsAvailability } from './ui/reports';
 import {
   renderWebsiteDashboardEmpty,
@@ -2062,6 +2062,7 @@ let clientSearchQuery: string = '';
 let clientStatusFilter: string = 'all';
 let selectedContactId: string | null = null;
 let invoiceStatusFilter: string = 'all';
+let selectedProductionInvoiceId: string | null = null;
 
 // Page Builder State
 let builderPageId: string = mockPages[0]?.id || '';
@@ -2246,6 +2247,7 @@ function clearProtectedRuntimeData(): void {
   currentShellController?.destroy();
   currentShellController = null;
   lastContactCount = 0;
+  selectedProductionInvoiceId = null;
 }
 
 const CRM_DATA_VIEWS = new Set([
@@ -10305,12 +10307,33 @@ function renderQuotes() {
 
 function renderInvoices() {
   if (editorUsesSupabase()) {
-    // Invoices are not available yet. The renderer preserves that explicit production state.
-    renderAppWithShell({ activeView: 'invoices', title: 'Invoices', contentVariant: 'wide', contentHtml: renderInvoicesContent({ userId: getActingUserId(), invoices: mockInvoices, contacts: mockContacts, filter: invoiceStatusFilter as InvoiceFilter, production: true }) });
+    const invoiceState = crmProductionHydrator.state.status === 'loading'
+      ? 'loading'
+      : crmProductionHydrator.state.entities.invoices === 'ready' && crmProductionHydrator.state.entities.invoice_items === 'ready'
+        ? 'ready'
+        : 'error';
+    const sourceQuoteIds = mockQuotes
+      .filter(quote => quote.user_id === getActingUserId())
+      .map(quote => quote.id);
+    renderAppWithShell({ activeView: 'invoices', title: 'Invoices', contentVariant: 'wide', contentHtml: renderProductionInvoiceWorkspace({ userId: getActingUserId(), invoices: durableInvoices, invoiceItems: durableInvoiceItems, state: invoiceState, selectedInvoiceId: selectedProductionInvoiceId, sourceQuoteIds }) });
     return;
   }
   renderAppWithShell({ activeView: 'invoices', title: 'Invoices', contentVariant: 'wide', contentHtml: renderInvoicesContent({ userId: getActingUserId(), invoices: mockInvoices, contacts: mockContacts, filter: invoiceStatusFilter as InvoiceFilter, production: false }) });
 }
+
+(window as any).viewProductionInvoice = (invoiceId: string) => {
+  if (!editorUsesSupabase()) return;
+  const invoice = durableInvoices.find(candidate => candidate.user_id === getActingUserId() && candidate.id === invoiceId);
+  if (!invoice) return;
+  selectedProductionInvoiceId = invoice.id;
+  renderInvoices();
+};
+
+(window as any).closeProductionInvoiceDetail = () => {
+  if (!editorUsesSupabase()) return;
+  selectedProductionInvoiceId = null;
+  renderInvoices();
+};
 
 (window as any).updateInvoiceFilter = (status: string) => {
   invoiceStatusFilter = status;
