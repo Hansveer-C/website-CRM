@@ -21,6 +21,18 @@ describe('production CRM hydration integration', () => {
     expect(mainSource).toContain('retry before relying on empty results.');
   });
 
+  it('keeps durable invoice reads separate from the unavailable invoice UI', () => {
+    const hydratorStart = mainSource.indexOf('const crmProductionHydrator = new CrmProductionHydrator');
+    const hydrator = mainSource.slice(hydratorStart, hydratorStart + 700);
+    expect(mainSource).toContain('const durableInvoices: DurableInvoice[] = [];');
+    expect(mainSource).toContain('const durableInvoiceItems: DurableInvoiceItem[] = [];');
+    expect(hydrator).toContain('invoices: durableInvoices');
+    expect(hydrator).toContain('invoice_items: durableInvoiceItems');
+    const invoiceRenderer = mainSource.slice(mainSource.indexOf('function renderInvoices()'), mainSource.indexOf('(window as any).updateInvoiceFilter'));
+    expect(invoiceRenderer).toContain('Invoices are not available yet');
+    expect(invoiceRenderer).toContain('production: true');
+  });
+
   it('awaits asynchronous CRM renderers before adding the hydration result notice', () => {
     expect(mainSource).toContain("case 'clients': await renderClients(); break;");
     expect(mainSource).toContain("case 'contact-detail': if (id) await renderContactDetail(id); break;");

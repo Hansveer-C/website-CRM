@@ -33,7 +33,7 @@ const validPhoneContact: Contact = {
 };
 
 function emptyCollections(): CrmProductionCollections {
-  return { contacts: [], opportunities: [], activities: [], quotes: [], quote_items: [], invoices: [] };
+  return { contacts: [], opportunities: [], activities: [], quotes: [], quote_items: [], invoices: [], invoice_items: [] };
 }
 
 function hydrationClient(contact: Contact) {

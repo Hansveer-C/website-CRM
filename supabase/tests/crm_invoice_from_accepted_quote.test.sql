@@ -52,6 +52,10 @@ begin
   if (select value from public.opportunities where id = 'opportunity-a') <> v_opportunity_value then
     raise exception 'invoice creation changed opportunity state';
   end if;
+  if (select count(*) from public.invoices where user_id = current_setting('request.jwt.claim.sub', true)) <> 1
+     or (select count(*) from public.invoice_items where user_id = current_setting('request.jwt.claim.sub', true)) <> 1 then
+    raise exception 'authenticated owner could not read its durable invoice projection';
+  end if;
   select public.create_invoice_from_accepted_quote(
     '91000000-0000-4000-8000-000000000001', 1, '91000000-0000-4000-8000-000000000031'
   ) into v_replayed;
@@ -132,6 +136,19 @@ begin
 end $$;
 select public.accept_crm_quote('92000000-0000-4000-8000-000000000001', 1, '92000000-0000-4000-8000-000000000021', 'Tenant B', null, true);
 select public.create_invoice_from_accepted_quote('92000000-0000-4000-8000-000000000001', 1, '92000000-0000-4000-8000-000000000031');
+do $$
+begin
+  if (select count(*) from public.invoices where quote_id = '91000000-0000-4000-8000-000000000001') <> 0
+     or (select count(*) from public.invoice_items where invoice_id in (
+       select id from public.invoices where quote_id = '91000000-0000-4000-8000-000000000001'
+     )) <> 0 then
+    raise exception 'tenant B could read tenant A invoice projection';
+  end if;
+  if (select count(*) from public.invoices where user_id = current_setting('request.jwt.claim.sub', true)) <> 1
+     or (select count(*) from public.invoice_items where user_id = current_setting('request.jwt.claim.sub', true)) <> 1 then
+    raise exception 'tenant B could not read its own durable invoice projection';
+  end if;
+end $$;
 
 reset role;
 set role service_role;
@@ -149,6 +166,16 @@ reset role;
 set role anon;
 do $$
 begin
+  begin
+    perform 1 from public.invoices limit 1;
+    raise exception 'anon invoice read unexpectedly succeeded';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform 1 from public.invoice_items limit 1;
+    raise exception 'anon invoice item read unexpectedly succeeded';
+  exception when insufficient_privilege then null;
+  end;
   begin
     perform public.create_invoice_from_accepted_quote('91000000-0000-4000-8000-000000000001', 1, '91000000-0000-4000-8000-000000000037');
     raise exception 'anon invoice creation unexpectedly succeeded';

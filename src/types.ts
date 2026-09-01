@@ -107,6 +107,40 @@ export interface Invoice {
   created_at: string;
 }
 
+export interface DurableInvoice {
+  id: string;
+  user_id: string;
+  contact_id: string;
+  quote_id: string;
+  quote_acceptance_id: string;
+  source_quote_revision: number;
+  invoice_number: number;
+  status: 'issued';
+  currency: 'USD';
+  total_amount: number;
+  customer_name: string;
+  customer_email: string | null;
+  customer_phone: string | null;
+  billing_address: string;
+  issued_at: string;
+  due_at: string;
+  origin: 'accepted_quote';
+  created_at: string;
+}
+
+export interface DurableInvoiceItem {
+  id: string;
+  user_id: string;
+  invoice_id: string;
+  source_quote_item_order_index: number;
+  service_name: string;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  created_at: string;
+}
+
 export type PageStatus = 'draft' | 'published';
 
 export interface Page {
