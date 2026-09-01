@@ -40,6 +40,18 @@ export interface QuoteAcceptanceResult {
   replayed: boolean;
 }
 
+export interface InvoiceCreationInput {
+  quoteId: string;
+  acceptedQuoteRevision: number;
+  requestKey: string;
+}
+
+export interface InvoiceCreationResult {
+  invoice: Record<string, unknown>;
+  items: Record<string, unknown>[];
+  replayed: boolean;
+}
+
 export interface InternalLeadInput {
   requestKey: string;
   name: string;
@@ -154,6 +166,38 @@ export async function acceptProductionQuote(client: CrmMutationClient, input: Qu
     throw new CrmMutationError('INVALID_RESPONSE');
   }
   return { quote: quote as unknown as Quote, acceptance, replayed: payload.replayed === true };
+}
+
+/**
+ * Creates the durable invoice only through the database transaction. No
+ * browser-supplied customer, amount, currency, line, or status is accepted.
+ */
+export async function createInvoiceFromAcceptedQuote(
+  client: CrmMutationClient,
+  input: InvoiceCreationInput
+): Promise<InvoiceCreationResult> {
+  if (!input.quoteId || !Number.isInteger(input.acceptedQuoteRevision) || input.acceptedQuoteRevision < 1 || !input.requestKey) {
+    throw new CrmMutationError('INVALID_INPUT', 'An accepted quote revision and request key are required.');
+  }
+  const result = await client.rpc('create_invoice_from_accepted_quote', {
+    p_quote_id: input.quoteId,
+    p_accepted_quote_revision: input.acceptedQuoteRevision,
+    p_request_key: input.requestKey
+  });
+  if (result.error) {
+    if (isConflictError(result.error)) throw new CrmMutationError('CONFLICT', 'This accepted quote is no longer available for invoicing. Refresh it before trying again.');
+    if (isInvalidInputError(result.error)) throw new CrmMutationError('INVALID_INPUT', 'This accepted quote cannot be converted to an invoice.');
+    throw new CrmMutationError('UNAVAILABLE');
+  }
+  const payload = requireObject(result.data);
+  const invoice = requireObject(payload.invoice);
+  const items = Array.isArray(payload.items) ? payload.items.map(requireObject) : null;
+  if (!items || typeof invoice.id !== 'string' || typeof invoice.user_id !== 'string'
+    || invoice.status !== 'issued' || typeof invoice.invoice_number !== 'number'
+    || Object.hasOwn(invoice, 'request_key') || Object.hasOwn(invoice, 'request_fingerprint')) {
+    throw new CrmMutationError('INVALID_RESPONSE');
+  }
+  return { invoice, items, replayed: payload.replayed === true };
 }
 
 export async function createProductionLead(client: CrmMutationClient, input: InternalLeadInput): Promise<InternalLeadResult> {

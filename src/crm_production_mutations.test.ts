@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { acceptProductionQuote, createProductionLead, CrmMutationError, saveProductionQuote, type CrmMutationClient } from './crm_production_mutations';
+import { acceptProductionQuote, createInvoiceFromAcceptedQuote, createProductionLead, CrmMutationError, saveProductionQuote, type CrmMutationClient } from './crm_production_mutations';
 
 describe('production CRM mutations', () => {
   it('maps quote input to the atomic RPC and returns sanitized durable rows', async () => {
@@ -113,5 +113,35 @@ describe('production CRM mutations', () => {
       quoteId: 'quote-1', quoteRevision: 1, requestKey: '11111111-1111-4111-8111-111111111111', signerName: 'Morgan Taylor',
       signatureDataUrl: null, accessibleDeclaration: true
     })).rejects.toMatchObject({ code: 'INVALID_INPUT', message: 'The acceptance details are invalid. Review them and try again.' });
+  });
+
+  it('maps accepted-quote invoice creation to the authority RPC without browser commercial values', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: {
+      invoice: { id: 'invoice-1', user_id: 'user-a', status: 'issued', invoice_number: 1, total_amount: 250 },
+      items: [{ id: 'invoice-item-1', invoice_id: 'invoice-1', line_total: 250 }],
+      replayed: false
+    }, error: null });
+    const result = await createInvoiceFromAcceptedQuote({ rpc } as CrmMutationClient, {
+      quoteId: 'quote-1', acceptedQuoteRevision: 1, requestKey: '11111111-1111-4111-8111-111111111111'
+    });
+    expect(rpc).toHaveBeenCalledWith('create_invoice_from_accepted_quote', {
+      p_quote_id: 'quote-1', p_accepted_quote_revision: 1, p_request_key: '11111111-1111-4111-8111-111111111111'
+    });
+    expect(result).toMatchObject({ replayed: false, invoice: { status: 'issued', invoice_number: 1 } });
+  });
+
+  it('rejects invalid invoice conversion input before calling persistence', async () => {
+    const rpc = vi.fn();
+    await expect(createInvoiceFromAcceptedQuote({ rpc } as CrmMutationClient, {
+      quoteId: 'quote-1', acceptedQuoteRevision: 0, requestKey: ''
+    })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('does not expose invoice conversion database errors', async () => {
+    const client = { rpc: vi.fn().mockResolvedValue({ data: null, error: { code: '22023', message: 'internal evidence detail' } }) } as CrmMutationClient;
+    await expect(createInvoiceFromAcceptedQuote(client, {
+      quoteId: 'quote-1', acceptedQuoteRevision: 1, requestKey: '11111111-1111-4111-8111-111111111111'
+    })).rejects.toMatchObject({ code: 'INVALID_INPUT', message: 'This accepted quote cannot be converted to an invoice.' });
   });
 });
