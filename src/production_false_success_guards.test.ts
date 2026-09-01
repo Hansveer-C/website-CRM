@@ -85,10 +85,16 @@ describe('production false-success guards', () => {
     expect(source).not.toContain('(window as any).renderDashboard()');
   });
 
-  it('marks invoices explicitly unavailable when production storage does not exist', () => {
+  it('renders invoices from the protected durable production workspace without wiring mutations', () => {
     const start = source.indexOf('function renderInvoices()');
-    expect(source.slice(start, start + 700)).toContain('Invoices are not available yet.');
-    expect(source.slice(start, start + 700)).toContain('if (editorUsesSupabase())');
+    const invoiceRenderer = source.slice(start, start + 1_800);
+    const productionBranch = invoiceRenderer.slice(0, invoiceRenderer.indexOf('return;'));
+    expect(productionBranch).toContain('renderProductionInvoiceWorkspace');
+    expect(productionBranch).toContain('invoices: durableInvoices');
+    expect(productionBranch).toContain('invoiceItems: durableInvoiceItems');
+    expect(productionBranch).not.toContain('mockInvoices');
+    expect(productionBranch).toContain("entities.invoices === 'ready'");
+    expect(productionBranch).toContain("entities.invoice_items === 'ready'");
   });
 
   it.each([
