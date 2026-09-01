@@ -2,7 +2,7 @@ import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuo
 import { escapeHtmlText, safeTelHref, safeNavHref } from './crm_html_output';
 import { contactMatchesClientSearch, formatContactPhone, hasContactPhone } from './crm_contact_phone';
 import { templates } from './templates';
-import { Activity, Contact, Funnel, Page, PageSection, User, Website, WebsiteLayout, WebsiteRoute, WebsiteSettings } from './types';
+import { Activity, Contact, DurableInvoice, DurableInvoiceItem, Funnel, Page, PageSection, User, Website, WebsiteLayout, WebsiteRoute, WebsiteSettings } from './types';
 import { getBuilderSectionDefinition } from './builder_section_registry';
 import type { BuilderInspectorFieldDefinition, BuilderInspectorTab } from './builder_inspector_schema';
 import { createBuilderInspectorPatch, getBuilderInspectorField, getBuilderInspectorFieldValue, getBuilderInspectorSchema } from './builder_inspector_schema';
@@ -702,6 +702,8 @@ const applicationAuthController = new ApplicationAuthController({
     getSupabaseClient: async () => await getBuilderPublicationSupabaseClient() as unknown as ApplicationAuthClient | null,
     ...(editorRuntime.success && editorRuntime.mode === 'local' ? { localUserId: 'system' } : {})
 });
+const durableInvoices: DurableInvoice[] = [];
+const durableInvoiceItems: DurableInvoiceItem[] = [];
 const crmProductionHydrator = new CrmProductionHydrator(
     async () => await getBuilderPublicationSupabaseClient() as unknown as CrmHydrationClient | null,
     {
@@ -710,7 +712,8 @@ const crmProductionHydrator = new CrmProductionHydrator(
       activities: mockActivities,
       quotes: mockQuotes,
       quote_items: mockQuoteItems,
-      invoices: mockInvoices
+      invoices: durableInvoices,
+      invoice_items: durableInvoiceItems
     }
 );
 const websiteLayoutHydrator = new WebsiteLayoutHydrator(
