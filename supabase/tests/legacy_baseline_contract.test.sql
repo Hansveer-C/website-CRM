@@ -177,6 +177,41 @@ begin
     raise exception 'legacy baseline is missing % required unique constraints', bad_count;
   end if;
 
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'websites'
+      and column_name = 'user_id'
+      and data_type = 'text'
+      and is_nullable = 'NO'
+  ) then
+    raise exception 'websites.user_id must exist as NOT NULL text';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.websites'::regclass
+      and conname = 'websites_user_id_unique'
+      and contype = 'u'
+  ) then
+    raise exception 'historical websites.user_id unique ownership constraint is missing';
+  end if;
+
+  -- The recovered production baseline has no websites.user_id -> users.id FK,
+  -- and no tracked later migration introduces one. This assertion is valid for
+  -- both the baseline-only contract and a completed canonical migration replay.
+  if exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.websites'::regclass
+      and conname = 'websites_user_id_fkey'
+      and contype = 'f'
+  ) then
+    raise exception 'legacy or later replay invented websites_user_id_fkey';
+  end if;
+
   select count(*) into bad_count
   from (values
     ('idx_activities_contact_id'), ('idx_calls_contact_id'),

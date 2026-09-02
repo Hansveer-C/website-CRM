@@ -14,7 +14,7 @@ create table public.users (
 
 create table public.websites (
   id uuid primary key default gen_random_uuid(),
-  user_id text not null references public.users(id) on delete cascade,
+  user_id text not null,
   name text not null,
   domain text,
   subdomain text not null,
