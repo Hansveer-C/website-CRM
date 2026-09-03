@@ -12,7 +12,12 @@
     "typecheck:api": "tsc -p tsconfig.api.json",
     "test": "vitest run",
     "test:phase0": "vitest run src/website_generation_contract.test.ts src/website_generation_client.test.ts src/website_generation_deployment.test.ts api/_lib/website_generation_handler.test.ts api/not-found.test.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "supabase:local:guard": "node supabase/tests/local_supabase_integration.mjs --guard-local",
+    "supabase:local:start": "npm run supabase:local:guard && npx --yes supabase@2.116.0 start",
+    "supabase:local:reset": "npm run supabase:local:guard && npx --yes supabase@2.116.0 db reset --local --no-seed",
+    "supabase:local:test": "node supabase/tests/local_supabase_integration.mjs",
+    "supabase:local:stop": "npx --yes supabase@2.116.0 stop"
   },
   "keywords": [],
   "author": "",
