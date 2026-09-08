@@ -20,13 +20,32 @@ Executes a rigorous, evidence-backed inspection of the WashOps CRM codebase with
 - **Reference Baseline**: Commit SHA or branch to inspect (default: fresh `origin/main` or current HEAD).
 
 ## Procedure
-1. **Enforce Read-Only Boundary**:
-   - Strictly prohibit file creation, modification, deletion, or staging.
-   - Prohibit executing commands that mutate database state, disk state, or remote systems.
+1. **Enforce Strict Read-Only Boundary**:
+   - **Prohibited Operations**:
+     - Editing, creating, or deleting tracked or untracked project files;
+     - Staging changes (`git add`, `git rm`);
+     - Committing (`git commit`);
+     - Pushing (`git push`);
+     - Branch or ref creation/deletion (`git checkout -b`, `git branch -d`);
+     - Database mutations (DDL or DML writes);
+     - Configuration, secret, or deployment mutations;
+     - Remote-system writes or API mutations.
+   - **Permitted Safe Baseline & Evidence Operations**:
+     - `git status`
+     - `git diff`
+     - `git log`
+     - `git show`
+     - `git rev-parse`
+     - `git branch` (inspection only)
+     - `git fetch origin` (updates local Git tracking metadata to verify against fresh `origin/main`; does not mutate worktree, index, remote repository, product state, or production environment)
+   - **Dirty Worktree Handling**:
+     - If the working tree contains uncommitted changes, report the exact porcelain status.
+     - Continue only if the audit can be performed safely while explicitly distinguishing `origin/main`, current `HEAD`, and local diffs.
+     - Stop if local modifications prevent reliable attribution or make the audit findings ambiguous.
 
 2. **Gather Concrete Evidence**:
    - Inspect source files, schema definitions, configs, and test suites directly using read tools.
-   - If tests or verification commands are executed, run only non-destructive, read-only commands.
+   - If verification commands are executed, run only non-destructive, read-only commands.
    - Record exact file paths, symbol names, and line numbers for every observation.
 
 3. **Investigate Material Contradictions**:
@@ -47,13 +66,15 @@ Executes a rigorous, evidence-backed inspection of the WashOps CRM codebase with
 
 ## Stop Conditions
 STOP immediately if:
-- Task or environment attempts to perform file modifications, database mutations, or writes while executing an audit.
+- Task or environment attempts to perform file modifications, database mutations, staging, commits, pushes, or remote writes while executing an audit.
 - Target files, repositories, or contracts cannot be accessed or located.
-- Codebase state materially contradicts repository routing guards (e.g., non-WashOps contamination).
+- Dirty working tree state introduces ambiguity or prevents reliable attribution of findings.
+- Task targets a non-WashOps project (e.g., HansSays/LedeIQ implementation task per routing guard).
 
 ## Expected Output
 A structured read-only audit report containing:
 - Executive summary of findings.
+- Baseline metadata (origin/main SHA, HEAD SHA, worktree state).
 - Concrete evidence citations (links to files and line ranges).
 - Classification of all claims as `VERIFIED`, `INFERRED`, or `UNKNOWN`.
 - Identified material contradictions between specification and implementation.

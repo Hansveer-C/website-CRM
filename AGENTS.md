@@ -4,17 +4,17 @@ This repository is exclusively for the **WASHOPS CRM** project.
 
 ## Mandatory project routing guard
 
-Before executing any task, inspect the task or prompt heading.
+Before executing any task, determine the primary/target project from the task heading or prompt.
 
 ### Allowed
 
-Execute coding work only when the task clearly identifies itself as:
+Execute work only when the primary target of the task is:
 
 **WASHOPS CRM**
 
 ### Wrong project
 
-If a task contains or identifies itself as:
+If the primary target of the task is:
 
 - **HansSays Content Engine**
 - **LedeIQ**
@@ -35,9 +35,23 @@ Respond only:
 
 `WRONG PROJECT — THIS CODEX WORKSPACE IS WASHOPS CRM ONLY. NO ACTION TAKEN.`
 
+### Non-triggering mentions and comparative audits
+
+Mere mention of **HansSays** or **LedeIQ** inside a **WashOps CRM** task does **not** trigger the wrong-project guard. Valid examples include:
+
+- WashOps contamination filters and negative checks (e.g., "Ensure no LedeIQ code was imported");
+- explicit WashOps-vs-other-project architectural or workflow comparisons;
+- audits of possible cross-project contamination;
+- research regarding transferable workflow patterns or agent governance methods.
+
+For an explicitly requested comparison or audit involving another project:
+
+- external project evidence may be inspected only for that bounded comparison/audit purpose;
+- no foreign project implementation state, SHAs, migrations, roadmap status, domain architecture, task numbering, or requirements may become WashOps state unless separately and explicitly approved.
+
 ### Missing identifier
 
-If a coding task does not clearly identify itself as **WASHOPS CRM**, do not execute it.
+If a task does not clearly identify its primary target project as **WASHOPS CRM**, do not execute it.
 
 Respond only:
 
@@ -68,8 +82,8 @@ These routing rules are repository-level safety instructions and apply before im
 ## WashOps architectural invariants
 
 1. **Server authority for lifecycle mutations**: Important domain lifecycle transitions (including status changes, financial records, and irreversible actions) must execute through server-authoritative logic rather than unvalidated client calls.
-2. **Tenant authorization from authenticated server identity**: Tenant authorization must always derive directly from validated server session identity. Never trust browser-supplied user IDs or tenant IDs for authorization.
-3. **RLS and ownership boundaries fail closed**: Row-Level Security policies, ownership checks, and API endpoints must deny access by default when authentication or tenant context is absent or invalid.
+2. **Tenant authorization from authenticated server identity**: Tenant authorization must always derive directly from trusted authenticated database or server identity (such as `auth.uid()`, verified JWT claims, server-resolved tenant membership, or approved server contracts). Never trust browser-supplied user IDs, tenant IDs, or business IDs for authorization. Service-role usage is an infrastructure capability, not the default domain authorization model; privileged code must still validate actor and tenant context before lifecycle mutations.
+3. **RLS and ownership boundaries fail closed**: Row-Level Security policies, ownership checks, and API endpoints must deny access by default when authentication or tenant context is absent or invalid. Protected tenant data denies anonymous access by default. Intentional public surfaces (such as published Builder runtime or public intake/lead submission) must be narrowly scoped to canonical contracts, expose only the minimal necessary data, and be tested adversarially.
 4. **Optimistic concurrency for stale-write protection**: Use optimistic concurrency controls (such as version columns or updated timestamps) wherever stale overwrites would cause data loss.
 5. **Explicit loading, error, and conflict states**: User interfaces and API consumers must handle loading, errors, and concurrency conflicts explicitly. Silent last-write-wins data corruption is prohibited.
 6. **No parallel systems without approval**: Do not introduce parallel authentication, persistence, or duplicate domain architectures without explicit architectural approval.
