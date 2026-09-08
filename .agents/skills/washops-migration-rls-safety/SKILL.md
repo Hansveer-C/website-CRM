@@ -6,7 +6,7 @@ description: Validates database migrations and Row-Level Security (RLS) policies
 # WashOps Migration and RLS Safety
 
 ## Purpose
-Ensures database migrations and Row-Level Security (RLS) policies adhere to WashOps CRM data architecture invariants: fail-closed access, tenant isolation, anonymous denial, server-authoritative mutations, and deterministic replay from a clean baseline. Prevents accidental production data loss and unauthorized data access.
+Ensures database migrations and Row-Level Security (RLS) policies adhere to WashOps CRM data architecture invariants: fail-closed access, tenant isolation, protected-data anonymous denial, narrowly controlled canonical public access where explicitly required, server-authoritative mutations, and deterministic replay from a clean baseline. Prevents accidental production data loss and unauthorized data access.
 
 ## Triggers
 - Authoring or modifying database schema, migrations, or DDL scripts.

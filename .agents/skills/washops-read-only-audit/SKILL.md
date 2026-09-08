@@ -6,7 +6,11 @@ description: Conducts an evidence-based, strictly read-only audit of WashOps CRM
 # WashOps Read-Only Audit
 
 ## Purpose
-Executes a rigorous, evidence-backed inspection of the WashOps CRM codebase without modifying any files, state, or configurations. Evaluates actual repository behavior against requirements, architectural invariants, or design plans while categorizing findings by epistemic certainty.
+Executes a rigorous, evidence-backed inspection of the WashOps CRM codebase while enforcing strict non-mutation boundaries:
+- Prohibits any worktree, index, project-file, database, deployment, production, or remote-system mutations.
+- Safe local Git metadata refresh such as `git fetch origin` is permitted solely for evidence and baseline verification against upstream state.
+
+Evaluates actual repository behavior against requirements, architectural invariants, or design plans while categorizing findings by epistemic certainty.
 
 ## Triggers
 - Pre-implementation architectural investigation or codebase exploration.
