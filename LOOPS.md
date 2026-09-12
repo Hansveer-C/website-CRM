@@ -1,125 +1,23 @@
-# WashOps CRM — Bounded Loops
+# WashOps CRM — Bounded Decision Loops
 
-This document defines the standard bounded feedback loops for WashOps CRM development. All agent and human workflows must operate within these bounded loops to prevent runaway iterations, thrashing, and scope creep.
+Skills define procedure. These loops decide only whether current evidence permits a repair pass. They never authorize scope expansion, merging, deployment, production mutation, destructive work, credential use, or a security-policy exception.
 
----
+## Implementation
 
-## 1. Implementation Verification Loop
+**PASS:** focused and risk-proportionate broader checks have current evidence; the final diff is in scope; no material contract or invariant violation remains.
 
-Used during direct feature development, bug fixes, or documentation tasks to ensure changes satisfy requirements without destabilizing the system.
+**REPAIR:** make at most two causally justified, in-scope repair passes after the initial implementation. Stop instead when a failure repeats without progress, a repair creates a systemic failure, or resolution requires a broader contract/architecture decision.
 
-### Loop Flow
+**HUMAN GATE:** a domain/API/architecture change, uncertainty about tenant isolation or a security boundary, production infrastructure or credentials, or destructive data/schema work.
 
-```
-IMPLEMENT
-  │
-  ▼
-FOCUSED TEST
-  │
-  ▼
-DIAGNOSE
-  │
-  ▼
-REPAIR
-  │
-  ▼
-RETEST
-```
+## PR review and repair
 
-### Iteration Bound
-- **Maximum**: Initial implementation plus **2 repair passes** (total of 3 test execution cycles).
+Use `pr-review` for a normal material review. Add `adversarial-review` only for auth/authz, tenant isolation, migrations or consequential shared contracts, credentials/secrets, publication/approval authority, irreversible external actions, financial lifecycle, consequential concurrency/idempotency, or a major security boundary.
 
-### Success Criteria
-- Focused checks and unit tests for the specific change pass cleanly.
-- Required relevant broader checks (integration, build, or typecheck gates) pass.
-- No unresolved material contract violations or regressions.
+The reviewer returns evidence-backed findings and does not implement a competing fix. With explicit fix authority, allow at most two fix/re-review cycles. Stop for an unresolved high-risk finding, a material contract contradiction, or repeated disagreement. Merging remains human-gated.
 
-### Plateau Conditions (Stop Immediately)
-- The same failure recurs twice across iterations without progress.
-- A repair pass introduces an equivalent or new systemic failure in previously working code.
-- Resolving the failure requires expanding scope or changing established contracts beyond the assigned task.
+## Migration / RLS
 
-### Human Escalation Triggers
-- Any required change to a domain, API, or architectural contract.
-- Uncertainty regarding security boundaries or tenant isolation.
-- Any operation touching production infrastructure or credentials.
-- Any destructive data or schema modification.
+Use `washops-migration-rls-safety` with the global Supabase/Postgres guidance. PASS requires a deterministic clean local replay plus evidence that protected data fails closed, anonymous access is denied by default, cross-tenant access is blocked, and sensitive lifecycle mutations remain server-authoritative. Allow at most two local repair passes after the initial run.
 
----
-
-## 2. Independent PR Review Loop
-
-Used for code review and adversarial inspection prior to merging PRs into canonical branches.
-
-### Loop Flow
-
-```
-PR CREATED / UPDATED
-  │
-  ▼
-INDEPENDENT ADVERSARIAL REVIEW
-  │
-  ▼
-VALIDATE FINDINGS (Evidence Gathering)
-  │
-  ▼
-OWNER FIXES (Author Lane)
-  │
-  ▼
-INDEPENDENT RE-REVIEW
-```
-
-### Iteration Bound
-- **Maximum**: **2 fix/re-review cycles** between reviewer and author.
-
-### Reviewer Boundary
-- The reviewer returns structured findings to the author/owner lane.
-- The reviewer must **not** independently implement a competing fix unless explicitly reassigned by a human lead.
-
-### Escalation Triggers
-- Fundamental architectural disagreement between author and reviewer.
-- Unresolved high-risk or critical security finding.
-- Ambiguity or contradiction in canonical contracts or specifications.
-- Repeated review/fix disagreement after 2 full review cycles.
-
----
-
-## 3. Migration / RLS Safety Loop
-
-Used for all database schema changes, migrations, and Row-Level Security (RLS) policy definitions.
-
-### Loop Flow
-
-```
-MIGRATION CREATED
-  │
-  ▼
-CLEAN LOCAL REPLAY (from baseline / zero state)
-  │
-  ▼
-RLS / TENANT-ISOLATION VALIDATION
-  │
-  ▼
-REPAIR
-  │
-  ▼
-REPLAY / RETEST
-```
-
-### Iteration Bound
-- **Maximum**: Initial migration plus **2 repair passes** during local validation.
-
-### Verification Requirements
-- Clean, deterministic local migration replay without manual intervention.
-- Automated or scripted validation of tenant isolation:
-  - Default fail-closed policy.
-  - Anonymous access denied.
-  - Cross-tenant data access prevented.
-  - Server-authoritative mutation boundaries enforced.
-
-### Always Human-Gated Operations (Strict Prohibition on Autonomous Execution)
-- Production database migration execution.
-- Production migration-ledger repairs or overrides.
-- Destructive DDL operations (e.g., dropping tables, columns, or constraints).
-- RLS policy broadening or loosening access restrictions.
-- Production data backfills, mutations, or manual data patches.
+Production migrations or ledger repairs, destructive DDL, RLS broadening, production backfills/data patches, and production credentials are human-gated and never part of this loop.

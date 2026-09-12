@@ -107,12 +107,13 @@ When the corresponding user-scoped skills are available, route work through the 
 
 | Task | Use, in order |
 | --- | --- |
-| Repository write work | `repository-baseline` → `bounded-implementation` → `parallel-handoff` |
-| Bug/regression with unproven cause | `repository-baseline` → `diagnostic-debugging`; add `bounded-implementation` only when repair is authorized → `parallel-handoff` |
-| Read-only audit | `repository-baseline` → `read-only-audit` → `parallel-handoff` |
-| Material PR/change review | `repository-baseline` → `pr-review`; add `adversarial-review` when risk warrants it → `parallel-handoff` |
+| Repository write work | `repository-baseline` → `bounded-implementation` |
+| Bug/regression with unproven cause | `repository-baseline` → `diagnostic-debugging`; add `bounded-implementation` only when repair is authorized |
+| Read-only audit | `read-only-audit`; add `repository-baseline` only when fresh repository state materially affects the finding |
+| Material PR/change review | `pr-review`; add `adversarial-review` only when the concrete risk warrants it |
 | Supabase/Postgres work | add global `supabase-postgres-best-practices`; for schema/RLS changes also use local `washops-migration-rls-safety` |
 | External tools/dependencies | `external-tool-pilot` plus the applicable route |
+| Handoff | `parallel-handoff` only for an actual cross-lane, cross-session/compaction, or explicit human handoff |
 
 Do not add a new project-local skill until confirming that its behavior cannot be expressed as a reusable global skill plus these repository instructions. Do not duplicate a global skill under a `washops-*` name merely to restate generic procedure.
 
