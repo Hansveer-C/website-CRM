@@ -98,3 +98,22 @@ These routing rules are repository-level safety instructions and apply before im
 15. **Single ownership of shared artifacts**: Exactly one owner/lane per shared database migration and per shared domain/API contract at any given time.
 16. **Protected and shared file declarations**: Concurrent agents and branches must explicitly declare protected and shared files in their handoff or execution bounds.
 17. **Human-gated release operations**: Merging to canonical branches, production deployments, production database mutations, and security-policy exceptions are strictly human-gated.
+
+## Skill architecture
+
+Skill placement is **global-first**. Generic engineering procedures and reusable vendor/domain guidance belong in the user-scoped Codex skill layer, not in this repository. WashOps keeps only skills whose procedure materially depends on WashOps-specific contracts, architecture, data boundaries, or release workflow.
+
+When the corresponding user-scoped skills are available, route work through the smallest applicable set:
+
+| Task | Use, in order |
+| --- | --- |
+| Repository write work | `repository-baseline` → `bounded-implementation` → `parallel-handoff` |
+| Bug/regression with unproven cause | `repository-baseline` → `diagnostic-debugging`; add `bounded-implementation` only when repair is authorized → `parallel-handoff` |
+| Read-only audit | `repository-baseline` → `read-only-audit` → `parallel-handoff` |
+| Material PR/change review | `repository-baseline` → `pr-review`; add `adversarial-review` when risk warrants it → `parallel-handoff` |
+| Supabase/Postgres work | add global `supabase-postgres-best-practices`; for schema/RLS changes also use local `washops-migration-rls-safety` |
+| External tools/dependencies | `external-tool-pilot` plus the applicable route |
+
+Do not add a new project-local skill until confirming that its behavior cannot be expressed as a reusable global skill plus these repository instructions. Do not duplicate a global skill under a `washops-*` name merely to restate generic procedure.
+
+If a referenced global skill is unavailable, do not pretend it ran. Continue only when these repository instructions provide an equivalent safe gate; otherwise stop and identify the missing capability.
