@@ -1,0 +1,98 @@
+{
+  "schema_version": "washops-control-plane-pilot-planning-v1",
+  "project_id": "washops",
+  "namespace": "cp:washops",
+  "canonical_repository": "Hansveer-C/website-CRM",
+  "document_purpose": "Project-owned planning authority candidate for exactly one bounded Automation Control Plane integration pilot; not a replacement WashOps CRM product roadmap.",
+  "authority": {
+    "scope": "single-control-plane-pilot-only",
+    "adoption_state": "PROPOSED_PENDING_PROJECT_OWNER_REVIEW_AND_MERGE",
+    "source_ref": "github://Hansveer-C/website-CRM#DOCS/control-plane-pilot.json",
+    "product_planning_reference": "CRM Roadmap.ods",
+    "supersedes_product_roadmap": false,
+    "automatic_promotion_to_control_plane": false,
+    "executable_roadmap_authority": false,
+    "acceptance_required": "Separate WashOps-owner acceptance of the exact merged document and separately authorized Control Plane identity/adapter registration. Approval of this planning proposal never authorizes a run."
+  },
+  "current_control_plane_boundary": {
+    "lifecycle": "PARKED",
+    "hermes_profile": "washops-operator",
+    "hermes_binding_enabled": false,
+    "registered_roadmap_authority_available": false,
+    "routing_enabled": false,
+    "execution_authorized": false,
+    "automatic_continuation_authorized": false
+  },
+  "bounded_units": [
+    {
+      "unit_id": "washops-browser-boundary-static-assessment",
+      "status": "PLANNED_NOT_ELIGIBLE",
+      "title": "Static assessment of WashOps browser/server boundary test coverage",
+      "objective": "Evaluate the existing browser-bundle boundary test against the documented frontend/server separation without executing application code, changing files, or claiming runtime bundle safety.",
+      "task_class": "read-only-audit",
+      "risk_class": "LOW",
+      "proposed_backend": "hermes",
+      "dependencies": [],
+      "source_scope": [
+        "src/browser_bundle_boundary.test.ts",
+        "src/main.ts",
+        "vite.config.ts",
+        "DOCS/ARCHITECTURE.md",
+        "AGENTS.md",
+        "LOOPS.md",
+        "package.json",
+        "vitest.config.ts"
+      ],
+      "allowed_actions": [
+        "Confirm canonical WashOps repository identity and immutable source revision.",
+        "Read only the declared source scope and directly referenced source files necessary to assess static imports.",
+        "Inspect supported frontend/server boundary declarations and report observed static coverage limitations.",
+        "Produce deterministic path/line findings and a structured factual handoff."
+      ],
+      "forbidden_actions": [
+        "Do not run npm test, Vitest, builds, dependency installs, scripts, application imports or application code.",
+        "Do not access production or local databases, Supabase, tenant records, credentials, or environment secrets.",
+        "Do not modify any repository/worktree file, policy, branch, configuration, dependency or application behavior.",
+        "Do not call application endpoints, browse external sites, message users, deploy, publish or merge.",
+        "Do not touch open invoice/PDF PR #48 or shared invoice/storage/migration contracts.",
+        "Do not delegate mutating work, retry, resume, or start another work unit."
+      ],
+      "execution_bounds": {
+        "max_attempts": 1,
+        "runtime_budget_minutes": 15,
+        "max_pages": 0,
+        "max_targets": 1,
+        "checkpointing": {
+          "mode": "terminal-only",
+          "resume_allowed": false
+        },
+        "terminal_states": [
+          "PASS",
+          "BLOCKED",
+          "HUMAN_GATE",
+          "MAX_RETRIES"
+        ]
+      },
+      "acceptance_criteria": [
+        "Exact project, namespace, immutable commit and scope are verified before assessment.",
+        "Findings cite exact source paths/lines and separate what the test checks from what it cannot prove.",
+        "Any remote-model, authenticated GitHub, or durable-witness transport needed for a future admitted run is explicitly disclosed and separately authorized.",
+        "Trusted admission and native Hermes run/session IDs are correlated with exactly one durable normalized terminal receipt; a model assertion or STARTED state alone is not completion.",
+        "Structured validations, explicit completeness, changed_scope: [] and before/after unchanged target state are independently checked.",
+        "No execution continues after the assessment; human reviews the result, and any next unit requires new authority."
+      ],
+      "prerequisites": [
+        "Project owner accepts this pilot source and unit after review/merge; acceptance does not imply eligibility.",
+        "Confirm no active conflicting WashOps lane or mutable shared-contract ownership, including PR #48.",
+        "Control Plane's applicable Windows source-verification PR #38 is separately reviewed and merged before reliance on that preparation path.",
+        "Control Plane source format adapter, identity, one-use admission/history and terminal evidence are separately implemented and independently verified offline.",
+        "Reliability gate and model-network/credential/host side-effect policy are explicitly adjudicated.",
+        "Control Plane lifecycle and backend policy remain parked/disabled until separate human approval to activate this one pilot.",
+        "Obtain fresh, exact, one-use human execution authorization after readiness and approval gates pass."
+      ],
+      "mutation_owner_before_activation": "none:read-only-planning",
+      "proposed_receipt_mutation_owner_after_separate_authorization": "backend:hermes/project:washops",
+      "execution_authorized": false
+    }
+  ]
+}
