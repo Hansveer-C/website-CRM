@@ -3,16 +3,16 @@
   "project_id": "washops",
   "namespace": "cp:washops",
   "canonical_repository": "Hansveer-C/website-CRM",
-  "document_purpose": "Project-owned planning authority candidate for exactly one bounded Automation Control Plane integration pilot; not a replacement WashOps CRM product roadmap.",
+  "document_purpose": "Project-owned planning reference accepted solely for one proposed Automation Control Plane integration pilot; not a replacement WashOps CRM product roadmap and not executable authority.",
   "authority": {
     "scope": "single-control-plane-pilot-only",
-    "adoption_state": "PROPOSED_PENDING_PROJECT_OWNER_REVIEW_AND_MERGE",
+    "adoption_state": "ACCEPTED_FOR_PILOT_PLANNING_ONLY",
     "source_ref": "github://Hansveer-C/website-CRM#DOCS/control-plane-pilot.json",
     "product_planning_reference": "CRM Roadmap.ods",
     "supersedes_product_roadmap": false,
     "automatic_promotion_to_control_plane": false,
     "executable_roadmap_authority": false,
-    "acceptance_required": "Separate WashOps-owner acceptance of the exact merged document and separately authorized Control Plane identity/adapter registration. Approval of this planning proposal never authorizes a run."
+    "acceptance_required": "The operator accepted the single project-owned pilot planning definition after PR #51 merged. Separate human approvals remain mandatory for Control Plane roadmap registration, identity/adapter modifications, backend activation, admission, any model or infrastructure side effects, and each live run."
   },
   "current_control_plane_boundary": {
     "lifecycle": "PARKED",
@@ -82,9 +82,9 @@
         "No execution continues after the assessment; human reviews the result, and any next unit requires new authority."
       ],
       "prerequisites": [
-        "Project owner accepts this pilot source and unit after review/merge; acceptance does not imply eligibility.",
+        "Planning-only acceptance is recorded in this document; this is not execution, backend, registration, or lifecycle authorization.",
         "Confirm no active conflicting WashOps lane or mutable shared-contract ownership, including PR #48.",
-        "Control Plane's applicable Windows source-verification PR #38 is separately reviewed and merged before reliance on that preparation path.",
+        "Control Plane PR #38 is merged at 1a8ddcd4c1964e00c99d350f71dda2dd62c10309; any runtime use still requires independent source/version readiness verification.",
         "Control Plane source format adapter, identity, one-use admission/history and terminal evidence are separately implemented and independently verified offline.",
         "Reliability gate and model-network/credential/host side-effect policy are explicitly adjudicated.",
         "Control Plane lifecycle and backend policy remain parked/disabled until separate human approval to activate this one pilot.",
