@@ -1,5 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": {
+      "codex/c04-property-domain": false
+    }
+  },
   "routes": [
     { "handle": "filesystem" },
     { "src": "/api(?:/.*)?", "dest": "/api/not-found" },
