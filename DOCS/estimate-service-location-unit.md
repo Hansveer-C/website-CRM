@@ -750,7 +750,7 @@ Do not represent this as a confirmed explanation of the hosted rejection;
 repeat the normal hosted flow after a reviewed release before closing it.
 
 Validation, independent review and draft-publication evidence follow below.
-No merge or hosted fixture mutation is authorized for this correction unit.
+At this candidate checkpoint, merge and hosted fixture mutations were held.
 
 Local validation: 108/108 affected regressions across ten files PASS; app/API
 type checks and actual production build PASS. Production-build Playwright suite
@@ -765,3 +765,199 @@ Independent review corrected nullable due-date handling; final working diff
 PASS with 17/17 independently executed contact/composer tests. No migration or
 configuration files changed. The local stack retains 56 migration versions;
 this candidate has zero pending SQL. Hosted contact/quote retest remains open.
+
+### PR62 automatic release verification
+
+Subsequent owner delegation authorized release of reviewed head
+`f16872ff56ca882faf4d47c64ceb5a3bcc4e63fa` only. Immediately before release,
+main/base remained `cab1d53b5333d4836949ae3a1d10651152ed6760`, exact-head independent
+review PASS and all ten CI jobs PASS (run `39673041538`). Six-file diff remained
+unchanged, with no migration/API-handler/configuration changes. PR62 merged at
+20:49:40 UTC on October 21 as `e976a250cd19083cc93d3292b9ea66f3c7960eef`; its tree
+matches the reviewed head exactly. PR48 and draft PR58 were unchanged.
+
+Vercel production deployment `dpl_HYRWkY8Cwy91vZNUr2g7veNRUasP` reached READY
+for that exact main SHA and assigned `website-crm-one.vercel.app`:
+https://vercel.com/hans-says-projects/website-crm/HYRWkY8Cwy91vZNUr2g7veNRUasP
+The live page and `/assets/index-vHpsi5Vn.js` return HTTP 200; the live asset
+contains the new contact unavailable and nullable activity states. Exact-SHA
+Supabase integration check (named "Supabase Preview" by the app even on main)
+completed success at 20:50:18 UTC; connected project remains ACTIVE_HEALTHY.
+
+Read-only pre/post metadata on project `jkwfocgqgltdmprhdmji`: ledger 56, latest
+`20261021054957`, version digest `92dc3533d42950746420ac1b4e38b6fa` unchanged.
+The same catalog-only table/RLS/column/ACL/policy/function/default-grant digest
+remained `db21d695ef59d73d3c153c72fa82459a` before merge and after terminal
+integration success. No hosted records were read or mutated, and no manual SQL
+mutation, credentials, settings, provider actions or charges were introduced.
+
+Remaining gate: parent's normal authenticated hosted UI retest against its
+preserved synthetic contact, including View/reload/back and the reported Basic
+Qty 1 / Price 1 quote creation path. Static release smoke and successful local
+tests do not establish that the exact hosted quote rejection is resolved.
+This verification record is committed locally only; no second release implied.
+
+### Hosted private-flow verification supplied by parent after PR62
+
+Parent reports normal authenticated production UI verification on the released
+PR62 app. This lane did not independently repeat those hosted mutations.
+Synthetic contact `bcc17ea5-4bf9-4304-9a3a-7d886bef848a` now opens through View,
+survives full reload, and returns to the contact list. Normal Quotes > New quote
+saved draft `33d737ba-07e8-4576-8d84-799aac8b8f89` with Basic service
+"QA driveway wash — synthetic draft only", quantity 1, price 1 and total $1.
+The hosted check explicitly pressed Tab to blur: it does NOT independently
+establish without-blur behavior. Without-blur synchronization remains supported
+by the separate local production-browser red/green regression above.
+
+Parent created service location `5a40cabf-861c-4198-8965-b7e6d0583427`, label
+"QA service location 20261021 2030", and associated it using Save service location.
+Back/reopen and full reload preserve selection; Save remains disabled until a
+change. No send, acceptance, provider action, website terms acceptance or site
+generation occurred. The reported quote rejection did not recur on this tested
+explicit-blur path; do not generalize that result to every input mechanism.
+This closes the bounded hosted contact/draft/location private-flow check, not
+acceptance, invoicing, jobs, payments or communication-first MVP completion.
+
+### Next proposed production-usable unit — persistent contact notes
+
+Planning only; no implementation or release authorized by this record. Reviewed
+the canonical workbook's current-status tab, its evidence overlay, current main
+`e976a250`, existing worktrees and open PRs. PR48 and draft PR58 remain separate;
+no competing contact-note implementation was found. The accumulated local history
+feature still requires a DEV/loopback QA gate and is not a released inbox.
+
+Recommend the existing Contact Detail Note action persisting an internal note
+to the existing `activities` table and showing it through the released owned
+activity read. `main.ts` currently refuses production activity creation/updates;
+`activities_repo.ts` is server-only legacy caller-supplied upsert/mock fallback,
+not a safe browser adapter. No existing note-creation RPC was found in migrations.
+Existing schema already has note description, nullable due date and a server
+`created_at`; reuse these rather than creating a parallel conversation store.
+This is immediately usable for manually recording a customer conversation; it
+does not send, simulate delivery, provision a number or claim live communications.
+
+Minimum proposed contract: authenticated server-derived owner, same-owner contact
+validation inside the transaction, bounded nonblank text, fixed note type and
+server creation time. Stable request identity must provide atomic same-payload
+replay and reject changed-payload/foreign-owner reuse without overwriting another
+activity. Account for existing owner CRUD when designing the replay ledger: an
+edited/deleted activity must not become a silently successful unchanged replay.
+Return minimal safe activity fields; no request fingerprint/private metadata.
+Keep existing contact/user cascade semantics, with no new retention or independent
+history promise. No note edit/delete, task scheduling, quote status, call/SMS or
+team assignment scope. Present actual created time distinctly from a due date.
+
+Ordinary production UI acceptance: open owned contact > Note > enter/save text >
+exactly one persisted activity appears and survives reload; validation/cancel
+causes no write, double click coalesces, lost response retains the retry key/text,
+denied permissions are recoverable, and late results never repaint another contact
+or account. Mobile keyboard/focus and escaped multiline text are required.
+No QA-only route/flag, fixture contact prerequisite or privileged frontend client.
+
+Test plan before release: isolated full-chain Supabase replay plus SQL tests for
+anonymous/foreign contact/foreign request denial, malformed text, concurrent replay,
+payload conflict, edited/deleted source and contact-deletion races. Real local
+production-build Auth/UI flow starts with no CRM seed, creates lead normally,
+saves/cancels/retries note and verifies persistence, account/navigation isolation
+and zero outbound requests. Run affected hydration/contact/XSS/operation-guard
+regressions, app/API types/build and independent exact-head review. Then staged
+draft/CI/release assessment, expected additive migration inventory/ACL comparison
+and rollback limits, followed by separately authorized normal hosted synthetic QA.
+
+No new credentials, external access, paid provider, number purchase or commercial
+decision is needed to implement/test this proposal locally. Any additive RPC and
+its narrow authenticated execution grant require the existing schema/security
+review and explicit release gate; no blanket access-policy exception is proposed.
+Live communication still separately needs approved sender/use case/consent and
+recipient/spend limits, provider verification/configuration and activation approval.
+New-draft delivery/sent/acceptance semantics, PR58 production usability, PR48 PDF,
+jobs/scheduling, payments, team permissions and launch documentation remain open.
+
+### Persistent contact notes — implemented local draft candidate
+
+Supersedes the proposal-only status above for this bounded implementation.
+Base/main inspected: `e976a250cd19083cc93d3292b9ea66f3c7960eef`; open PR48/58
+and all prior worktrees preserved. The two local documentation-only records above
+are carried forward into this draft; no unrelated product implementation is imported.
+
+- [x] Ordinary authenticated Contact Detail > Note opens a visible accessible form.
+  Save persists an internal `note` in existing `activities`; cancel/Escape writes
+  nothing. Text renders escaped and multiline, with server creation time distinct
+  from an absent due date. Contact-list latest activity recognizes undated notes.
+  No DEV/loopback activation flag or server-only legacy repository import.
+- [x] `create_crm_contact_note(uuid,text,text)` derives its owner from `auth.uid()`;
+  locks and validates an owned contact, trims boundary whitespace, bounds text and
+  atomically creates the activity plus an owner/request retry record. No browser
+  owner argument, external send, status transition, or note edit/delete feature.
+- [x] Concurrent replay uses the same result; changed payload is rejected. Deleted
+  or owner-edited source activity cannot silently become an unchanged replay.
+  Existing contact/user cascade and owner activity CRUD remain unchanged; no
+  immutable/independent note-history or retention guarantee is introduced.
+- [x] Same-tab session storage retains only an interrupted note's text/contact/key,
+  not credentials. It survives reload until confirmed, is scoped by verified owner
+  and contact, and clears on verified sign-out/account change. Blocked storage
+  prevents a fresh RPC; retry-storage failure preserves an already-uncertain key.
+  Late completion cannot erase a newer request. Tab closure/sign-out ends this
+  browser recovery boundary; reload history before manually starting another note.
+- [x] Saving disables duplicate submit/cancel/edit. Unknown outcomes preserve the
+  request; permission/validation failures keep text repairable. Contact/account
+  navigation guards prevent late repaint. Missing RPC during schema rollout keeps
+  text repairable and does not call a different persistence path.
+
+Only migration: `20261021210325_create_crm_contact_note.sql`. It adds private
+hash-only `crm_contact_note_requests` with RLS/no client/service-role table grants
+and the narrow authenticated RPC. Response excludes owner/request/fingerprint
+metadata. It adds no column, backfill, existing-table grant or policy exception.
+Tombstones contain contact/activity IDs, server time and request hash, not a note
+copy; they survive source deletion to prevent retry resurrection, and cascade on
+owner deletion. This is local schema 57 against hosted/main schema 56.
+
+Executed verification on this composition:
+
+- [x] Clean complete 57-version Supabase replay (no seed, no hosted connection).
+- [x] Transactional `supabase/tests/crm_contact_note.test.sql`: actual anon denial,
+  owner/foreign/missing-contact authorization, private-ledger denial/RLS, invalid
+  and Unicode whitespace inputs, safe response, create/replay, payload conflict,
+  owner-edited/deleted activity, cross-owner key reuse and source-delete tombstone.
+  SQL fixtures rolled back.
+- [x] `supabase/tests/crm_contact_note_concurrency.mjs`: five observed real lock
+  races — concurrent identical replay, payload conflict, contact-delete first,
+  note-create first followed by contact deletion, and activity deletion after a
+  locked replay. Fixtures cleaned. Requires explicit local opt-in and owned
+  loopback database URL; never supply a hosted URL or print credentials.
+- [x] 134/134 affected regressions across 11 files; app/API types and production
+  builds PASS. Independent current implementation review PASS with 37/37 tests.
+  Review found and corrected uncertain retry-key loss on storage failure; its
+  navigation test setup now mirrors actual beginUnbound/bindCurrent semantics.
+- [x] Real local production-build Auth/browser note scenario 1/1 PASS (12.0s),
+  starting with Auth profiles only and zero CRM records. Normal UI creates the
+  contact, saves/cancels a note, injects a denied execute permission, double-clicks,
+  loses the real committed RPC response, reloads and replays the same key, verifies
+  escaped XSS/multiline text, mobile/keyboard use and contact/account races. The
+  initial harness's network-idle wait was corrected because a deliberately held
+  request cannot become idle; no application assertions were weakened.
+- [x] Existing actual production-build empty-account lead/quote/property/contact
+  regression 3/3 PASS (19.1s) against the same 57-version composition. All browser
+  requests are restricted to exact owned app/backend loopback origins; specialized
+  handlers revalidate origin/path before fetching. No external messages, calls,
+  acceptance, invoice creation, site generation or terms acceptance occurred.
+
+SQL/concurrency/browser suites are opt-in local evidence, not claims that the
+existing GitHub workflow automatically executes them. Exact committed-head review,
+normal draft push and exact-head CI are publication gates. No merge this unit.
+Before any later merge, recheck main/head/review/CI, exact one-version migration
+delta and narrow ACLs, then monitor both automatic integrations. Git revert can
+remove UI wiring; it does not undo additive SQL, stored notes or retry tombstones.
+Dropping objects/deleting stored data would be a separate destructive action;
+no downgrade SQL, production migration or cleanup is authorized here. Hosted
+normal-UI note verification remains a later release gate. This does not activate
+telephony, provision a business number, complete the inbox or resolve PR48/58.
+
+Post-test local metadata: Auth fixtures 0, race profiles 0, ledger 57/latest
+`20261021210325`, note RPC authenticated execute true/anon false, private-ledger
+authenticated/service-role SELECT false, ledger RLS true, lead execute restored.
+PR58 still contains the older unpublished migration
+`20261021064220_read_accepted_quote_invoice_evidence.sql`. If notes lands first,
+that later release must reconcile migration ordering against the new ledger;
+do not bulk-merge the old local stack or manually repair hosted history. PR58 is
+unchanged here and is not a prerequisite for notes.

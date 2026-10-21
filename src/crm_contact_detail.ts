@@ -12,7 +12,7 @@ export function resolveHydratedContact(userId: string, loadedUserId: string | un
 export function renderHydratedContactActivity(userId: string, contactId: string, ready: boolean, activities: Activity[]): string {
   if (!userId || !ready) return '<p role="status">Activity could not be loaded. Retry CRM data loading.</p>';
   const owned = activities.filter(item => item.user_id === userId && item.contact_id === contactId)
-    .sort((a,b) => (b.due_date ?? '').localeCompare(a.due_date ?? '') || a.id.localeCompare(b.id));
-  return owned.map(item => `<div class="wo-contact-detail-timeline-item"><div>${escapeHtmlText(item.description)}</div><span>${item.due_date ? `Due: ${escapeHtmlText(item.due_date)}` : 'No due date'}</span></div>`).join('')
+    .sort((a,b) => (b.created_at ?? b.due_date ?? '').localeCompare(a.created_at ?? a.due_date ?? '') || a.id.localeCompare(b.id));
+  return owned.map(item => `<div class="wo-contact-detail-timeline-item"><div class="wo-contact-note-text">${escapeHtmlText(item.description)}</div>${item.created_at ? `<span>Created: ${escapeHtmlText(item.created_at)}</span>` : ''}<span>${item.due_date ? `Due: ${escapeHtmlText(item.due_date)}` : 'No due date'}</span></div>`).join('')
     || '<p class="wo-contact-detail-empty">No activities recorded.</p>';
 }

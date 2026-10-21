@@ -38,6 +38,7 @@ export interface Opportunity {
 }
 
 export interface Activity {
+  created_at?: string;
   id: string;
   user_id: string; // Ownership
   contact_id: string;

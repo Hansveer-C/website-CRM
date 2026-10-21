@@ -8,6 +8,11 @@ const foreign = { ...contact, id: 'c-foreign', user_id: 'other-user', name: 'For
 const base = { userId: owner, contacts: [contact, foreign], activities: [{ id: 'a-1', user_id: owner, contact_id: 'c-1', type: 'note' as const, description: 'Requested an estimate', due_date: '2026-08-21T12:00:00.000Z', completed: true }], query: '', filter: 'all' as const, now: new Date('2026-08-21T12:30:00.000Z') };
 
 describe('WashOps contacts interiors', () => {
+  it('shows a newly persisted undated note as latest activity using server creation time',()=>{
+    const html=renderClientsContent({...base,activities:[...base.activities,
+      {...base.activities[0],id:'new-note',due_date:'',created_at:'2026-08-22T12:00:00Z',description:'Latest persisted note'}]});
+    expect(html).toContain('Latest persisted note');expect(html).not.toContain('Requested an estimate');
+  });
   it('keeps the Clients list tenant scoped and preserves status filtering', () => {
     expect(filterContacts(base).map(item => item.id)).toEqual(['c-1']);
     expect(filterContacts({ ...base, filter: 'customer' })).toEqual([]);

@@ -26,7 +26,7 @@ function attentionRequired(contact: Contact): boolean {
 function activityForContact(activities: Activity[], userId: string, contactId: string): Activity | undefined {
   return activities
     .filter(activity => activity.user_id === userId && activity.contact_id === contactId)
-    .sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime())[0];
+    .sort((a,b)=>(b.created_at ?? b.due_date ?? '').localeCompare(a.created_at ?? a.due_date ?? '') || a.id.localeCompare(b.id))[0];
 }
 
 export function filterContacts(model: ContactsScreenModel): Contact[] {
@@ -142,6 +142,7 @@ export function renderContactDetailContent(model: ContactDetailModel): string {
       </section>
       <div class="wo-contact-detail-layout">
         <div class="wo-contact-detail-primary">
+          <div id="contact-note-root"></div>
           ${renderCard({ className: 'wo-contact-detail-info', headerHtml: '<h2 class="wo-contact-detail-section-title">Contact information</h2>', bodyHtml: `
             <div class="wo-contact-detail-info-grid">
               <label><span>Phone</span><input class="wo-field-input" type="tel" value="${escapeHtmlText(contact.phone ?? '')}" placeholder="Add phone" onchange="window.updateContactField('${contact.id}', 'phone', this.value)"></label>
