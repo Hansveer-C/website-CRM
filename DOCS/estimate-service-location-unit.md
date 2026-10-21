@@ -481,3 +481,56 @@ Exact-SHA Supabase check SUCCESS; fresh hosted ledger54/latestC04 unchanged.
 No manual retrigger, SQL mutation or settings change. Executor lacks dashboard
 session, so no detailed workflow-log claim is made. PR57 stays draft/unmerged;
 two-migration staged rollout and postdeployment authenticated test verification remain.
+
+## Isolated invoice conversion candidate (historical local proof follows)
+
+This next draft preserves the current main release evidence above. Only the original
+invoice conversion unit is selected; job/history/SMS and PR48 PDF code are excluded.
+The UI remains development-only, restricted to exact loopback QA origins.
+No production flag or hosted user flow is enabled by this draft.
+
+## Locally verified accepted-estimate invoice conversion — 2026-10-21
+
+Completed the bounded successor to the historical PR43 read-only scope. A separate
+accepted-estimate controller uses the existing invoice transaction; it does not use
+the legacy in-memory conversion. A narrow authenticated read-only evidence RPC
+projects the frozen selected-tier lines, accepted revision, normalized totals and
+existing invoice ID without exposing the private acceptance ledger. Current revision
+must equal accepted revision + 1. The browser never supplies invoice pricing.
+
+Stable request keys survive uncertain responses; duplicate clicks coalesce. Permission
+and revision failures stop conversion, retries preserve transaction identity, and
+navigation/account changes discard late UI results. Returned invoice lines and totals
+must match accepted evidence before success. View opens the hydrated persisted invoice.
+Legacy acceptances and PostgreSQL fractional rounding are covered.
+
+Release boundary: this component requires DEV, VITE_LOCAL_INVOICE_CONVERSION_QA=true,
+application origin http://127.0.0.1:4218 and Supabase https://127.0.0.1:56429 together.
+The production bundle remains fail-closed even with the flag enabled. The legacy
+production handler, PDF/payment/send guards and existing conversion RPC are unchanged.
+No remote publication, production migration or customer-side action occurred.
+
+Verification on synthetic isolated local data:
+- Clean replay of all 56 timestamped migrations passed with local Supabase/Storage.
+- Actual SQL suite: 79 assertions passed, transaction rolled back.
+- Affected regression suite: 218 tests across 15 files passed.
+- Application and API TypeScript checks passed; whitespace check passed. No repository
+  lint script is defined, so no separate lint result is claimed.
+- Real authenticated DEV browser suite: 2/2 passed; final conversion-only rerun 1/1
+  passed. Covered frozen premium pricing after live edits, double clicks, a committed
+  write with dropped response and same-key retry, existing invoice, stale revision,
+  actual local permission denial/restoration, navigation races and legacy conversion.
+- Actual production build with QA flag enabled: authenticated browser negative proof
+  1/1 passed (no conversion component/action). Build passed; existing large-bundle
+  warning remains (largest generated JavaScript 878,282 bytes).
+- Independent reviewer inspected final implementation and SQL rounding additions and
+  reported PASS with no material findings; independently ran 76 focused tests.
+
+Screenshots from actual local authenticated execution (synthetic data only):
+[Saved conversion](evidence/invoice-conversion-local-2026-10-21/local-invoice-conversion-saved.png)
+and [persisted invoice](evidence/invoice-conversion-local-2026-10-21/local-persisted-invoice-detail.png).
+
+Test opt-ins are WASHOPS_LOCAL_INVOICE_QA=true and, for the production negative proof,
+WASHOPS_LOCAL_PRODUCTION_QA=true. Execution-only host/config and temporary TLS artifacts
+are excluded from the deliverable. This completes local verification only; production
+wiring/release and the external integration-trigger gate remain unresolved.
