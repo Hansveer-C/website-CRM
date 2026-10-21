@@ -140,6 +140,60 @@ function isInvalidInputError(error: unknown): boolean {
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export interface ServicePropertyDraft {
+  serviceAddressLine1: string;
+  serviceAddressLine2?: string;
+  locality: string;
+  administrativeArea?: string;
+  postalCode?: string;
+  countryCode: string;
+  label?: string;
+}
+export interface ServicePropertyCreateInput extends ServicePropertyDraft { requestKey: string; contactId: string }
+export type CreatedServiceProperty = Omit<AcceptedServiceLocation, 'schema_version' | 'property_id'> & { id: string; contact_id: string; created_at: string };
+export interface ServicePropertyCreateResult { property: CreatedServiceProperty; replayed: boolean }
+
+export function normalizeServicePropertyDraft(input: ServicePropertyDraft): ServicePropertyDraft {
+  const text = (value: unknown) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
+  const normalized = { serviceAddressLine1: text(input.serviceAddressLine1), serviceAddressLine2: text(input.serviceAddressLine2), locality: text(input.locality), administrativeArea: text(input.administrativeArea), postalCode: text(input.postalCode), countryCode: text(input.countryCode).toUpperCase(), label: text(input.label) };
+  if (!normalized.serviceAddressLine1 || normalized.serviceAddressLine1.length > 200 || !normalized.locality || normalized.locality.length > 120
+    || !/^[A-Z]{2}$/.test(normalized.countryCode) || normalized.serviceAddressLine2.length > 200 || normalized.administrativeArea.length > 120 || normalized.postalCode.length > 32 || normalized.label.length > 120) {
+    throw new CrmMutationError('INVALID_INPUT', 'Enter a street address (up to 200 characters), city (up to 120), and two-letter country code. Check optional field lengths.');
+  }
+  return normalized;
+}
+
+/** Existing C04 RPC owns identity and persistence; never send browser owner IDs. */
+export async function createProductionServiceProperty(client: CrmMutationClient, input: ServicePropertyCreateInput): Promise<ServicePropertyCreateResult> {
+  const draft = normalizeServicePropertyDraft(input);
+  if (!uuidPattern.test(input.requestKey) || !input.contactId?.trim()) throw new CrmMutationError('INVALID_INPUT');
+  const response = await client.rpc('create_crm_property', {
+    p_request_key: input.requestKey, p_contact_id: input.contactId,
+    p_service_address_line1: draft.serviceAddressLine1, p_locality: draft.locality, p_country_code: draft.countryCode,
+    p_service_address_line2: draft.serviceAddressLine2 || null, p_administrative_area: draft.administrativeArea || null,
+    p_postal_code: draft.postalCode || null, p_label: draft.label || null
+  });
+  if (response.error) {
+    const code = object(response.error)?.code;
+    if (code === '42501') throw new CrmMutationError('INVALID_INPUT', 'This customer is unavailable or your access changed. Refresh before creating a service location.');
+    if (code === '22023') throw new CrmMutationError('INVALID_INPUT', 'Check the service-location address and try again.');
+    if (code === '23505') throw new CrmMutationError('CONFLICT', 'This request key was already used. Close and refresh before starting another location.');
+    throw new CrmMutationError('UNAVAILABLE');
+  }
+  const result = requireObject(response.data), row = requireObject(result.property);
+  const keys = ['id','contact_id','label','service_address_line1','service_address_line2','locality','administrative_area','postal_code','country_code','created_at'];
+  const optional = (key: string, max: number) => row[key] === null || (typeof row[key] === 'string' && (row[key] as string).length <= max);
+  if (Object.keys(result).some(key => !['property','replayed'].includes(key)) || typeof result.replayed !== 'boolean'
+    || Object.keys(row).some(key => !keys.includes(key)) || keys.some(key => !(key in row))
+    || typeof row.id !== 'string' || !uuidPattern.test(row.id) || row.contact_id !== input.contactId
+    || typeof row.service_address_line1 !== 'string' || !row.service_address_line1.trim() || row.service_address_line1.length > 200
+    || typeof row.locality !== 'string' || !row.locality.trim() || row.locality.length > 120
+    || typeof row.country_code !== 'string' || !/^[A-Z]{2}$/.test(row.country_code)
+    || !optional('label',120) || !optional('service_address_line2',200) || !optional('administrative_area',120) || !optional('postal_code',32)
+    || typeof row.created_at !== 'string' || !Number.isFinite(Date.parse(row.created_at))) throw new CrmMutationError('INVALID_RESPONSE');
+  return { property: row as unknown as CreatedServiceProperty, replayed: result.replayed };
+}
+
 /** Associates an existing quote without changing pricing or bypassing server identity. */
 export async function setProductionQuoteServiceProperty(
   client: CrmMutationClient,

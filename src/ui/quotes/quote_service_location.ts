@@ -1,5 +1,6 @@
 import { escapeHtmlText as escape } from '../../crm_html_output';
-import { CrmMutationError, readAcceptedServiceLocation, type AcceptedServiceLocation, type QuoteServicePropertyInput, type QuoteServicePropertyResult } from '../../crm_production_mutations';
+import { CrmMutationError, readAcceptedServiceLocation, type AcceptedServiceLocation, type QuoteServicePropertyInput, type QuoteServicePropertyResult, type ServicePropertyCreateInput, type ServicePropertyCreateResult } from '../../crm_production_mutations';
+import { ServicePropertyCreateController, renderServicePropertyCreate, mountServicePropertyCreate } from './service_property_create';
 import type { Quote, QuoteItem } from '../../types';
 import { renderCard } from '../primitives';
 
@@ -11,6 +12,7 @@ export interface LocationDependencies {
   current(): boolean;
   updateQuote(quote: Quote, items?: QuoteItem[]): void;
   requestKey(): string;
+  create?(input: ServicePropertyCreateInput): Promise<ServicePropertyCreateResult>;
 }
 export class QuoteServiceLocationController {
   data?: LocationData;
@@ -19,11 +21,23 @@ export class QuoteServiceLocationController {
   selected = '';
   private pending?: QuoteServicePropertyInput;
   private generation = 0;
-  constructor(readonly quoteId: string, readonly contactId: string, readonly userId: string, private dependencies: LocationDependencies, private changed: () => void = () => {}) {}
-  get busy() { return this.phase === 'saving'; }
-  get acceptanceBlocked() { return this.phase !== 'ready' || this.retryPending || this.selected !== (this.data?.quote.property_id ?? ''); }
+  readonly creator?: ServicePropertyCreateController;
+  constructor(readonly quoteId: string, readonly contactId: string, readonly userId: string, private dependencies: LocationDependencies, private changed: () => void = () => {}) {
+    if (dependencies.create) this.creator = new ServicePropertyCreateController(contactId, {
+      create: input => dependencies.create!(input), requestKey: () => dependencies.requestKey(),
+      current: () => dependencies.current() && this.phase === 'ready' && !this.pending && Boolean(this.data && ['draft','sent'].includes(this.data.quote.status)),
+      created: result => {
+        if (!this.data) return;
+        this.data = { ...this.data, locations: [...this.data.locations.filter(row => row.id !== result.property.id), result.property] };
+        this.selected = result.property.id;
+        this.message = 'Location created. Save service location to associate it with this estimate.';
+      }
+    }, () => { if (this.creator?.open) this.message = ''; this.changed(); });
+  }
+  get busy() { return this.phase === 'saving' || this.creator?.phase === 'saving'; }
+  get acceptanceBlocked() { return this.phase !== 'ready' || this.creator?.open === true || this.retryPending || this.selected !== (this.data?.quote.property_id ?? ''); }
   async load() {
-    if (this.busy) return;
+    if (this.busy || this.creator?.open) return;
     const generation = ++this.generation;
     this.phase = 'loading'; this.message = ''; this.changed();
     try {
@@ -43,11 +57,11 @@ export class QuoteServiceLocationController {
     }
     this.changed();
   }
-  select(id: string) { if (this.phase === 'ready' && !this.pending) { this.selected = id; this.message = ''; this.changed(); } }
-  cancel() { if (this.phase === 'ready' && !this.pending) { this.selected = this.data?.quote.property_id ?? ''; this.changed(); } }
+  select(id: string) { if (this.phase === 'ready' && !this.pending && !this.creator?.open) { this.selected = id; this.message = ''; this.changed(); } }
+  cancel() { if (this.phase === 'ready' && !this.pending && !this.creator?.open) { this.selected = this.data?.quote.property_id ?? ''; this.changed(); } }
   async save() {
     const quote = this.data?.quote;
-    if (this.phase !== 'ready' || !quote || !['draft', 'sent'].includes(quote.status)) return;
+    if (this.phase !== 'ready' || this.creator?.open || !quote || !['draft', 'sent'].includes(quote.status)) return;
     if (!this.pending && (!this.selected || this.selected === quote.property_id || !this.data?.locations.some(row => row.id === this.selected))) return;
     if (!Number.isInteger(quote.revision)) { this.phase = 'conflict'; this.message = 'Refresh this estimate before changing its service location.'; this.changed(); return; }
     this.pending ??= { quoteId: quote.id, expectedRevision: quote.revision!, propertyId: this.selected, requestKey: this.dependencies.requestKey() };
@@ -101,11 +115,12 @@ export function renderQuoteServiceLocation(controller: QuoteServiceLocationContr
       : `<p>${evidence.status === 'unassigned' ? 'No service location was assigned when this estimate was accepted.' : 'This older acceptance has no recorded service-location evidence.'}</p>`;
   } else if (data && ['draft', 'sent'].includes(data.quote.status)) {
     const saving = controller.busy;
-    const locked = saving || controller.retryPending;
+    const locked = saving || controller.retryPending || controller.creator?.open;
     const options = data.locations.map(row => `<option value="${escape(row.id)}" ${row.id === controller.selected ? 'selected' : ''}>${escape(address(row))}</option>`).join('');
-    content = data.locations.length ? `<label for="quote-service-location">Customer service location</label><select class="wo-field-select" id="quote-service-location" ${locked ? 'disabled' : ''}><option value="">Choose a service location</option>${options}</select><p>Choose where the work will take place. Saving updates this estimate before acceptance.</p><button type="button" class="wo-button wo-button--primary" data-location-save ${saving || !controller.selected || (!controller.retryPending && controller.selected === data.quote.property_id) ? 'disabled' : ''}>${saving ? 'Saving…' : controller.retryPending ? 'Retry save' : 'Save service location'}</button> <button type="button" class="wo-button wo-button--secondary" data-location-cancel ${locked ? 'disabled' : ''}>Cancel selection</button>` : '<p>No service locations are available for this customer. No address has been inferred from billing details.</p>';
-    if (!saving) content += refresh;
+    content = data.locations.length ? `<label for="quote-service-location">Customer service location</label><select class="wo-field-select" id="quote-service-location" ${locked ? 'disabled' : ''}><option value="">Choose a service location</option>${options}</select><p>Choose where the work will take place. Saving updates this estimate before acceptance.</p><button type="button" class="wo-button wo-button--primary" data-location-save ${saving || controller.creator?.open || !controller.selected || (!controller.retryPending && controller.selected === data.quote.property_id) ? 'disabled' : ''}>${saving ? 'Saving…' : controller.retryPending ? 'Retry save' : 'Save service location'}</button> <button type="button" class="wo-button wo-button--secondary" data-location-cancel ${locked ? 'disabled' : ''}>Cancel selection</button>` : '<p>No service locations are available for this customer. No address has been inferred from billing details.</p>';
+    if (!saving && !controller.creator?.open) content += refresh;
     if (controller.message) content += `<p role="alert">${escape(controller.message)}</p>`;
+    if (controller.creator && !controller.retryPending) content += renderServicePropertyCreate(controller.creator);
   } else content = '<p>Service-location changes are unavailable for this estimate status.</p>';
   return `<section class="wo-quote-location" aria-labelledby="quote-location-heading" aria-busy="${controller.phase === 'loading' || controller.busy}">${renderCard({ bodyHtml: `<h2 id="quote-location-heading">Service location</h2>${content}` })}</section>`;
 }
@@ -115,4 +130,5 @@ export function mountQuoteServiceLocation(root: HTMLElement, controller: QuoteSe
   root.querySelector('[data-location-save]')?.addEventListener('click', () => void controller.save());
   root.querySelector('[data-location-cancel]')?.addEventListener('click', () => controller.cancel());
   root.querySelector('[data-location-refresh]')?.addEventListener('click', () => void controller.load());
+  if (controller.creator) mountServicePropertyCreate(root, controller.creator);
 }
