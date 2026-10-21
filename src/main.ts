@@ -2644,10 +2644,16 @@ async function renderClients() {
   });
 
   try {
-    const response = await fetch('/api/contacts');
-    const result = await response.json();
-    const contacts: Contact[] = result.data || result;
     const userId = getActingUserId();
+    let contacts: Contact[];
+    if (editorUsesSupabase()) {
+      if (crmProductionHydrator.state.entities.contacts !== 'ready') throw new Error('Contacts unavailable');
+      contacts = mockContacts.filter(contact => contact.user_id === userId);
+    } else {
+      const response = await fetch('/api/contacts');
+      const result = await response.json();
+      contacts = result.data || result;
+    }
 
     renderAppWithShell({
       activeView: 'clients', title: 'Clients & Leads', contentVariant: 'wide', user: getCurrentShellUser(),
@@ -10533,21 +10539,19 @@ function renderNewQuote() {
     if (!navigationOperation) return;
     const quoteOperation = protectedAsyncOperationGuard.begin(`quote-ui:${requestKey}`, userId);
     try {
-      const response = await fetch('/api/quotes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          request_key: requestKey,
-          contact_id: nqcId,
-          opportunity_id: nqoId || null,
-          selected_tier: selectedTier,
-          notes,
-          items: nqItems.map((item: any) => ({ serviceName: String(item.service).trim(), description: item.description || '', quantity: item.quantity, unitPrice: item.price, tier: item.tier }))
-        })
+      const client = await getBuilderPublicationSupabaseClient();
+      if (!client) throw new Error('Quote creation is temporarily unavailable.');
+      const saved = await saveProductionQuote(client as unknown as CrmMutationClient, {
+        requestKey,
+        contactId: nqcId,
+        opportunityId: nqoId || undefined,
+        selectedTier,
+        notes,
+        items: nqItems.map((item: any) => ({ serviceName: String(item.service).trim(), description: item.description || '', quantity: item.quantity, unitPrice: item.price, tier: item.tier }))
       });
-      const payload = await response.json();
-      if (!response.ok || !payload.success) throw new Error(payload.error || 'Quote creation failed.');
-      const saved = payload.data;
+      if (saved.quote.user_id !== userId || saved.quote.contact_id !== nqcId
+        || saved.items.some(item => item.user_id !== userId || item.quote_id !== saved.quote.id)
+        || (saved.opportunity && saved.opportunity.user_id !== userId)) throw new Error('Quote creation returned unavailable account data.');
       const committed = protectedAsyncOperationGuard.commitIfCurrent(quoteOperation, getActingUserId(), () => {
         const quoteIndex = mockQuotes.findIndex(quote => quote.id === saved.quote.id);
         if (quoteIndex >= 0) mockQuotes[quoteIndex] = saved.quote;
@@ -10557,9 +10561,10 @@ function renderNewQuote() {
           if (itemIndex >= 0) mockQuoteItems[itemIndex] = item;
           else mockQuoteItems.push(item);
         }
-        if (saved.opportunity) {
-          const opportunityIndex = mockOpportunities.findIndex(opportunity => opportunity.id === saved.opportunity.id);
-          if (opportunityIndex >= 0) mockOpportunities[opportunityIndex] = saved.opportunity;
+        const savedOpportunity = saved.opportunity;
+        if (savedOpportunity) {
+          const opportunityIndex = mockOpportunities.findIndex(opportunity => opportunity.id === savedOpportunity.id);
+          if (opportunityIndex >= 0) mockOpportunities[opportunityIndex] = savedOpportunity;
         }
       });
       if (!committed) return;

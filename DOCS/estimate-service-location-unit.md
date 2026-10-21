@@ -287,8 +287,8 @@ runtime credentials are synthetic and confined to the disposable local stack.
 
 Remote push/merge/deployment remains pending the parent's Supabase integration
 trigger-policy investigation. No production capability was activated. The application
-currently requires HTTPS Supabase configuration, so full-app browser QA against the
-HTTP-only disposable stack is not claimed; component browser QA plus actual local
+requires HTTPS Supabase configuration, so at that checkpoint full-app browser QA against the
+HTTP-only disposable stack was not claimed; component browser QA plus actual local
 SQL/Auth/Storage tests are distinct evidence. New estimate creation remains the
 existing flow; selection is performed in the saved estimate's preview. Creating
 new customer service locations in the UI is outside this association unit.
@@ -304,3 +304,97 @@ historical D-drive output location. Mobile screenshot was visually inspected:
 readable wrapped location/evidence, established card styling, no horizontal overflow.
 Only this run's generated tracked Vite metadata was restored to its clean initial
 bytes. The temporary workspace browser config was removed; no runtime settings changed.
+
+## Full authenticated local application verification
+
+Current result: **PASS locally, remote release held**. This supersedes the earlier
+component-only browser limitation. The real application ran with browser fixtures
+disabled, real disposable Supabase Auth/PostgREST/database/Storage, and a temporary
+loopback-only HTTPS proxy. A one-day test certificate was generated outside the
+repository; only the test browser accepted it. No application HTTPS check, system
+trust, hosted credentials, external access or deployment configuration was changed.
+
+Two existing production-path defects were reproduced before repair:
+
+1. Clients & Leads requested `/api/contacts`, whose implementation existed only
+   inside the development fixture interceptor. With fixtures disabled, the real
+   application showed “Contacts could not be loaded”. Production now reads the
+   established authenticated contact hydration only when ready, with an owner filter.
+2. Production estimate creation posted to `/api/quotes`, also present only in that
+   fixture interceptor. It now calls the existing authenticated `saveProductionQuote`
+   adapter directly. Request-key idempotency, server authorization and protected
+   async/navigation guards remain; returned quote/contact/items/opportunity ownership
+   is checked before changing displayed collections. No parallel API was introduced.
+
+The opt-in `tests/e2e/quote-service-location-authenticated.spec.ts` passed its complete
+real-application scenario against strict localhost ports and synthetic accounts:
+
+- [x] Real login, authenticated quote hydration and contacts display.
+- [x] Customer switching in the estimate composer; other businesses' customers and
+  other customers' service locations remain absent.
+- [x] Estimate created through the real UI/RPC, draft location selection/cancel/save,
+  with database revision and association verified.
+- [x] Same-status commercial refresh changes actual displayed line item and price
+  before the new revision can be used for acceptance.
+- [x] Real stale-revision conflict followed by refresh and successful retry.
+- [x] Deliberately lost response after a successful local database write; retry sends
+  the same request key, replays success and advances revision only once.
+- [x] Actual typed-name/signature attestation acceptance through the UI and RPC.
+- [x] Accepted service address stays frozen after editing the source property;
+  recorded, explicit unassigned and historical missing-evidence displays are distinct.
+  The historical shape is an explicit synthetic fixture; the earlier SQL test remains
+  the evidence for genuine pre-migration acceptance preservation.
+- [x] Unchanged invoice conversion RPC and replay succeeded for this accepted quote,
+  then a full application reload hydrated the issued synthetic invoice into its
+  workspace. Invoice-conversion **UI remains intentionally unavailable** in
+  authenticated mode, so no end-to-end conversion-button claim is made.
+- [x] Real logout and second-business login clear the previous account's data;
+  direct navigation to the first business's estimate shows “Quote unavailable”.
+- [x] No browser page errors in the passing scenario. External browser requests are
+  blocked. Independent review found a retry-route override could bypass the broad
+  deny route; repair cycle 1 adds an exact local-origin check before every fetch or
+  continue. The passing browser regression proves a matching `.invalid` URL is
+  intercepted and aborted before network access or request processing.
+
+Verification: one complete authenticated Chromium E2E passed (10.2 seconds, final
+run 17.0 seconds including setup), plus **154/154 focused Vitest assertions across
+9 files**. App/API TypeScript checks and Vite 5.1 build passed; the largest entry is
+877.17 kB and still exceeds the existing 550 kB warning threshold. No lint command
+is defined. No migration/schema change was needed for these application-path fixes.
+Independent review passed after the harness guard correction; reviewer independently
+ran 40 relevant mutation/hydration/UI tests and whitespace checks.
+
+Real local UI evidence (synthetic data only):
+
+- [Saved draft location](evidence/estimate-service-location-2026-10-21/authenticated-draft-location.png)
+- [Frozen accepted location after source edit](evidence/estimate-service-location-2026-10-21/authenticated-accepted-frozen-location.png)
+
+Harness corrections were Windows ESM URL syntax and selectors that initially missed
+navigation badges/duplicated screen-reader text. An invoice created outside the SPA
+needed a full reload rather than hash-only navigation to refresh the existing cached
+collections. Cleanup was corrected to delete synthetic invoice items before invoices;
+the two retained synthetic fixture accounts from that failed cleanup were verified
+and removed before the passing rerun. These were local fixture operations only.
+Final database checks returned **0 synthetic Auth accounts, 0 synthetic contacts and
+0 synthetic quotes**. Only the session-owned disposable stack was stopped; unrelated
+worker containers and the original checkout's pre-existing work were preserved.
+The two execution-only host/config files were removed from the workspace. Seven
+verified session-owned temporary TLS directories (certificate/key files only) and
+the local credential-bearing startup log were removed; QA ports 4218/56429 are closed.
+
+Reproduction prerequisites for the opt-in spec: an unlinked copied local project
+with the already-replayed migrations at API `http://127.0.0.1:56421` and database
+`127.0.0.1:56422`, a temporary HTTPS loopback proxy at `https://127.0.0.1:56429`,
+and real Vite application at `http://127.0.0.1:4218`. Configure publication/media as
+`supabase`, browser fixtures `false`, the local proxy URL and local anon key only
+(no browser service-role key). The test process receives
+`WASHOPS_LOCAL_AUTH_QA=true` and `WASHOPS_LOCAL_QA_STATUS` from the local CLI's captured
+JSON status; never print or commit that JSON. Use a temporary Playwright config with
+only this spec, one Chromium worker, certificate errors ignored in that test context,
+and trace/video disabled. Run the existing Playwright CLI against that temporary
+config. These are test-only prerequisites, not proposed persistent product services.
+
+Remaining: production trigger-policy investigation/PR55 dependency before any remote
+push or merge; authenticated invoice-conversion UI and customer-location creation UI
+remain separate product work. No jobs/scheduling, live providers, communications,
+production data, new paid service or customer-facing activation was involved.
