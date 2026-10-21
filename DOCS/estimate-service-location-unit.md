@@ -211,7 +211,7 @@ Temp installation of the unchanged lockfile (install scripts disabled). One offl
 cache attempt failed; normal public-registry fetch of those already-pinned packages
 succeeded. No new dependency, credential, paid API or provider was introduced.
 
-No UI is wired yet: this verifies a backend/RPC/client-adapter dependency, not the
+At this backend checkpoint no UI was wired: this verified a backend/RPC/client-adapter dependency, not the
 finished customer workflow or CRM. Production migration-trigger evidence and merged
 PR55 remain prerequisites for any later remote release.
 
@@ -225,3 +225,82 @@ The follow-up evidence commit changes this record only; implementation remains
 byte-identical to the reviewed commit. No remote push/merge or production operation
 was performed. The session-owned disposable container is stopped at handoff; its
 synthetic databases remain available for review. Pre-existing worktrees are intact.
+
+## Estimate UI unit (local, dependent on PR55 and the backend above)
+
+Scope owner: this worktree. Changed shared `src/main.ts` only for the existing
+estimate preview integration; no competing worker or jobs/scheduling scope.
+Protected: prior migrations/RPC mutations, PR48, PR53, PR55, dependencies,
+deployment/workflow settings, Control Plane and all pre-existing dirty files.
+
+- [x] Draft/sent estimate preview loads only service locations for its customer;
+  property SELECT uses C04's safe columns and server RLS, never an owner-column grant.
+- [x] Explicit loading, empty and error states; select/cancel/save and refresh;
+  repeated clicks suppressed; uncertain retries retain their original request key
+  and payload; conflicts require authoritative refresh. Navigating or switching
+  accounts/estimates discards late results.
+- [x] Approved estimates display frozen accepted evidence, with distinct historical
+  missing-evidence and explicit unassigned states. Current customer/billing data
+  never fills an absent accepted address. Local fixtures explicitly identify that
+  service-location persistence is available in authenticated CRM mode.
+- [x] Acceptance is blocked during loading, unsaved selections and uncertain saves.
+  Refresh fetches quote and owned items, checks revision/status again, then replaces
+  and renders the complete preview before adopting that revision for acceptance.
+- [x] New authenticated-only `read_crm_accepted_service_location` returns location
+  evidence only. Acceptance ledger direct-read grants remain denied; no signature,
+  signer or pricing record is exposed by this read function.
+- [x] Focused Vitest: 77/77 (19 UI controller/integration regressions, 12 existing
+  quote rendering, 9 signature, 37 backend location adapter tests). App/API type
+  checks pass. No repository lint script is defined; whitespace check is used.
+- [x] Four Chromium browser scenarios passed against the actual mounted component
+  with synthetic injected load/save dependencies: these are simulated network
+  results, not authenticated full-application/backend browser certification.
+  Covers loading/error/empty, cancel/save/repeated clicks, uncertain retry, stale
+  conflict, navigation and 375px accepted snapshot display.
+- [x] Full timestamped local migration-chain replay now passed using cached
+  Supabase CLI 2.116.0 in a separate copied project, unique ID
+  `washops-location-ui-20261021`, ports 56421/56422, with actual Auth/PostgREST/
+  Storage containers. Non-timestamp manual SQL bundle is intentionally skipped by
+  the CLI. This supersedes the earlier raw-Postgres-only verification limitation.
+- [x] Existing Auth/RLS/Storage smoke passed on that stack: synthetic Auth fixtures,
+  database tenant isolation, commercial-document Storage boundaries and media
+  bucket regression, including fixture cleanup. Harness changed only local project
+  identity and cached CLI invocation, outside the repository; hosted configuration
+  and production data were not used.
+- [x] Independent re-review passed after repair cycle 1; reviewer independently ran
+  19 UI and 37 adapter tests and whitespace checks. No residual material findings.
+- [x] Final SQL suite: 61/61, including missing identity and unchanged direct-ledger
+  denial. Full local ledger contains all 55 timestamped migrations.
+- [x] Final production build passed with the existing bundle threshold warning;
+  largest entry is 876.20 kB at this checkpoint. No bundle optimization claimed.
+
+Independent initial review found a real stale-display acceptance risk: the first
+UI implementation replaced quote revision without rerendering changed pricing/items.
+Repair cycle 1 adds authoritative quote+items refresh, synchronous preview replacement
+and the actual integration-helper/rendering regression described above. No scope
+expansion into quote editing or jobs was needed.
+
+Local browser/full-stack commands initially required escalation for localhost/
+Docker access. A sandbox Temp-path difference was resolved using a workspace-local
+temporary browser config; no access policy or global setting was changed. Generated
+runtime credentials are synthetic and confined to the disposable local stack.
+
+Remote push/merge/deployment remains pending the parent's Supabase integration
+trigger-policy investigation. No production capability was activated. The application
+currently requires HTTPS Supabase configuration, so full-app browser QA against the
+HTTP-only disposable stack is not claimed; component browser QA plus actual local
+SQL/Auth/Storage tests are distinct evidence. New estimate creation remains the
+existing flow; selection is performed in the saved estimate's preview. Creating
+new customer service locations in the UI is outside this association unit.
+
+Commands: cached Vitest 1.6 `run src/ui/quotes/quote_service_location.test.ts
+src/ui/quotes/quotes.test.ts src/ui/quotes/quotes_signature.test.ts
+src/crm_quote_service_location.test.ts --pool=forks --poolOptions.forks.singleFork`;
+TypeScript `-p tsconfig.app.json` and `-p tsconfig.api.json`; Vite 5.1 build to an
+isolated Temp output directory. Browser spec is compatible with existing Playwright
+configuration; this run used a temporary config selecting only that spec, cached
+Chromium, Vite localhost port 4217 and Temp artifacts to avoid the repository's
+historical D-drive output location. Mobile screenshot was visually inspected:
+readable wrapped location/evidence, established card styling, no horizontal overflow.
+Only this run's generated tracked Vite metadata was restored to its clean initial
+bytes. The temporary workspace browser config was removed; no runtime settings changed.

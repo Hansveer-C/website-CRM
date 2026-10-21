@@ -1,0 +1,22 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Service location synthetic UI fixture</title><body>
+<main><h1>Estimate service-location test fixture</h1><p>Synthetic data; no network mutations.</p><div id="location"></div></main>
+<script type="module">
+import '/src/style.css';
+import { QuoteServiceLocationController, mountQuoteServiceLocation } from '/src/ui/quotes/quote_service_location.ts';
+import { CrmMutationError } from '/src/crm_production_mutations.ts';
+const original = { id: 'q1', user_id: 'u1', contact_id: 'c1', status: 'sent', revision: 1, total_amount: 25, created_at: '2026-10-21' };
+const locations = [{ id: 'p1', contact_id: 'c1', label: 'Front driveway', service_address_line1: '10 Service Lane', service_address_line2: null, locality: 'Town', administrative_area: null, postal_code: null, country_code: 'CA' }];
+let quote, mode, saves, keys, snapshot, delay, active, controller;
+function reset(options = {}) {
+ quote = { ...original, ...options.quote }; mode = options.mode; saves = 0; keys = []; snapshot = options.snapshot; delay = options.delay ?? 0; active = true;
+ const root = document.getElementById('location');
+ controller = new QuoteServiceLocationController('q1', 'c1', 'u1', {
+   current: () => active, requestKey: () => crypto.randomUUID(), updateQuote: () => {},
+   load: async () => { if (mode === 'load-error') throw new Error('Unavailable'); return { quote: { ...quote }, locations: options.empty ? [] : locations, snapshot }; },
+   save: async input => { saves++; keys.push(input.requestKey); if (delay) await new Promise(r => setTimeout(r, delay)); if (mode === 'conflict') throw new CrmMutationError('CONFLICT'); if (mode === 'timeout') throw new Error('Uncertain'); quote = { ...quote, revision: quote.revision + 1, property_id: input.propertyId }; return { quoteId: quote.id, propertyId: input.propertyId, revision: quote.revision, replayed: false }; }
+ }, () => { if (active) mountQuoteServiceLocation(root, controller); });
+ void controller.load();
+}
+window.locationFixture = { reset, state: () => ({ saves, keys, quote }), recover: () => { mode = null; }, leave: () => { active = false; document.getElementById('location').innerHTML = '<p>Another estimate</p>'; } };
+reset();
+</script></body></html>

@@ -121,5 +121,19 @@ select is((select count(*)::integer from public.properties where id='aa200000-00
 select is((select count(*)::integer from public.quote_property_assignment_requests where quote_id='aa300000-0000-4000-8000-000000000006'),0,'customer cascade cleans assignment request ledger');
 select is((select count(*)::integer from public.invoices where quote_id='aa300000-0000-4000-8000-000000000007'),0,'invalid commercial evidence leaves no partial invoice');
 
+set local role authenticated;
+select set_config('request.jwt.claim.sub','aa100000-0000-4000-8000-000000000001',true);
+select is(public.read_crm_accepted_service_location('aa300000-0000-4000-8000-000000000001')->'service_location'->>'service_address_line1','10 Frozen Service Lane','UI read returns immutable accepted address');
+select ok(not (public.read_crm_accepted_service_location('aa300000-0000-4000-8000-000000000001') ? 'quote'),'UI read never returns commercial quote or signature evidence');
+select is(public.read_crm_accepted_service_location('aa300000-0000-4000-8000-000000000004')->>'service_location_status','unassigned','UI read distinguishes explicit unassigned acceptance');
+select is(public.read_crm_accepted_service_location('aa300000-0000-4000-8000-000000000005'),'{}'::jsonb,'UI read preserves historical missing evidence');
+select throws_ok($$select public.read_crm_accepted_service_location('aa300000-0000-4000-8000-000000000003')$$,'42501','quote unavailable','UI read denies unavailable or unaccepted quotes');
+select set_config('request.jwt.claim.sub','aa100000-0000-4000-8000-000000000002',true);
+select throws_ok($$select public.read_crm_accepted_service_location('aa300000-0000-4000-8000-000000000001')$$,'42501','quote unavailable','UI read denies another business acceptance');
+select set_config('request.jwt.claim.sub','',true);
+select throws_ok($$select public.read_crm_accepted_service_location('aa300000-0000-4000-8000-000000000001')$$,'42501','quote unavailable','UI read requires server-authenticated identity');
+reset role;
+select ok(not has_function_privilege('anon','public.read_crm_accepted_service_location(uuid)','execute') and not has_function_privilege('service_role','public.read_crm_accepted_service_location(uuid)','execute'),'UI evidence read is authenticated-only');
+select ok(not has_table_privilege('authenticated','public.quote_acceptances','select'),'UI projection does not open direct acceptance-ledger access');
 select * from finish();
 rollback;
