@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CrmMutationError, createProductionServiceProperty } from '../../crm_production_mutations';
 import { ServicePropertyCreateController, renderServicePropertyCreate } from './service_property_create';
 import { QuoteServiceLocationController, renderQuoteServiceLocation } from './quote_service_location';
+import { assertLocalPropertyQaStatus } from '../../../tests/fixtures/service_property_local_guard';
 
 const id = 'ca100000-0000-4000-8000-000000000001';
 const input = { requestKey: id, contactId: 'customer-a', serviceAddressLine1: ' 10  Service Lane ', locality: ' Town ', countryCode: ' ca ', label: '<script>Driveway</script>' };
@@ -15,6 +16,11 @@ function fixture() {
   return { controller, create, current, created, requestKey, fill };
 }
 describe('property create RPC boundary', () => {
+  it('rejects connection-string overrides without constructing a client', () => {
+    const status = { API_URL: 'http://127.0.0.1:56421', DB_URL: 'postgres://postgres:synthetic@127.0.0.1:56422/postgres' };
+    expect(() => assertLocalPropertyQaStatus(status)).not.toThrow();
+    for (const value of [status.DB_URL+'?host=remote.invalid', status.DB_URL+'#fragment', status.DB_URL.replace('postgres://','https://'), status.DB_URL.replace('/postgres','/other'), status.DB_URL.replace('127.0.0.1','remote.invalid')]) expect(() => assertLocalPropertyQaStatus({ ...status, DB_URL: value })).toThrow('Only the exact disposable local');
+  });
   it('uses only existing RPC arguments, normalizes input and does not send owner authority', async () => {
     const rpc = vi.fn().mockResolvedValue({ data: result(), error: null });
     await createProductionServiceProperty({ rpc }, { ...input, user_id: 'foreign' } as any);

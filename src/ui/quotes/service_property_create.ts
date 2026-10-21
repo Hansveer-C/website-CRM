@@ -1,5 +1,6 @@
 import { CrmMutationError, normalizeServicePropertyDraft, type ServicePropertyDraft, type ServicePropertyCreateInput, type ServicePropertyCreateResult } from '../../crm_production_mutations';
 import { escapeHtmlText as escape } from '../../crm_html_output';
+import { renderField, renderInput } from '../primitives';
 
 interface Dependencies {
   create(input: ServicePropertyCreateInput): Promise<ServicePropertyCreateResult>;
@@ -53,7 +54,10 @@ const fields: Array<[keyof ServicePropertyDraft,string,number,boolean,string]> =
 export function renderServicePropertyCreate(controller: ServicePropertyCreateController) {
   if (!controller.open) return '<button type="button" class="wo-button wo-button--secondary" data-property-add>Add service location</button>';
   const locked = controller.phase !== 'editing';
-  return `<form data-property-form novalidate aria-label="Add customer service location" aria-busy="${controller.phase === 'saving'}"><h3>Add service location</h3><p>Enter the washing service address. Billing details are not copied. Creating a location does not send or accept this estimate.</p>${fields.map(([key,label,max,required,autocomplete]) => `<div><label class="wo-field-label" for="new-property-${key}">${escape(label)}${required ? ' *' : ''}</label><input class="wo-field-input" id="new-property-${key}" data-property-field="${key}" value="${escape(controller.draft[key] ?? '')}" maxlength="${max}" autocomplete="${autocomplete}" ${required ? 'required' : ''} ${locked ? 'disabled' : ''}></div>`).join('')}${controller.message ? `<p role="alert" tabindex="-1" data-property-error>${escape(controller.message)}</p>` : ''}<button class="wo-button wo-button--primary" type="submit" ${['saving','conflict'].includes(controller.phase) ? 'disabled' : ''}>${controller.phase === 'saving' ? 'Creating location…' : controller.phase === 'uncertain' ? 'Retry location creation' : 'Create service location'}</button> <button type="button" class="wo-button wo-button--secondary" data-property-cancel ${['saving','uncertain'].includes(controller.phase) ? 'disabled' : ''}>Cancel location creation</button></form>`;
+  const controls = fields.map(([key,label,max,required,autocomplete]) => renderField({ id: `new-property-${key}`, label, required,
+    controlHtml: renderInput({ id: `new-property-${key}`, value: controller.draft[key] ?? '', disabled: locked, required,
+      attributes: { 'data-property-field': key, maxlength: String(max), autocomplete } }) })).join('');
+  return `<form data-property-form novalidate aria-label="Create washing service address" aria-busy="${controller.phase === 'saving'}"><h3>Add service location</h3><p>Enter the washing service address. Billing details are not copied. Creating a location does not send or accept this estimate.</p>${controls}${controller.message ? `<p role="alert" tabindex="-1" data-property-error>${escape(controller.message)}</p>` : ''}<button class="wo-button wo-button--primary" type="submit" ${['saving','conflict'].includes(controller.phase) ? 'disabled' : ''}>${controller.phase === 'saving' ? 'Creating location…' : controller.phase === 'uncertain' ? 'Retry location creation' : 'Create service location'}</button> <button type="button" class="wo-button wo-button--secondary" data-property-cancel ${['saving','uncertain'].includes(controller.phase) ? 'disabled' : ''}>Cancel location creation</button></form>`;
 }
 export function mountServicePropertyCreate(root: HTMLElement, controller: ServicePropertyCreateController) {
   root.querySelector('[data-property-add]')?.addEventListener('click', () => { controller.begin(); root.querySelector<HTMLInputElement>('[data-property-field="serviceAddressLine1"]')?.focus(); });
