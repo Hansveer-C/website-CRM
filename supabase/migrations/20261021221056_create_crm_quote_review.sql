@@ -1,4 +1,4 @@
--- Local proof only. Deployment does NOT enable owner issuance or recipient access.
+-- Approved estimate review contract. Apply only after the reviewed production release gate.
 create table private.crm_quote_review_runtime (id boolean primary key check(id), enabled boolean not null);
 insert into private.crm_quote_review_runtime values(true,false);
 alter table private.crm_quote_review_runtime enable row level security;
@@ -223,4 +223,8 @@ revoke all on function public.create_crm_quote_review(uuid,integer,uuid,text,tex
   public.read_crm_quote_review(text),public.respond_crm_quote_review(text,uuid,text,text,boolean) from public,anon,authenticated,service_role;
 grant execute on function public.create_crm_quote_review(uuid,integer,uuid,text,text),public.read_crm_quote_reviews(uuid),
   public.revoke_crm_quote_review(uuid),public.record_crm_quote_review_acceptance(uuid,uuid) to authenticated;
--- Recipient EXECUTE and enabled=true exist ONLY in guarded disposable local tests.
+-- Activation is part of this migration, not a dashboard toggle/manual SQL step.
+-- Draft/preview publication alone does not apply this migration to the shared database.
+-- Bearer capability is required for both operations, even when the caller is signed in.
+grant execute on function public.read_crm_quote_review(text),public.respond_crm_quote_review(text,uuid,text,text,boolean) to anon,authenticated;
+update private.crm_quote_review_runtime set enabled=true where id;

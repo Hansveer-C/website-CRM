@@ -1281,3 +1281,128 @@ synthetic credentials/certificates removed by the launcher. The owned Supabase
 stack was stopped after fixtures were removed and runtime/grants restored;
 unrelated services were preserved. No push, draft PR, merge, hosted migration,
 provider action, external message or spending occurred. PR48/58 remain unchanged.
+## Approved estimate review design — production candidate, release held
+
+Hans explicitly approved the manually shared, revocable 24-hour bearer-link
+review, restricted customer-facing disclosure, customer confirmation followed by
+owner-recorded acceptance, additive records and no automatic messages. That
+approval supersedes the earlier pending DESIGN decision and local-only proposal
+above. It does not authorize sending actual customer links or accepting real
+estimates. Parent instructed production-ready normal UI and a reviewed draft PR;
+NO merge, hosted migration, settings change, provider action or spending this unit.
+
+Candidate base remains main `e7f766aedb36e9bb1f3f90285433ad199888d547`.
+Open PR48 and draft PR58 retain their recorded heads; neither is modified or a
+prerequisite. `codex/local-estimate-review` preserves the disabled local proof.
+The candidate branch is `codex/customer-estimate-review`.
+
+Normal production path (no DEV/QA flag or test backdoor): authenticated Quotes ->
+Preview -> Customer estimate review -> explicit customer-facing text -> Generate
+review link / Copy review link. Anyone holding the link can open
+`/#/estimate-review/<64-hex-token>` on the CRM application host, review the frozen
+items/options/USD price and service address, enter their own name, choose a tier
+and explicitly confirm scope/price. Owner reloads review status, then deliberately
+records that actual response as acceptance. No send/delivery state is fabricated.
+Internal contact/activity/estimate notes, billing/contact details, ownership IDs
+and private signature evidence remain excluded. The existing CRM host boundary
+runs before recipient routing; customer website hosts retain their public-site
+resolver. Recipient routes set no-referrer; tokens stay in fragment/memory and
+HTTPS POST bodies, never query strings, local/session storage, console output or
+analytics added by this feature. Only token SHA-256 is persisted. Browser history
+and deliberate clipboard copies contain the bearer URL and must be treated as
+private. Link loss still requires deliberate revoke/reissue, not token recovery.
+
+Access and migration effect:
+
+- The unpublished version is still `20261021221056`, renamed from the historical
+  local-proof filename to `20261021221056_create_crm_quote_review.sql`. No duplicate
+  version/file or ledger repair. Canonical main contains 57 migration versions; latest verified hosted ledger
+  is also 57 per prior release evidence. Recheck it before merge; expected approved
+  release delta is 57 -> 58 ONLY.
+- Adds two PRIVATE RLS tables and ten functions (four private helpers, six public
+  domain operations). All private tables/helpers deny anon/authenticated/
+  service_role access. Four owner RPCs grant EXECUTE only to authenticated and
+  derive ownership from auth.uid(). No existing table/column grants, policies,
+  acceptance/invoice RPCs, providers or credentials are changed.
+- Grants EXECUTE ONLY on `read_crm_quote_review(text)` and
+  `respond_crm_quote_review(text,uuid,text,text,boolean)` to anon/authenticated,
+  never service_role/PUBLIC. A valid high-entropy bearer is mandatory for both;
+  signing in does not grant quote-ID enumeration, owner status, revoke or record
+  authority over another account. This signed-in bearer access is the same
+  approved anyone-holding-the-link scope, not cross-account CRM access.
+- This candidate migration ends by enabling its PRIVATE runtime row. Thus an
+  eventual APPROVED main merge/automatic migration activates the reviewed
+  capability. It is not a hidden QA feature and needs no manual SQL, new dashboard
+  setting, persistent credential or Vercel flag. Existing four-owner/two-recipient
+  functions all reject while the private runtime is disabled. This unit does NOT
+  apply the migration to the hosted project.
+
+Publication versus activation gates:
+
+1. Draft push/PR may run existing public-repository CI and included Hobby preview
+   build. Existing GitHub workflow uses tests/types/build and contains no production
+   migration/provider send hook. Existing Supabase automatic branching is OFF;
+   only configured production main merges apply SQL. Draft preview therefore does
+   not apply this migration. Its normal UI fails closed if RPCs are absent in the
+   shared deployed backend. Do not generate hosted preview links or use customer
+   data as a substitute for local testing. Use the canonical production app origin
+   for later approved synthetic hosted QA, not a protected/ephemeral preview URL.
+2. Before merge: independently verify exact main/head/diff/review/CI, hosted ledger
+   still 57 and ONLY this pending version, current automatic integrations, and no
+   unexpected quote/acceptance triggers. The finalizer refuses custom triggers
+   rather than risking a delivery side effect. No unrelated bulk stack/PR48/58
+   merge, manual baseline/repair/reset or environment/settings change.
+3. A separate release decision permits main merge and its existing integrations.
+   Vercel/SQL may finish in either order: early UI shows unavailable until RPCs
+   exist; early SQL cannot disclose an estimate without a deliberately issued
+   bearer. Observe both integrations to terminal success, exact app SHA, ledger58,
+   narrow ACLs/RLS/function contracts and non-mutating smoke before claiming live.
+4. Parent coordinates separately approved hosted synthetic owner/recipient QA on
+   the existing test account: only synthetic draft/scope/location, no real customer
+   link/send/acceptance, providers or payment. Local success is not hosted success.
+5. Git revert alone removes UI but leaves capability RPCs/records and may leave
+   issued links usable until expiry. Recovery requires a separately reviewed
+   NON-destructive forward migration disabling the private runtime and revoking
+   the two recipient grants, through the same approved automatic path. Preserve
+   evidence; do not drop objects/delete data or run manual hosted SQL. Additive
+   persistence is approved, but destructive rollback is not implied.
+
+Fresh candidate evidence:
+
+- Clean full 58-version local Supabase replay PASS; actual migration-defined
+  runtime/grants, no test-time activation or recipient grants in browser fixtures.
+- 72 SQL assertions and eight observed lock races PASS: owner/private-role denial,
+  both anonymous and signed-in bearer scope, token hash-only storage, valid-token
+  runtime pause denial, source/item/address change without revision, expiry after
+  lock wait, item-insertion phantom prevention, response/revoke/finalize/delete
+  races, idempotency and existing selected-tier invoice/revision compatibility.
+- Normal production BUILD with NO application QA flag: 2/2 real local browser
+  tests PASS. Auth profiles only, zero seeded CRM records; ordinary UI creates
+  lead, draft/items/location; separate anonymous context responds; separate signed-in
+  account sees only bearer projection and an empty own CRM; owner records once,
+  reloads and revokes. Lost/malformed committed responses retain exact keys/token.
+  Internal HTML renders literally, mobile/keyboard pass, malformed URLs issue zero
+  RPCs, and messages/calls/invoices/websites remain zero. Harness sign-in uses
+  desktop navigation after mobile recipient checks; normal onboarding is dismissed
+  explicitly without site generation or terms acceptance.
+- 193/193 affected regressions across 16 files, app/API types and production build
+  PASS. Nine existing SQL regression suites replay on the fresh composition with
+  synthetic prerequisite records/rollback, preserving existing financial contracts.
+- Independent production-candidate review PASS with 13 focused tests; exact-head
+  confirmation and published-head CI are required and recorded with the draft PR.
+  SQL/browser proofs are local opt-in evidence, not a claim those suites run in CI.
+
+No new legal terms, verified identity/signature, live telephony, delivery provider,
+phone provisioning, scheduling, job domain or invoice/PDF activation is introduced.
+PR58 still requires its own migration-ordering reconciliation after PR63; no such
+ordering repair is included here. PR48 remains separate and unchanged. Earlier
+local-proof production-negative tests remain historical evidence; this approved
+candidate intentionally replaces that gate with normal production paths and the
+explicit reviewed migration activation boundary.
+Final local candidate metadata: 58 versions/latest `20261021221056`; runtime true
+and recipient anon/authenticated EXECUTE true exactly as defined by the candidate
+migration; service_role recipient EXECUTE false; 0 review rows, 0 profiles and
+0 Auth users. This metadata is LOCAL, not a hosted activation claim. Owned local
+stack/app/TLS processes stopped; captured owned CLI logs removed without recursive
+deletion. No hosted credentials, customer records, external communications or paid
+services were used. Canonical main and PR48/58 remained unchanged during preparation.

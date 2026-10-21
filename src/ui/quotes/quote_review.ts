@@ -1,7 +1,12 @@
-/** Deliberately local-only until public disclosure/access and release approval. */
-export function allowsLocalQuoteReview(dev: boolean, flag: unknown, origin: string, backend: string): boolean {
-  return dev === true && flag === 'true' && origin === 'http://127.0.0.1:4218'
-    && backend === 'https://127.0.0.1:56429';
+import { isCrmApplicationHost } from '../../application_host';
+/** Same trusted CRM host boundary as the existing application; authorization is server-side. */
+export function allowsEstimateReview(origin: string, backend: string): boolean {
+  try {
+    const app=new URL(origin),api=new URL(backend);
+    const loopback=['localhost','127.0.0.1','[::1]'].includes(app.hostname);
+    return isCrmApplicationHost(app.hostname) && (app.protocol==='https:' || (loopback&&app.protocol==='http:'))
+      && api.protocol==='https:' && !api.username && !api.password && !api.search && !api.hash && api.pathname==='/';
+  } catch { return false; }
 }
 export interface ReviewClient { rpc(name: string, args: Record<string, unknown>): PromiseLike<{data: unknown; error: {message: string} | null}> }
 type Row = Record<string, any>;
@@ -74,8 +79,8 @@ export function mountOwnerQuoteReview(root: HTMLElement, options: {
   }
   function paint() {
     if(!current())return;root.replaceChildren();root.className='wo-card no-print';
-    root.append(element('h2','Local estimate review proof'));
-    root.append(element('p','Local testing only. A link is not proof of delivery. Recipient confirmation is recorded by the owner in a separate step. Links expire after 24 hours.'));
+    root.append(element('h2','Customer estimate review'));
+    root.append(element('p','A link is not proof of delivery. Recipient confirmation is recorded by the owner in a separate step. Links expire after 24 hours.'));
     const status=element('p',message);status.setAttribute('role','status');root.append(status);
     if(pending){const retry=button('Retry review request',()=>void execute());retry.disabled=busy;root.append(retry);return;}
     root.append(button('Reload review status',()=>void load()));
@@ -87,12 +92,12 @@ export function mountOwnerQuoteReview(root: HTMLElement, options: {
       if(active.finalized)root.append(element('p','Response recorded as estimate acceptance.'));
       else if(active.responded_at)root.append(button('Record customer response as acceptance',()=>start('record_crm_quote_review_acceptance',{p_review_id:active.id,p_request_key:crypto.randomUUID()})));
       root.append(button('Revoke review link',()=>start('revoke_crm_quote_review',{p_review_id:active.id})));
-      if(rawLink){const label=element('label','Local review link (anyone holding it can view this estimate)');const input=element('input');input.readOnly=true;input.value=rawLink;input.style.width='100%';label.append(input);root.append(label);root.append(button('Copy local review link',()=>{void navigator.clipboard.writeText(rawLink).then(()=>{if(current()){message='Link copied. Delivery has not been recorded.';paint();}},()=>{if(current()){message='Copy unavailable. Select and copy the displayed link.';paint();}});}));}
+      if(rawLink){const label=element('label','Review link (anyone holding it can view this estimate)');const input=element('input');input.readOnly=true;input.value=rawLink;input.style.width='100%';label.append(input);root.append(label);root.append(button('Copy review link',()=>{void navigator.clipboard.writeText(rawLink).then(()=>{if(current()){message='Link copied. Delivery has not been recorded.';paint();}},()=>{if(current()){message='Copy unavailable. Select and copy the displayed link.';paint();}});}));}
       else root.append(element('p','The raw link is not stored. If you lost it, revoke and generate a replacement.'));
     }else if(options.canGenerate){
       const label=element('label','Customer-facing estimate message (optional)');const input=element('textarea');input.maxLength=2000;input.value=text;input.style.width='100%';input.addEventListener('input',()=>{text=input.value;});label.append(input);root.append(label);
       root.append(element('p','Only this message, estimate line items, pricing options and service address will be disclosed. Internal notes and billing/contact details stay private.'));
-      root.append(button('Generate local review link',()=>{const raw=token();start('create_crm_quote_review',{p_quote_id:options.quoteId,p_revision:options.revision,p_request_key:crypto.randomUUID(),p_token:raw,p_customer_text:text},raw);}));
+      root.append(button('Generate review link',()=>{const raw=token();start('create_crm_quote_review',{p_quote_id:options.quoteId,p_revision:options.revision,p_request_key:crypto.randomUUID(),p_token:raw,p_customer_text:text},raw);}));
     }else root.append(element('p','No active review link. This estimate is no longer editable.'));
   }
   paint();void load();

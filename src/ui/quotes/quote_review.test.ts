@@ -1,16 +1,9 @@
 import {it,expect} from 'vitest';
-import {allowsLocalQuoteReview,validateOwnerReviewResult,validateRecipientReviewResult,reviewItemTotal} from './quote_review';
-it('local review requires development opt-in and both exact loopback endpoints',()=>{
-  expect(allowsLocalQuoteReview(true,'true','http://127.0.0.1:4218','https://127.0.0.1:56429')).toBe(true);
-  const cases: [boolean,unknown,string,string][]=[
-    [false,'true','http://127.0.0.1:4218','https://127.0.0.1:56429'],
-    [true,'false','http://127.0.0.1:4218','https://127.0.0.1:56429'],
-    [true,undefined,'http://127.0.0.1:4218','https://127.0.0.1:56429'],
-    [true,'true','https://website-crm-one.vercel.app','https://127.0.0.1:56429'],
-    [true,'true','http://localhost:4218','https://127.0.0.1:56429'],
-    [true,'true','http://127.0.0.1:4218','https://example.supabase.co'],
-    [true,'true','http://127.0.0.1:4218','https://127.0.0.1:56429.attacker.test']];
-  for(const args of cases)expect(allowsLocalQuoteReview(...args)).toBe(false);
+import {allowsEstimateReview,validateOwnerReviewResult,validateRecipientReviewResult,reviewItemTotal} from './quote_review';
+it('normal production review uses the existing CRM host boundary and secure backend',()=>{
+  expect(allowsEstimateReview('https://website-crm-one.vercel.app','https://example.supabase.co')).toBe(true);
+  expect(allowsEstimateReview('http://127.0.0.1:4218','https://127.0.0.1:56429')).toBe(true);
+  for(const [app,api] of [['https://customer.example','https://example.supabase.co'],['http://website-crm-one.vercel.app','https://example.supabase.co'],['https://website-crm-one.vercel.app','http://example.supabase.co'],['https://website-crm-one.vercel.app','https://secret@example.supabase.co'],['https://website-crm-one.vercel.app','invalid']])expect(allowsEstimateReview(app,api)).toBe(false);
 });
 it('malformed or mismatched mutation responses remain unconfirmed',()=>{
   const args={expected_quote_id:'q',expected_revision:2,p_revision:2,p_customer_text:'text',p_review_id:'r',p_tier:'basic'};
