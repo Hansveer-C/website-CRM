@@ -173,7 +173,7 @@ import { submitPublicLead } from './public_lead_client';
 import { resolvePublicLeadRuntime, shouldUsePublicLeadEdge } from './public_lead_runtime';
 import { FormSubmissionIdempotency } from './form_submission_idempotency';
 import { validateSelectedQuoteTier } from './quote_tier_validation';
-import { shouldShowWebsiteOnboarding } from './website_onboarding_gate';
+import { shouldShowWebsiteOnboarding, websiteOnboardingDeferralKey } from './website_onboarding_gate';
 import { buildAuthenticatedPreviewUrl, resolveAuthenticatedPreview } from './authenticated_preview_route';
 import {
   BUILDER_SETUP_SERVICE_CATALOG,
@@ -2580,6 +2580,7 @@ function renderDashboard() {
   const alreadySeenOnboarding = !!window.localStorage.getItem('onboarding_seen');
   if (editorUsesSupabase()) {
     void loadWebsiteDashboardCore({ actingUserId: userId }).then(core => {
+      if (getActingUserId() !== userId) return;
       if (core.websites.length > 0) {
         document.getElementById('website-onboarding-modal')?.remove();
         return;
@@ -2587,6 +2588,7 @@ function renderDashboard() {
       if (currentView !== 'dashboard') return;
       const shouldShow = shouldShowWebsiteOnboarding({
         alreadySeen: alreadySeenOnboarding,
+        deferred: window.localStorage.getItem(websiteOnboardingDeferralKey(userId)) === 'true',
         usesSupabase: true,
         durableWebsiteCount: core.websites.length
       });
@@ -2598,8 +2600,9 @@ function renderDashboard() {
     });
   } else if (!alreadySeenOnboarding) {
     fetch('/api/funnels').then(r => r.json()).then(res => {
-      if (currentView === 'dashboard' && res.success && shouldShowWebsiteOnboarding({
+      if (getActingUserId() === userId && currentView === 'dashboard' && res.success && shouldShowWebsiteOnboarding({
         alreadySeen: false,
+        deferred: window.localStorage.getItem(websiteOnboardingDeferralKey(userId)) === 'true',
         usesSupabase: false,
         localFunnelCount: Array.isArray(res.data) ? res.data.length : undefined
       })) {
@@ -13200,6 +13203,8 @@ function websiteGenerationClient(): WebsiteGenerationClient {
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14m-7-7 7 7-7 7"/></svg>
                     </button>
                     <p style="font-size: 0.8rem; color: #94a3b8; text-align: center;">By continuing, you agree to our terms of service.</p>
+                    <button type="button" class="btn-secondary" id="onboarding-later">Set up website later</button>
+                    <p style="font-size: 0.8rem; text-align: center;">Use the CRM without generating a website or accepting website setup terms.</p>
                 </div>
             </div>
             
@@ -13220,6 +13225,14 @@ function websiteGenerationClient(): WebsiteGenerationClient {
         </div>
     `;
     document.body.appendChild(modal);
+    const ownerId = getActingUserId();
+    modal.querySelector('#onboarding-later')?.addEventListener('click', () => {
+        if (websiteGenerationInFlight || getActingUserId() !== ownerId) return;
+        window.localStorage.setItem(websiteOnboardingDeferralKey(ownerId), 'true');
+        modal.remove();
+        Array.from(document.querySelectorAll<HTMLElement>('[data-nav-view="clients"]'))
+            .find(link => link.getClientRects().length > 0)?.focus();
+    });
     
     // Accessibility: focus the first field
     setTimeout(() => document.getElementById('ob-business-name')?.focus(), 100);
@@ -13281,6 +13294,8 @@ function websiteGenerationClient(): WebsiteGenerationClient {
     const button = document.getElementById('onboarding-submit') as HTMLButtonElement | null;
     const label = document.getElementById('onboarding-submit-label');
     websiteGenerationInFlight = true;
+    const later = document.getElementById('onboarding-later') as HTMLButtonElement | null;
+    if (later) later.disabled = true;
     if (button) {
         button.disabled = true;
         button.setAttribute('aria-disabled', 'true');
@@ -13299,6 +13314,7 @@ function websiteGenerationClient(): WebsiteGenerationClient {
         : null;
     if (usesProductionAuthority && !generationAuthority) {
         websiteGenerationInFlight = false;
+        if (later) later.disabled = false;
         if (button) {
             button.disabled = false;
             button.setAttribute('aria-disabled', 'false');
@@ -13349,6 +13365,7 @@ function websiteGenerationClient(): WebsiteGenerationClient {
         if (generationAuthority
             && !websiteGenerationAuthority.isOperationCurrent(generationAuthority, getActingUserId())) return;
         websiteGenerationInFlight = false;
+        if (later) later.disabled = false;
         if (generationAuthority
             && !websiteGenerationAuthority.isViewCurrent(generationAuthority, getActingUserId())) return;
         if (button) {

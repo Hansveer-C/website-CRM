@@ -551,3 +551,40 @@ Final regression: existing real authenticated acceptance/frozen-location/legacy 
 invoice RPC/replay browser journey passed (1/1, 9.4 seconds) on this exact code.
 The onboarding dismissal prerequisite is tracked separately; no terms acceptance
 or website publication is authorized by this property-entry draft.
+## Current CRM-only onboarding prerequisite
+
+Separate draft based on deployed main e4b8c0a2cffb2329ef50131e2cc96f59ecffbbd1.
+PR57 is merged; earlier release-packet statuses above are historical. Property
+creation is independently published as draft PR59, not included in this unit.
+PR58 remains draft and PR48 remains untouched.
+
+Fresh hosted owner verification identified a blocking website setup dialog with
+no Close/Skip/Cancel/Later. This bounded correction adds Set up website later,
+explicitly without website generation or website terms acceptance. Deferral is a
+browser-local preference scoped to the exact account, distinct from onboarding_seen
+or any website/completion/consent record. It survives reload and dashboard visits;
+the existing Website -> Create your website action explicitly reopens setup.
+Generation remains unchanged and deferral is disabled while generation is in flight.
+A stale dashboard response from a different acting account cannot open its dialog.
+No schema, grants, providers, accounts, security settings or backend writes change.
+
+Validation: 71 focused onboarding/client/contract/authority tests and app/API types
+passed. Actual production-build browser proof used two fresh disposable local Auth
+owners, no preseeded websites and no browser fixture flag. Keyboard/mobile dismissal,
+normal Clients & Leads/Quotes navigation, reload, explicit setup reopening and
+account-scoped deferral passed; zero generation requests, zero website records,
+no onboarding_seen completion flag and no page errors. Initial setup attempts found
+missing ignored cached dependency links, then an ambiguous responsive-navigation
+locator; resolved without installing dependencies or weakening assertions.
+
+Known independent gap: website-generation terms sentence has no URL. This change
+does not invent legal terms or consent, generate/publish a website, or activate
+sending. Hosted QA after a future reviewed merge: sign in, choose Set up website
+later, open Clients & Leads, then Quotes; reload/dashboard stays usable. Website ->
+Create your website still opens the form; choose Later again without submitting.
+PR59 must separately land before Add service location is available. New draft
+estimates still have no deliberate non-sending sent/acceptance transition.
+
+No production test records, messages or provider actions were performed. Rollback
+is an application Git revert; only an account-scoped local preference may remain.
+Clearing that preference reoffers setup; no data deletion or hosted cleanup needed.
