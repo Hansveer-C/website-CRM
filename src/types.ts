@@ -80,6 +80,8 @@ export interface Quote {
   revision?: number;
   accepted_at?: string | null;
   accepted_signer_name?: string | null;
+  /** Separate service location; never inferred from the customer's billing address. */
+  property_id?: string | null;
 }
 
 export interface QuoteItem {

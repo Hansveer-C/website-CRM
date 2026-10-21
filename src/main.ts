@@ -2,7 +2,7 @@ import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuo
 import { escapeHtmlText, safeTelHref, safeNavHref } from './crm_html_output';
 import { contactMatchesClientSearch, formatContactPhone, hasContactPhone } from './crm_contact_phone';
 import { templates } from './templates';
-import { Activity, Contact, DurableInvoice, DurableInvoiceItem, Funnel, Page, PageSection, User, Website, WebsiteLayout, WebsiteRoute, WebsiteSettings } from './types';
+import { Activity, Contact, DurableInvoice, DurableInvoiceItem, Funnel, Page, PageSection, Quote, QuoteItem, User, Website, WebsiteLayout, WebsiteRoute, WebsiteSettings } from './types';
 import { getBuilderSectionDefinition } from './builder_section_registry';
 import type { BuilderInspectorFieldDefinition, BuilderInspectorTab } from './builder_inspector_schema';
 import { createBuilderInspectorPatch, getBuilderInspectorField, getBuilderInspectorFieldValue, getBuilderInspectorSchema } from './builder_inspector_schema';
@@ -237,10 +237,12 @@ import {
 import { resolveSiteRenderPage } from './site_render_page_resolution';
 import {
   acceptProductionQuote,
+  setProductionQuoteServiceProperty,
   createProductionLead,
   saveProductionQuote,
   type CrmMutationClient
 } from './crm_production_mutations';
+import { QuoteServiceLocationController, mountQuoteServiceLocation, applyServiceLocationPreviewRefresh, type ServiceLocation } from './ui/quotes/quote_service_location';
 import {
   ApplicationAuthController,
   createApplicationSignupRedirect,
@@ -2642,10 +2644,16 @@ async function renderClients() {
   });
 
   try {
-    const response = await fetch('/api/contacts');
-    const result = await response.json();
-    const contacts: Contact[] = result.data || result;
     const userId = getActingUserId();
+    let contacts: Contact[];
+    if (editorUsesSupabase()) {
+      if (crmProductionHydrator.state.entities.contacts !== 'ready') throw new Error('Contacts unavailable');
+      contacts = mockContacts.filter(contact => contact.user_id === userId);
+    } else {
+      const response = await fetch('/api/contacts');
+      const result = await response.json();
+      contacts = result.data || result;
+    }
 
     renderAppWithShell({
       activeView: 'clients', title: 'Clients & Leads', contentVariant: 'wide', user: getCurrentShellUser(),
@@ -10531,21 +10539,19 @@ function renderNewQuote() {
     if (!navigationOperation) return;
     const quoteOperation = protectedAsyncOperationGuard.begin(`quote-ui:${requestKey}`, userId);
     try {
-      const response = await fetch('/api/quotes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          request_key: requestKey,
-          contact_id: nqcId,
-          opportunity_id: nqoId || null,
-          selected_tier: selectedTier,
-          notes,
-          items: nqItems.map((item: any) => ({ serviceName: String(item.service).trim(), description: item.description || '', quantity: item.quantity, unitPrice: item.price, tier: item.tier }))
-        })
+      const client = await getBuilderPublicationSupabaseClient();
+      if (!client) throw new Error('Quote creation is temporarily unavailable.');
+      const saved = await saveProductionQuote(client as unknown as CrmMutationClient, {
+        requestKey,
+        contactId: nqcId,
+        opportunityId: nqoId || undefined,
+        selectedTier,
+        notes,
+        items: nqItems.map((item: any) => ({ serviceName: String(item.service).trim(), description: item.description || '', quantity: item.quantity, unitPrice: item.price, tier: item.tier }))
       });
-      const payload = await response.json();
-      if (!response.ok || !payload.success) throw new Error(payload.error || 'Quote creation failed.');
-      const saved = payload.data;
+      if (saved.quote.user_id !== userId || saved.quote.contact_id !== nqcId
+        || saved.items.some(item => item.user_id !== userId || item.quote_id !== saved.quote.id)
+        || (saved.opportunity && saved.opportunity.user_id !== userId)) throw new Error('Quote creation returned unavailable account data.');
       const committed = protectedAsyncOperationGuard.commitIfCurrent(quoteOperation, getActingUserId(), () => {
         const quoteIndex = mockQuotes.findIndex(quote => quote.id === saved.quote.id);
         if (quoteIndex >= 0) mockQuotes[quoteIndex] = saved.quote;
@@ -10555,9 +10561,10 @@ function renderNewQuote() {
           if (itemIndex >= 0) mockQuoteItems[itemIndex] = item;
           else mockQuoteItems.push(item);
         }
-        if (saved.opportunity) {
-          const opportunityIndex = mockOpportunities.findIndex(opportunity => opportunity.id === saved.opportunity.id);
-          if (opportunityIndex >= 0) mockOpportunities[opportunityIndex] = saved.opportunity;
+        const savedOpportunity = saved.opportunity;
+        if (savedOpportunity) {
+          const opportunityIndex = mockOpportunities.findIndex(opportunity => opportunity.id === savedOpportunity.id);
+          if (opportunityIndex >= 0) mockOpportunities[opportunityIndex] = savedOpportunity;
         }
       });
       if (!committed) return;
@@ -12156,8 +12163,50 @@ function renderQuotePreview(quoteId: string) {
     title: 'Quote preview',
     headerActionsHtml: `<div class="wo-shell-header-actions"><button type="button" class="wo-button wo-button--secondary no-print" onclick="window.navigateTo('quotes')">Back</button><button type="button" class="wo-button wo-button--primary no-print" onclick="window.print()">Print quote</button></div>`,
     contentVariant: 'wide',
-    contentHtml: preview
+    contentHtml: preview + (quote ? '<div id="quote-service-location-root"></div>' : '')
   });
+
+  let locationController: QuoteServiceLocationController | undefined;
+  const locationRoot = app.querySelector<HTMLElement>('#quote-service-location-root');
+  if (quote && locationRoot && editorUsesSupabase()) {
+    const active = () => locationRoot.isConnected && getActingUserId() === userId && currentView === 'quote-preview';
+    locationController = new QuoteServiceLocationController(quoteId, quote.contact_id, userId, {
+      current: active,
+      requestKey: () => crypto.randomUUID(),
+      updateQuote: (fresh, items) => {
+        if (!items) throw new Error('Unavailable');
+        applyServiceLocationPreviewRefresh(quote, fresh, items, mockQuotes, mockQuoteItems, () => renderQuotePreview(quoteId));
+      },
+      load: async () => {
+        const client = await getBuilderPublicationSupabaseClient();
+        if (!client || !active()) throw new Error('Unavailable');
+        const result = await client.from('quotes').select('*').eq('id', quoteId).eq('user_id', userId).single();
+        if (result.error || !result.data) throw new Error('Unavailable');
+        const fresh = result.data as Quote;
+        const itemResult = await client.from('quote_items').select('*').eq('quote_id', quoteId).eq('user_id', userId).order('order_index');
+        if (itemResult.error || !Array.isArray(itemResult.data)) throw new Error('Unavailable');
+        const items = itemResult.data as QuoteItem[];
+        const versionCheck = await client.from('quotes').select('revision,status').eq('id', quoteId).eq('user_id', userId).single();
+        if (versionCheck.error || versionCheck.data?.revision !== fresh.revision || versionCheck.data?.status !== fresh.status) throw new Error('Estimate changed during refresh');
+        if (fresh.status === 'approved') {
+          const evidence = await client.rpc('read_crm_accepted_service_location', { p_quote_id: quoteId });
+          if (evidence.error) throw new Error('Unavailable');
+          return { quote: fresh, items, locations: [], snapshot: evidence.data };
+        }
+        const locations = await client.from('properties').select('id,contact_id,label,service_address_line1,service_address_line2,locality,administrative_area,postal_code,country_code').eq('contact_id', quote.contact_id);
+        if (locations.error || !Array.isArray(locations.data)) throw new Error('Unavailable');
+        return { quote: fresh, items, locations: locations.data as ServiceLocation[] };
+      },
+      save: async input => {
+        const client = await getBuilderPublicationSupabaseClient();
+        if (!client || !active()) throw new Error('Unavailable');
+        return setProductionQuoteServiceProperty(client as unknown as CrmMutationClient, input);
+      }
+    }, () => { if (active() && locationController) mountQuoteServiceLocation(locationRoot, locationController); });
+    void locationController.load();
+  } else if (locationRoot) {
+    locationRoot.innerHTML = '<p>Service-location persistence is available in the authenticated CRM. This preview uses local fixtures.</p>';
+  }
 
   if (acceptanceEnabled && quote) {
     const acceptanceRoot = app.querySelector<HTMLElement>('.wo-quote-acceptance-card');
@@ -12166,6 +12215,9 @@ function renderQuotePreview(quoteId: string) {
         quoteId,
         editable: true,
         onSubmitAcceptance: async (result) => {
+          if (locationController?.acceptanceBlocked) {
+            throw new Error('Save, cancel or refresh the service-location selection before accepting this estimate.');
+          }
           if (!editorUsesSupabase()) {
             approveQuote(quoteId, result);
             return;
