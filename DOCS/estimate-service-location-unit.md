@@ -432,3 +432,52 @@ Existing 877.17kB entry warning remains. Missing ignored dependency junctions we
 restored to existing cached packages; no dependency/version/install change.
 No lint command configured; git diff --check passed. SQL/concurrency/real Auth browser
 evidence above is reused from byte-identical original implementation; not rerun here.
+
+## Fresh isolated verification supersedes inherited-evidence limitation
+
+Actual PR57 composition replayed from zero with cached CLI2.116.0 and Supabase
+Postgres17.6.1.165:56 versioned migrations, latest20261021054957, no later units.
+Initial start restored an older local backup; explicit disposable-local reset
+replaced it before testing. No restored-stack results counted as fresh evidence.
+
+- C04 SQL40/40 and location SQL61/61 PASS on actual fresh56 schema.
+- Unchanged acceptance/invoice SQL regressions PASS. Execution seed supplies required
+  funnel names and synthetic password hashes; initial missing-hash fixture error
+  corrected in seed only. Transactions rolled back; no schema/product adjustment.
+- Four observed-lock concurrency cases PASS using unchanged guarded runner on a
+  network-none/no-port schema copy of actual56. Local copy needed schema-owner and
+  default-ACL bootstrap completion; table/function counts and private ledger ACL
+  matched source before testing. No remote data or credentials transferred.
+- Real local Chromium Auth/UI/REST/Postgres journey PASS: login/customer isolation,
+  estimate create, save/cancel, stale conflict, lost-response retry, frozen accepted
+  address after source edit, legacy/unassigned reads, invoice RPC replay, navigation,
+  mobile view and account switch. No page errors; fixture cleanup passed. No invoice
+  conversion UI claim. Vite/TLS proxy stopped; temporary certificate/key removed.
+  Fresh synthetic screenshots retained in Temp/washops-pr57-auth-proof/results;
+  no trace/video/credentials. No hosted Auth/provider request.
+- Genuine legacy-forward proof PASS: disposable reset to54, old-RPC acceptance,
+  apply exactly52454/54957, verify unchanged signature/snapshot/revision/time,
+  replay and invoicing. No hosted DDL.
+
+CI root cause: five unchanged Builder expected-failure queries attached rejection
+assertions after another transaction committed and released their locks. Rejection
+could arrive before the handler, causing an unhandled error despite passing checks.
+Fresh-main and oldPR57 normal21-case baselines passed; a temporary exact-main copy
+with25ms continuation delay reproduced unhandledPT404. Corrected delayed copy passed.
+No product regression established. Same-class publication23503 surfaced after first
+partial fix, so all five sites were corrected in the same file.
+
+Separate commits8665771/4062819 modify only delete_builder_page.test.ts: immediate
+per-query outcome capture, then Error/exactSQLSTATE/original-message checks after
+unchanged real lock waits/commits. No global suppression, skips or weakened checks.
+Fresh combined159/159 PASS without unhandled errors; all21 delete cases PASS with
+25ms delayed continuation at all five sites. Independent exact4062819 review PASS;
+all ten exact-head CI jobs PASS. Earlier fresh83 unit/types/build remain valid;
+only test/docs changed since and CI repeats broad/types/build.
+
+PR53 exact main7c60be8 Vercel Production READY:
+https://vercel.com/hans-says-projects/website-crm/Cgo2uPrTCx3bVMV6EYT1X3wp4K24
+Exact-SHA Supabase check SUCCESS; fresh hosted ledger54/latestC04 unchanged.
+No manual retrigger, SQL mutation or settings change. Executor lacks dashboard
+session, so no detailed workflow-log claim is made. PR57 stays draft/unmerged;
+two-migration staged rollout and postdeployment authenticated test verification remain.
