@@ -516,13 +516,18 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
 
       await c2.query('begin');
       await c2.query(`set local request.jwt.claim.sub = '${u1}'`);
-      const c2Promise = c2.query("select public.delete_builder_page('p-same-del') as result");
+      // Observe rejection immediately: commit can release the waiter before the
+      // assertion resumes. Capture only this query's outcome; assert it below.
+      const c2Promise = c2.query("select public.delete_builder_page('p-same-del') as result")
+        .catch(error => error);
 
       await assertBackendWaiting(pool, (c2 as any).processID);
 
       await c1.query('commit');
 
-      await expect(c2Promise).rejects.toThrow(/Page not found/);
+      const secondDelete = await c2Promise;
+      expect(secondDelete).toBeInstanceOf(Error);
+      expect(secondDelete).toMatchObject({ code: 'PT404', message: 'Page not found' });
       await c2.query('rollback');
     } finally {
       await c1.query('rollback').catch(() => {});
