@@ -134,7 +134,7 @@ begin
       raise exception using errcode = '23505', message = 'request key was already used';
     end if;
     return pg_catalog.jsonb_build_object(
-      'property', pg_catalog.to_jsonb(v_property) - 'request_key' - 'request_fingerprint',
+      'property', pg_catalog.to_jsonb(v_property) - 'user_id' - 'request_key' - 'request_fingerprint',
       'replayed', true
     );
   end if;
@@ -156,7 +156,7 @@ begin
   ) returning * into v_property;
 
   return pg_catalog.jsonb_build_object(
-    'property', pg_catalog.to_jsonb(v_property) - 'request_key' - 'request_fingerprint',
+    'property', pg_catalog.to_jsonb(v_property) - 'user_id' - 'request_key' - 'request_fingerprint',
     'replayed', false
   );
 end;

@@ -3,7 +3,7 @@ set search_path = public, extensions;
 
 begin;
 
-select plan(36);
+select plan(40);
 
 select ok(
   to_regclass('public.properties') is not null,
@@ -73,6 +73,23 @@ select is(
   '101 Service Road',
   'creation stores a separately supplied service address'
 );
+select ok(
+  not (public.create_crm_property(
+    'c0400000-0000-4000-8000-000000000026', 'c04-contact-a2',
+    '66 Response Boundary Road', 'Springfield', 'US'
+  )->'property' ?| array['user_id', 'request_key', 'request_fingerprint']),
+  'first creation response omits ownership and idempotency metadata'
+);
+select ok(
+  not (public.create_crm_property(
+    'c0400000-0000-4000-8000-000000000026', 'c04-contact-a2',
+    '66 Response Boundary Road', 'Springfield', 'US'
+  )->'property' ?| array['user_id', 'request_key', 'request_fingerprint']),
+  'replayed creation response omits ownership and idempotency metadata'
+);
+reset role;
+delete from public.properties where request_key = 'c0400000-0000-4000-8000-000000000026';
+set local role authenticated;
 select is(
   public.create_crm_property(
     'c0400000-0000-4000-8000-000000000011', 'c04-contact-a1',
@@ -288,6 +305,18 @@ select throws_ok(
   'anonymous role cannot create properties'
 );
 reset role;
+
+delete from public.contacts where id = 'c04-contact-a2';
+select is(
+  (select count(*)::integer from public.properties where contact_id = 'c04-contact-a2'),
+  0,
+  'deleting a contact cascades its service properties in the bounded current domain'
+);
+select is(
+  (select count(*)::integer from public.properties where contact_id = 'c04-contact-a1'),
+  2,
+  'contact deletion preserves another customer service properties'
+);
 
 select * from finish();
 rollback;
