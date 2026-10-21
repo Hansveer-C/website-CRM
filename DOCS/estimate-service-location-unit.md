@@ -1,6 +1,6 @@
 # WASHOPS CRM — estimate/service-location association unit
 
-Status: implemented and tested locally; separate final review pending. No remote activation.
+Status: implemented, tested and separately reviewed locally. No remote activation.
 Owner: this project lane. Dependency: reviewed PR55 `b5a171081c192a94334c0be08efb460ec6c50828`.
 Base main inspected: `7d361596e6994e0371ac20ef18a85cb833de5651`.
 Branch: `codex/estimate-service-location`, isolated from PR53/PR55 worktrees.
@@ -161,7 +161,9 @@ reviewed separately without destructive production DDL.
 - [x] Parent accepted scope for reversible local implementation; final diff needs separate review.
 - [x] Implement one bounded migration/RPC/client unit, with no UI/provider activation.
 - [x] Execute actual SQL, concurrency, adapter/type/build regressions below.
-- [ ] Complete separate independent final-diff review and fix material findings.
+- [x] Separate independent review PASS on implementation commit
+  `b5756b82dd5d927860b2bc696a674860a903ce91`; no material findings. Reviewer also
+  independently ran the 37 new client tests and whitespace check successfully.
 - [ ] Resolve production integration gate and verify merged PR55 before remote release.
 - [ ] Only then consider customer-facing association UX, followed by job/visit conversion.
 
@@ -212,3 +214,14 @@ succeeded. No new dependency, credential, paid API or provider was introduced.
 No UI is wired yet: this verifies a backend/RPC/client-adapter dependency, not the
 finished customer workflow or CRM. Production migration-trigger evidence and merged
 PR55 remain prerequisites for any later remote release.
+
+## Independent review checkpoint
+
+The separate reviewer verified authorization/customer FK, stable historic replay
+results, revisions, lock order, explicit accepted-location projection and preserved
+legacy/commercial/invoice contracts. It reviewed SQL/concurrency/legacy fixtures and
+the execution evidence, but did not independently rerun the database suites.
+The follow-up evidence commit changes this record only; implementation remains
+byte-identical to the reviewed commit. No remote push/merge or production operation
+was performed. The session-owned disposable container is stopped at handoff; its
+synthetic databases remain available for review. Pre-existing worktrees are intact.
