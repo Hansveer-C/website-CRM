@@ -29,6 +29,14 @@ describe('accepted invoice evidence and production boundary', () => {
 
 });
 describe('RPC-backed conversion controller', () => {
+  it('accepts canonical SQL-normalized legacy line names without modifying frozen evidence', async () => {
+    const f=fixture(),evidence=raw();evidence.items[0].service_name='Basic wash';
+    f.load.mockResolvedValueOnce(parseAcceptedInvoiceEvidence(evidence,q));
+    const response=result();response.items[0].service_name='Basic wash';f.create.mockResolvedValueOnce(response);
+    await f.controller.load();await f.controller.create();expect(f.controller.phase).toBe('success');
+    expect(f.controller.evidence?.items[0].service_name).toBe('Basic wash');
+  });
+
   it('does not start reads, writes or navigation from a stale account or detached preview', async () => {
     const f=fixture();f.current.mockReturnValue(false);await f.controller.load();expect(f.load).not.toHaveBeenCalled();
     f.current.mockReturnValue(true);await f.controller.load();f.current.mockReturnValue(false);await f.controller.create();expect(f.create).not.toHaveBeenCalled();

@@ -1430,8 +1430,10 @@ in-memory converter and its production denial remain separate and unchanged.
 
 CLI-generated `20261021232634_read_accepted_quote_invoice_evidence.sql` replaces
 PR58's UNPUBLISHED `20261021064220` in this candidate only. Body SHA256
-`37f7989a7cbc9735d83237a40413aefb72a87964227ed586a46dc7e34dd8fc73`
-matches the old file. All 58 applied migrations remain byte-for-byte unchanged;
+`0cd96a2b4c9633446865af03531d8d2d6a13ef51f9a28fbf165c89ca34790a00`.
+It differs from PR58 only by SQL btrim of projected service names, matching the
+existing invoice converter for valid padded legacy names. Raw accepted snapshots
+remain unchanged, verified by regression; ordinary new quote saves already trim. All 58 applied migrations remain byte-for-byte unchanged;
 the old unpublished filename is absent. Expected hosted effect AFTER release gate:
 58 -> 59, one authenticated owner-only SECURITY DEFINER read projection, no new
 table or existing grant/policy/invoice-RPC change. PUBLIC/anon/service_role EXECUTE
@@ -1447,17 +1449,19 @@ billing snapshot are reused. No invoice service-location schema expansion, PDF
 sharing, send/payment/provider activation or automatic communication is included.
 
 Fresh local checks: 59-migration replay; nine SQL regression suites (properties
-40 TAP assertions, service-location/evidence 79; other suites are exception-based);
+40 TAP assertions, service-location/evidence 82; other suites are exception-based);
 85 review/acceptance/invoice assertions including concurrent duplicate conversion
 and eight observed review races; app/API types and build. Broad regression passed
-2304 with 204 skipped, followed by 31 focused final guard/XSS/traffic tests.
+2304 with 204 skipped, followed by 32 focused final guard/XSS/traffic tests.
 Actual production-build browser 2/2 passed: no seeded CRM records, ordinary lead,
 draft, property, separate recipient confirmation, owner acceptance, invoice save,
 lost-response same-key retry, reopen/reload, literal HTML scope, mobile width and
 keyboard navigation. A separate invoice proof narrowly permits only the additional
 exact loopback conversion RPC; the original review-only traffic guard is unchanged.
 Initial browser failures were test guard/locator/mobile-navigation issues, corrected
-without weakening assertions. Final independent review and remote CI are pending.
+without weakening assertions. Independent review passed initial head `0592bb6`; a subsequent focused review
+identified the legacy name issue corrected above. Final correction review and
+current-head remote CI remain pending.
 
 Parent-reported hosted PR64 proof remains OWNER-ONLY: synthetic revision2 link,
 24-hour/access disclosure, expiry `10/22/2026 4:18:01 PM`, normal revocation and full

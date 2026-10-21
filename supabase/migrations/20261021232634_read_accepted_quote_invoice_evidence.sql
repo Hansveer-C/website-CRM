@@ -42,7 +42,7 @@ begin
     v_quantity := round((v_item ->> 'quantity')::numeric, 2);
     v_price := round((v_item ->> 'unit_price')::numeric, 2);
     v_items := v_items || pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
-      'service_name', v_item -> 'service_name', 'description', coalesce(v_item -> 'description', '""'::jsonb),
+      'service_name', pg_catalog.btrim(v_item ->> 'service_name'), 'description', coalesce(v_item -> 'description', '""'::jsonb),
       'quantity', v_quantity, 'unit_price', v_price, 'line_total', round(v_quantity * v_price, 2),
       'order_index', v_item -> 'order_index', 'tier', v_tier
     ));

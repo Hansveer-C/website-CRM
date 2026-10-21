@@ -162,12 +162,15 @@ select ok(not has_table_privilege('authenticated','public.quote_acceptances','se
 insert into public.quotes(id,user_id,contact_id,request_key,request_fingerprint,status,total_amount,selected_tier)
 values('aa300000-0000-4000-8000-000000000008','aa100000-0000-4000-8000-000000000001','location-a1','aa300000-0000-4000-8000-000000000018','rounding fixture','sent',0.15,'basic');
 insert into public.quote_items(user_id,quote_id,service_name,quantity,unit_price,tier,order_index)
-values('aa100000-0000-4000-8000-000000000001','aa300000-0000-4000-8000-000000000008','Fractional fixture',0.29,0.50,'basic',0);
+values('aa100000-0000-4000-8000-000000000001','aa300000-0000-4000-8000-000000000008','  Fractional fixture  ',0.29,0.50,'basic',0);
 set local role authenticated;
 select set_config('request.jwt.claim.sub','aa100000-0000-4000-8000-000000000001',true);
 select public.accept_crm_quote('aa300000-0000-4000-8000-000000000008',1,'aa400000-0000-4000-8000-000000000008','Rounding Signer',null,true)->>'replayed';
+select is(public.read_crm_accepted_invoice_evidence('aa300000-0000-4000-8000-000000000008')->'items'->0->>'service_name','Fractional fixture','legacy padded names use canonical SQL invoice normalization');
 select is(public.read_crm_accepted_invoice_evidence('aa300000-0000-4000-8000-000000000008')->'items'->0->>'line_total','0.15','read evidence uses exact PostgreSQL decimal rounding');
 select is(public.create_invoice_from_accepted_quote('aa300000-0000-4000-8000-000000000008',1,'aa600000-0000-4000-8000-000000000008')->'items'->0->>'line_total','0.15','unchanged invoice authority matches projected fractional evidence');
+select is(public.create_invoice_from_accepted_quote('aa300000-0000-4000-8000-000000000008',1,'aa600000-0000-4000-8000-000000000008')->'items'->0->>'service_name','Fractional fixture','legacy padded snapshot conversion returns projected normalized name');
 reset role;
+select is((select quote_snapshot->'items'->0->>'service_name' from public.quote_acceptances where quote_id='aa300000-0000-4000-8000-000000000008'),'  Fractional fixture  ','read and conversion preserve raw accepted legacy scope');
 select * from finish();
 rollback;
