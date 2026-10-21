@@ -1,14 +1,15 @@
 # WASHOPS CRM - estimate/service-location association unit
 
-Status: isolated draft release candidate on main `7c60be847370365c5680681168c7f1cc51100488`.
-C04 PR55 and roadmap PR53 are merged. This branch contains only the reviewed
-estimate/location backend, acceptance snapshot and UI units through original
-`8d14235`; invoice conversion UI, jobs, communication history and synthetic SMS
-scaffolding are excluded. Historical implementation evidence below is retained.
+Status: PR59 staged service-location entry release refreshed on deployed onboarding main
+`2468a0d05320d151227b08a5cd5fb56122b51f4f`. This unit closes the missing creation
+entry point in authenticated estimate Preview using the existing C04 property RPC.
+It is independent of QA-only invoice PR58, which remains draft. PR48 PDF work and
+later job/history/SMS units are untouched. Historical estimate/location evidence is
+retained below; the final current entry packet records this unit's exact limits.
 
-This is the established engineering execution record, not a competing roadmap.
-Canonical product authority remains `CRM Roadmap.ods`. No functional merge is
-authorized in this publication unit; final release gates are recorded below.
+This is the established engineering execution record, not another roadmap.
+Canonical product authority remains `CRM Roadmap.ods`. The current staged release
+authorization supersedes earlier draft-only notes; no hosted test records are created here.
 
 ## Verified contracts
 
@@ -481,6 +482,75 @@ Exact-SHA Supabase check SUCCESS; fresh hosted ledger54/latestC04 unchanged.
 No manual retrigger, SQL mutation or settings change. Executor lacks dashboard
 session, so no detailed workflow-log claim is made. PR57 stays draft/unmerged;
 two-migration staged rollout and postdeployment authenticated test verification remain.
+
+## Current service-location entry draft packet
+
+Design grounded in canonical C04: customer washing service locations are distinct
+from billing addresses. Choose the smallest existing entry point: Quotes -> Preview
+for an owned draft/sent estimate, whose customer identity is already fixed. The
+inline Add service location form creates via existing create_crm_property, selects
+that safe returned location, then requires a separate Save service location action
+through the existing association RPC. No duplicate property domain, new migration,
+permission grant, update/delete API, sent-state mutation or invoice feature.
+
+The adapter sends only the existing nine RPC arguments, never user/tenant authority.
+It normalizes and validates bounds, rejects private/unexpected response fields and
+foreign-customer results, and sanitizes permission/validation/conflict errors.
+Server auth.uid ownership/RLS remains authoritative. Country code is explicit;
+no billing address or country is inferred. Canonical form primitives provide
+escaped labels/values, full-width touch inputs, native required state and focus.
+
+Cancel/Escape before submission makes no write. Creation locks quote selection,
+refresh and acceptance while the form is active. Double clicks coalesce; uncertain
+responses retain the same normalized payload/key and disable editing/cancel so a
+retry cannot silently change intent. A visible warning explains that leaving may
+leave a saved location; return and inspect existing locations first. Late results
+after leaving the quote/account cannot select a property or hijack navigation.
+Existing accepted-location snapshots remain read-only; no creation form there.
+
+Fresh checks on this unit (no hidden PR58 or later work):
+- Clean local Supabase reset applied exactly the current 56 migrations. No new SQL.
+- C04 40/40 and location 61/61 SQL assertions passed on actual local Auth/Storage
+  stack; fixtures rolled back, private response/owner/idempotency contract unchanged.
+- Focused tests 107/107 across six files, app/API types and whitespace passed.
+- Fresh Auth accounts start with customer prerequisites only: no preseeded property,
+  quote or acceptance. The real DEV browser creates draft estimates and properties
+  through the actual UI/RPC; validation/cancel/focus/mobile, double click, dropped
+  committed response/replay, separate association, permission denial, navigation race,
+  customer/business isolation and zero acceptances passed.
+- Actual production build and the same authenticated fresh-account journey passed.
+  No property feature QA flag is needed; no fixture/backdoor path exists in product.
+- New local fixture guard rejects URL query/hash overrides, protocol/path/user/host
+  drift before creating pg.Client. Independent review identified that gap; fixed
+  with a nonconnecting regression. Reviewer independently ran 32 focused tests.
+
+Browser harness corrections were label matching, waiting for the exact select
+instead of an enclosing accessible form, and normal deep-link reload after login.
+The existing dashboard website-onboarding overlay can obstruct sidebar navigation
+and has no dismiss button. This unit does not remove/bypass it in product; the
+supported /#/quotes address reload reaches the actual CRM. No forced clicks, DOM
+modal deletion, hidden fixture flag or website-generation submission was used.
+
+Remaining private workflow: after a future reviewed merge, sign in with an existing
+authorized account, open /#/quotes (reload if onboarding obstructs), create a draft
+for an owned customer, Preview -> Add service location -> Create -> Save service
+location. Form cancellation can be checked without persistence. Hosted quote sending
+is still disabled; there is no deliberate non-sending sent/acceptance transition
+for a newly created draft. Full acceptance/frozen-history flow needs that separately
+reviewed contract; this unit does not mark drafts sent or send any communication.
+PR58 invoice UI remains QA-only and is not merged for convenience.
+
+Persistence/recovery limits before merge decision: successful creation is a durable
+property row; Save association advances quote revision. Cancel/Back/Git revert do
+not undo committed data. There is no property edit/delete/undo UI or delete RPC;
+address duplication across different deliberate request keys is not prohibited.
+No destructive cleanup/reset is proposed. Application rollback is a Git revert;
+existing schema/records remain. No production test records were created here.
+
+Final regression: existing real authenticated acceptance/frozen-location/legacy and
+invoice RPC/replay browser journey passed (1/1, 9.4 seconds) on this exact code.
+The onboarding dismissal prerequisite is tracked separately; no terms acceptance
+or website publication is authorized by this property-entry draft.
 ## Current CRM-only onboarding prerequisite
 
 Separate draft based on deployed main e4b8c0a2cffb2329ef50131e2cc96f59ecffbbd1.
@@ -518,3 +588,44 @@ estimates still have no deliberate non-sending sent/acceptance transition.
 No production test records, messages or provider actions were performed. Rollback
 is an application Git revert; only an account-scoped local preference may remain.
 Clearing that preference reoffers setup; no data deletion or hosted cleanup needed.
+## Current staged release refresh after PR60
+
+PR60 merged as 2468a0d05320d151227b08a5cd5fb56122b51f4f. Exact-SHA Supabase
+check SUCCESS; Vercel Production READY at
+https://vercel.com/hans-says-projects/website-crm/35NTRGAiMADrjcNBZEJrYLVTRXVP .
+Root and app asset HTTP200, released Later button present. Hosted ledger unchanged:
+56 versions, latest 20261021054957, digest 92dc3533d42950746420ac1b4e38b6fa.
+No manual migration, settings, credentials, website generation or hosted records.
+
+PR59 refreshed using normal merge ca5a2c0; only overlapping appended documentation
+required resolution and both sections were preserved. Onboarding source merged
+without functional conflict. Earlier no-dismiss/deep-link observations remain
+historical; the refreshed actual production browser test now uses Set up website
+later and normal Quotes navigation. No QA flag is needed for either product UI.
+
+Fresh composition validation:
+- All 56 versioned migration files byte-match the disposable stack and hosted
+  ledger has the same versions, zero pending SQL. Historical non-versioned
+  manual_deploy_rls_bundle.sql is excluded and never executed.
+- Clean local Supabase reset/replay, C04 40/40 and association 61/61 pgTAP PASS.
+- 113/113 focused tests across seven files, app/API types and production build PASS.
+- Real production-build fresh-account property journey PASS (1/1, 9.2 seconds),
+  including normal onboarding dismissal, create/replay/privacy/permission/mobile/
+  navigation isolation and explicit draft-only association.
+- Real production-build acceptance/frozen-address/legacy/invoice RPC regression
+  PASS (1/1, 8.8 seconds); no invoice conversion UI imported.
+- Real production-build onboarding/account/reload/navigation regression on this
+  same composition PASS (1/1, 6.3 seconds), zero generation requests/website rows.
+- Existing real concurrency proof PASS all four cases: same-key replay, competing
+  assignment conflict, assignment-before-acceptance and acceptance-before-assignment.
+  Ran unchanged assertions on a fresh network-none/no-port disposable PostgreSQL
+  instance with schema-only application/Auth copy from the replayed local stack.
+  Two stock image bootstrap approaches failed before the race proof; replaced with
+  an independently initialized plain server process. All owned failed/successful
+  race containers removed; no production access/data or test assertions changed.
+
+PR58 stays draft, PR48 untouched. Release rollback is application revert only;
+property creation and assignment are durable once committed. No delete/undo API
+or destructive hosted cleanup is proposed. Parent will independently perform hosted
+synthetic UI checks after release. New draft sending/acceptance and missing website
+terms URL remain explicit gaps; no live messages or site publication are needed.

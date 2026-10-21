@@ -237,6 +237,7 @@ import {
 import { resolveSiteRenderPage } from './site_render_page_resolution';
 import {
   acceptProductionQuote,
+  createProductionServiceProperty,
   setProductionQuoteServiceProperty,
   createProductionLead,
   saveProductionQuote,
@@ -12204,6 +12205,11 @@ function renderQuotePreview(quoteId: string) {
         const client = await getBuilderPublicationSupabaseClient();
         if (!client || !active()) throw new Error('Unavailable');
         return setProductionQuoteServiceProperty(client as unknown as CrmMutationClient, input);
+      },
+      create: async input => {
+        const client = await getBuilderPublicationSupabaseClient();
+        if (!client || !active()) throw new Error('Unavailable');
+        return createProductionServiceProperty(client as unknown as CrmMutationClient, input);
       }
     }, () => { if (active() && locationController) mountQuoteServiceLocation(locationRoot, locationController); });
     void locationController.load();
