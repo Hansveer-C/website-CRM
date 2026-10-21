@@ -40,6 +40,37 @@ export interface QuoteAcceptanceResult {
   replayed: boolean;
 }
 
+export interface QuoteServicePropertyInput {
+  quoteId: string;
+  expectedRevision: number;
+  propertyId: string;
+  requestKey: string;
+}
+
+export interface QuoteServicePropertyResult {
+  quoteId: string;
+  propertyId: string;
+  revision: number;
+  replayed: boolean;
+}
+
+export interface AcceptedServiceLocation {
+  schema_version: 1;
+  property_id: string;
+  label: string | null;
+  service_address_line1: string;
+  service_address_line2: string | null;
+  locality: string;
+  administrative_area: string | null;
+  postal_code: string | null;
+  country_code: string;
+}
+
+export type AcceptedServiceLocationEvidence =
+  | { status: 'legacy_unrecorded' }
+  | { status: 'unassigned' }
+  | { status: 'recorded'; location: AcceptedServiceLocation };
+
 export interface InvoiceCreationInput {
   quoteId: string;
   acceptedQuoteRevision: number;
@@ -105,6 +136,67 @@ function isConflictError(error: unknown): boolean {
 
 function isInvalidInputError(error: unknown): boolean {
   return object(error)?.code === '22023';
+}
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Associates an existing quote without changing pricing or bypassing server identity. */
+export async function setProductionQuoteServiceProperty(
+  client: CrmMutationClient,
+  input: QuoteServicePropertyInput
+): Promise<QuoteServicePropertyResult> {
+  if (!uuidPattern.test(input.quoteId) || !uuidPattern.test(input.propertyId)
+    || !uuidPattern.test(input.requestKey) || !Number.isInteger(input.expectedRevision)
+    || input.expectedRevision < 1 || input.expectedRevision >= 2147483647) {
+    throw new CrmMutationError('INVALID_INPUT', 'A quote revision, service location and request key are required.');
+  }
+  const quoteId = input.quoteId.toLowerCase();
+  const propertyId = input.propertyId.toLowerCase();
+  const result = await client.rpc('set_crm_quote_service_property', {
+    p_quote_id: quoteId,
+    p_expected_revision: input.expectedRevision,
+    p_property_id: propertyId,
+    p_request_key: input.requestKey.toLowerCase()
+  });
+  if (result.error) {
+    if (isConflictError(result.error)) throw new CrmMutationError('CONFLICT');
+    if (isInvalidInputError(result.error)) throw new CrmMutationError('INVALID_INPUT');
+    throw new CrmMutationError('UNAVAILABLE');
+  }
+  const payload = requireObject(result.data);
+  if (payload.quote_id !== quoteId || payload.property_id !== propertyId
+    || payload.revision !== input.expectedRevision + 1 || typeof payload.replayed !== 'boolean'
+    || ['user_id', 'request_key', 'request_fingerprint'].some(key => Object.hasOwn(payload, key))) {
+    throw new CrmMutationError('INVALID_RESPONSE');
+  }
+  return { quoteId, propertyId, revision: payload.revision as number, replayed: payload.replayed };
+}
+
+/** Missing historical evidence is explicit; this never consults current customer/property data. */
+export function readAcceptedServiceLocation(snapshot: unknown): AcceptedServiceLocationEvidence {
+  if (Array.isArray(snapshot)) throw new CrmMutationError('INVALID_RESPONSE');
+  const envelope = requireObject(snapshot);
+  if (!Object.hasOwn(envelope, 'service_location') && !Object.hasOwn(envelope, 'service_location_status')) {
+    return { status: 'legacy_unrecorded' };
+  }
+  if (envelope.service_location_status === 'unassigned' && envelope.service_location === null) {
+    return { status: 'unassigned' };
+  }
+  const location = requireObject(envelope.service_location);
+  const required = (key: string, max: number) => typeof location[key] === 'string'
+    && (location[key] as string).trim().length > 0 && (location[key] as string).length <= max;
+  const optional = (key: string, max: number) => location[key] === null
+    || (typeof location[key] === 'string' && (location[key] as string).length <= max);
+  if (envelope.service_location_status !== 'recorded' || location.schema_version !== 1
+    || typeof location.property_id !== 'string' || !uuidPattern.test(location.property_id)
+    || !required('service_address_line1', 200) || !required('locality', 120)
+    || typeof location.country_code !== 'string' || !/^[A-Z]{2}$/.test(location.country_code)
+    || !optional('label', 120) || !optional('service_address_line2', 200)
+    || !optional('administrative_area', 120) || !optional('postal_code', 32)
+    || ['user_id', 'request_key', 'request_fingerprint'].some(key => Object.hasOwn(location, key))) {
+    throw new CrmMutationError('INVALID_RESPONSE');
+  }
+  return { status: 'recorded', location: location as unknown as AcceptedServiceLocation };
 }
 
 export async function saveProductionQuote(client: CrmMutationClient, input: QuoteSaveInput): Promise<QuoteSaveResult> {

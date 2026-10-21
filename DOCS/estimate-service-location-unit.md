@@ -1,6 +1,6 @@
 # WASHOPS CRM — estimate/service-location association unit
 
-Status: local implementation plan; no migration/API implementation or remote activation.
+Status: implemented and tested locally; separate final review pending. No remote activation.
 Owner: this project lane. Dependency: reviewed PR55 `b5a171081c192a94334c0be08efb460ec6c50828`.
 Base main inspected: `7d361596e6994e0371ac20ef18a85cb833de5651`.
 Branch: `codex/estimate-service-location`, isolated from PR53/PR55 worktrees.
@@ -133,8 +133,10 @@ implementation and at most two repair passes; stop on plateau/security ambiguity
 
 ## File ownership and release bounds
 
-Expected future owned files: one NEW migration; one NEW association SQL suite;
-bounded additions to `src/crm_production_mutations.ts`, its tests and Quote type.
+Owned files: new migration `20261021052454_associate_quote_service_property.sql`;
+new association SQL suite, real-concurrency runner and before/after legacy fixtures;
+bounded additions to `src/crm_production_mutations.ts`, a new adapter/evidence-reader
+test file and the Quote type.
 The acceptance SQL/RPC contract is shared and exclusively owned by this unit while
 changing it; recheck other workers before edits. `src/main.ts`/quote UI are protected
 from this first backend unit; later UI wiring must independently prove async actor
@@ -156,8 +158,57 @@ reviewed separately without destructive production DDL.
 - [x] Read exact save/acceptance/invoice RPCs, production adapters and SQL tests.
 - [x] Verify PR55 dependency and isolated branch; no competing next-unit worktree found.
 - [x] Document API, legacy behavior, commercial/revision invariants and test matrix.
-- [ ] Independently review this proposed domain contract before implementation.
-- [ ] Implement one bounded migration/RPC/client unit, with no UI/provider activation.
-- [ ] Execute SQL, concurrency, adapter/type/build regressions and independent review.
+- [x] Parent accepted scope for reversible local implementation; final diff needs separate review.
+- [x] Implement one bounded migration/RPC/client unit, with no UI/provider activation.
+- [x] Execute actual SQL, concurrency, adapter/type/build regressions below.
+- [ ] Complete separate independent final-diff review and fix material findings.
 - [ ] Resolve production integration gate and verify merged PR55 before remote release.
 - [ ] Only then consider customer-facing association UX, followed by job/visit conversion.
+
+## Executed local verification
+
+- New SQL suite: **52/52 pgTAP assertions passed** against the isolated domain schema.
+  Repeated successfully after a fresh relevant-domain replay. These are the same
+  52 cases, not 104 independent tests.
+- Actual legacy-forward test: create a signed acceptance using the old RPC BEFORE
+  the new migration; afterward verify unchanged snapshot text, signature bytes,
+  acceptance revision/time, exact retry and invoice conversion. Passed.
+- Four two-session checks passed, each observing a real PostgreSQL lock wait:
+  concurrent same-key assignment (one mutation/one replay), competing assignments
+  (one stale loser/no ledger row), association-before-acceptance and
+  acceptance-before-association (frozen original location retained).
+  Reproduce with `node supabase/tests/crm_quote_service_location_concurrency.mjs
+  washops-pr55-review-20261021 --local-only` against the prepared disposable DB.
+  Runner refuses containers with network access or published ports and cleans only
+  its unique synthetic fixtures; it never reads a host database URL/credential.
+- Unchanged `crm_quote_acceptance.test.sql`,
+  `crm_invoice_from_accepted_quote.test.sql` and C04's **40 assertions** passed.
+- Vitest **57/57** in `crm_quote_service_location.test.ts` (37), existing production
+  mutations (14), existing acceptance migration (3), existing invoice migration (3).
+  Exact Vitest 1.6.0 was reused from local cache.
+- App/API TypeScript checks passed. Lockfile-installed Vite 5.1.0 production build
+  passed with output directed to Temp, preserving tracked dist. A >550 kB chunk
+  warning remains (largest entry 866.59 kB); no bundle-size correction or unsupported
+  claim that this warning is new/pre-existing is made in this backend unit.
+- `git diff --check` passed; protected UI, prior migrations, invoice RPC, dependencies,
+  workflows and deployment configuration are unchanged.
+
+Database used: session-owned Docker container `washops-pr55-review-20261021`,
+network mode `none`, no published ports, cached Supabase Postgres 17.6.1.165.
+The fresh DB `washops_location_fresh_20261021` replayed canonical legacy baseline,
+quote creation/nonfinite, acceptance, invoice, reviewed C04 and the new migration.
+It used a minimal local auth.uid fixture, **not** full Supabase Auth/Storage bootstrap;
+this does not certify the entire repository migration chain or live infrastructure.
+The fresh harness required pgTAP extensions-schema usage for authenticated/service
+roles, then anon; these two deterministic harness-only setup corrections were made
+within the bounded loop. No protected-data access policy was loosened.
+
+Missing checkout packages initially blocked Vitest and typechecks. Tracked
+node_modules was not reinstalled. Only absent packages were linked to an isolated
+Temp installation of the unchanged lockfile (install scripts disabled). One offline
+cache attempt failed; normal public-registry fetch of those already-pinned packages
+succeeded. No new dependency, credential, paid API or provider was introduced.
+
+No UI is wired yet: this verifies a backend/RPC/client-adapter dependency, not the
+finished customer workflow or CRM. Production migration-trigger evidence and merged
+PR55 remain prerequisites for any later remote release.
