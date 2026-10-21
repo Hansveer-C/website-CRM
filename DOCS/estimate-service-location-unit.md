@@ -1,16 +1,16 @@
 # WASHOPS CRM - estimate/service-location association unit
 
-Status: PR59 staged service-location entry release refreshed on deployed onboarding main
-`2468a0d05320d151227b08a5cd5fb56122b51f4f`. This unit closes the missing creation
-entry point in authenticated estimate Preview using the existing C04 property RPC.
-It is independent of QA-only invoice PR58, which remains draft. PR48 PDF work and
-later job/history/SMS units are untouched. Historical estimate/location evidence is
-retained below; the final current entry packet records this unit's exact limits.
+Status: authenticated Add Lead draft based on deployed main
+`f4534e90fe846970a8e54e04a463ce0b5539d291`. PR60 onboarding and PR59 property
+entry are released. Current work closes the ordinary production lead-entry gap.
+Earlier property/estimate browser proofs seeded customer prerequisites: they are
+NOT empty-account end-to-end proof. The current unit below explicitly seeds only
+local Auth identities/profiles and creates every CRM record through normal UI.
+PR58 remains draft; PR48 and later job/history/SMS work remain untouched.
 
-This is the established engineering execution record, not another roadmap.
-Canonical product authority remains `CRM Roadmap.ods`. The current staged release
-authorization supersedes earlier draft-only notes; no hosted test records are created here.
-
+This is the established execution checklist/evidence record, not a competing
+roadmap. Canonical product authority remains `CRM Roadmap.ods`. This unit may be
+published as a draft only; no merge or hosted test records are authorized here.
 ## Verified contracts
 
 - `20260812150626_reject_nonfinite_quote_amounts.sql`: `save_crm_quote` creates a
@@ -629,3 +629,68 @@ property creation and assignment are durable once committed. No delete/undo API
 or destructive hosted cleanup is proposed. Parent will independently perform hosted
 synthetic UI checks after release. New draft sending/acceptance and missing website
 terms URL remain explicit gaps; no live messages or site publication are needed.
+## Authenticated Add Lead entry draft
+
+Full empty-account inspection: released onboarding dismissal works; existing
+production quote create and service-property create/association call authoritative
+RPCs directly. Add Lead alone posted to an absent /api/leads handler; its existing
+createProductionLead branch was inside disabled fixture dispatch. This draft wires
+the ordinary authenticated form directly to the existing create_internal_crm_lead
+RPC through the established adapter. Local/fixture behavior stays separate. No
+schema, grant, credential, provider, dependency or release-setting changes.
+
+Existing six required form fields and RPC bounds are preserved. Visible bounded
+validation, normalized name/email, safe permission/validation/conflict errors,
+Cancel/Escape, saving and replay states use existing form/button primitives.
+Owner comes from the authenticated server identity; the browser sends no owner or
+tenant parameter. Returned contact/opportunity graph is checked for the current
+owner and relationship before updating the existing CRM collections.
+
+Double clicks coalesce. Unknown outcomes freeze payload/key and disallow editing
+or Cancel; retries use the same key, including ordinary view navigation/return in
+the current page session. A late committed result cannot hijack another view; on
+return, View saved lead reuses the result without a new mutation. Authentication
+changes clear in-memory drafts/results. No PII or keys are persisted to storage.
+A full reload intentionally loses in-memory intent: the visible warning says to
+reload Clients & Leads and inspect saved records before starting another lead.
+Confirmed creation persists contact, opportunity and inquiry ledger; Cancel or a
+Git revert does not undo committed data. No delete/undo feature is introduced.
+
+Cold browser verification exposed an adjacent loading race: ensureProductionCrmData
+skipped awaiting an already-loading request for the same owner, so Contacts could
+render before its data was ready. The bounded correction awaits the hydrator's
+existing deduplicated promise. A held real contact request proves cold navigation
+waits and ends in the genuine empty state. Retry button text now updates its
+accessible label too. A harness locator was corrected for the ordinary contact
+count badge; no assertions, security checks or intended concurrency were weakened.
+
+Executed verification on the actual composition:
+- 102/102 focused tests across nine files, app/API types and whitespace PASS.
+- Existing hardened lead SQL suite PASS on the real 56-migration local Supabase
+  stack: role permissions, same-key replay, repeated inquiries, identity-conflict
+  atomicity, cross-business/missing-funnel denial. Separate SQL fixtures rolled back.
+- Actual production build PASS with browser fixture mode disabled; no lead QA
+  activation flag exists in product.
+- Real local Auth production-browser suite 2/2 PASS (10.9 seconds): held cold-load
+  navigation and an actually empty account through Later -> Clients & Leads ->
+  Add Lead -> lead RPC/replay -> New quote -> property create -> explicit Save.
+- Browser setup seeds Auth users/profiles ONLY, with zero contacts, opportunities,
+  inquiry ledgers, properties, quotes, acceptances, invoices, messages, calls and
+  websites verified beforehand. No hidden fixture dispatcher or /api/leads request.
+- Browser exercises blank/email validation, Cancel/Escape, real local permission
+  revoke/restore, mobile layout, duplicate clicks, committed-response loss/retry,
+  navigating away/returning, late commit recovery, account switch and draft isolation.
+  End-state acceptance/invoice/message/call/website counts remain zero. All fixtures
+  are synthetic/local; no hosted Auth, production records or outgoing provider calls.
+
+Hosted QA is pending a reviewed future merge, using the existing signed-in test
+owner: Later -> Clients & Leads -> Add Lead. Enter a clearly synthetic name,
+reserved fictional phone (+1 613 555 0101), example.test email, synthetic address,
+service selection and 'Synthetic private QA only; do not contact' details. Submit
+once; verify the contact appears and persists after reload. Then normal Quotes ->
+New quote -> select that contact -> Basic washing line quantity 1 / price 25 ->
+Create -> Preview -> Add service location -> explicit country CA -> Create -> Save.
+Cancel validation may be tested first without writes. Do not send/accept an
+estimate, create an invoice, call/text, generate/publish a website or delete data.
+New draft sent/acceptance wiring and missing website terms URL remain explicit
+separate gaps; this is a draft-only private-flow prerequisite, not completed MVP.

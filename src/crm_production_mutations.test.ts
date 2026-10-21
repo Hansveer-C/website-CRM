@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { acceptProductionQuote, createInvoiceFromAcceptedQuote, createProductionLead, CrmMutationError, saveProductionQuote, type CrmMutationClient } from './crm_production_mutations';
 
 describe('production CRM mutations', () => {
+  it.each([['42501','INVALID_INPUT'],['22023','INVALID_INPUT'],['23505','CONFLICT'],['P0001','CONFLICT'],['XX000','UNAVAILABLE']])('sanitizes lead rejection %s',async(code,expected)=>{
+    const rpc=vi.fn().mockResolvedValue({data:null,error:{code,message:'private database details'}});
+    await expect(createProductionLead({rpc} as CrmMutationClient,{requestKey:'request-1',name:'Synthetic'})).rejects.toMatchObject({code:expected});
+    try { await createProductionLead({rpc} as CrmMutationClient,{requestKey:'request-1',name:'Synthetic'}); } catch(error) { expect((error as Error).message).not.toContain('private'); }
+  });
   it('maps quote input to the atomic RPC and returns sanitized durable rows', async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: {

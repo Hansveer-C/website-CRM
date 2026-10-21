@@ -358,7 +358,13 @@ export async function createProductionLead(client: CrmMutationClient, input: Int
     p_source: input.source || 'internal-lead-capture',
     p_funnel_id: input.funnelId || null
   });
-  if (result.error) throw new CrmMutationError('UNAVAILABLE');
+  if (result.error) {
+    const code=object(result.error)?.code;
+    if (code === '42501') throw new CrmMutationError('INVALID_INPUT','Lead access changed. Sign in again or reload before retrying.');
+    if (code === '22023') throw new CrmMutationError('INVALID_INPUT','The lead details are invalid. Review the fields and try again.');
+    if (code === '23505' || code === 'P0001') throw new CrmMutationError('CONFLICT');
+    throw new CrmMutationError('UNAVAILABLE');
+  }
   const payload = requireObject(result.data);
   const contact = requireObject(payload.contact);
   const opportunity = requireObject(payload.opportunity);
