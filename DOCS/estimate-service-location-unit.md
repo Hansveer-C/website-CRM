@@ -750,7 +750,7 @@ Do not represent this as a confirmed explanation of the hosted rejection;
 repeat the normal hosted flow after a reviewed release before closing it.
 
 Validation, independent review and draft-publication evidence follow below.
-No merge or hosted fixture mutation is authorized for this correction unit.
+At this candidate checkpoint, merge and hosted fixture mutations were held.
 
 Local validation: 108/108 affected regressions across ten files PASS; app/API
 type checks and actual production build PASS. Production-build Playwright suite
@@ -765,3 +765,34 @@ Independent review corrected nullable due-date handling; final working diff
 PASS with 17/17 independently executed contact/composer tests. No migration or
 configuration files changed. The local stack retains 56 migration versions;
 this candidate has zero pending SQL. Hosted contact/quote retest remains open.
+
+### PR62 automatic release verification
+
+Subsequent owner delegation authorized release of reviewed head
+`f16872ff56ca882faf4d47c64ceb5a3bcc4e63fa` only. Immediately before release,
+main/base remained `cab1d53b5333d4836949ae3a1d10651152ed6760`, exact-head independent
+review PASS and all ten CI jobs PASS (run `39673041538`). Six-file diff remained
+unchanged, with no migration/API-handler/configuration changes. PR62 merged at
+20:49:40 UTC on October 21 as `e976a250cd19083cc93d3292b9ea66f3c7960eef`; its tree
+matches the reviewed head exactly. PR48 and draft PR58 were unchanged.
+
+Vercel production deployment `dpl_HYRWkY8Cwy91vZNUr2g7veNRUasP` reached READY
+for that exact main SHA and assigned `website-crm-one.vercel.app`:
+https://vercel.com/hans-says-projects/website-crm/HYRWkY8Cwy91vZNUr2g7veNRUasP
+The live page and `/assets/index-vHpsi5Vn.js` return HTTP 200; the live asset
+contains the new contact unavailable and nullable activity states. Exact-SHA
+Supabase integration check (named "Supabase Preview" by the app even on main)
+completed success at 20:50:18 UTC; connected project remains ACTIVE_HEALTHY.
+
+Read-only pre/post metadata on project `jkwfocgqgltdmprhdmji`: ledger 56, latest
+`20261021054957`, version digest `92dc3533d42950746420ac1b4e38b6fa` unchanged.
+The same catalog-only table/RLS/column/ACL/policy/function/default-grant digest
+remained `db21d695ef59d73d3c153c72fa82459a` before merge and after terminal
+integration success. No hosted records were read or mutated, and no manual SQL
+mutation, credentials, settings, provider actions or charges were introduced.
+
+Remaining gate: parent's normal authenticated hosted UI retest against its
+preserved synthetic contact, including View/reload/back and the reported Basic
+Qty 1 / Price 1 quote creation path. Static release smoke and successful local
+tests do not establish that the exact hosted quote rejection is resolved.
+This verification record is committed locally only; no second release implied.
