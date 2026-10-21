@@ -796,3 +796,79 @@ preserved synthetic contact, including View/reload/back and the reported Basic
 Qty 1 / Price 1 quote creation path. Static release smoke and successful local
 tests do not establish that the exact hosted quote rejection is resolved.
 This verification record is committed locally only; no second release implied.
+
+### Hosted private-flow verification supplied by parent after PR62
+
+Parent reports normal authenticated production UI verification on the released
+PR62 app. This lane did not independently repeat those hosted mutations.
+Synthetic contact `bcc17ea5-4bf9-4304-9a3a-7d886bef848a` now opens through View,
+survives full reload, and returns to the contact list. Normal Quotes > New quote
+saved draft `33d737ba-07e8-4576-8d84-799aac8b8f89` with Basic service
+"QA driveway wash — synthetic draft only", quantity 1, price 1 and total $1.
+The hosted check explicitly pressed Tab to blur: it does NOT independently
+establish without-blur behavior. Without-blur synchronization remains supported
+by the separate local production-browser red/green regression above.
+
+Parent created service location `5a40cabf-861c-4198-8965-b7e6d0583427`, label
+"QA service location 20261021 2030", and associated it using Save service location.
+Back/reopen and full reload preserve selection; Save remains disabled until a
+change. No send, acceptance, provider action, website terms acceptance or site
+generation occurred. The reported quote rejection did not recur on this tested
+explicit-blur path; do not generalize that result to every input mechanism.
+This closes the bounded hosted contact/draft/location private-flow check, not
+acceptance, invoicing, jobs, payments or communication-first MVP completion.
+
+### Next proposed production-usable unit — persistent contact notes
+
+Planning only; no implementation or release authorized by this record. Reviewed
+the canonical workbook's current-status tab, its evidence overlay, current main
+`e976a250`, existing worktrees and open PRs. PR48 and draft PR58 remain separate;
+no competing contact-note implementation was found. The accumulated local history
+feature still requires a DEV/loopback QA gate and is not a released inbox.
+
+Recommend the existing Contact Detail Note action persisting an internal note
+to the existing `activities` table and showing it through the released owned
+activity read. `main.ts` currently refuses production activity creation/updates;
+`activities_repo.ts` is server-only legacy caller-supplied upsert/mock fallback,
+not a safe browser adapter. No existing note-creation RPC was found in migrations.
+Existing schema already has note description, nullable due date and a server
+`created_at`; reuse these rather than creating a parallel conversation store.
+This is immediately usable for manually recording a customer conversation; it
+does not send, simulate delivery, provision a number or claim live communications.
+
+Minimum proposed contract: authenticated server-derived owner, same-owner contact
+validation inside the transaction, bounded nonblank text, fixed note type and
+server creation time. Stable request identity must provide atomic same-payload
+replay and reject changed-payload/foreign-owner reuse without overwriting another
+activity. Account for existing owner CRUD when designing the replay ledger: an
+edited/deleted activity must not become a silently successful unchanged replay.
+Return minimal safe activity fields; no request fingerprint/private metadata.
+Keep existing contact/user cascade semantics, with no new retention or independent
+history promise. No note edit/delete, task scheduling, quote status, call/SMS or
+team assignment scope. Present actual created time distinctly from a due date.
+
+Ordinary production UI acceptance: open owned contact > Note > enter/save text >
+exactly one persisted activity appears and survives reload; validation/cancel
+causes no write, double click coalesces, lost response retains the retry key/text,
+denied permissions are recoverable, and late results never repaint another contact
+or account. Mobile keyboard/focus and escaped multiline text are required.
+No QA-only route/flag, fixture contact prerequisite or privileged frontend client.
+
+Test plan before release: isolated full-chain Supabase replay plus SQL tests for
+anonymous/foreign contact/foreign request denial, malformed text, concurrent replay,
+payload conflict, edited/deleted source and contact-deletion races. Real local
+production-build Auth/UI flow starts with no CRM seed, creates lead normally,
+saves/cancels/retries note and verifies persistence, account/navigation isolation
+and zero outbound requests. Run affected hydration/contact/XSS/operation-guard
+regressions, app/API types/build and independent exact-head review. Then staged
+draft/CI/release assessment, expected additive migration inventory/ACL comparison
+and rollback limits, followed by separately authorized normal hosted synthetic QA.
+
+No new credentials, external access, paid provider, number purchase or commercial
+decision is needed to implement/test this proposal locally. Any additive RPC and
+its narrow authenticated execution grant require the existing schema/security
+review and explicit release gate; no blanket access-policy exception is proposed.
+Live communication still separately needs approved sender/use case/consent and
+recipient/spend limits, provider verification/configuration and activation approval.
+New-draft delivery/sent/acceptance semantics, PR58 production usability, PR48 PDF,
+jobs/scheduling, payments, team permissions and launch documentation remain open.
