@@ -70,6 +70,7 @@ import {
   type QuoteSignatureAcceptanceResult
 } from './ui/quotes';
 import { renderLeadCaptureContent } from './ui/lead-capture';
+import { LeadCaptureController, mountLeadCapture } from './ui/lead-capture/lead_capture_controller';
 import { renderInvoicesContent, renderProductionInvoiceWorkspace, type InvoiceFilter } from './ui/invoices';
 import { createReportsViewModel, renderReportsContent, type ReportsAvailability } from './ui/reports';
 import {
@@ -240,6 +241,7 @@ import {
   createProductionServiceProperty,
   setProductionQuoteServiceProperty,
   createProductionLead,
+  CrmMutationError,
   saveProductionQuote,
   type CrmMutationClient
 } from './crm_production_mutations';
@@ -2223,6 +2225,7 @@ function clearProtectedRuntimeData(): void {
   websiteGenerationInFlight = false;
   lastGeneratedWebsiteData = null;
   crmProductionHydrator.clear();
+  authenticatedLeadCapture = null;
   websiteLayoutHydrator.clear();
   websiteSettingsHydrator.clear();
   applyPrimaryColor(mockWebsiteSettings.primary_color);
@@ -2291,7 +2294,7 @@ function renderCrmHydrationNotice(): void {
 
 async function ensureProductionCrmData(userId: string, view: string, force = false): Promise<void> {
   if (!editorUsesSupabase() || !CRM_DATA_VIEWS.has(view)) return;
-  if (force || crmProductionHydrator.state.userId !== userId || crmProductionHydrator.state.status === 'idle') {
+  if (force || crmProductionHydrator.state.userId !== userId || ['idle','loading'].includes(crmProductionHydrator.state.status)) {
     renderCrmDataLoading(view);
     await crmProductionHydrator.hydrateAuthenticatedUser(userId, force);
   }
@@ -10223,6 +10226,7 @@ function renderQuickstart() {
   });
 }
 
+let authenticatedLeadCapture: { owner: string; controller: LeadCaptureController; root: HTMLFormElement | null; navigation: ProtectedAsyncOperationToken | null } | null = null;
 function renderLeadCapture() {
   (window as any).internalLeadRequestKey ||= crypto.randomUUID();
   renderAppWithShell({
@@ -10233,7 +10237,40 @@ function renderLeadCapture() {
     contentHtml: renderLeadCaptureContent()
   });
 
-  document.getElementById('lead-form')?.addEventListener('submit', handleLeadCaptureSubmission);
+  const form=document.getElementById('lead-form') as HTMLFormElement;
+  if (editorUsesSupabase()) {
+    const owner=getActingUserId();
+    const navigation=protectedAsyncOperationGuard.captureCurrent('application-navigation',owner);
+    if (!authenticatedLeadCapture || authenticatedLeadCapture.owner !== owner) {
+      const current=()=>getActingUserId() === owner && currentView === 'lead-capture'
+        && authenticatedLeadCapture?.controller === controller
+        && authenticatedLeadCapture.root === document.getElementById('lead-form')
+        && !!authenticatedLeadCapture.navigation
+        && protectedAsyncOperationGuard.isCurrent(authenticatedLeadCapture.navigation,owner);
+      const controller: LeadCaptureController = new LeadCaptureController(owner, {
+        current,
+        requestKey:()=>crypto.randomUUID(),
+        create:async input=>{
+          const client=await getBuilderPublicationSupabaseClient();
+          if (!client || !current()) throw new CrmMutationError('UNAVAILABLE');
+          return createProductionLead(client as unknown as CrmMutationClient,input);
+        },
+        created:result=>{
+          if (!current()) return;
+          upsertById(mockContacts,result.contact); upsertById(mockOpportunities,result.opportunity);
+          authenticatedLeadCapture=null;
+          (window as any).showToast('Lead saved.','success');
+          void (window as any).navigateTo('clients');
+        },
+        cancelled:()=>{ if (!current()) return; authenticatedLeadCapture=null; void (window as any).navigateTo('clients'); }
+      });
+      authenticatedLeadCapture={owner,controller,root:form,navigation};
+    } else { authenticatedLeadCapture.root=form; authenticatedLeadCapture.navigation=navigation; }
+    mountLeadCapture(form,authenticatedLeadCapture.controller);
+  } else {
+    form.addEventListener('submit', handleLeadCaptureSubmission);
+    document.getElementById('lead-cancel')?.addEventListener('click',()=>window.navigateTo('clients'));
+  }
 }
 
 async function handleLeadCaptureSubmission(e: Event) {
