@@ -40,7 +40,11 @@ describe('production false-success guards', () => {
 
   it('resolves authenticated Preview from owned hydrated Website data', () => {
     const bootStart = source.indexOf('async function bootRouter()');
-    const bootSource = source.slice(bootStart, bootStart + 5_000);
+    const bootEnd = source.indexOf('\nbootRouter();', bootStart);
+    expect(bootStart).toBeGreaterThan(-1);
+    expect(bootEnd).toBeGreaterThan(bootStart);
+    // Review routing extends this function; inspect its boundary, not an arbitrary prefix.
+    const bootSource = source.slice(bootStart, bootEnd);
     expect(bootSource).toContain('resolveAuthenticatedPreview');
     expect(bootSource).toContain('hydrateAuthenticatedPreviewSections');
     expect(bootSource).toContain("params.get('websiteId')");

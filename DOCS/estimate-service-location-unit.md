@@ -1406,3 +1406,16 @@ migration; service_role recipient EXECUTE false; 0 review rows, 0 profiles and
 stack/app/TLS processes stopped; captured owned CLI logs removed without recursive
 deletion. No hosted credentials, customer records, external communications or paid
 services were used. Canonical main and PR48/58 remained unchanged during preparation.
+Draft PR64 publication/CI correction: exact initial head
+`9f5d025ab38640aecbb1aba84e7027be601a14ef` was published as DRAFT at
+https://github.com/Hansveer-C/website-CRM/pull/64. Nine database CI jobs passed;
+the broad gate passed 2,275 tests and failed only the existing authenticated
+Preview source guard. Its fixed 5,000-character bootRouter prefix no longer
+included the unchanged preview invocation (base offset 3,951; candidate 5,414).
+The correction bounds extraction at the actual router end marker with positive
+start/end checks, retaining EVERY existing security/order assertion. No production
+source or SQL changed in that correction. All 226 affected regressions across
+17 files now pass locally. Existing exact runtime browser/SQL/type/build evidence
+remains valid because only this test harness and receipt changed. Independent
+review and new published-head CI must pass; results are attached to the draft PR.
+Supabase Preview was SKIPPED as expected; publication did not apply hosted SQL.
