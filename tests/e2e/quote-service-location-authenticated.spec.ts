@@ -9,6 +9,8 @@ const emails = [`location-ui-a-${run}@example.test`, `location-ui-b-${run}@examp
 const users: string[] = [], contacts = [`qa-a1-${run}`, `qa-a2-${run}`, `qa-b1-${run}`];
 const properties = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
 const sent = randomUUID(), legacy = randomUUID(), unassigned = randomUUID(), refreshQuote = randomUUID();
+const conversion = randomUUID(), invoiceConflict = randomUUID(), invoicePermission = randomUUID(), invoiceNavigation = randomUUID();
+const invoiceCases = process.env.WASHOPS_LOCAL_INVOICE_QA === 'true' ? [conversion, invoiceConflict, invoicePermission, invoiceNavigation] : [];
 let db: Client, token: string;
 async function localRequest(path: string, body: unknown, key = status.SERVICE_ROLE_KEY, bearer = key) {
   if (status.API_URL !== 'http://127.0.0.1:56421') throw new Error('Refusing non-fixture API');
@@ -34,13 +36,85 @@ test.beforeAll(async () => {
     const contact = i < 2 ? contacts[0] : i === 2 ? contacts[1] : contacts[2];
     await db.query('insert into public.properties(id,user_id,contact_id,label,service_address_line1,locality,country_code,request_key,request_fingerprint) values($1,$2,$3,$4,$5,$6,$7,$8,$9)', [properties[i], i === 3 ? users[1] : users[0], contact, ['Original driveway', 'Second service location', 'Other customer location', 'FOREIGN BUSINESS LOCATION'][i], `${10 + i} Synthetic Service Lane`, 'Fixture Town', 'CA', randomUUID(), {}]);
   }
-  for (const id of [sent, legacy, unassigned, refreshQuote]) {
+  for (const id of [sent, legacy, unassigned, refreshQuote, ...invoiceCases]) {
     await db.query('insert into public.quotes(id,user_id,contact_id,status,total_amount,selected_tier,request_key,request_fingerprint,notes) values($1,$2,$3,$4,$5,$6,$7,$8,$9)', [id, users[0], contacts[0], 'sent', 25, 'basic', randomUUID(), {}, `Authenticated local fixture ${run}`]);
     await db.query('insert into public.quote_items(user_id,quote_id,service_name,quantity,unit_price,tier,order_index) values($1,$2,$3,1,25,$4,0)', [users[0], id, 'Synthetic driveway clean', 'basic']);
+    if (invoiceCases.includes(id)) {
+      await db.query("update public.quotes set total_amount=250,selected_tier='premium' where id=$1", [id]);
+      await db.query("insert into public.quote_items(user_id,quote_id,service_name,description,quantity,unit_price,tier,order_index) values($1,$2,'Accepted premium clean','Frozen accepted description',1,250,'premium',1)", [users[0], id]);
+    }
   }
-  for (const id of [legacy, unassigned]) await rpc('accept_crm_quote', { p_quote_id: id, p_quote_revision: 1, p_request_key: randomUUID(), p_signer_name: 'Synthetic Local Signer', p_signature_data_url: null, p_accessible_declaration: true });
+  for (const id of [legacy, unassigned, ...invoiceCases]) await rpc('accept_crm_quote', { p_quote_id: id, p_quote_revision: 1, p_request_key: randomUUID(), p_signer_name: 'Synthetic Local Signer', p_signature_data_url: null, p_accessible_declaration: true });
   // Explicit legacy fixture shape; genuine pre-migration acceptance preservation has its own SQL replay test.
   await db.query("update public.quote_acceptances set quote_snapshot=quote_snapshot - 'service_location' - 'service_location_status' where quote_id=$1 and user_id=$2", [legacy, users[0]]);
+});
+
+test('local-only RPC invoice component persists frozen selected tier, handles errors/retries and opens durable invoices', async ({ page }) => {
+  test.skip(process.env.WASHOPS_LOCAL_INVOICE_QA !== 'true', 'Explicit local-only invoice integration required.');
+  page.setDefaultTimeout(10000);
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url());
+    return ['http://127.0.0.1:4218','https://127.0.0.1:56429'].includes(url.origin) && !/\/api\/(sms|calls|payments|emails)/.test(url.pathname) ? route.continue() : route.abort();
+  });
+  await page.goto('/#/quotes'); await page.getByLabel('Email', { exact: true }).fill(emails[0]); await page.getByLabel('Password', { exact: true }).fill(password); await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Quotes', exact: true })).toBeVisible();
+  const component = page.locator('#accepted-invoice-root');
+  await openQuote(page, conversion); await expect(component.getByRole('button', { name: 'Create persisted invoice', exact: true })).toBeVisible();
+  // Mutate only synthetic LIVE pricing, without touching frozen acceptance evidence.
+  await db.query("update public.quotes set total_amount=999,selected_tier='basic' where id=$1", [conversion]);
+  await db.query("update public.quote_items set unit_price=999,service_name='Live changed work' where quote_id=$1", [conversion]);
+  await openQuote(page, conversion); await expect(component).toContainText('Accepted premium option'); await expect(component).toContainText('USD 250.00'); await expect(component).not.toContainText('Live changed work');
+  let lost = true, deniedOrigin = 0;
+  const keys: string[] = [];
+  let releaseNavigation!: () => void, navigationStarted!: () => void, navigationCompleted!: () => void;
+  const holdNavigation = new Promise<void>(resolve => { releaseNavigation = resolve; });
+  const startedNavigation = new Promise<void>(resolve => { navigationStarted = resolve; });
+  const completedNavigation = new Promise<void>(resolve => { navigationCompleted = resolve; });
+  await page.route('**/rest/v1/rpc/create_invoice_from_accepted_quote', async route => {
+    if (new URL(route.request().url()).origin !== 'https://127.0.0.1:56429') { deniedOrigin++; return route.abort(); }
+    if (route.request().method() !== 'POST') return route.continue();
+    const input = route.request().postDataJSON();
+    if (input.p_quote_id === conversion) {
+      keys.push(input.p_request_key);
+      expect(Object.keys(input).sort()).toEqual(['p_accepted_quote_revision','p_quote_id','p_request_key']); expect(input.p_accepted_quote_revision).toBe(1);
+      if (lost) { lost = false; const response = await route.fetch({ maxRedirects: 0 }); expect(response.status()).toBe(200); await new Promise(resolve => setTimeout(resolve, 200)); return route.abort('failed'); }
+    }
+    if (input.p_quote_id === invoiceNavigation) {
+      const response = await route.fetch({ maxRedirects: 0 }); expect(response.status()).toBe(200); navigationStarted(); await holdNavigation; await route.fulfill({ response }); navigationCompleted(); return;
+    }
+    return route.continue();
+  });
+  expect(await page.evaluate(async () => { try { await fetch('https://local-qa-deny.invalid/rest/v1/rpc/create_invoice_from_accepted_quote'); return false; } catch { return true; } })).toBe(true); expect(deniedOrigin).toBe(1);
+  await component.getByRole('button', { name: 'Create persisted invoice', exact: true }).evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+  await expect(component.getByRole('button', { name: 'Creating invoice…', exact: true })).toBeDisabled();
+  await expect(component.getByRole('alert')).toContainText('could not be confirmed'); expect(keys).toHaveLength(1);
+  await component.getByRole('button', { name: 'Retry invoice save', exact: true }).click(); await expect(component.getByRole('button', { name: 'View persisted invoice', exact: true })).toBeVisible(); expect(keys).toHaveLength(2); expect(keys[0]).toBe(keys[1]);
+  const persisted = (await db.query('select id,total_amount,source_quote_revision from public.invoices where quote_id=$1', [conversion])).rows; expect(persisted).toHaveLength(1); expect(Number(persisted[0].total_amount)).toBe(250); expect(persisted[0].source_quote_revision).toBe(1);
+  const lines = (await db.query('select service_name,line_total from public.invoice_items where invoice_id=$1', [persisted[0].id])).rows; expect(lines).toHaveLength(1); expect(lines[0].service_name).toBe('Accepted premium clean'); expect(Number(lines[0].line_total)).toBe(250);
+  await component.screenshot({ path: test.info().outputPath('local-invoice-conversion-saved.png') });
+  await component.getByRole('button', { name: 'View persisted invoice', exact: true }).click(); await expect(page.locator('body')).toContainText('Accepted premium clean'); await expect(page.locator('body')).not.toContainText('Live changed work');
+  await page.screenshot({ path: test.info().outputPath('local-persisted-invoice-detail.png'), fullPage: true });
+  await openQuote(page, conversion); await expect(component.getByRole('button', { name: 'View persisted invoice', exact: true })).toBeVisible(); await expect(component.getByRole('button', { name: 'Create persisted invoice', exact: true })).toHaveCount(0); expect(keys).toHaveLength(2);
+  console.log('PASS: actual invoice UI frozen premium snapshot, duplicate clicks, lost response/same-key replay, existing invoice and durable navigation.');
+
+  await openQuote(page, invoiceConflict); await expect(component.getByRole('button', { name: 'Create persisted invoice', exact: true })).toBeVisible();
+  await db.query('update public.quotes set revision=revision+1 where id=$1', [invoiceConflict]); await component.getByRole('button', { name: 'Create persisted invoice', exact: true }).click(); await expect(component.getByRole('alert')).toContainText('estimate changed');
+  await component.getByRole('button', { name: 'Refresh invoice evidence', exact: true }).click(); await expect(component.getByRole('alert')).toContainText('No invoice can be created'); expect((await db.query('select count(*)::int as n from public.invoices where quote_id=$1', [invoiceConflict])).rows[0].n).toBe(0);
+  await openQuote(page, invoicePermission); await expect(component.getByRole('button', { name: 'Create persisted invoice', exact: true })).toBeVisible();
+  try {
+    await db.query('revoke execute on function public.create_invoice_from_accepted_quote(uuid,integer,uuid) from authenticated');
+    await component.getByRole('button', { name: 'Create persisted invoice', exact: true }).click(); await expect(component.getByRole('alert')).toContainText('Invoice access changed'); await expect(component.getByRole('button', { name: 'Retry invoice save', exact: true })).toHaveCount(0);
+  } finally { await db.query('grant execute on function public.create_invoice_from_accepted_quote(uuid,integer,uuid) to authenticated'); }
+  await component.getByRole('button', { name: 'Refresh invoice evidence', exact: true }).click(); await expect(component.getByRole('button', { name: 'Create persisted invoice', exact: true })).toBeVisible();
+  console.log('PASS: real SQL stale-revision and execute-permission errors fail closed and refresh recovers access.');
+
+  await openQuote(page, invoiceNavigation); await component.getByRole('button', { name: 'Create persisted invoice', exact: true }).click(); await startedNavigation;
+  await page.getByRole('button', { name: 'Back', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Quotes', exact: true })).toBeVisible(); releaseNavigation(); await completedNavigation;
+  await expect(page.getByRole('heading', { name: 'Quotes', exact: true })).toBeVisible(); await openQuote(page, invoiceNavigation); await expect(component.getByRole('button', { name: 'View persisted invoice', exact: true })).toBeVisible();
+  await openQuote(page, legacy); await expect(component).toContainText('acceptance revision 1'); await component.getByRole('button', { name: 'Create persisted invoice', exact: true }).click(); await expect(component.getByRole('button', { name: 'View persisted invoice', exact: true })).toBeVisible();
+  expect((await db.query('select count(*)::int as n from public.invoices where quote_id=$1', [legacy])).rows[0].n).toBe(1);
+  expect(errors).toEqual([]); console.log('PASS: late committed response cannot hijack navigation; legacy accepted quote converts via the real UI.');
 });
 test.afterAll(async () => {
   if (!db) return;
@@ -122,12 +196,17 @@ test('real local login → customer/estimate → service location → acceptance
   await openQuote(page, sent); await expect(page.locator('#quote-service-location-root')).toContainText('10 Synthetic Service Lane'); await expect(page.locator('#quote-service-location-root')).not.toContainText('999 Changed'); await expect(selector).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 }); await page.locator('#quote-service-location-root').screenshot({ path: test.info().outputPath('authenticated-accepted-frozen-location.png') }); await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.getByRole('button', { name: 'Convert to invoice', exact: true })).toHaveCount(0);
+  if (process.env.WASHOPS_LOCAL_PRODUCTION_QA === 'true') {
+    await expect(page.locator('#accepted-invoice-root')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Create persisted invoice', exact: true })).toHaveCount(0);
+    console.log('PASS: actual production bundle keeps invoice conversion disabled even with QA flag true and exact local origins.');
+  }
   const invoiceKey = randomUUID(); const invoice = await rpc('create_invoice_from_accepted_quote', { p_quote_id: sent, p_accepted_quote_revision: 3, p_request_key: invoiceKey }); expect(Number(invoice.invoice.total_amount)).toBe(25);
   const invoiceRetry = await rpc('create_invoice_from_accepted_quote', { p_quote_id: sent, p_accepted_quote_revision: 3, p_request_key: invoiceKey }); expect(invoiceRetry.replayed).toBe(true);
   await page.goto('/#/invoices'); await page.reload(); await expect(page.locator('body')).toContainText('QA Customer A');
   await openQuote(page, legacy); await expect(page.locator('#quote-service-location-root')).toContainText('older acceptance has no recorded');
   await openQuote(page, unassigned); await expect(page.locator('#quote-service-location-root')).toContainText('No service location was assigned');
-  console.log('PASS: real acceptance, frozen address, legacy/unassigned display and invoice RPC/replay. Invoice conversion UI remains unavailable.');
+  console.log('PASS: real acceptance, frozen address, legacy/unassigned display and invoice RPC/replay. Legacy production conversion remains blocked.');
   await page.getByRole('button', { name: 'Sign out', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Sign in to your CRM' })).toBeVisible();
   await page.getByLabel('Email', { exact: true }).fill(emails[1]); await page.getByLabel('Password', { exact: true }).fill(password); await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible();

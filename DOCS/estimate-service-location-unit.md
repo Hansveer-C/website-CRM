@@ -1,14 +1,16 @@
 # WASHOPS CRM - estimate/service-location association unit
 
-Status: isolated draft release candidate on main `7c60be847370365c5680681168c7f1cc51100488`.
-C04 PR55 and roadmap PR53 are merged. This branch contains only the reviewed
-estimate/location backend, acceptance snapshot and UI units through original
-`8d14235`; invoice conversion UI, jobs, communication history and synthetic SMS
-scaffolding are excluded. Historical implementation evidence below is retained.
+Status: isolated invoice-conversion draft on fresh main
+`e4b8c0a2cffb2329ef50131e2cc96f59ecffbbd1` (PR57 deployed; hosted authenticated
+feature verification still pending an existing account session). This draft selects
+only original invoice unit `1e44605`, on the already merged estimate/location work.
+Jobs, communication history, synthetic SMS and PR48 PDF work remain excluded.
+Invoice conversion is development/loopback QA only; hosted production UI stays disabled.
 
 This is the established engineering execution record, not a competing roadmap.
-Canonical product authority remains `CRM Roadmap.ods`. No functional merge is
-authorized in this publication unit; final release gates are recorded below.
+Canonical product authority remains `CRM Roadmap.ods`. Earlier PR57 candidate sections
+are historical; the final current invoice draft section records fresh release evidence.
+No merge or hosted activation of this invoice unit is authorized in this turn.
 
 ## Verified contracts
 
@@ -481,3 +483,113 @@ Exact-SHA Supabase check SUCCESS; fresh hosted ledger54/latestC04 unchanged.
 No manual retrigger, SQL mutation or settings change. Executor lacks dashboard
 session, so no detailed workflow-log claim is made. PR57 stays draft/unmerged;
 two-migration staged rollout and postdeployment authenticated test verification remain.
+
+## Isolated invoice conversion candidate (historical local proof follows)
+
+This next draft preserves the current main release evidence above. Only the original
+invoice conversion unit is selected; job/history/SMS and PR48 PDF code are excluded.
+The UI remains development-only, restricted to exact loopback QA origins.
+No production flag or hosted user flow is enabled by this draft.
+
+## Locally verified accepted-estimate invoice conversion — 2026-10-21
+
+Completed the bounded successor to the historical PR43 read-only scope. A separate
+accepted-estimate controller uses the existing invoice transaction; it does not use
+the legacy in-memory conversion. A narrow authenticated read-only evidence RPC
+projects the frozen selected-tier lines, accepted revision, normalized totals and
+existing invoice ID without exposing the private acceptance ledger. Current revision
+must equal accepted revision + 1. The browser never supplies invoice pricing.
+
+Stable request keys survive uncertain responses; duplicate clicks coalesce. Permission
+and revision failures stop conversion, retries preserve transaction identity, and
+navigation/account changes discard late UI results. Returned invoice lines and totals
+must match accepted evidence before success. View opens the hydrated persisted invoice.
+Legacy acceptances and PostgreSQL fractional rounding are covered.
+
+Release boundary: this component requires DEV, VITE_LOCAL_INVOICE_CONVERSION_QA=true,
+application origin http://127.0.0.1:4218 and Supabase https://127.0.0.1:56429 together.
+The production bundle remains fail-closed even with the flag enabled. The legacy
+production handler, PDF/payment/send guards and existing conversion RPC are unchanged.
+No remote publication, production migration or customer-side action occurred.
+
+Verification on synthetic isolated local data:
+- Clean replay of all 56 timestamped migrations passed with local Supabase/Storage.
+- Actual SQL suite: 79 assertions passed, transaction rolled back.
+- Affected regression suite: 218 tests across 15 files passed.
+- Application and API TypeScript checks passed; whitespace check passed. No repository
+  lint script is defined, so no separate lint result is claimed.
+- Real authenticated DEV browser suite: 2/2 passed; final conversion-only rerun 1/1
+  passed. Covered frozen premium pricing after live edits, double clicks, a committed
+  write with dropped response and same-key retry, existing invoice, stale revision,
+  actual local permission denial/restoration, navigation races and legacy conversion.
+- Actual production build with QA flag enabled: authenticated browser negative proof
+  1/1 passed (no conversion component/action). Build passed; existing large-bundle
+  warning remains (largest generated JavaScript 878,282 bytes).
+- Independent reviewer inspected final implementation and SQL rounding additions and
+  reported PASS with no material findings; independently ran 76 focused tests.
+
+Screenshots from actual local authenticated execution (synthetic data only):
+[Saved conversion](evidence/invoice-conversion-local-2026-10-21/local-invoice-conversion-saved.png)
+and [persisted invoice](evidence/invoice-conversion-local-2026-10-21/local-persisted-invoice-detail.png).
+
+Test opt-ins are WASHOPS_LOCAL_INVOICE_QA=true and, for the production negative proof,
+WASHOPS_LOCAL_PRODUCTION_QA=true. Execution-only host/config and temporary TLS artifacts
+are excluded from the deliverable. This completes local verification only; production
+wiring/release and the external integration-trigger gate remain unresolved.
+
+## Current isolated invoice draft release packet
+
+Base: deployed main `e4b8c0a2cffb2329ef50131e2cc96f59ecffbbd1` (PR57).
+Only original invoice unit `1e44605` is selected. No code conflicts; the execution
+record append conflict was resolved by preserving main evidence and adding the
+historical invoice proof above. Ten changed files; no job/history/SMS or PR48 PDF
+implementation, dependency, workflow, configuration or provider changes.
+
+One pending migration, `20261021064220_read_accepted_quote_invoice_evidence.sql`,
+would advance the hosted ledger from 56 to 57. It adds an authenticated owner-only
+read projection with empty search_path and no anon/service-role execute; it does
+not alter the existing invoice transaction or private acceptance table grants.
+It projects frozen selected-tier scope, accepted revision, normalized monetary
+evidence and an existing invoice ID. Signature/owner/request internals stay private.
+Applying it would expose that narrow read API even while the UI remains QA-only.
+
+Fresh verification of this isolated composition (not inherited stack evidence):
+
+- All 57 versioned migrations replayed from zero with local Supabase Auth/Storage.
+  An initial restored test backup was reset before any counted verification.
+- C04 SQL 40/40 and location/invoice-evidence SQL 79/79 assertions passed, including
+  owner/anonymous denial, private-field exclusion, legacy snapshots, revision and
+  PostgreSQL decimal rounding. Fixtures rolled back.
+- Unchanged acceptance/invoice SQL regressions passed using canonical synthetic
+  prerequisite seed (required funnel names and synthetic password hashes).
+- Focused unit regression: 112/112 across seven files passed; app/API types passed.
+- Actual local Auth + Chromium DEV suite: 2/2 passed. It exercised frozen premium
+  scope after live-source edits, double clicks, a committed response dropped before
+  receipt, same-key retry, existing invoice, actual SQL permission failure/restore,
+  stale revision, late navigation response, legacy conversion and persisted detail.
+- Actual production build with QA flag true passed. Authenticated Chromium proved
+  no conversion component/action at exact loopback origins: 1 passed, 1 intentionally
+  skipped DEV-only scenario. This is not a second successful conversion run.
+- No lint command is configured; whitespace check passed. Existing bundle-size
+  warning remains. Fresh screenshots are in local Temp invoice-release auth results;
+  no trace/video or external credentials are captured.
+
+Activation is deliberately unchanged: DEV must be true, together with
+`VITE_LOCAL_INVOICE_CONVERSION_QA=true`, app `http://127.0.0.1:4218` and Supabase
+`https://127.0.0.1:56429`. Setting the flag on a production deployment cannot enable
+conversion. This draft is a local verification foundation, not a usable hosted
+private conversion flow and not the end-to-end CRM.
+
+Minimum next work for hosted private usability: explicitly review/approve production
+wiring of this existing authenticated component (rather than remove guards casually),
+then test it through an existing authorized hosted account with synthetic accepted
+estimate evidence and verify persisted invoice navigation. PR57's separate gaps also
+remain: no customer-location creation UI, and hosted quote sending/status transition
+is unavailable, so normal UI cannot prepare a new sent estimate for acceptance.
+No existing hosted fixture IDs or credentials are known in this executor. Parent is
+handling the authorized account sign-in; local fixture setup is not hosted-ready.
+
+Release remains draft-only. Main auto-deploy/auto-migrate is enabled. Future merge
+requires exact-head CI/review and a staged read-migration rollout; no hosted schema
+change or conversion is performed now. Application recovery is a Git revert while
+retaining compatible additive SQL; no destructive down migration is proposed.
