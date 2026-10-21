@@ -105,3 +105,37 @@ These source decisions were supplied through the parent coordination thread; thi
 **Superseding PR55 handoff (October 21):** the earlier Hans/Hermes ownership pause above is historical. Hans supplied Hermes's `CHANGES_REQUIRED` report and delegated the project back: smallest correction is to omit `user_id` from both create/replay RPC responses and add two absence assertions. Contact deletion cascade is a follow-up for future immutable job/service-location history, not a blocker requiring a new job-domain contract. Keep feature-branch deployment suppression until reviewed. This documentation unit changes no PR55 code; perform the correction next in isolation, rerun actual SQL tests, independently review and verify deployment/out-of-repository triggers before merge. The roadmap current-status C04 row reflects this new handoff; C04 remains unmerged.
 
 **Superseding budget (October 21):** this unit continues with existing/free resources. New subscriptions may be proposed only within a combined CA$30/month ceiling, including taxes/FX, after proving value for WashOps **and** other running projects. A specific service/merchant has not been selected; required transaction approvals still apply. This is not authorization for speculative metered APIs, live phone purchases, production mutations or an upgrade. The current worksheet row 5 reflects this conditional policy; no subscription or other purchase was made.
+
+## Local-only product evidence reconciliation — 2026-10-21
+
+Supersedes the earlier "not started" frontier for the isolated product lane only.
+`codex/estimate-service-location` implementation head
+`1e44605a33517638286ae63ae22628618094f09e` passed independent exact-head review.
+Its established `DOCS/estimate-service-location-unit.md` records service-location
+association/frozen acceptance UI and DEV-only RPC-backed persisted invoice conversion.
+Invoice-unit verification: 56 clean local migrations, 79 SQL assertions, 218 affected
+regressions, app/API types/build, authenticated DEV browser 2/2 and actual production
+QA-flag-on negative proof 1/1. The production action remains fail-closed. Screenshots
+are synthetic; QA stack/TLS/listeners cleaned and local permissions restored.
+These are local branch results, not merged main, remote CI or production certification.
+Observed local main ref is now 12021c2 (PR50 skill cleanup); remote heads and production
+were not refreshed in this documentation turn. Earlier exact-head remote facts remain
+dated evidence, not current assertions.
+
+Proposed next smallest useful unit: authenticated read-only customer communication
+history using existing Message/Call storage, timeline ordering/grouping and contact
+workspace conventions. No Conversation/BusinessNumber schema, shared-inbox semantics,
+provider purchase/provisioning, send/call activation or job domain starts here.
+Require auth.uid-based authorization, cross-customer/tenant denial, minimal fields,
+stable bounded ordering/pagination, loading/empty/error/retry and account/navigation
+race handling. Prove real local Auth/database/browser behavior with synthetic records,
+safe rendering and mobile/keyboard use; separately review and run affected checks.
+Local worktree/branch inventory shows no matching communication-history owner; running
+process names are inconclusive. Parent/remote ownership recheck precedes implementation.
+
+Remaining release: exact production integration-trigger policy, current base/dependent
+PR reconciliation, production schema/ledger/grant compatibility read-only, reviewed
+production wiring and rollback/post-release evidence. Phone lifecycle, shared ownership,
+portability/retention, jobs/scheduling/payments/permissions, private testing, onboarding
+and practical documentation remain open. No remote action or implementation in this
+reconciliation. The canonical workbook now labels this evidence local-only.
