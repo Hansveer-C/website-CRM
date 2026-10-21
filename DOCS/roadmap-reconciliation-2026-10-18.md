@@ -139,3 +139,34 @@ production wiring and rollback/post-release evidence. Phone lifecycle, shared ow
 portability/retention, jobs/scheduling/payments/permissions, private testing, onboarding
 and practical documentation remain open. No remote action or implementation in this
 reconciliation. The canonical workbook now labels this evidence local-only.
+
+## Aggregate release audit through 39c43ac — local proof, production blocked
+
+Supersedes the earlier next-unit suggestions in this overlay. The existing execution
+record `DOCS/estimate-service-location-unit.md` on codex/estimate-service-location
+contains the aggregate release packet; it remains evidence under this canonical
+workbook/overlay, not another roadmap. Implementation head is
+39c43acfeec847884229463b52bc5902cdcec3a2. Communication history, job backend and local
+create/read job UI are now tested local increments; canonical Conversation/business
+number lifecycle, scheduling, assignments, payments and launch readiness remain open.
+No product completion percentage or merged/production completion is claimed.
+
+Reused exact implementation evidence: 307 regression tests, 220 SQL assertions,
+59 timestamped clean migrations, 4 authenticated local browser scenarios, production
+QA-flags-enabled negative test, app/API types/build and unit-specific reviews. The
+aggregate independent adversarial review separately passed 209 tests and found no new
+implementation defect, but production is BLOCKED. Invoice/history/job UI flags do NOT
+disable their authenticated database RPCs; service-location UI and authenticated quote
+saving are not behind those flags. Main automatically deploying is therefore material.
+
+Audit-only focused checks additionally verified the same acceptance creates matching
+job/invoice scope totals while keeping billing and service location distinct. A clean
+local replay with auto_expose_new_tables=false reproduced missing authenticated read
+grants on legacy users/contacts/opportunities/activities. This is a pre-existing fresh-
+schema compatibility gap, not evidence production has those ACLs or permission to
+issue broad grants. New private job tables and column-limited properties stayed closed.
+Resolve exact project/trigger policy, schema/ledger/effective grants, owner erasure,
+non-destructive recovery and exact candidate CI/review before release. PR48 remains a
+separate non-overlapping PDF lane; do not rerun its migration from stale PR wording.
+PR53 remote ceab505 and these newer local documentation edits are distinct. No remote
+publication or deployment occurred; workbook historical sheets remain unchanged.
