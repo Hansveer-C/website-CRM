@@ -170,3 +170,159 @@ non-destructive recovery and exact candidate CI/review before release. PR48 rema
 separate non-overlapping PDF lane; do not rerun its migration from stale PR wording.
 PR53 remote ceab505 and these newer local documentation edits are distinct. No remote
 publication or deployment occurred; workbook historical sheets remain unchanged.
+
+## Proposed single-business telephony pilot - local planning only, October 21
+
+This is a bounded design under the existing communication-first roadmap, NOT approved
+launch scope or activation. No code, provider account/settings/credentials, number,
+funding, send/call or production change is authorized by this plan. Current rollout
+is separate: PR56 main79df126 alignment verified; PR55 main6900bb37 merged and awaits
+activation verification in the execution record. Phone work must not add migrations
+to that rollout or broaden its authority. Later evidence in that record supersedes
+this overlay's historical production/backup assertions; Hans declared target records
+disposable, so no backup/export prerequisite is imposed on that test-stage release.
+
+Account evidence supplied by parent's authenticated read-only inspection: selected
+the selected existing account is TRIAL with verified-recipient restrictions; no active
+or recoverable released Twilio number. Financial account details stay in private
+coordination, not this potentially public repository record. A verified caller ID is
+NOT a provisioned business number. An existing Messaging Service in US1 exists, empty sender
+pool, incoming defers to sender webhook, blank status callback; default STOP/START/HELP,
+Advanced Opt-Out OFF; no TwiML applications. This lane did not inspect secrets or the
+account independently. Existing balance and an offer to load funds are NOT approved
+metered spend, upgrade, number rental or message/call permission.
+
+### Reuse versus gaps
+
+Reuse established Message/Call persistence and timeline projection, phone/message
+validation, tenant-auth boundary and server-only SDK separation where verified. Relevant
+sources: src/smsService.ts, sms_logic.ts, messages_repo.ts, calls_logic.ts/calls_api.ts,
+config.ts and local readonly communication-history UI. Do not introduce a parallel
+inbox/store or replace quote/location/job/invoice snapshots. Add minimal canonical
+business-number/conversation identity only as a reviewed extension of existing records;
+not a new provider-hosted Twilio Conversations dependency by default.
+
+Existing sending_phone_number is account-global; optional caller user_id is not tenant
+authority. Call inbound/end APIs explicitly simulate calls; duration60 and mock_call
+are not live voice. Existing inbound owner resolution by caller phone must NOT route
+real webhooks. Scanned src/api/function code has no Twilio-signature validation or
+OptOutType/STOP ingestion boundary. Current rate-limit checks are count-then-send,
+not atomic budget reservations; failed count lookup is not a safe permit. SDK15-second
+timeout via Promise.race does not cancel accepted provider work; marking all timeouts
+retryable risks duplicates. Existing sent means provider acceptance, not delivery.
+These are activation gaps to test, not defects silently fixed by this documentation.
+
+### Smallest proposed pilot and acceptance contract
+
+One explicitly identified pressure-washing business, one authenticated operator,
+one dedicated approved SMS+voice-capable number, small explicitly consenting/test
+recipient allowlist in approved Canadian destinations. Proposed first increment is
+manual two-way transactional SMS in existing customer workspace; second is incoming
+voice forwarded to ONE approved operator destination with bounded duration/legs and
+real call-state logging. No auto lead/missed-call SMS, campaigns, MMS, recording,
+transcription/AI, emergency dialing, arbitrary dial targets, porting, shared assignment
+or browser/mobile VoIP. A forwarded call is not in-app calling; those remain roadmap
+gaps. Neither this pilot nor readonly history completes the communication-first MVP.
+
+- Persist server-controlled binding of business owner, approved provider account,
+  messaging service and number identifiers. Deny ambiguous/unmapped bindings; no
+  browser-supplied From/owner, global phone-owner lookup or fallback system tenant.
+  Authenticated commands resolve owner/contact and consent server-side; webhook
+  ownership comes from verified account+destination-number binding. Same customer
+  phone across businesses must remain isolated. Unknown numbers fail closed; handling
+  new inbound leads is a separate explicit choice, not automatic contact creation.
+- Verify HTTPS webhook signatures with maintained Twilio SDK against the EXACT external
+  URL/query and all form parameters (or proper raw-body variant), using server-only
+  account credential. Do not trust forwarded host headers or accept unsigned callbacks.
+  Validate account/number association after signature, size/method/type limits before
+  persistence. No secrets, phone payloads or message bodies in general logs.
+  [Twilio request-security contract](https://www.twilio.com/docs/usage/security).
+- Inbound unique key(account,MessageSid), calls(account,CallSid), with transactional
+  persistence before acknowledgment. Callback ledger deduplicates semantic events,
+  applies allowed state transitions and rejects conflicting terminal regressions;
+  correlate signed callback to an opaque server operation/attempt ID. Outbound owner+
+  stable request key fixes recipient/body/purpose/number; changed replay conflicts.
+  Atomic outbox/dispatch claim and spend reservation prevent double clicks/workers
+  from creating two sends. Provider timeout/lost response becomes UNKNOWN, not failed
+  and automatically resendable; reconcile SID/callback/evidence first, hold unresolved
+  attempts. Do not promise provider exactly-once delivery or invent an API idempotency
+  guarantee. Duplicate callbacks must never trigger another SMS/call.
+- Consent records scope business+recipient+channel+purpose, provenance/time and wording;
+  phone possession, an inbound inquiry or existing contact is not marketing consent.
+  Proposed pilot excludes marketing. Process STOP/revocation atomically before queued
+  sends; recheck immediately before dispatch, prevent retries/automation after opt-out.
+  HELP/START semantics and English/French wording must match selected service/provider
+  behavior. Provider default keyword handling is not proof CRM suppression is synced.
+  Avoid duplicate application/provider acknowledgments; record any provider automatic
+  replies as spend/behavior outside app dispatch. Reconsent needs evidence, not merely
+  a UI checkbox. No real consent submission performed.
+- Server activation manifest defaults OFF: exact environment/account/business/number,
+  verified sender state, allowed recipients/countries/purposes, active consent, callback
+  configuration, explicit approved budget, segment/minute/leg/concurrency limits and
+  kill switch. Missing values, stale price/quota data, limit-store failure, inactive
+  owner, unverified sender or invalid signatures deny sends. Fixtures use fake adapter
+  and synthetic signed requests, never fall back to a real provider if mock setup fails.
+  Production UI flag alone is insufficient; block backend dispatch too.
+- Budget must cover number rental, SMS segments/encoding, carrier/inbound charges,
+  voice BOTH legs and maximum duration, taxes/FX and uncertainty margin. Reserve
+  conservatively/atomically and reconcile actual usage; bound unknown attempts rather
+  than releasing their reservations. Provider balance/alerts are not a guaranteed
+  spend cap; unsolicited inbound traffic/provider auto replies may cost outside app
+  controls. Do not claim a hard financial cap until the enforcement/remaining risk is
+  understood and approved. No automatic top-up. Existing CA$30 combined subscription
+  policy is separate from unapproved metered usage. No numeric cap is invented here.
+
+### Canadian sender strategy and unresolved activation choices
+
+[Twilio Canada guidance](https://www.twilio.com/en-us/guidelines/ca/sms) supports
+Canadian domestic long codes and two-way SMS, while recommending verified toll-free
+or short code for A2P deliverability. Verified toll-free is the planning baseline,
+NOT a claim local SMS is illegal. Evaluate actual use case/capabilities/filtering and
+fees before selection; no number selected. Require consent and appropriate HELP/STOP.
+[Toll-free onboarding](https://www.twilio.com/docs/messaging/compliance/toll-free/console-onboarding)
+requires a paid/non-trial account and approved verification before toll-free SMS to
+US/Canada; current guidance also requires a compliance profile before purchase.
+Therefore current trial/empty sender pool does not satisfy this baseline. No promises
+of approval timing, eligibility or production delivery. No business facts invented.
+
+Before activation Hans must supply/choose: exact operating business and authorized
+representative/legal identity/address/website/support and privacy/consent evidence;
+whether this is that business's direct account or WashOps acting as ISV for a customer;
+transactional use cases/sample messages/opt-in flow, destination countries/languages,
+allowlisted consenting test recipients, desired sender type/new number vs later port,
+operator forwarding destination/hours and whether call forwarding is acceptable for
+this pilot. Provide truthful profile/verification details through secure vendor UI,
+not in public repository. Confirm permitted history access/retention for future live
+use separately; don't invent team sharing or account-wide data access.
+
+Then present exact fees and specific account upgrade/number purchase/verification
+submission/provider configuration actions for approval. Required decision: approved
+one-time funding amount, recurring rental ceiling AND metered pilot spend/period,
+alerts/stop conditions, recipient count, SMS segment and call-minute/leg limits.
+Offered funding without those bounds is not purchase/usage authorization. Business
+verification transmits business/contact evidence; real recipient/body data goes to
+Twilio on send; call forwarding reaches the chosen destination. Obtain appropriate
+specific approval at those actions, including any new credentials/access or binding
+terms, rather than a broad permission request now. Do not mint keys, upgrade/fund,
+buy/port, configure endpoints or send to validate this design.
+
+### Local implementation sequence that can proceed after this planning review
+
+1. Schema/API contract proposal: extend existing records with durable provider binding,
+   operation/event ledger, consent/suppression and spend reservation. Exact migrations
+   need their own review after C04 rollout; avoid parallel writers. No schema written now.
+2. Pure fake-adapter tests for signature canonicalization (tampered URL/query/params,
+   invalid/foreign account), tenant/number isolation, duplicate/reordered events,
+   outbox concurrency, STOP racing queued/retry work, lost response reconciliation,
+   missing credentials/flags/budget and conservative segment/voice cost bounds.
+3. Disposable local authenticated DB/API/browser integration: real local ownership/RLS,
+   inbound/outbound fixture history, consent/opt-out UI, pending/unknown/delivered/error
+   states, repeated clicks/account navigation races and mobile/keyboard behavior.
+   Synthetic TwiML/callbacks only; voice simulation cannot be labeled live validation.
+4. Independent exact-head review plus regressions/types/build and production-flag-on
+   negative proof; confirm no billable SDK invocation without full activation manifest.
+   Only then offer a separately approved, bounded live verified-recipient validation.
+
+No code, workbook history, provider state or rollout configuration changed in this
+planning unit. This section is proposed acceptance/design, not built or approved
+commercial scope. Dedicated number and communications remain essential product goals.
