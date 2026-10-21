@@ -978,3 +978,47 @@ listeners are removed, and unrelated newsletter services remain running. This
 checkpoint is local documentation only; it changes no reviewed PR source bytes.
 Next action is the scoped release/migration-risk decision above, not automatic
 merge or a claim that hosted notes or the communications-first MVP are complete.
+
+### PR63 approved automatic database/application release
+
+After the owner explicitly approved merging PR63 and allowing its additive
+automatic database update, the release rechecked unchanged reviewed head
+`7145de8f22fdbd4d3aa1c2987e29827accdc5be7`, main/base `e976a250`, independent
+exact-head PASS and all ten successful CI jobs. Candidate inventory contained
+57 versions; excluding only `20261021210325` matched all 56 hosted versions
+(digest `92dc3533d42950746420ac1b4e38b6fa`). No materially changed risk appeared.
+
+PR63 merged at 21:53:50 UTC October 21 as
+`e7f766aedb36e9bb1f3f90285433ad199888d547`; tree exactly matches reviewed head.
+Vercel production for that exact SHA is READY, assigned website-crm-one.vercel.app:
+https://vercel.com/hans-says-projects/website-crm/GcHqEfj8e73Jtm4kWhrVCSxts2C8
+The live page and `/assets/index-CUhSiucD.js` return HTTP 200; the asset includes
+the note editor, RPC wiring and retry state. Exact-SHA Supabase integration check
+completed SUCCESS at 21:54:28 UTC; project `jkwfocgqgltdmprhdmji` ACTIVE_HEALTHY.
+
+Read-only catalog verification after terminal success:
+
+- Ledger 56 -> 57, with only `20261021210325` added; latest equals that version.
+  Full version digest `d544127b75ed71be63e9142c9fa32793`; excluding the new version
+  still matches the prior 56-version digest above.
+- Pre-existing object/column/default/constraint/function/grant/RLS-policy catalog
+  digest unchanged: `8e298e0a3f354c223f0fd42280853835`, excluding only the expected
+  new private ledger/PK and public note RPC from both pre/post comparisons.
+- Private retry ledger exists, RLS true, no policies and no anon/authenticated/
+  service-role CRUD grants. RPC authenticated execute true; anon/service-role
+  execute false. SECURITY DEFINER and empty search_path match reviewed source.
+  Hosted RPC source digest `0760cd76cc609e69235665325a274643` exactly equals the
+  reviewed migration body, including ownership checks and safe JSON projection.
+- No non-internal triggers are attached to public.activities. No hosted note RPC
+  or records were invoked/read by this lane; no manual SQL mutations, settings,
+  credentials, provider actions, external communications or spending occurred.
+
+PR48 and draft PR58 exact heads remain unchanged. PR58's unpublished migration
+`20261021064220` now precedes the applied latest version; its separate future
+release must reconcile that ordering against fresh main before merging, without
+manual hosted ledger repair or blindly publishing the accumulated local stack.
+Rollback remains limited as described above: a UI revert leaves SQL/data; no
+destructive downgrade is authorized. Parent will now run normal hosted Note UI
+verification on its preserved synthetic contact. Until that evidence arrives,
+do not claim hosted note-save/reload usability from deployment/catalog checks.
+This release evidence is a local documentation commit, not another deployment.
