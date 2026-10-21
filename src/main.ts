@@ -1,6 +1,9 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
 import { escapeHtmlText, safeTelHref, safeNavHref } from './crm_html_output';
 import { resolveHydratedContact, renderHydratedContactActivity } from './crm_contact_detail';
+import { createContactNote } from './crm_contact_notes';
+import { ContactNoteController, contactNoteFormHtml, mountContactNote } from './ui/contacts/contact_note';
+import { contactNoteAttempt, contactNoteStorage, clearContactNoteAttempts } from './ui/contacts/contact_note_attempt';
 import { contactMatchesClientSearch, formatContactPhone, hasContactPhone } from './crm_contact_phone';
 import { templates } from './templates';
 import { Activity, Contact, DurableInvoice, DurableInvoiceItem, Funnel, Page, PageSection, Quote, QuoteItem, User, Website, WebsiteLayout, WebsiteRoute, WebsiteSettings } from './types';
@@ -2214,6 +2217,7 @@ type BuilderContext = {
 let compSearchQuery: string = '';
 let compCategoryFilter: string = 'all';
 let contactTimelineState: any[] = [];
+const contactNoteSessions = new Map<string, { controller: ContactNoteController; root: HTMLElement | null; navigation: ProtectedAsyncOperationToken | null }>();
 let lastContactCount = mockContacts.length;
 
 function getActingUserId(): string {
@@ -2227,6 +2231,7 @@ function clearProtectedRuntimeData(): void {
   lastGeneratedWebsiteData = null;
   crmProductionHydrator.clear();
   authenticatedLeadCapture = null;
+  contactNoteSessions.clear();
   websiteLayoutHydrator.clear();
   websiteSettingsHydrator.clear();
   applyPrimaryColor(mockWebsiteSettings.primary_color);
@@ -2311,12 +2316,14 @@ async function ensureProductionCrmData(userId: string, view: string, force = fal
 function applyApplicationAuthState(state: ApplicationAuthState): void {
   const previousUserId = getActingUserId();
   if (state.status !== 'authenticated') {
+    if (state.status==='unauthenticated') clearContactNoteAttempts(contactNoteStorage());
     (window as any).currentUser = undefined;
     if (previousUserId || editorUsesSupabase()) clearProtectedRuntimeData();
     return;
   }
   if (previousUserId && previousUserId !== state.user.id) clearProtectedRuntimeData();
   (window as any).currentUser = state.user.id;
+  clearContactNoteAttempts(contactNoteStorage(),state.user.id);
   if (state.source === 'supabase' && previousUserId !== state.user.id) {
     clearProtectedRuntimeData();
     (window as any).currentUser = state.user.id;
@@ -12429,7 +12436,48 @@ async function renderContactDetail(contactId: string) {
 };
 
 (window as any).addNote = (contactId: string) => {
-  if (editorUsesSupabase()) { (window as any).showToast('Activity creation is temporarily unavailable.', 'error'); return; }
+  if (editorUsesSupabase()) {
+    const owner=getActingUserId();
+    const owned=resolveHydratedContact(owner,crmProductionHydrator.state.userId,
+      crmProductionHydrator.state.entities.contacts==='ready',mockContacts,contactId);
+    const root=document.getElementById('contact-note-root');
+    const navigation=protectedAsyncOperationGuard.captureCurrent('application-navigation',owner);
+    if (owned.status!=='ready' || !root || !navigation || currentView!=='contact-detail' || selectedContactId!==contactId) return;
+    const key=JSON.stringify([owner,contactId]);
+    let session=contactNoteSessions.get(key);
+    if (!session) {
+      const current=()=>contactNoteSessions.get(key)===session && getActingUserId()===owner
+        && currentView==='contact-detail' && selectedContactId===contactId && !!session?.root?.isConnected
+        && !!session.navigation && protectedAsyncOperationGuard.isCurrent(session.navigation,getActingUserId());
+      const controller=new ContactNoteController(contactId,{
+        ...contactNoteAttempt(contactNoteStorage(),owner,contactId),
+        current,
+        requestKey:()=>crypto.randomUUID(),
+        create:async input=>{
+          const client=await getBuilderPublicationSupabaseClient();
+          if (!client || !current()) throw new Error('Note creation unavailable');
+          return createContactNote(client as unknown as CrmMutationClient,input);
+        },
+        saved:result=>{
+          if (!current()) return;
+          const activity={...result.activity,user_id:owner};
+          const index=mockActivities.findIndex(item=>item.id===activity.id && item.user_id===owner);
+          if (index<0) mockActivities.push(activity); else mockActivities[index]=activity;
+          void loadTimeline(contactId);
+        },
+        cancelled:()=>{
+          if (!current()) return;
+          session?.root?.replaceChildren();contactNoteSessions.delete(key);
+          document.querySelector<HTMLButtonElement>('button[aria-label="Add note"]')?.focus();
+        }
+      });
+      session={controller,root,navigation};contactNoteSessions.set(key,session);
+    }
+    session.root=root;session.navigation=navigation;
+    root.innerHTML=contactNoteFormHtml;
+    mountContactNote(root.querySelector<HTMLFormElement>('form')!,session.controller);
+    return;
+  }
   const note = prompt("Enter your note:");
   if (note) {
     mockActivities.push({
