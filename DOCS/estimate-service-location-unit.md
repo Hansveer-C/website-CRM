@@ -961,3 +961,20 @@ PR58 still contains the older unpublished migration
 that later release must reconcile migration ordering against the new ledger;
 do not bulk-merge the old local stack or manually repair hosted history. PR58 is
 unchanged here and is not a prerequisite for notes.
+
+### PR63 draft publication checkpoint
+
+Published normal branch `codex/authenticated-contact-notes` as draft PR63:
+https://github.com/Hansveer-C/website-CRM/pull/63
+Exact remote head `7145de8f22fdbd4d3aa1c2987e29827accdc5be7` received independent
+exact-head PASS (37/37 independently run tests; no residual findings). All ten
+workflow jobs PASS on that SHA:
+https://github.com/Hansveer-C/website-CRM/actions/runs/39678635155
+Vercel preview completed; Supabase preview was skipped. The PR is still draft,
+unmerged and clean against unchanged main `e976a250cd19083cc93d3292b9ea66f3c7960eef`.
+No hosted SQL, fixtures, credentials, provider or settings changes occurred.
+Local Auth/race fixtures are zero, the owned stack is stopped, TLS files and app
+listeners are removed, and unrelated newsletter services remain running. This
+checkpoint is local documentation only; it changes no reviewed PR source bytes.
+Next action is the scoped release/migration-risk decision above, not automatic
+merge or a claim that hosted notes or the communications-first MVP are complete.
