@@ -1419,3 +1419,56 @@ source or SQL changed in that correction. All 226 affected regressions across
 remains valid because only this test harness and receipt changed. Independent
 review and new published-head CI must pass; results are attached to the draft PR.
 Supabase Preview was SKIPPED as expected; publication did not apply hosted SQL.
+### Production invoice conversion candidate (unmerged replacement for PR58 QA wiring)
+
+Base `60f634ed4a29c6fef0af0d4a469dd843c904774e`; isolated branch
+`codex/production-accepted-invoice`. PR58 remote stays `ae5a23d2490bb362844f0a3a5c0effda55544c92`;
+PR48 unchanged. Normal authenticated approved-estimate preview now offers Create
+invoice / Open existing invoice, reusing PR58 evidence/controller contracts and
+the existing server-authoritative invoice RPC. No QA flag is required. The legacy
+in-memory converter and its production denial remain separate and unchanged.
+
+CLI-generated `20261021232634_read_accepted_quote_invoice_evidence.sql` replaces
+PR58's UNPUBLISHED `20261021064220` in this candidate only. Body SHA256
+`37f7989a7cbc9735d83237a40413aefb72a87964227ed586a46dc7e34dd8fc73`
+matches the old file. All 58 applied migrations remain byte-for-byte unchanged;
+the old unpublished filename is absent. Expected hosted effect AFTER release gate:
+58 -> 59, one authenticated owner-only SECURITY DEFINER read projection, no new
+table or existing grant/policy/invoice-RPC change. PUBLIC/anon/service_role EXECUTE
+and direct acceptance-ledger reads remain denied. Projection exposes frozen
+selected-tier lines, accepted/current revision, currency/total and existing invoice
+ID; no signatures, signer identity, internal notes or private retry fields.
+Do not merge old PR58 afterward: reconcile/retire the duplicate explicitly.
+
+Stable-key retry, double-click suppression, returned owner/quote/revision/amount/
+line validation, stale account/navigation guards and persisted-invoice navigation
+are implemented. The existing read-only invoice workspace and historical customer/
+billing snapshot are reused. No invoice service-location schema expansion, PDF
+sharing, send/payment/provider activation or automatic communication is included.
+
+Fresh local checks: 59-migration replay; nine SQL regression suites (properties
+40 TAP assertions, service-location/evidence 79; other suites are exception-based);
+85 review/acceptance/invoice assertions including concurrent duplicate conversion
+and eight observed review races; app/API types and build. Broad regression passed
+2304 with 204 skipped, followed by 31 focused final guard/XSS/traffic tests.
+Actual production-build browser 2/2 passed: no seeded CRM records, ordinary lead,
+draft, property, separate recipient confirmation, owner acceptance, invoice save,
+lost-response same-key retry, reopen/reload, literal HTML scope, mobile width and
+keyboard navigation. A separate invoice proof narrowly permits only the additional
+exact loopback conversion RPC; the original review-only traffic guard is unchanged.
+Initial browser failures were test guard/locator/mobile-navigation issues, corrected
+without weakening assertions. Final independent review and remote CI are pending.
+
+Parent-reported hosted PR64 proof remains OWNER-ONLY: synthetic revision2 link,
+24-hour/access disclosure, expiry `10/22/2026 4:18:01 PM`, normal revocation and full
+reload restoring Generate; USD1 draft/property intact. Token not exposed; no
+recipient confirmation/acceptance. No explicit revoked-history label. Hosted
+signed-out denial/expiry/customer QA remains pending supported browser isolation.
+Local proof does not bypass that gate or authorize hosted fake acceptance/invoices.
+
+Release requires parent decision after reviewed draft/CI. Main merges automatically
+deploy Vercel AND Supabase. Code rollback hides UI but leaves the new function and
+any created invoice records; reviewed forward EXECUTE revocation can disable the
+added read API without data deletion. No destructive downgrade is proposed. Existing
+invoice mutation permissions remain unchanged. No hosted writes, new credentials,
+provider actions, payments or spending occurred in this implementation unit.
