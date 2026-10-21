@@ -250,6 +250,7 @@ import {
   type CrmMutationClient
 } from './crm_production_mutations';
 import { QuoteServiceLocationController, mountQuoteServiceLocation, applyServiceLocationPreviewRefresh, type ServiceLocation } from './ui/quotes/quote_service_location';
+import { allowsEstimateReview, mountOwnerQuoteReview, mountRecipientQuoteReview, type ReviewClient } from './ui/quotes/quote_review';
 import {
   ApplicationAuthController,
   createApplicationSignupRedirect,
@@ -12212,8 +12213,23 @@ function renderQuotePreview(quoteId: string) {
     title: 'Quote preview',
     headerActionsHtml: `<div class="wo-shell-header-actions"><button type="button" class="wo-button wo-button--secondary no-print" onclick="window.navigateTo('quotes')">Back</button><button type="button" class="wo-button wo-button--primary no-print" onclick="window.print()">Print quote</button></div>`,
     contentVariant: 'wide',
-    contentHtml: preview + (quote ? '<div id="quote-service-location-root"></div>' : '')
+    contentHtml: preview + (quote ? '<div id="quote-service-location-root"></div><div id="quote-review-root"></div>' : '')
   });
+
+  const reviewRoot = app.querySelector<HTMLElement>('#quote-review-root');
+  if (quote && reviewRoot && editorUsesSupabase() && allowsEstimateReview(location.origin, builderPublicationSupabaseUrl)) {
+    const navigation=protectedAsyncOperationGuard.captureCurrent('application-navigation',userId);
+    const current=()=>reviewRoot.isConnected && currentView==='quote-preview' && getActingUserId()===userId
+      && !!navigation && protectedAsyncOperationGuard.isCurrent(navigation,getActingUserId());
+    void getBuilderPublicationSupabaseClient().then(client=>{
+      if(!client||!current())return;
+      mountOwnerQuoteReview(reviewRoot,{client:client as unknown as ReviewClient,quoteId,revision:quote.revision!,current,
+        canGenerate:quote.status==='draft'||quote.status==='sent',ready:()=>!locationController?.acceptanceBlocked,
+        recorded:()=>{void crmProductionHydrator.hydrateAuthenticatedUser(userId,true).then(()=>{if(current())renderQuotePreview(quoteId);}).catch(()=>{
+          if(current())reviewRoot.append(Object.assign(document.createElement('p'),{textContent:'Acceptance recorded; reload this estimate to refresh its display.'}));
+        });}});
+    });
+  }
 
   let locationController: QuoteServiceLocationController | undefined;
   const locationRoot = app.querySelector<HTMLElement>('#quote-service-location-root');
@@ -13041,6 +13057,24 @@ async function bootRouter() {
     await renderConfiguredPublicSite(hostRoute.pathname);
     return;
   }
+  if (window.location.hash.startsWith('#/estimate-review/')) {
+    protectedAsyncOperationGuard.beginUnbound('application-navigation');
+    // The bearer stays in the fragment/HTTPS POST body, never a query string/referrer.
+    let referrer=document.querySelector<HTMLMetaElement>('meta[name="referrer"]');
+    if(!referrer){referrer=document.createElement('meta');referrer.name='referrer';document.head.append(referrer);}
+    referrer.content='no-referrer';
+    const hash=window.location.hash;
+    if(!allowsEstimateReview(location.origin,builderPublicationSupabaseUrl) || !/^#\/estimate-review\/[0-9a-f]{64}$/.test(hash)) {
+      app.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Estimate review is unavailable.'}));return;
+    }
+    app.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Loading estimate review.'}));
+    const client=await getBuilderPublicationSupabaseClient();
+    if(location.hash!==hash)return;
+    if(!client){app.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Estimate review is unavailable.'}));return;}
+    const root=document.createElement('main');root.className='wo-card';root.style.cssText='max-width:760px;margin:20px auto;padding:20px;overflow-wrap:anywhere';app.replaceChildren(root);
+    mountRecipientQuoteReview(root,{client:client as unknown as ReviewClient,token:hash.slice('#/estimate-review/'.length),current:()=>location.hash===hash});return;
+  }
+
   const targetPath = resolveWebsitePathFromBrowserPath(rawPath);
   const isPreviewRoute = rawPath === '/preview' || rawPath.startsWith('/preview/');
   // Explicit /site simulation remains public on CRM application hosts.
