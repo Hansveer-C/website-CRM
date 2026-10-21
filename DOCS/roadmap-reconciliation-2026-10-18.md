@@ -326,3 +326,29 @@ buy/port, configure endpoints or send to validate this design.
 No code, workbook history, provider state or rollout configuration changed in this
 planning unit. This section is proposed acceptance/design, not built or approved
 commercial scope. Dedicated number and communications remain essential product goals.
+
+## Local synthetic SMS proof and C04 release evidence
+
+Supersedes C04 pending status above: PR55 merged main6900bb37; exact production
+Vercel READY and Supabase workflow applied ONLY20261020183000. Fresh ledger54,
+property RLS/column denial, owner-derived authenticated-only RPC and both JSON
+response exclusions corroborated read-only; root/login HTTP200. No hosted create
+RPC or SQL mutation was used for verification. See established execution record.
+
+Local-only SMS proof commit ce26f52090bebe6a766a4ed8459199c3a0bb9f3b passed independent
+exact-head review. Durable local Postgres intent ledger reuses existing Message shape
+and fake sendSMS contract: owner routing, same-key replay, atomic allowance, queued
+STOP/claim race, unknown outcome/no automatic resend and finalization-loss handling.
+Actual15SMS+25history+1bundle-boundary tests=41PASS; targeted/app/API types and production
+build PASS. Actual production-mode initialization denied even with test flag; production
+JS contains no synthetic dispatch markers. Fixture is outside timestamped migrations;
+no hosted schema/provider activation. Owned fixture stopped; no external credential,
+paid service, message/call or remote publication. No configured lint task; whitespace
+check passes. Test principal/consent flags/fixed units are synthetic, not hosted Auth,
+consent evidence, live signature callbacks, carrier cost model or usable live SMS.
+
+The canonical current-status sheet now reflects deployed C04 foundation and this
+local fake-only proof, while Conversation/BusinessNumber/live phone lifecycle remain
+unbuilt. Original historical sheets and other ZIP entries preserved. No layout change
+or new rendering claim. Plan's business/sender/recipient/funding/metered approvals and
+live integration prerequisites remain open; existing trial credit changes none of them.
