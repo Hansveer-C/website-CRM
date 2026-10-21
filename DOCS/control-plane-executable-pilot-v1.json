@@ -1,0 +1,86 @@
+{
+  "schema_version": "washops-control-plane-executable-pilot-v1",
+  "project_id": "washops",
+  "namespace": "cp:washops",
+  "canonical_repository": "Hansveer-C/website-CRM",
+  "authority": {
+    "purpose": "Project-owned executable task definition for exactly one future Control Plane read-only assessment; not a general WashOps development authority.",
+    "owner_decision": "APPROVED_FOR_EXECUTABLE_TASK_DEFINITION_ONLY",
+    "owner_decision_date": "2026-10-19",
+    "source_of_decision": "Explicit operator approval in Automation Control Panel project conversation",
+    "supersedes_product_roadmap": false,
+    "supersedes_planning_reference": false,
+    "registered_as_control_plane_executable_authority": false,
+    "control_plane_lifecycle_transition_authorized": false,
+    "hermes_activation_authorized": false,
+    "live_execution_authorized": false,
+    "automatic_continuation_authorized": false
+  },
+  "planning_source": {
+    "ref": "github://Hansveer-C/website-CRM#DOCS/control-plane-pilot.json",
+    "observed_default_branch_revision": "721772925cc113e96e4d6603d4732e4e1ecc2ad8",
+    "raw_source_fingerprint": "sha256:c4df70c55c9775b3d257a61c601556595ade850fc4f4829532df7db3beccbdf5",
+    "adoption_state": "ACCEPTED_FOR_PILOT_PLANNING_ONLY"
+  },
+  "bounded_unit": {
+    "unit_id": "washops-browser-boundary-static-assessment",
+    "envelope_identity": "washops/washops-browser-boundary-static-assessment/v1",
+    "task_class": "read-only-audit",
+    "risk_class": "LOW",
+    "objective": "Assess static browser/server boundary test coverage and document precisely what it proves and does not prove, without running application code or modifying WashOps.",
+    "target_revision": "721772925cc113e96e4d6603d4732e4e1ecc2ad8",
+    "backend": "hermes",
+    "profile": "washops-operator",
+    "workspace": "C:/Users/NoOne/Documents/ChatGPT/Projects/WashOps/main",
+    "read_scope": [
+      "src/browser_bundle_boundary.test.ts",
+      "src/main.ts",
+      "vite.config.ts",
+      "DOCS/ARCHITECTURE.md",
+      "AGENTS.md",
+      "LOOPS.md",
+      "package.json",
+      "vitest.config.ts"
+    ],
+    "write_scope": [],
+    "further_source_reads": "Only directly referenced same-repository source required for static import assessment, when each path and hash is included in a separately reviewed approved plan before admission; otherwise stop at HUMAN_GATE.",
+    "execution_bounds": {
+      "max_attempts": 1,
+      "max_runtime_minutes": 15,
+      "max_external_application_targets": 0,
+      "retry_allowed": false,
+      "resume_allowed": false,
+      "nested_delegation_allowed": false,
+      "automatic_continuation_allowed": false
+    },
+    "required_findings": [
+      "Source paths and line references",
+      "Explicit scope and completeness",
+      "Checks and limitations",
+      "changed_scope: []",
+      "Independently verified unchanged repository state"
+    ],
+    "prohibited_effects": [
+      "WashOps source edits, tests, builds or installs",
+      "Database, Supabase, tenant data or secret access",
+      "Application or external-site requests",
+      "Invoice/PDF PR #48 changes",
+      "Merge, deployment, publication, production mutation or communication"
+    ]
+  },
+  "future_admission_gates": {
+    "eligible_now": false,
+    "reason": "WashOps remains PARKED, its Control Plane roadmap authority unregistered, its Hermes binding disabled, and its approved planning file non-executable.",
+    "requires_separate_human_approvals": [
+      "Review and merge this exact project-owned task definition; independently verify its canonical source bytes and immutable revision.",
+      "Approve specific Control Plane executable-authority registration and task/plan bindings; keep legacy planning-only source unchanged.",
+      "Approve exact lifecycle, routing, backend-binding and mutation-owner policy changes after reliability and ownership gates.",
+      "Approve inference/network, local evidence persistence and owned-process termination effects.",
+      "Issue fresh exact trusted-TTY one-use run approval only after independent issuer-to-admission and terminal-evidence verification."
+    ],
+    "required_runtime_evidence": "One durable approved decision, one non-replayable dispatch, authenticated native Hermes run/session association, independently retrievable terminal proof and no continuation.",
+    "missing_or_uncertain_history": "BLOCK; never infer no prior attempt from absence of a record.",
+    "may_activate_without_new_approval": false,
+    "may_run_without_new_approval": false
+  }
+}
