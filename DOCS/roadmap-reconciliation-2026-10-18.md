@@ -1,14 +1,14 @@
 # WashOps CRM — Roadmap Reconciliation (2026-10-18)
 
-**Status:** Documentation reconciliation updated 2026-10-21; PR53 remains draft pending validation/release gates.
+**Status:** Current documentation reconciliation, 2026-10-21. PR53 publication is documentation-only; local product proofs below remain unmerged unless explicitly identified as deployed.
 
 **Canonical product roadmap:** `CRM Roadmap.ods`. Open its first/active tab, `Current status 2026-10-21`: rows 1–5 explain authority and evidence, row 6 defines the six columns, rows 7–23 record current direction/status/acceptance, and rows 24–25 define evidence labels and sources. Original `Sheet1` and `Sheet2` remain historical evidence, preserved verbatim; their Done labels are not current product certification. The dated sheet is the current reconciliation within the same canonical workbook, not another roadmap.
 
 **Canonical repository:** `Hansveer-C/website-CRM`.
 
-**Verified remote main:** `7d361596e6994e0371ac20ef18a85cb833de5651` (2026-10-21).
+**Verified remote main:** `6900bb37b5d1d0769c553274c7cdf9fa2bd7b331` (2026-10-21), including merged/deployed C04 PR55 and migration-file alignment PR56.
 
-**Evidence scope:** this update inspects local exact-head code, original workbook XML, GitHub PR/check/deployment metadata and supplied source decisions. Prior September Stage-2 capability audit and Stage-3–6 research remain historical. This is **not** a fresh 160-capability or production audit. Production database and live telephony were not inspected. A focused PR55 SQL rerun is separately identified below; no production readiness is inferred.
+**Evidence scope:** this update inspects local exact-head code, original workbook XML, GitHub PR/check/deployment metadata and supplied source decisions. Prior September Stage-2 capability audit and Stage-3–6 research remain historical. This is **not** a fresh 160-capability or production audit. Read-only production ledger/schema/access metadata and deployment evidence were inspected for the bounded C04 release; no hosted customer records or mutation tests were used. Live telephony was not validated. A focused PR55 SQL rerun is separately identified below; no production readiness is inferred.
 
 ## Authority and reconciliation rules
 
@@ -17,7 +17,7 @@
 3. The October 18 `DOCS/control-plane-pilot.json` planning record has `ACCEPTED_FOR_PILOT_PLANNING_ONLY` and `PARKED`. PR54 subsequently adds only the authority specified in `DOCS/control-plane-executable-pilot-v1.json`. Do not broaden that authority or equate planning acceptance with product implementation, deployment, or launch authorization. This reconciliation activates nothing.
 4. Do not import another project's commits, tasks, agents, milestones or architecture into WashOps. Preserve human merge/deploy/production gates.
 
-## Verified current GitHub facts
+## Initial audit facts (historical; current release reconciliation follows)
 
 - `main` at `7d361596e6994e0371ac20ef18a85cb833de5651` includes PR #54's narrowly defined read-only pilot authority after PR #52 planning acceptance. Read the exact pilot contract for its limits; this roadmap change activates no routing or production capabilities. Control Plane work does not complete CRM product capabilities.
 - The intervening September 8–12 merges concern agent/skill instructions and routing cleanup, not proof of new CRM product modules.
@@ -26,7 +26,7 @@
 - `DOCS/db-base1-production-ledger-runbook.md` separately documents the `20260325170300` baseline ledger-repair gate. **These are distinct migration versions and tasks**; do not conflate them or assume either is resolved.
 - `DOCS/ARCHITECTURE.md` includes older `user_id` and mock-interceptor wording. The September audit identified coexistence of `user_id` tenancy and `tenant_business_identity` as intentional compatibility/debt; validate current contracts before editing architecture prose or tenancy.
 
-## Capability status: evidence and remaining verification
+## Historical capability baseline (not current completion status)
 
 | Area | Last verified product maturity (September Stage 2) | October 18 status |
 | --- | --- | --- |
@@ -59,7 +59,7 @@
 
 **Open communication decisions:** WashOps-owned architectural contracts do not imply team-assignee ownership. Shared inbox assignment/handoff/queues, customer export/history portability, port-out/offboarding and retention lack acceptance contracts. Track them as gaps; do not promise them as built. Define synthetic tenant-routing, callback-signature, delivery/call-state, retries/duplicate events, permissions and continuity tests. Provider economics, packaging and included allowances remain undecided; no number purchase or live metered validation is authorized by this reconciliation.
 
-## Dependency-driven execution frontier (proposed, not autonomous authorization)
+## Initial execution frontier (historical planning; subsequent evidence below)
 
 1. **Baseline/roadmap status audit — first bounded unit.** Verify repository identity, remote, branch, HEAD, worktree; inspect `CRM Roadmap.ods` and current product contracts/tests; reconcile 160 capability IDs and relevant accepted completion reports against `main`. Produce evidence-backed status/delta, explicit blockers, and proposed minimal roadmap edits. No application mutation or launch date invention. **Done:** every status change has a code/test/merged-PR reference and uncertain items remain unknown.
 2. **Product scope and launch gates — human decision.** Freeze V1 inclusions/deferments, communications minimum, pricing/entitlement assumptions, and private-test success criteria. **Done:** approved decision record and revised milestone calendar; no unapproved dates.
@@ -329,7 +329,7 @@ commercial scope. Dedicated number and communications remain essential product g
 
 ## Local synthetic SMS proof and C04 release evidence
 
-Supersedes C04 pending status above: PR55 merged main6900bb37; exact production
+Current release status supersedes the historical audit and baseline above: PR55 merged main6900bb37; exact production
 Vercel READY and Supabase workflow applied ONLY20261020183000. Fresh ledger54,
 property RLS/column denial, owner-derived authenticated-only RPC and both JSON
 response exclusions corroborated read-only; root/login HTTP200. No hosted create
