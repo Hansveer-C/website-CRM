@@ -10226,7 +10226,7 @@ function renderQuickstart() {
   });
 }
 
-let authenticatedLeadCapture: { owner: string; controller: LeadCaptureController; root: HTMLFormElement | null } | null = null;
+let authenticatedLeadCapture: { owner: string; controller: LeadCaptureController; root: HTMLFormElement | null; navigation: ProtectedAsyncOperationToken | null } | null = null;
 function renderLeadCapture() {
   (window as any).internalLeadRequestKey ||= crypto.randomUUID();
   renderAppWithShell({
@@ -10240,10 +10240,13 @@ function renderLeadCapture() {
   const form=document.getElementById('lead-form') as HTMLFormElement;
   if (editorUsesSupabase()) {
     const owner=getActingUserId();
+    const navigation=protectedAsyncOperationGuard.captureCurrent('application-navigation',owner);
     if (!authenticatedLeadCapture || authenticatedLeadCapture.owner !== owner) {
       const current=()=>getActingUserId() === owner && currentView === 'lead-capture'
         && authenticatedLeadCapture?.controller === controller
-        && authenticatedLeadCapture.root === document.getElementById('lead-form');
+        && authenticatedLeadCapture.root === document.getElementById('lead-form')
+        && !!authenticatedLeadCapture.navigation
+        && protectedAsyncOperationGuard.isCurrent(authenticatedLeadCapture.navigation,owner);
       const controller: LeadCaptureController = new LeadCaptureController(owner, {
         current,
         requestKey:()=>crypto.randomUUID(),
@@ -10261,8 +10264,8 @@ function renderLeadCapture() {
         },
         cancelled:()=>{ if (!current()) return; authenticatedLeadCapture=null; void (window as any).navigateTo('clients'); }
       });
-      authenticatedLeadCapture={owner,controller,root:form};
-    } else authenticatedLeadCapture.root=form;
+      authenticatedLeadCapture={owner,controller,root:form,navigation};
+    } else { authenticatedLeadCapture.root=form; authenticatedLeadCapture.navigation=navigation; }
     mountLeadCapture(form,authenticatedLeadCapture.controller);
   } else {
     form.addEventListener('submit', handleLeadCaptureSubmission);

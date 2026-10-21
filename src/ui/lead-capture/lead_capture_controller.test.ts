@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { LeadCaptureController, normalizeLeadCaptureDraft } from './lead_capture_controller';
 import { CrmMutationError, type InternalLeadResult } from '../../crm_production_mutations';
+import { isLocalCrmQaUrl, isLocalCrmQaBackendUrl } from '../../../tests/fixtures/local_crm_browser_guard';
+import { ProtectedAsyncOperationGuard } from '../../website_dashboard_hydration_guard';
 
 const draft = { name:'  Synthetic   Wash ', phone:'613-555-0101', email:' QA@EXAMPLE.TEST ', address:' 10 Fixture Lane ', serviceType:'Residential Pressure Washing', message:' Synthetic only ' };
 const result = () => ({contact:{id:'contact-a',user_id:'owner-a'},opportunity:{id:'opportunity-a',user_id:'owner-a',contact_id:'contact-a'},isRepeat:false,replayed:false}) as InternalLeadResult;
@@ -11,6 +13,21 @@ function setup() {
   return {controller,dependencies,leave:()=>current=false,return:()=>current=true};
 }
 describe('authenticated lead capture',()=>{
+  it('does not redirect after a new navigation invocation starts, even before its view renders',async()=>{
+    const s=setup(), guard=new ProtectedAsyncOperationGuard();
+    const navigation=guard.bindCurrent(guard.beginUnbound('application-navigation'),'owner-a')!;
+    s.dependencies.current=()=>guard.isCurrent(navigation,'owner-a');
+    let finish!:(value:InternalLeadResult)=>void;s.dependencies.create.mockImplementation(()=>new Promise(r=>finish=r));
+    const saving=s.controller.save();guard.beginUnbound('application-navigation');finish(result());await saving;
+    expect(s.controller.phase).toBe('saved');expect(s.dependencies.created).not.toHaveBeenCalled();
+  });
+  it('blocks matching external URLs before specialized browser routes can fetch or continue',()=>{
+    const path='/rest/v1/rpc/create_internal_crm_lead';
+    expect(isLocalCrmQaBackendUrl(`https://127.0.0.1:56429${path}`,path)).toBe(true);
+    for(const value of [`https://remote.example${path}`,`https://127.0.0.1:56429@remote.example${path}`,`https://127.0.0.1.evil:56429${path}`,`http://127.0.0.1:56429${path}`,`https://127.0.0.1:56429/api/websites/generate`,'not a URL']){expect(isLocalCrmQaUrl(value)).toBe(false);expect(isLocalCrmQaBackendUrl(value,path)).toBe(false);}
+    expect(isLocalCrmQaBackendUrl('https://remote.example/rest/v1/contacts?select=*','/rest/v1/contacts')).toBe(false);
+    expect(isLocalCrmQaUrl('https://127.0.0.1:56429/rest/v1/rpc/accept_crm_quote')).toBe(false);
+  });
   it('normalizes identity and bounds the existing form fields',()=>{
     expect(normalizeLeadCaptureDraft(draft)).toMatchObject({name:'Synthetic Wash',email:'qa@example.test',address:'10 Fixture Lane',message:'Synthetic only'});
     for(const key of Object.keys(draft))expect(()=>normalizeLeadCaptureDraft({...draft,[key]:' '})).toThrow();

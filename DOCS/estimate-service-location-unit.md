@@ -694,3 +694,31 @@ Cancel validation may be tested first without writes. Do not send/accept an
 estimate, create an invoice, call/text, generate/publish a website or delete data.
 New draft sent/acceptance wiring and missing website terms URL remain explicit
 separate gaps; this is a draft-only private-flow prerequisite, not completed MVP.
+### Final review corrections and resumed verification
+
+Execution transport disconnected after base 77c6048; inspection on reconnect found
+that head unchanged and only expected review corrections dirty. Existing owned
+Supabase stack was already running; no duplicate services or test accounts were
+started. No push/merge had occurred during the interruption.
+
+Independent review found a P1 test-harness issue: specialized route handlers could
+override the global blocker without first verifying origin. A shared local-only
+policy now applies before every browser case, including cold hydration; both RPC
+and contacts overrides require the exact loopback backend origin/path before
+fetch/continue. Regression tests reject matching remote, userinfo-spoofed, suffix,
+wrong-protocol and malformed URLs, plus prohibited acceptance/site generation.
+No security assertions were weakened. Product review had no material findings.
+
+The form also captures the existing application-navigation token, so a newly
+started navigation invalidates UI delivery before the next view renders. This
+uses the established operation guard; its behavior is unchanged. A real-guard
+unit regression proves a late saved lead cannot redirect the new navigation.
+
+Final resumed checks: 104/104 focused tests across nine files PASS; app/API types,
+whitespace and actual production build PASS. Real local production-browser suite
+2/2 PASS (27.4 seconds), including cold hydration and the fully empty-account path
+with no seeded CRM records. Successful logout response is awaited before the
+second account login. Existing hardened lead SQL suite rerun PASS on the local
+56-migration stack; all separate SQL fixtures rolled back. No hosted writes,
+acceptance, invoice, provider, website-generation or external sends were executed.
+Final exact-head independent review and remote CI remain draft-publication gates.

@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { Client } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { assertLocalPropertyQaStatus } from '../fixtures/service_property_local_guard';
+import { isLocalCrmQaUrl, isLocalCrmQaBackendUrl } from '../fixtures/local_crm_browser_guard';
 
 test.skip(process.env.WASHOPS_EMPTY_ACCOUNT_QA !== 'true','Explicit disposable local Auth only.');
 const status=process.env.WASHOPS_LOCAL_QA_STATUS ? JSON.parse(process.env.WASHOPS_LOCAL_QA_STATUS) : {};
@@ -27,6 +28,9 @@ test.afterAll(async()=>{
     for(const id of users){const r=await fetch(`${status.API_URL}/auth/v1/admin/users/${id}`,{method:'DELETE',headers:{apikey:status.SERVICE_ROLE_KEY,Authorization:`Bearer ${status.SERVICE_ROLE_KEY}`}});if(!r.ok)throw Error('Local Auth cleanup failed');}
   }finally{await db.end();}
 });
+test.beforeEach(async({page})=>{
+  await page.route('**/*',route=>isLocalCrmQaUrl(route.request().url())?route.continue():route.abort());
+});
 async function login(page:Page,index:number){
   await page.goto('/#/dashboard');await page.getByLabel('Email',{exact:true}).fill(emails[index]);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();await page.goto('/#/dashboard');await page.waitForLoadState('networkidle');const later=page.getByRole('button',{name:'Set up website later',exact:true});if(await later.isVisible())await later.click();
@@ -38,7 +42,7 @@ async function fillLead(page:Page,second=false){
 }
 test('cold authenticated navigation awaits the existing contact hydration request',async({page})=>{
   let release!:()=>void,started!:()=>void;const held=new Promise<void>(r=>release=r),begun=new Promise<void>(r=>started=r);
-  await page.route('**/rest/v1/contacts?*',async route=>{started();await held;return route.continue();});
+  await page.route('**/rest/v1/contacts?*',async route=>{if(!isLocalCrmQaBackendUrl(route.request().url(),'/rest/v1/contacts'))return route.abort();started();await held;return route.continue();});
   await page.goto('/#/dashboard');await page.getByLabel('Email',{exact:true}).fill(emails[0]);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await begun;
   try { await page.getByRole('link',{name:'Clients & Leads',exact:false}).click();await expect(page.getByText('Contacts could not be loaded',{exact:true})).toHaveCount(0);release();await expect(page.getByText('No contacts found',{exact:true})).toBeVisible(); } finally { release(); }
 });
@@ -47,8 +51,7 @@ test('actually empty authenticated owner creates first lead, draft estimate and 
   page.on('response',r=>{if(r.status()>=400)console.log(`QA HTTP ${r.status()} ${new URL(r.url()).pathname}`);});
   page.on('requestfailed',r=>console.log(`QA failed request ${new URL(r.url()).pathname}`));
   await page.route('**/*',route=>{
-    const u=new URL(route.request().url());if(!['http://127.0.0.1:4218','https://127.0.0.1:56429'].includes(u.origin))return route.abort();
-    if(/\/api\/(leads|sms|calls|messages|payments|emails|websites\/generate)|\/rpc\/(accept_crm_quote|create_invoice_from_accepted_quote|create_initial_website)/.test(u.pathname)){forbidden++;return route.abort();}
+    if(!isLocalCrmQaUrl(route.request().url())){forbidden++;return route.abort();}
     return route.continue();
   });
   await login(page,0);await page.getByRole('link',{name:'Clients & Leads',exact:false}).click();await expect(page.getByText('No contacts found',{exact:true})).toBeVisible();
@@ -60,6 +63,7 @@ test('actually empty authenticated owner creates first lead, draft estimate and 
   await expect(page.getByLabel('Full name',{exact:false})).toBeEnabled();await page.getByLabel('Email address',{exact:false}).fill('invalid');await page.getByRole('button',{name:'Submit lead info',exact:true}).click();await expect(page.locator('#lead-submit-status')).toContainText('valid email');await fillLead(page);
   let lost=true,hold=false,release!:()=>void,started!:()=>void,completed!:()=>void;const held=new Promise<void>(r=>release=r),begun=new Promise<void>(r=>started=r),done=new Promise<void>(r=>completed=r);const keys:string[]=[];
   await page.route('**/rest/v1/rpc/create_internal_crm_lead',async route=>{
+    if(!isLocalCrmQaBackendUrl(route.request().url(),'/rest/v1/rpc/create_internal_crm_lead'))return route.abort();
     if(route.request().method()!=='POST')return route.continue();const body=route.request().postDataJSON();expect(Object.keys(body).sort()).toEqual(['p_request_key','p_name','p_phone','p_email','p_address','p_service_type','p_message','p_source','p_funnel_id'].sort());
     const response=await route.fetch({maxRedirects:0});expect(response.status()).toBe(200);
     if(hold){started();await held;await route.fulfill({response});completed();return;}
@@ -68,6 +72,7 @@ test('actually empty authenticated owner creates first lead, draft estimate and 
   await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.locator('#lead-form').evaluate(form=>{form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));});
   await expect(page.locator('#lead-submit-status')).toContainText('could not be confirmed');expect(keys).toHaveLength(1);await expect(page.getByLabel('Full name',{exact:false})).toBeDisabled();await expect(page.getByRole('button',{name:'Cancel lead creation',exact:true})).toBeDisabled();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.setViewportSize({width:1280,height:900});await page.getByRole('link',{name:'Quotes',exact:true}).click();await page.getByRole('link',{name:'Clients & Leads',exact:false}).click();await page.getByRole('button',{name:'+ Add Lead',exact:true}).click();
   await expect(page.getByRole('button',{name:'Retry lead creation',exact:true})).toBeVisible();await page.getByRole('button',{name:'Retry lead creation',exact:true}).click();await expect(page.getByRole('link',{name:'Open Synthetic Empty Account Lead',exact:true})).toBeVisible();expect(keys).toHaveLength(2);expect(keys[0]).toBe(keys[1]);
   const contact=(await db.query('select id from public.contacts where user_id=$1',[users[0]])).rows;expect(contact).toHaveLength(1);expect((await db.query('select count(*)::int as n from public.opportunities where user_id=$1',[users[0]])).rows[0].n).toBe(1);expect((await db.query('select count(*)::int as n from public.internal_crm_lead_requests where user_id=$1',[users[0]])).rows[0].n).toBe(1);
@@ -78,7 +83,9 @@ test('actually empty authenticated owner creates first lead, draft estimate and 
   await page.getByRole('button',{name:'Back',exact:true}).click();await page.getByRole('link',{name:'Clients & Leads',exact:false}).click();await page.getByRole('button',{name:'+ Add Lead',exact:true}).click();await fillLead(page,true);hold=true;await page.getByRole('button',{name:'Submit lead info',exact:true}).click();await begun;
   try{await page.getByRole('link',{name:'Quotes',exact:true}).click();release();await done;}finally{release();}
   await expect(page.getByRole('heading',{name:'Quotes',exact:true})).toBeVisible();await page.getByRole('link',{name:'Clients & Leads',exact:false}).click();await page.getByRole('button',{name:'+ Add Lead',exact:true}).click();await page.getByRole('button',{name:'View saved lead',exact:true}).click();await expect(page.getByRole('link',{name:'Open Synthetic Second Lead',exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'+ Add Lead',exact:true}).click();await fillLead(page,true);await page.getByRole('link',{name:'Quotes',exact:true}).click();await page.getByRole('button',{name:'Sign out',exact:true}).click();await login(page,1);await page.getByRole('link',{name:'Clients & Leads',exact:false}).click();await expect(page.getByText('No contacts found',{exact:true})).toBeVisible();await page.getByRole('button',{name:'+ Add Lead',exact:true}).click();await expect(page.getByLabel('Full name',{exact:false})).toHaveValue('');await expect(page.getByRole('button',{name:'Submit lead info',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'+ Add Lead',exact:true}).click();await fillLead(page,true);await page.getByRole('link',{name:'Quotes',exact:true}).click();
+  const signedOut=page.waitForResponse(r=>isLocalCrmQaBackendUrl(r.url(),'/auth/v1/logout') && r.status()<300);
+  await page.getByRole('button',{name:'Sign out',exact:true}).click();await signedOut;await expect(page.getByRole('button',{name:'Sign in',exact:true})).toBeVisible();await login(page,1);await page.getByRole('link',{name:'Clients & Leads',exact:false}).click();await expect(page.getByText('No contacts found',{exact:true})).toBeVisible();await page.getByRole('button',{name:'+ Add Lead',exact:true}).click();await expect(page.getByLabel('Full name',{exact:false})).toHaveValue('');await expect(page.getByRole('button',{name:'Submit lead info',exact:true})).toBeVisible();
   for(const table of ['quote_acceptances','invoices','messages','calls','websites'])expect((await db.query(`select count(*)::int as n from public.${table} where user_id=any($1::text[])`,[users])).rows[0].n).toBe(0);
   expect((await db.query('select count(*)::int as n from public.contacts where user_id=$1',[users[0]])).rows[0].n).toBe(2);expect(forbidden).toBe(0);expect(errors).toEqual([]);
   console.log('PASS permission/validation, frozen retries, mobile/keyboard cancellation, navigation commit recovery and account isolation; zero API-leads/send/accept/invoice/website requests.');
