@@ -1,15 +1,15 @@
 # WASHOPS CRM - estimate/service-location association unit
 
-Status: service-location entry draft on deployed main
-`e4b8c0a2cffb2329ef50131e2cc96f59ecffbbd1`. This unit closes the missing creation
+Status: PR59 staged service-location entry release refreshed on deployed onboarding main
+`2468a0d05320d151227b08a5cd5fb56122b51f4f`. This unit closes the missing creation
 entry point in authenticated estimate Preview using the existing C04 property RPC.
 It is independent of QA-only invoice PR58, which remains draft. PR48 PDF work and
 later job/history/SMS units are untouched. Historical estimate/location evidence is
 retained below; the final current entry packet records this unit's exact limits.
 
 This is the established engineering execution record, not another roadmap.
-Canonical product authority remains `CRM Roadmap.ods`. No merge or hosted test records
-are authorized in this draft publication turn.
+Canonical product authority remains `CRM Roadmap.ods`. The current staged release
+authorization supersedes earlier draft-only notes; no hosted test records are created here.
 
 ## Verified contracts
 
@@ -588,3 +588,44 @@ estimates still have no deliberate non-sending sent/acceptance transition.
 No production test records, messages or provider actions were performed. Rollback
 is an application Git revert; only an account-scoped local preference may remain.
 Clearing that preference reoffers setup; no data deletion or hosted cleanup needed.
+## Current staged release refresh after PR60
+
+PR60 merged as 2468a0d05320d151227b08a5cd5fb56122b51f4f. Exact-SHA Supabase
+check SUCCESS; Vercel Production READY at
+https://vercel.com/hans-says-projects/website-crm/35NTRGAiMADrjcNBZEJrYLVTRXVP .
+Root and app asset HTTP200, released Later button present. Hosted ledger unchanged:
+56 versions, latest 20261021054957, digest 92dc3533d42950746420ac1b4e38b6fa.
+No manual migration, settings, credentials, website generation or hosted records.
+
+PR59 refreshed using normal merge ca5a2c0; only overlapping appended documentation
+required resolution and both sections were preserved. Onboarding source merged
+without functional conflict. Earlier no-dismiss/deep-link observations remain
+historical; the refreshed actual production browser test now uses Set up website
+later and normal Quotes navigation. No QA flag is needed for either product UI.
+
+Fresh composition validation:
+- All 56 versioned migration files byte-match the disposable stack and hosted
+  ledger has the same versions, zero pending SQL. Historical non-versioned
+  manual_deploy_rls_bundle.sql is excluded and never executed.
+- Clean local Supabase reset/replay, C04 40/40 and association 61/61 pgTAP PASS.
+- 113/113 focused tests across seven files, app/API types and production build PASS.
+- Real production-build fresh-account property journey PASS (1/1, 9.2 seconds),
+  including normal onboarding dismissal, create/replay/privacy/permission/mobile/
+  navigation isolation and explicit draft-only association.
+- Real production-build acceptance/frozen-address/legacy/invoice RPC regression
+  PASS (1/1, 8.8 seconds); no invoice conversion UI imported.
+- Real production-build onboarding/account/reload/navigation regression on this
+  same composition PASS (1/1, 6.3 seconds), zero generation requests/website rows.
+- Existing real concurrency proof PASS all four cases: same-key replay, competing
+  assignment conflict, assignment-before-acceptance and acceptance-before-assignment.
+  Ran unchanged assertions on a fresh network-none/no-port disposable PostgreSQL
+  instance with schema-only application/Auth copy from the replayed local stack.
+  Two stock image bootstrap approaches failed before the race proof; replaced with
+  an independently initialized plain server process. All owned failed/successful
+  race containers removed; no production access/data or test assertions changed.
+
+PR58 stays draft, PR48 untouched. Release rollback is application revert only;
+property creation and assignment are durable once committed. No delete/undo API
+or destructive hosted cleanup is proposed. Parent will independently perform hosted
+synthetic UI checks after release. New draft sending/acceptance and missing website
+terms URL remain explicit gaps; no live messages or site publication are needed.

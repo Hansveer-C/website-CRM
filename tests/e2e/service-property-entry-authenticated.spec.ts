@@ -36,8 +36,11 @@ test.afterAll(async () => {
 async function login(page: Page, index: number) {
   await page.goto('/#/quotes'); await page.getByLabel('Email',{exact:true}).fill(emails[index]); await page.getByLabel('Password',{exact:true}).fill(password); await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
-  // Normal deep-link reload avoids the unrelated dashboard website-onboarding overlay.
-  await page.goto('/#/quotes'); await page.reload();
+  // Exercise the released non-publishing onboarding dismissal and ordinary CRM navigation.
+  await page.goto('/#/dashboard'); await page.waitForLoadState('networkidle');
+  const later = page.getByRole('button',{name:'Set up website later',exact:true});
+  if (await later.isVisible()) await later.click();
+  await page.getByRole('link',{name:'Quotes',exact:true}).click();
   await expect(page.getByRole('heading',{name:'Quotes',exact:true})).toBeVisible();
 }
 async function newQuote(page: Page, contact: string, note: string) {
