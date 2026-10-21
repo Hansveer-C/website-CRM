@@ -722,3 +722,46 @@ second account login. Existing hardened lead SQL suite rerun PASS on the local
 56-migration stack; all separate SQL fixtures rolled back. No hosted writes,
 acceptance, invoice, provider, website-generation or external sends were executed.
 Final exact-head independent review and remote CI remain draft-publication gates.
+
+### Hosted usability regressions after PR61 — local correction candidate
+
+Base: `cab1d53b5333d4836949ae3a1d10651152ed6760`. Parent's normal hosted
+synthetic-account QA saved a lead, then found Contact View returning to the list
+with "Contact not found". Source inspection proves the detail and timeline routes
+called `/api/contacts/...`, which exists only in the browser simulator. Production
+has no such API handler. This is not evidence of missing database grants.
+
+The correction resolves detail from the same authenticated hydrated owner data
+as Clients & Leads, denies missing/foreign/account-transition/unavailable data,
+and offers an ordinary retry when hydration failed. Activity rendering uses only
+already-loaded owner/contact activity records, escaping content and handling
+nullable due dates deterministically. This does not implement call/SMS history.
+No schema, grants, private columns or production API surface are added.
+
+The same hosted session reported quote validation rejecting visible service,
+Qty 1 and Price 1. That exact rejection did not reproduce locally: the unchanged
+production composer successfully persisted the selected contact/opportunity and
+one Basic item at Qty 1 / Price 1. A narrower synchronization defect is proven:
+while typing a service name, the model remains empty until blur because its
+handler used `change`. A deliberate production-browser red regression observed
+that empty model; using `input` keeps service/description synchronized. Existing
+tier, numeric, selected-tier, authorization and RPC validation are unchanged.
+Do not represent this as a confirmed explanation of the hosted rejection;
+repeat the normal hosted flow after a reviewed release before closing it.
+
+Validation, independent review and draft-publication evidence follow below.
+No merge or hosted fixture mutation is authorized for this correction unit.
+
+Local validation: 108/108 affected regressions across ten files PASS; app/API
+type checks and actual production build PASS. Production-build Playwright suite
+3/3 PASS, using real disposable local Auth/database and ordinary UI: no CRM data
+seeded, contact keyboard View/mobile layout/reload/back, cross-owner deep-link
+denial, failed contact hydration/retry, selected opportunity plus Basic Qty 1 /
+Price 1 persisted at total 1.00, then explicit service-location creation/save.
+Existing frozen lead replay/navigation checks remain exercised. Simulator-only
+contact API calls are blocked and asserted absent. The denied-hydration case
+uses a synthetic 403; successful reads and writes use the real local stack.
+Independent review corrected nullable due-date handling; final working diff
+PASS with 17/17 independently executed contact/composer tests. No migration or
+configuration files changed. The local stack retains 56 migration versions;
+this candidate has zero pending SQL. Hosted contact/quote retest remains open.
