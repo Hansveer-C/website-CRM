@@ -1022,3 +1022,133 @@ destructive downgrade is authorized. Parent will now run normal hosted Note UI
 verification on its preserved synthetic contact. Until that evidence arrives,
 do not claim hosted note-save/reload usability from deployment/catalog checks.
 This release evidence is a local documentation commit, not another deployment.
+
+### Hosted PR63 Note usability verified by parent
+
+Parent's normal authenticated production browser check on existing synthetic
+contact `bcc17ea5-4bf9-4304-9a3a-7d886bef848a` saved exactly one reported marker
+`QA internal note20261021 2158` at `2026-10-21T21:58:39.835574Z`. Full reload
+retained that marker once with the same creation timestamp. Literal HTML-like
+text (`<b>not bold</b>`, an ampersand and quoted text) displayed as text, with
+no B element. A second unsaved `QA CANCEL ONLY` note was cancelled; reopening
+showed an empty textarea, and full reload showed the cancelled marker absent
+and saved marker once. No external sends occurred. This is supplied hosted UI
+evidence, not an independent repetition or hosted-record query by this lane.
+The bounded hosted Note save/cancel/render/reload gate is now passed. It does
+not certify live communications, estimate delivery/acceptance or invoicing.
+
+### Next coherent milestone proposal — customer estimate review and acceptance
+
+Read-only planning on main `e7f766aedb36e9bb1f3f90285433ad199888d547`; no code,
+migration, new access grant, provider action or production change this turn.
+The canonical workbook's dated current-status tab and existing reconciliation
+overlay still anchor communication-first direction and the customer -> estimate
+-> service-location -> job -> invoice journey. Their older snapshot labels do
+not supersede the named deployed/hosted evidence above or certify later modules.
+
+Recommended user-facing outcome: an owner prepares an estimate, deliberately
+creates a restricted customer review link, the recipient reviews scope/options
+and service location, accepts a selected option, and the owner sees a durable
+accepted estimate with matching frozen evidence after reload. A copy-link/manual
+sharing pilot is proposed to avoid live provider activation; do not claim copying
+a link means it was delivered. Deliver the complete reviewed flow as a usable
+milestone, not another hidden QA-only conversion or a fake Send button. Actual
+SMS/email delivery and its conversation integration remain separately gated.
+
+Verified implementation gaps:
+
+- Production `sendQuote` refuses sending; the visible list hides Send/option
+  controls when `editable=false`. The legacy send path mutates arrays and runs
+  automations; it must not become the real delivery contract. No review-link,
+  customer capability or delivery transaction was found in current source.
+- Production acceptance UI exists for an already-`sent` owned quote, but ordinary
+  new drafts have no server transition into that state. `accept_crm_quote` requires
+  `auth.uid()` ownership and `status='sent'`; `actor_user_id` is a non-null owner
+  user FK. An unauthenticated customer link cannot safely call it by pretending to
+  be that owner or by placing a service key in the browser. A distinct recipient
+  authorization/audit contract must be designed before exposing this path.
+- New quotes default to Basic. Production option selection is disabled, while
+  acceptance snapshots all tiers. Recipient choice needs atomic server validation
+  of a nonempty selected tier and its recomputed amount, not a client total or
+  unreviewed status update. Preserve existing USD evidence, pre-acceptance revision
+  R, approved quote revision R+1 and invoice input `acceptance.quote_revision=R`.
+- The composer labels `quote.notes` "Internal notes or terms", while preview
+  renders it as Additional notes. It cannot simply be copied into a customer
+  projection. Customer-facing terms/scope must be distinguished from internal
+  notes and frozen as the exact text reviewed; no legal terms are invented here.
+- A review link must bind the exact released quote/options/location/terms.
+  Quote revision or service-address changes after issue must revoke/reject stale
+  review/acceptance, not sign a different amount/address than the recipient saw.
+  Preserve existing legacy/unassigned acceptance behavior rather than backfilling
+  an address or silently inventing a new retention policy.
+
+Bounded contract/design decisions before implementation/release:
+
+1. Confirm copy-link/manual sharing versus an actual provider send for the pilot,
+   and define truthful issued/shared/delivered state semantics. Do not label a
+   newly generated link "sent" without an agreed contract; existing sent-state
+   acceptance rules cannot be bypassed by a browser update.
+2. Agree the minimal recipient-visible fields, customer terms/source/version,
+   whether customers choose among tiers, and the acceptance actor model. A bearer
+   link proves possession, not independently verified customer identity. Do not
+   forge an owner actor or reuse website-generation consent as service terms.
+3. Define owner revoke/replace behavior, expiry, one-estimate/revision scope and
+   already-accepted/retry behavior. Proposed capability storage is hash-only,
+   high-entropy and private; raw links/signatures must stay out of logs, analytics,
+   referrers and public storage. Raw-link recovery/rotation after response loss
+   needs explicit behavior rather than storing recoverable credentials by default.
+4. Public recipient access is a new narrow security surface, not authority already
+   granted by PR63's note migration approval. Prepare a concrete local design and
+   synthetic proof, then obtain scoped owner approval before production exposure
+   or changed acceptance actor/access grants. Routine local reversible code/test
+   preparation needs no provider credentials or paid service. No extra access or
+   persistent server secret is presumed available/authorized.
+
+Proposed implementation boundary after those choices: reuse existing quote/item,
+acceptance and service-location evidence through a reviewed shared canonical
+transaction; add only necessary private review-session/audit/idempotency metadata
+and narrow owner/recipient operations. No anonymous table reads, private signer
+evidence projection, automatic send/call, invoice/job creation, routing or campaign.
+Use ordinary production UI and a restricted recipient route; keep internal contact
+history truthful (link issued/accepted are events, not fake SMS delivery records).
+
+PR48/58 and migration sequencing:
+
+- PR48 remains `2b1954d6c43d850569f1eabbe21456391d88ea03`, invoice PDF only.
+  Its stated 52-migration blocker is stale: `20260901110000` is already canonical
+  main and applied per earlier read-only release evidence. Main/PR48 migration
+  blob is identically `d1d1c1bce7d837c7bf8f1a1b047c34ffb6336c6d`. Do not rerun
+  it or repurpose invoice PDFs as estimate delivery. Fresh-base review, private
+  Storage and deployed server configuration/authorization still need verification;
+  no readiness claim or credentials/bucket change is made in this planning turn.
+- PR58 remains draft `ae5a23d2490bb362844f0a3a5c0effda55544c92`, explicitly
+  DEV/loopback-only invoice conversion, preserving selected-tier/revision contracts.
+  Its old `20261021064220` evidence-read migration precedes deployed latest
+  `20261021210325`; a future refreshed release must reconcile ordering and rerun
+  fresh-chain/legacy tests. Do not merge it unchanged just to add another hidden
+  surface. Production invoice wiring is a later useful continuation once ordinary
+  estimates can actually become accepted; preserve issued-invoice financial rules.
+- Any new estimate-review migration is generated with the established CLI on fresh
+  main after version `20261021210325`. Exact pending versions, additive/rollback
+  effects and access changes must be reviewed before a separately authorized
+  automatic release. No manual ledger repair, baseline DDL or bulk local-stack
+  publication. PR48 and PR58 are not modified or made dependencies unnecessarily.
+
+Milestone end-to-end acceptance tests: start with an empty authenticated local
+owner, create lead/draft/items/location through normal production-build UI; issue
+and copy a restricted review link without provider calls; open a separate synthetic
+recipient context, review exactly the frozen projection, choose an eligible tier
+and accept once; owner reload shows approved status and matching frozen scope,
+amount/currency/location/terms. Exercise foreign owner, quote-ID enumeration,
+missing/invalid/expired/revoked capability, cross-revision/address edits, concurrent
+owner edits/revoke versus acceptance, lost-response/double-click replay and changed
+payload conflict, already accepted, malformed signature/typed declaration, XSS,
+mobile/keyboard, account/navigation races and zero private evidence leakage.
+Run clean full-chain SQL/ACL and existing legacy owner acceptance/invoice regression
+tests, including all-tier snapshots with selected-tier-only invoice amounts and
+R/R+1 checks. Invoice compatibility tests use disposable synthetic local records;
+do not issue real invoices or accept an actual customer agreement during QA.
+Independent exact-head review, CI, actual automatic deployment checks and separately
+approved hosted synthetic owner/recipient UI testing finish the release. Live
+telephony still separately needs sender/use-case/consent/recipient/spend approval;
+this plan buys nothing and does not imply that dedicated-number service is built.
