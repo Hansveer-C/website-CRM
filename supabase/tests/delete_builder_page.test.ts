@@ -700,14 +700,17 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
 
       await c2.query('begin');
       await c2.query(`set local request.jwt.claim.sub = '${u1}'`);
-      const deletePromise = c2.query("select public.delete_builder_page('p-race-1') as result");
+      const deletePromise = c2.query("select public.delete_builder_page('p-race-1') as result").catch(error => error);
 
       await assertBackendWaiting(pool, (c2 as any).processID);
 
       await c1.query("update public.pages set funnel_id = 'f-dest-B' where id = 'p-race-1'");
       await c1.query('commit');
 
-      await expect(deletePromise).rejects.toThrow(/Page funnel destination changed concurrently/);
+      const outcome = await deletePromise;
+      expect(outcome).toBeInstanceOf(Error);
+      expect(outcome).toMatchObject({ code: 'PT409' });
+      expect(outcome.message).toMatch(/Page funnel destination changed concurrently/);
       await c2.query('rollback');
 
       const check = await pool.query("select funnel_id from public.pages where id = 'p-race-1'");
@@ -749,7 +752,7 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       // 2. Transaction B starts delete_builder_page for p-pub-race-1 while c1 open
       await c2.query('begin');
       await c2.query(`set local request.jwt.claim.sub = '${u1}'`);
-      const deletePromise = c2.query("select public.delete_builder_page('p-pub-race-1') as result");
+      const deletePromise = c2.query("select public.delete_builder_page('p-pub-race-1') as result").catch(error => error);
 
       // 3. Verify c2 is waiting on page row lock
       await assertBackendWaiting(pool, (c2 as any).processID);
@@ -758,7 +761,10 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       await c1.query('commit');
 
       // 5. c2 unblocks, reloads page, detects publication target, raises PUBLISHED_BLOCKED
-      await expect(deletePromise).rejects.toThrow(/published or has active publication records/);
+      const outcome = await deletePromise;
+      expect(outcome).toBeInstanceOf(Error);
+      expect(outcome).toMatchObject({ code: 'PT423' });
+      expect(outcome.message).toMatch(/published or has active publication records/);
       await c2.query('rollback');
     } finally {
       await c1.query('rollback').catch(() => {});
@@ -795,7 +801,7 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
 
       // 2. Transaction B attempts inserting published revision for p-del-pub-1 while c1 open
       await c2.query('begin');
-      const revPromise = c2.query(`insert into public.builder_published_revisions(id, website_id, page_id) values ('${revId}', '${siteId}', 'p-del-pub-1')`);
+      const revPromise = c2.query(`insert into public.builder_published_revisions(id, website_id, page_id) values ('${revId}', '${siteId}', 'p-del-pub-1')`).catch(error => error);
 
       // 3. Confirm c2 waits
       await assertBackendWaiting(pool, (c2 as any).processID);
@@ -804,7 +810,10 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       await c1.query('commit');
 
       // 5. c2 unblocks and fails with FK violation 23503 (page no longer exists)
-      await expect(revPromise).rejects.toThrow(/foreign key constraint/);
+      const outcome = await revPromise;
+      expect(outcome).toBeInstanceOf(Error);
+      expect(outcome).toMatchObject({ code: '23503' });
+      expect(outcome.message).toMatch(/foreign key constraint/);
       await c2.query('rollback');
     } finally {
       await c1.query('rollback').catch(() => {});
@@ -842,7 +851,7 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       // 2. Transaction B starts delete_builder_page for p-lead-race-1 while c1 open
       await c2.query('begin');
       await c2.query(`set local request.jwt.claim.sub = '${u1}'`);
-      const deletePromise = c2.query("select public.delete_builder_page('p-lead-race-1') as result");
+      const deletePromise = c2.query("select public.delete_builder_page('p-lead-race-1') as result").catch(error => error);
 
       // 3. Verify c2 is waiting
       await assertBackendWaiting(pool, (c2 as any).processID);
@@ -851,7 +860,10 @@ describeDatabase('delete_builder_page RPC Integration Tests (PostgreSQL 17)', ()
       await c1.query('commit');
 
       // 5. c2 unblocks and returns LEAD_HISTORY_BLOCKED
-      await expect(deletePromise).rejects.toThrow(/historical lead intake records/);
+      const outcome = await deletePromise;
+      expect(outcome).toBeInstanceOf(Error);
+      expect(outcome).toMatchObject({ code: 'PT409' });
+      expect(outcome.message).toMatch(/historical lead intake records/);
       await c2.query('rollback');
     } finally {
       await c1.query('rollback').catch(() => {});
