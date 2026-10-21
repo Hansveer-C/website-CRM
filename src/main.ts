@@ -1,5 +1,6 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
 import { escapeHtmlText, safeTelHref, safeNavHref } from './crm_html_output';
+import { resolveHydratedContact, renderHydratedContactActivity } from './crm_contact_detail';
 import { contactMatchesClientSearch, formatContactPhone, hasContactPhone } from './crm_contact_phone';
 import { templates } from './templates';
 import { Activity, Contact, DurableInvoice, DurableInvoiceItem, Funnel, Page, PageSection, Quote, QuoteItem, User, Website, WebsiteLayout, WebsiteRoute, WebsiteSettings } from './types';
@@ -12310,9 +12311,20 @@ function renderQuotePreview(quoteId: string) {
  * GET /api/contacts/:id/timeline
  */
 async function loadTimeline(contactId: string) {
+  const userId = getActingUserId();
+  if (editorUsesSupabase()) {
+    if (currentView !== 'contact-detail' || selectedContactId !== contactId) return;
+    const container = document.getElementById('api-timeline-list');
+    if (container) container.innerHTML = renderHydratedContactActivity(userId, contactId,
+      crmProductionHydrator.state.userId === userId && crmProductionHydrator.state.entities.activities === 'ready', mockActivities);
+    return;
+  }
+  const operation = protectedAsyncOperationGuard.captureCurrent('application-navigation', userId);
   const response = await fetch(`/api/contacts/${contactId}/timeline`);
   const result = await response.json();
+  if (!operation || !protectedAsyncOperationGuard.isCurrent(operation, getActingUserId()) || currentView !== 'contact-detail' || selectedContactId !== contactId) return;
   const timeline = result.data || result;
+  if (!response.ok || !Array.isArray(timeline)) return;
   contactTimelineState = timeline;
 
   const timelineContainer = document.getElementById('api-timeline-list');
@@ -12347,6 +12359,8 @@ async function sendQuickSMS(contactId: string) {
 (window as any).sendQuickSMS = sendQuickSMS;
 
 async function renderContactDetail(contactId: string) {
+  const userId = getActingUserId();
+  const operation = protectedAsyncOperationGuard.captureCurrent('application-navigation', userId);
   renderAppWithShell({
     activeView: 'contact-detail',
     title: 'Loading contact details…',
@@ -12354,12 +12368,24 @@ async function renderContactDetail(contactId: string) {
     contentHtml: renderContactDetailLoading()
   });
 
-  const response = await fetch(`/api/contacts/${contactId}`);
-  const result = await response.json();
-  const contact: Contact | null = result.data || result;
-  const userId = getActingUserId();
+  let contact: Contact | undefined;
+  if (editorUsesSupabase()) {
+    const resolved = resolveHydratedContact(userId, crmProductionHydrator.state.userId,
+      crmProductionHydrator.state.entities.contacts === 'ready', mockContacts, contactId);
+    if (resolved.status !== 'ready') {
+      renderAppWithShell({ activeView: 'contact-detail', title: resolved.status === 'missing' ? 'Contact unavailable' : 'Contact could not be loaded',
+        contentVariant: 'standard', contentHtml: `<p>This contact is unavailable for the current account.</p><button type="button" class="wo-button" onclick="window.navigateTo('clients')">Back to clients</button>${resolved.status === 'unavailable' ? '<button type="button" class="wo-button" onclick="window.retryCrmDataLoad()">Retry</button>' : ''}` });
+      return;
+    }
+    contact = resolved.contact;
+  } else {
+    const response = await fetch(`/api/contacts/${contactId}`);
+    const result = await response.json();
+    if (!operation || !protectedAsyncOperationGuard.isCurrent(operation, getActingUserId()) || currentView !== 'contact-detail' || selectedContactId !== contactId) return;
+    if (response.ok) contact = result.data || result;
+  }
 
-  if (!contact || response.status === 404 || contact.user_id !== userId) {
+  if (!contact || contact.user_id !== userId) {
     (window as any).showToast('Contact not found.', 3000);
     window.navigateTo('clients');
     return;
