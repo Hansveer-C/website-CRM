@@ -1,13 +1,14 @@
-# WASHOPS CRM — estimate/service-location association unit
+# WASHOPS CRM - estimate/service-location association unit
 
-Status: implemented, tested and separately reviewed locally. No remote activation.
-Owner: this project lane. Dependency: reviewed PR55 `b5a171081c192a94334c0be08efb460ec6c50828`.
-Base main inspected: `7d361596e6994e0371ac20ef18a85cb833de5651`.
-Branch: `codex/estimate-service-location`, isolated from PR53/PR55 worktrees.
+Status: isolated draft release candidate on main `7c60be847370365c5680681168c7f1cc51100488`.
+C04 PR55 and roadmap PR53 are merged. This branch contains only the reviewed
+estimate/location backend, acceptance snapshot and UI units through original
+`8d14235`; invoice conversion UI, jobs, communication history and synthetic SMS
+scaffolding are excluded. Historical implementation evidence below is retained.
 
-This is an engineering execution record under DOCS, not another product roadmap.
-The canonical communication-first roadmap remains CRM Roadmap.ods / PR53.
-Neither PR53 nor PR55 may merge until the production migration trigger gate is known.
+This is the established engineering execution record, not a competing roadmap.
+Canonical product authority remains `CRM Roadmap.ods`. No functional merge is
+authorized in this publication unit; final release gates are recorded below.
 
 ## Verified contracts
 
@@ -398,3 +399,36 @@ Remaining: production trigger-policy investigation/PR55 dependency before any re
 push or merge; authenticated invoice-conversion UI and customer-location creation UI
 remain separate product work. No jobs/scheduling, live providers, communications,
 production data, new paid service or customer-facing activation was involved.
+
+## Isolated release candidate after C04 / roadmap merge
+
+Fresh base: main `7c60be847370365c5680681168c7f1cc51100488`.
+Original reviewed implementation commits `b5756b8`, `9c90cf2`, `8d14235` were
+cherry-picked normally with their plan/evidence commits; no code conflicts arose.
+PR48 and all later local product/SMS work are unchanged and excluded.
+
+Pending migration delta is exactly:
+- `20261021052454_associate_quote_service_property.sql`: nullable quote property,
+  private idempotency ledger, owner-derived assignment RPC and frozen acceptance
+  service-location projection, preserving legacy acceptance/commercial semantics.
+- `20261021054957_read_accepted_quote_service_location.sql`: owner-derived minimal
+  accepted-location read RPC; no private signer evidence returned.
+
+Target remains ledger54. Merge would apply these two migrations and deploy the UI;
+this draft does not activate either. No backfill or guessed legacy location.
+Git revert can recover UI; it does not undo applied SQL or frozen acceptance data.
+Use forward corrective migrations after deployment rather than destructive rollback.
+
+Release gates: fresh-base tests/types/build, independent aggregate review, exact-head
+CI, final two-migration ACL/default-grant and acceptance/invoice compatibility review,
+then staged Supabase/Vercel observation and authenticated disposable-test smoke.
+Historical real local browser proof is evidence, not fresh-base or hosted certification.
+Customer-location creation UI, scheduling/jobs, payments and live communications are
+separate scope; this draft does not claim an end-to-end completed CRM.
+
+Fresh isolated worktree verification (2026-10-21): 83/83 focused Vitest cases across
+six files passed; app/API TypeScript checks and Vite production build passed.
+Existing 877.17kB entry warning remains. Missing ignored dependency junctions were
+restored to existing cached packages; no dependency/version/install change.
+No lint command configured; git diff --check passed. SQL/concurrency/real Auth browser
+evidence above is reused from byte-identical original implementation; not rerun here.
