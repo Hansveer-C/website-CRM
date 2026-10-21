@@ -250,6 +250,7 @@ import {
   type CrmMutationClient
 } from './crm_production_mutations';
 import { QuoteServiceLocationController, mountQuoteServiceLocation, applyServiceLocationPreviewRefresh, type ServiceLocation } from './ui/quotes/quote_service_location';
+import { allowsLocalQuoteReview, mountOwnerQuoteReview, mountRecipientQuoteReview, type ReviewClient } from './ui/quotes/quote_review';
 import {
   ApplicationAuthController,
   createApplicationSignupRedirect,
@@ -583,6 +584,8 @@ type BuilderPublicationViteEnvironment = {
     VITE_ENABLE_BROWSER_FIXTURES?: string;
     VITE_BROWSER_FIXTURE_ZERO_WEBSITE?: string;
     PROD?: boolean;
+    DEV?: boolean;
+    VITE_LOCAL_ESTIMATE_REVIEW_QA?: string;
 };
 
 const builderPublicationEnvironment = (
@@ -12212,8 +12215,24 @@ function renderQuotePreview(quoteId: string) {
     title: 'Quote preview',
     headerActionsHtml: `<div class="wo-shell-header-actions"><button type="button" class="wo-button wo-button--secondary no-print" onclick="window.navigateTo('quotes')">Back</button><button type="button" class="wo-button wo-button--primary no-print" onclick="window.print()">Print quote</button></div>`,
     contentVariant: 'wide',
-    contentHtml: preview + (quote ? '<div id="quote-service-location-root"></div>' : '')
+    contentHtml: preview + (quote ? '<div id="quote-service-location-root"></div><div id="quote-review-root"></div>' : '')
   });
+
+  const reviewRoot = app.querySelector<HTMLElement>('#quote-review-root');
+  if (quote && reviewRoot && editorUsesSupabase() && allowsLocalQuoteReview(builderPublicationEnvironment.DEV === true,
+    builderPublicationEnvironment.VITE_LOCAL_ESTIMATE_REVIEW_QA, location.origin, builderPublicationSupabaseUrl)) {
+    const navigation=protectedAsyncOperationGuard.captureCurrent('application-navigation',userId);
+    const current=()=>reviewRoot.isConnected && currentView==='quote-preview' && getActingUserId()===userId
+      && !!navigation && protectedAsyncOperationGuard.isCurrent(navigation,getActingUserId());
+    void getBuilderPublicationSupabaseClient().then(client=>{
+      if(!client||!current())return;
+      mountOwnerQuoteReview(reviewRoot,{client:client as unknown as ReviewClient,quoteId,revision:quote.revision!,current,
+        canGenerate:quote.status==='draft'||quote.status==='sent',ready:()=>!locationController?.acceptanceBlocked,
+        recorded:()=>{void crmProductionHydrator.hydrateAuthenticatedUser(userId,true).then(()=>{if(current())renderQuotePreview(quoteId);}).catch(()=>{
+          if(current())reviewRoot.append(Object.assign(document.createElement('p'),{textContent:'Acceptance recorded; reload this estimate to refresh its display.'}));
+        });}});
+    });
+  }
 
   let locationController: QuoteServiceLocationController | undefined;
   const locationRoot = app.querySelector<HTMLElement>('#quote-service-location-root');
@@ -13034,6 +13053,20 @@ async function bootRouter() {
   publicSiteRenderSequence += 1;
   publicSiteAbortController?.abort();
   publicSiteAbortController = null;
+  if (window.location.hash.startsWith('#/estimate-review/')) {
+    protectedAsyncOperationGuard.beginUnbound('application-navigation');
+    const hash=window.location.hash;
+    if(!allowsLocalQuoteReview(builderPublicationEnvironment.DEV === true,builderPublicationEnvironment.VITE_LOCAL_ESTIMATE_REVIEW_QA,
+      location.origin,builderPublicationSupabaseUrl) || !/^#\/estimate-review\/[0-9a-f]{64}$/.test(hash)) {
+      app.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Estimate review is unavailable.'}));return;
+    }
+    app.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Loading estimate review.'}));
+    const client=await getBuilderPublicationSupabaseClient();
+    if(location.hash!==hash)return;
+    if(!client){app.replaceChildren(Object.assign(document.createElement('p'),{textContent:'Estimate review is unavailable.'}));return;}
+    const root=document.createElement('main');root.className='wo-card';root.style.cssText='max-width:760px;margin:20px auto;padding:20px;overflow-wrap:anywhere';app.replaceChildren(root);
+    mountRecipientQuoteReview(root,{client:client as unknown as ReviewClient,token:hash.slice('#/estimate-review/'.length),current:()=>location.hash===hash});return;
+  }
   const host = window.location.hostname;
   const rawPath = window.location.pathname;
   const hostRoute = resolveApplicationHostRoute({ hostname: host, pathname: rawPath });

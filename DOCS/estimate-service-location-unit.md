@@ -1152,3 +1152,123 @@ Independent exact-head review, CI, actual automatic deployment checks and separa
 approved hosted synthetic owner/recipient UI testing finish the release. Live
 telephony still separately needs sender/use-case/consent/recipient/spend approval;
 this plan buys nothing and does not imply that dedicated-number service is built.
+
+## Local estimate review/response proof — production access held
+
+Implementation base: main `e7f766aedb36e9bb1f3f90285433ad199888d547`
+(PR63). The three existing local PR63 publication/release/hosted-note evidence
+commits were carried forward unchanged above. This section supersedes the earlier
+proposal only for the bounded LOCAL proof; it does not approve public launch.
+PR48 and PR58 remain unchanged and are not dependencies.
+
+Implemented scope:
+
+- Owner deliberately generates/revokes one unrevoked review link per estimate.
+  Issue/replay is atomic and owner-derived. Raw 256-bit random token exists only
+  in page memory and a URL fragment; only SHA-256 is stored privately. No token
+  recovery, local/session storage, analytics, automatic sharing or delivery claim.
+  Lost issue responses retain exactly the same key/token/text until confirmed.
+  Reload without the raw link requires deliberate revoke/reissue.
+- Default 24-hour expiry is an ACCESS lifetime, not a promise of price validity
+  or new legal terms. Expired/revoked links cannot read or respond. An owner may
+  record a response actually received before expiry if not revoked and the
+  commercial/location source is unchanged. Revoking blocks recording; it does
+  not delete private evidence. Quote/owner deletion cascades this proof metadata;
+  no new retention policy is represented as settled.
+- Customer projection is only explicit customer-facing review text, estimate
+  service names/descriptions, quantity/unit price/line total, available tiers,
+  USD, exact revision and service address. No `quote.notes`, contact name,
+  phone/email/billing address, activity/internal notes, ownership IDs, request
+  fingerprints, signatures or raw tokens are returned. Property label is omitted.
+  Customer-controlled strings render through DOM text nodes, never HTML.
+- Source snapshot/hash includes all disclosed items/prices/location plus source
+  identity/revision/status/selection/total. Locks protect quote/property/items;
+  source changes without a revision bump also invalidate pending review.
+- Recipient chooses an existing tier and types their own name with explicit
+  scope/price confirmation. Possession is not verified identity. Response is
+  PRIVATE proof, not immediate canonical approval. Owner deliberately records
+  that actual response in a second step through unchanged `accept_crm_quote`.
+  Canonical actor remains the owner; recipient name/confirmation proof stays
+  separately attributable. This avoids pretending the existing owner RPC is an
+  anonymous customer actor. No invented signature, payment or agreement text.
+- Compatibility state `sent` exists only inside the owner-recording transaction;
+  no committed delivery transition or communication event is created. The RPC
+  refuses custom quote/acceptance triggers before this step. Accepted revision
+  remains R, live approved revision R+1; selected-tier amounts feed the unchanged
+  invoice conversion contract. No UI invoice creation or invoice PDF work added.
+- UI uses normal existing lead/estimate/location screens and local-only review
+  entry/recipient route. Unsaved/loading/conflicting service-location selection
+  blocks issuance/recording. Busy/unknown requests freeze payloads and prevent
+  duplicate clicks; malformed successful responses preserve keys and token.
+  Account/navigation/root guards reject stale paints. Accepted estimates cannot
+  issue replacements after revocation.
+
+Migration `20261021221056_local_quote_review.sql` adds two PRIVATE RLS tables and
+narrow owner/capability functions. It changes no existing table policies/grants,
+quote acceptance implementation, invoices, provider configuration or credentials.
+Runtime defaults OFF. No recipient EXECUTE is granted to anon/authenticated/
+service_role. Four owner functions have authenticated EXECUTE but reject while
+OFF. Only explicitly guarded disposable local tests enable the runtime and grant
+recipient execution; cleanup restores disabled/no-recipient-access state. The
+front end additionally requires DEV=true, explicit local QA flag and BOTH exact
+owned loopback app/backend endpoints. Production with that flag enabled denies
+the route and makes zero review RPC calls. This is LOCAL proof, not a usable
+hosted customer acceptance feature yet.
+
+Verification on this composition:
+
+- Complete clean 58-version local Supabase replay PASS, no seed or hosted access.
+- `supabase/tests/crm_quote_review_local.mjs`: 50 assertions PASS. Default private
+  table/capability denial, runtime-off denial, foreign owner denial, token
+  enumeration/malformed denial, minimal disclosure, eligible-tier validation,
+  identical/changed retry, canonical actor/revision/snapshot, stale item mutation,
+  revoked/expired access, timely response recorded after expiry, reused canonical
+  acceptance key rejection and selected-tier invoice compatibility are exercised.
+  Six observed real lock races cover same-key response, conflicting response,
+  quote-delete-first, both revoke/finalize orderings and concurrent finalization.
+- Real local Auth/browser proof starts with Auth identity/profile ONLY and zero
+  contacts/properties/quotes/activities/acceptances. Ordinary UI creates lead,
+  draft/items/location, issues review, opens separate anonymous browser context,
+  confirms actual scope/price/name, records owner acceptance, reloads and revokes.
+  XSS text, mobile width/keyboard, lost issue response and malformed committed
+  create/recipient/finalization responses are checked with identical retry keys.
+  Messages/calls/invoices/websites remain zero. No external sends or site terms.
+- Production build with `VITE_LOCAL_ESTIMATE_REVIEW_QA=true`: unavailable route,
+  zero review RPC requests, actual browser PASS. Local runtime restored OFF and
+  recipient grant revoked afterward. No hosted public link was created.
+- Affected unit/type/build checks and independent exact-byte review are recorded
+  below after final validation. Existing tests are reused; no assertions weakened.
+  Independent review found and corrected premature pending-key disposal on
+  malformed responses and floating-point total mismatch; cents arithmetic and
+  malformed-ID regressions now protect these boundaries.
+
+Before production activation, obtain scoped decisions/approval for bearer-link
+recipient disclosure/access and the additive persistence, 24h access/revoke and
+owner-recording semantics. Confirm whether direct customer canonical acceptance
+is desired instead (it would require a separately reviewed actor contract). Agree
+pilot recipient identity/disclosure and explicit customer text; no new legal terms
+are assumed. A later reviewed activation must choose production route/RPC gating,
+manual sharing versus actual provider delivery, public endpoint abuse/recipient
+limits, link confidentiality/referrer/log controls and hosted synthetic QA.
+Do not enable anonymous functions or toggle the private runtime in hosted SQL as
+an ad hoc workaround. This unit is neither merged nor deployed and authorizes no
+provider send, number purchase, hosted migration, access grant or credential.
+Git revert removes wiring but cannot erase added private objects/evidence;
+destructive downgrade/retention choices require separate approval. PR58 migration
+ordering still needs reconciliation before its own release. PR48 stays separate.
+
+Final validation receipt: 171/171 affected unit regressions across 14 files,
+app/API TypeScript PASS, real local empty-account/recipient proof 1/1 PASS,
+and actual flag-on production build/browser negative 1/1 PASS. Nine existing SQL
+suites passed on schema 58: properties, service location, transactions, acceptance,
+invoice conversion, tier/nonfinite hardening, document specs and internal notes.
+The first standalone legacy acceptance invocation lacked its documented fixture
+users/contact; it stopped on the FK before mutation. Re-running the legacy group
+with the canonical synthetic prerequisite records inside one rolled-back
+transaction passed; no schema/auth function replacement or assertion change.
+Independent review PASS after fixing malformed response and fractional-total
+findings. Exact committed-head confirmation follows the implementation commit.
+Local cleanup metadata: 58 versions, latest `20261021221056`, runtime false,
+anon/authenticated capability execution false, 0 review rows, 0 profiles and 0 Auth users.
+Remote read-only PR inventory still contains only PR48/58 at their recorded heads.
+No draft was published and no new CI/deployment or hosted QA is claimed here.
