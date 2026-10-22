@@ -41,6 +41,8 @@ describe('application bootstrap', () => {
   it('rejects unsafe or public return destinations', () => {
     expect(sanitizeApplicationReturnRoute('https://evil.example')).toBeUndefined();
     expect(sanitizeApplicationReturnRoute('#/login')).toBeUndefined();
+    expect(sanitizeApplicationReturnRoute('#/forgot-password')).toBeUndefined();
+    expect(sanitizeApplicationReturnRoute('#/reset-password')).toBeUndefined();
     expect(sanitizeApplicationReturnRoute('#/site/secret')).toBeUndefined();
     expect(sanitizeApplicationReturnRoute('#/website-dashboard')).toBe('#/website-dashboard');
   });

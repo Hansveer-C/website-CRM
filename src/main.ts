@@ -1,3 +1,5 @@
+import { createPasswordRecoveryRouter } from './application_recovery_ui';
+import { readRecoveryRoute, recoveryClientOptions, type RecoveryClient } from './application_recovery';
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
 import { escapeHtmlText, safeTelHref, safeNavHref } from './crm_html_output';
 import { resolveHydratedContact, renderHydratedContactActivity } from './crm_contact_detail';
@@ -631,6 +633,12 @@ if (!builderPublicationProduction) {
     console.info(`Editor runtime: ${document.documentElement.dataset.editorRuntime}; browser fixtures: ${browserFixturesEnabled ? 'enabled' : 'disabled'}`);
 }
 let builderPublicationSupabaseClientPromise: Promise<SupabaseClient | null> | undefined;
+
+const handlePasswordRecovery = createPasswordRecoveryRouter(async () => {
+    if (!builderPublicationSupabaseConfigured) return null;
+    const { createClient } = await import('@supabase/supabase-js');
+    return createClient(builderPublicationSupabaseUrl, builderPublicationSupabaseKey, recoveryClientOptions) as unknown as RecoveryClient;
+});
 
 function getBuilderPublicationSupabaseClient(): Promise<SupabaseClient | null> {
     if (!builderPublicationSupabaseConfigured) return Promise.resolve(null);
@@ -2340,6 +2348,10 @@ function applyApplicationAuthState(state: ApplicationAuthState): void {
 async function ensureApplicationAuth(): Promise<ApplicationAuthState> {
   if (!applicationAuthInitialization) {
     applicationAuthController.onChange(state => {
+      if (handlePasswordRecovery.isActive() || readRecoveryRoute(location.href).kind !== 'none') {
+        applyApplicationAuthState({ status: 'unauthenticated' });
+        return;
+      }
       applicationAuthInitialization = Promise.resolve(state);
       const previousUserId = getActingUserId();
       applyApplicationAuthState(state);
@@ -10808,6 +10820,7 @@ function renderApplicationLogin(
             <button id="application-login-submit" type="submit" class="btn-primary">${creatingAccount ? 'Create account' : 'Sign in'}</button>
           </form>
           <div class="application-auth-switch">
+            ${!creatingAccount ? '<a href="/#/forgot-password">Forgot password?</a>' : ''}
             <span>${creatingAccount ? 'Already have an account?' : 'New to PressurePro?'}</span>
             <button id="application-auth-mode-switch" type="button" class="application-auth-link">${creatingAccount ? 'Sign in' : 'Create an account'}</button>
           </div>
@@ -13057,6 +13070,17 @@ async function bootRouter() {
     await renderConfiguredPublicSite(hostRoute.pathname);
     return;
   }
+  const recoveryNavigation = publicSiteRenderSequence;
+  // Initial routing starts before all CRM runtime bindings are initialized.
+  await Promise.resolve();
+  if (recoveryNavigation !== publicSiteRenderSequence) return;
+  if (handlePasswordRecovery.isActive() || readRecoveryRoute(location.href).kind !== 'none') {
+    protectedAsyncOperationGuard.beginUnbound('application-navigation');
+    clearProtectedRuntimeData();
+    (window as any).currentUser = undefined;
+  }
+  const recoveryHandled = await handlePasswordRecovery(app);
+  if (recoveryNavigation !== publicSiteRenderSequence || recoveryHandled) return;
   if (window.location.hash.startsWith('#/estimate-review/')) {
     protectedAsyncOperationGuard.beginUnbound('application-navigation');
     // The bearer stays in the fragment/HTTPS POST body, never a query string/referrer.
