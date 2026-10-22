@@ -56,8 +56,14 @@ test('actual application handles recovery before CRM bootstrap and reload fails 
   await page.reload();
   await expect(page.getByRole('status')).toContainText('invalid or expired');
   await expect(page.getByRole('button',{name:'Update password'})).toHaveCount(0);
+  await page.evaluate(() => (window as any).navigateTo('dashboard'));
+  await expect(page.getByRole('status')).toContainText('invalid or expired');
+  expect(page.url()).toBe('http://127.0.0.1:4191/#/reset-password');
   await page.getByRole('button',{name:'Request a new link'}).click();
   await expect(page.getByLabel('Email',{exact:true})).toBeVisible();
+  await page.evaluate(() => (window as any).navigateTo('site'));
+  await expect(page.getByLabel('Email',{exact:true})).toBeVisible();
+  expect(page.url()).toBe('http://127.0.0.1:4191/#/forgot-password');
   expect(await page.locator('meta[name="referrer"]').getAttribute('content')).toBe('no-referrer');
   expect(errors).toEqual([]);
 });

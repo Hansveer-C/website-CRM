@@ -2348,11 +2348,11 @@ function applyApplicationAuthState(state: ApplicationAuthState): void {
 async function ensureApplicationAuth(): Promise<ApplicationAuthState> {
   if (!applicationAuthInitialization) {
     applicationAuthController.onChange(state => {
+      applicationAuthInitialization = Promise.resolve(state);
       if (handlePasswordRecovery.isActive() || readRecoveryRoute(location.href).kind !== 'none') {
         applyApplicationAuthState({ status: 'unauthenticated' });
         return;
       }
-      applicationAuthInitialization = Promise.resolve(state);
       const previousUserId = getActingUserId();
       applyApplicationAuthState(state);
       if (
@@ -2372,7 +2372,12 @@ async function ensureApplicationAuth(): Promise<ApplicationAuthState> {
       return state;
     });
   }
-  const state = await applicationAuthInitialization;
+  await applicationAuthInitialization;
+  // A newer notification may have arrived while initialization was pending.
+  // Recovery suppresses application of ordinary identity, not its observation.
+  const state: ApplicationAuthState = handlePasswordRecovery.isActive() || readRecoveryRoute(location.href).kind !== 'none'
+    ? { status: 'unauthenticated' }
+    : applicationAuthController.state;
   applyApplicationAuthState(state);
   return state;
 }
@@ -11868,6 +11873,10 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
 }
 
 (window as any).navigateTo = async (view: string, id?: string, context?: any) => {
+  if (handlePasswordRecovery.isActive() || readRecoveryRoute(location.href).kind !== 'none') {
+    await bootRouter();
+    return;
+  }
   const navigationInvocation = protectedAsyncOperationGuard.beginUnbound('application-navigation');
   let navigationOperation: ProtectedAsyncOperationToken;
   publicSiteRenderSequence += 1;
@@ -11877,6 +11886,10 @@ function renderWebsiteRepositoryUnavailable(view: string): void {
   }
   if (view !== 'site') {
     const authState = await ensureApplicationAuth();
+    if (handlePasswordRecovery.isActive() || readRecoveryRoute(location.href).kind !== 'none') {
+      await bootRouter();
+      return;
+    }
     const boundNavigation = protectedAsyncOperationGuard.bindCurrent(navigationInvocation, getActingUserId());
     if (!boundNavigation) return;
     navigationOperation = boundNavigation;

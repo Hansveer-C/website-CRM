@@ -11,6 +11,8 @@ It does not require a database migration or new privileged credentials.
 - Callback parameters are erased with `history.replaceState` before the SDK is loaded or any callback request starts. HTML sets `no-referrer`. No token/password is logged, reflected into HTML, or persisted by this feature.
 - A separate client using the same canonical Supabase project is memory-only (`persistSession:false`, `autoRefreshToken:false`, `detectSessionInUrl:false`, separate storage key). It does not replace the ordinary CRM session or hydrate CRM data. The router blocks ordinary navigation/auth-state application while recovery is active.
 - SDK session exchange and `getUser` must agree on the user; identity is checked again immediately before `updateUser`. Ordinary logged-in state or visiting the update route without a recovery callback cannot open the update form.
+- Recovery-only means UI/session isolation, not cryptographic proof of recovery provenance: the URL's `type=recovery` is caller-controlled and `setSession` accepts valid ordinary session credentials. Supabase remains authoritative for session validity and password-update permission.
+- Ordinary auth notifications remain observed during recovery, including cross-tab sign-out. Pending initialization rechecks recovery and uses the latest controller state before applying identity; direct navigation cannot replace an active recovery screen.
 - Matching 8–128 character passwords are required. Submission clears both fields, suppresses duplicate updates and displays sanitized uncertainty on a failed/lost response. The recovery client signs out locally after confirmed success; user returns to sign-in. A reload loses the memory-only recovery state and requires a new link. The existing normal CRM session is not used as recovery authority.
 
 ## Validation
@@ -42,3 +44,9 @@ Approve this PR's exact final HEAD for merge and its automatic Vercel production
 After deployment, verify the deployed HEAD and visible request/update routes, confirm settings above, then send one official reset email to the exact test account. Hans opens it privately and enters/confirms/submits his own new password. Never put the password or bearer URL in chat, logs, PRs or screenshots. Only after success resume owner QA and invalidate/replace any outdated saved password through the user's normal password manager.
 
 Rollback the app commit to remove the new UI; no destructive database rollback or password reversal is proposed. Any successfully changed user password remains changed.
+
+## Auth interleaving review correction
+
+The independent P2 review was reproduced with three failing tests against the original bridge: cross-tab sign-out during recovery, initialization completing after recovery entry, and sign-out arriving before an initialization waiter resumes. The corrected bridge retains notifications, rechecks recovery after awaiting initialization, and reads the latest controller state. Direct navigation rechecks recovery before and after awaiting auth. Eight new executable bridge/navigation tests pass; the actual-app browser scenario also verifies dashboard/site navigation cannot displace recovery.
+
+Correction verification: 100 focused tests passed; 2,311 broad tests passed / 204 skipped (153 passing files / 14 skipped); app/API typechecks and build passed; all four loopback Chrome scenarios passed. No hosted actions were used.
