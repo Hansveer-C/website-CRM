@@ -1,0 +1,58 @@
+name: PR65 Disposable Browser Gates
+on:
+  push:
+    branches: [codex/pr65-browser-ci-20261024]
+permissions:
+  contents: read
+jobs:
+  disposable-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: c7edf13e9aa4ce0787731871a39c639f8d7ae2e6
+          path: target
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.22.1
+      - name: Assert exact composition and isolate harness
+        working-directory: target
+        run: |
+          test "$(git rev-parse HEAD)" = c7edf13e9aa4ce0787731871a39c639f8d7ae2e6
+          test "$(git rev-parse HEAD^{tree})" = 3d0fca79a9a31dabe880207b5d2f141665e660d8
+          test "$(git show -s --format=%P HEAD)" = "ab466ac44784d3d140e50b72aeceb1ccce785888 a2ce008a3d43f462b1b72a0b6506fa93fd440e0f"
+          cp -R ../harness/.ci .ci
+          node -e "const fs=require('fs');const p='supabase/config.toml';fs.writeFileSync(p,fs.readFileSync(p,'utf8').replace(/5432/g,'5642'))"
+          npm run supabase:local:guard
+      - name: Install locked dependencies and pinned Chromium
+        working-directory: target
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node node_modules/@playwright/test/cli.js install --with-deps chromium
+      - name: Start disposable stack and replay migrations
+        working-directory: target
+        run: |
+          npm run supabase:local:start > "$RUNNER_TEMP/local-start.log" 2>&1
+          npm run supabase:local:reset > "$RUNNER_TEMP/local-reset.log" 2>&1
+          echo 'Local start and migration replay PASS'
+      - name: Local Auth RLS Storage regressions
+        working-directory: target
+        run: |
+          npm run supabase:local:test > "$RUNNER_TEMP/local-tests.log" 2>&1
+          npm run test:doc-1b2:live > "$RUNNER_TEMP/pdf-tests.log" 2>&1
+          echo 'Local Auth RLS Storage and PDF lifecycle PASS'
+      - name: SQL and separate-context browser gates
+        working-directory: target
+        run: node .ci/run.mjs
+      - name: Stop disposable stack on every outcome
+        if: always()
+        working-directory: target
+        run: |
+          npm run supabase:local:stop > "$RUNNER_TEMP/local-stop.log" 2>&1
+          echo 'Disposable stack stopped'
