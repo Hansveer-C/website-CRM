@@ -1,0 +1,50 @@
+name: PR48 isolated Supabase lifecycle
+on:
+  push:
+    branches: [codex/pr48-lifecycle-ci-20261024]
+permissions:
+  contents: read
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: b9839c0c9ae835368a761559712aee83d2bd7da7
+          persist-credentials: false
+      - name: Assert exact composition
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = b9839c0c9ae835368a761559712aee83d2bd7da7
+          test "$(git rev-parse HEAD^{tree})" = fc0282a22a8539e7d1c6402b8defa6d78d321ede
+          git show -s --format='%H %T %P'
+          test ! -e supabase/.temp/project-ref
+          test ! -e supabase/.temp/linked-project.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+      - name: Install locked dependencies without lifecycle hooks
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Guard disposable local target
+        run: npm run supabase:local:guard
+      - name: Start disposable Supabase
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run supabase:local:start > "$RUNNER_TEMP/pr48-start.log" 2>&1 || { echo "Local stack startup failed; raw log retained only on disposable runner because it may contain local keys."; exit 1; }
+          echo "Local stack started successfully."
+      - name: Replay migrations from empty local baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run supabase:local:reset > "$RUNNER_TEMP/pr48-reset.log" 2>&1 || { echo "Local migration replay failed; raw log retained only on disposable runner."; exit 1; }
+          echo "Local migration replay passed."
+      - name: Test local Auth RLS and Storage
+        run: npm run supabase:local:test
+      - name: Test DOC-1B2 lifecycle
+        run: npm run test:doc-1b2:live
+      - name: Stop disposable Supabase
+        if: always()
+        run: npm run supabase:local:stop
