@@ -493,13 +493,14 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       `);
 
       // c2 begins reorder on same funnel with old expected order
+      // Observe the expected rejection immediately, before yielding to lock inspection.
       const c2Promise = c2.query(`
         select public.reorder_builder_pages(
           'f-conc-rr',
           array['p-rr-3', 'p-rr-2', 'p-rr-1'],
           array['p-rr-1', 'p-rr-2', 'p-rr-3']
         );
-      `);
+      `).then(() => ({ error: undefined }), error => ({ error }));
 
       // Assert c2 is waiting on advisory lock
       await assertBackendWaiting(pool, (c2 as any).processID);
@@ -508,12 +509,7 @@ describeDatabase('reorder_builder_pages RPC Integration Tests (PostgreSQL 17)', 
       await c1.query('commit');
 
       // c2 finishes waiting and rejects with PT409
-      let c2Err: any;
-      try {
-        await c2Promise;
-      } catch (e) {
-        c2Err = e;
-      }
+      const { error: c2Err } = await c2Promise;
       expect(c2Err?.code).toBe('PT409');
       await c2.query('rollback').catch(() => {});
     } finally {

@@ -246,9 +246,11 @@ import {
   setProductionQuoteServiceProperty,
   createProductionLead,
   CrmMutationError,
+  createInvoiceFromAcceptedQuote,
   saveProductionQuote,
   type CrmMutationClient
 } from './crm_production_mutations';
+import { AcceptedQuoteInvoiceController, loadAcceptedInvoiceEvidence, mountAcceptedQuoteInvoice } from './ui/quotes/accepted_quote_invoice';
 import { QuoteServiceLocationController, mountQuoteServiceLocation, applyServiceLocationPreviewRefresh, type ServiceLocation } from './ui/quotes/quote_service_location';
 import { allowsEstimateReview, mountOwnerQuoteReview, mountRecipientQuoteReview, type ReviewClient } from './ui/quotes/quote_review';
 import {
@@ -12205,6 +12207,7 @@ function renderQuotePreview(quoteId: string) {
   const quote = mockQuotes.find(q => q.user_id === userId && q.id === quoteId);
   const editable = !editorUsesSupabase();
   const acceptanceEnabled = Boolean(quote && quote.status === 'sent');
+  const invoiceEnabled = editorUsesSupabase() && quote?.status === 'approved';
   // Audit contract preserved in renderQuotePreviewContent:
   // escapeHtmlText(item.service_name), escapeHtmlText(item.description), escapeHtmlText(quote.notes)
   const preview = renderQuotePreviewContent({ userId, quoteId, quotes: mockQuotes, contacts: mockContacts, items: mockQuoteItems, editable, acceptanceEnabled, durableAcceptance: editorUsesSupabase() });
@@ -12213,8 +12216,41 @@ function renderQuotePreview(quoteId: string) {
     title: 'Quote preview',
     headerActionsHtml: `<div class="wo-shell-header-actions"><button type="button" class="wo-button wo-button--secondary no-print" onclick="window.navigateTo('quotes')">Back</button><button type="button" class="wo-button wo-button--primary no-print" onclick="window.print()">Print quote</button></div>`,
     contentVariant: 'wide',
-    contentHtml: preview + (quote ? '<div id="quote-service-location-root"></div><div id="quote-review-root"></div>' : '')
+    contentHtml: preview + (quote ? '<div id="quote-service-location-root"></div><div id="quote-review-root"></div>' : '') + (invoiceEnabled ? '<div id="accepted-invoice-root"></div>' : '')
   });
+
+  const invoiceRoot = app.querySelector<HTMLElement>('#accepted-invoice-root');
+  if (invoiceEnabled && quote && invoiceRoot) {
+    const navigation = protectedAsyncOperationGuard.captureCurrent('application-navigation', userId);
+    const current = () => invoiceRoot.isConnected && getActingUserId() === userId && currentView === 'quote-preview'
+      && !!navigation && protectedAsyncOperationGuard.isCurrent(navigation, getActingUserId());
+    let controller: AcceptedQuoteInvoiceController;
+    controller = new AcceptedQuoteInvoiceController(quoteId, userId, {
+      current, requestKey: () => crypto.randomUUID(),
+      load: async () => {
+        const client = await getBuilderPublicationSupabaseClient();
+        if (!client || !current()) throw new Error('Unavailable');
+        return loadAcceptedInvoiceEvidence(client as unknown as CrmMutationClient, quoteId);
+      },
+      create: async input => {
+        const client = await getBuilderPublicationSupabaseClient();
+        if (!client || !current()) throw new Error('Unavailable');
+        return createInvoiceFromAcceptedQuote(client as unknown as CrmMutationClient, input);
+      },
+      view: async invoiceId => {
+        const navigation = protectedAsyncOperationGuard.captureCurrent('application-navigation', userId);
+        if (!navigation || !current()) return;
+        await crmProductionHydrator.hydrateAuthenticatedUser(userId, true);
+        if (!current() || !protectedAsyncOperationGuard.isCurrent(navigation, getActingUserId())) return;
+        const invoice = durableInvoices.find(row => row.id === invoiceId && row.user_id === userId && row.quote_id === quoteId);
+        if (!invoice || crmProductionHydrator.state.entities.invoices !== 'ready'
+          || crmProductionHydrator.state.entities.invoice_items !== 'ready') throw new Error('Invoice unavailable');
+        selectedProductionInvoiceId = invoice.id;
+        await (window as any).navigateTo('invoices');
+      }
+    }, () => { if (current()) mountAcceptedQuoteInvoice(invoiceRoot, controller); });
+    void controller.load();
+  }
 
   const reviewRoot = app.querySelector<HTMLElement>('#quote-review-root');
   if (quote && reviewRoot && editorUsesSupabase() && allowsEstimateReview(location.origin, builderPublicationSupabaseUrl)) {
