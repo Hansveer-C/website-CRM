@@ -17,6 +17,7 @@ jobs:
         with:
           ref: c7edf13e9aa4ce0787731871a39c639f8d7ae2e6
           path: target
+          fetch-depth: 2
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
