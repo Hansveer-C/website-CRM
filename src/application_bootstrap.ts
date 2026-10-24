@@ -15,7 +15,7 @@ export function isPublicApplicationPath(pathname: string): boolean {
 export function sanitizeApplicationReturnRoute(value: string | null | undefined): string | undefined {
   if (!value || !SAFE_HASH.test(value)) return undefined;
   const route = value.slice(2).split(/[/?]/, 1)[0];
-  return route && route !== 'login' && route !== 'site' ? value : undefined;
+  return route && !['login', 'site', 'forgot-password', 'reset-password'].includes(route) ? value : undefined;
 }
 
 export function getLoginReturnRoute(hash: string): string | undefined {
