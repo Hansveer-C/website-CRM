@@ -15,7 +15,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: c7edf13e9aa4ce0787731871a39c639f8d7ae2e6
+          ref: 8d4cd3afd18e3ba241da5d2e4a402b4c0ec97f42
           path: target
           fetch-depth: 2
           persist-credentials: false
@@ -25,9 +25,9 @@ jobs:
       - name: Assert exact composition and isolate harness
         working-directory: target
         run: |
-          test "$(git rev-parse HEAD)" = c7edf13e9aa4ce0787731871a39c639f8d7ae2e6
-          test "$(git rev-parse HEAD^{tree})" = 3d0fca79a9a31dabe880207b5d2f141665e660d8
-          test "$(git show -s --format=%P HEAD)" = "ab466ac44784d3d140e50b72aeceb1ccce785888 a2ce008a3d43f462b1b72a0b6506fa93fd440e0f"
+          test "$(git rev-parse HEAD)" = 8d4cd3afd18e3ba241da5d2e4a402b4c0ec97f42
+          test "$(git rev-parse HEAD^{tree})" = a5050b0ee193642e668ac3b6f1ec4162130b90a9
+          test "$(git show -s --format=%P HEAD)" = "86c2fca000dd15864eeea27faecdb4dafe915927 a2ce008a3d43f462b1b72a0b6506fa93fd440e0f"
           cp -R ../harness/.ci .ci
           node -e "const fs=require('fs');const p='supabase/config.toml';fs.writeFileSync(p,fs.readFileSync(p,'utf8').replace(/5432/g,'5642'))"
           npm run supabase:local:guard
