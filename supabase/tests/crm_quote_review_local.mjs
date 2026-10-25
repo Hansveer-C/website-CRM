@@ -60,7 +60,21 @@ try{
   check(accepted.actor_user_id,owner);check(accepted.signer_name,'Synthetic Recipient');check(Number(accepted.accepted_total_amount),150);check(accepted.quote_revision,1);
   check(accepted.quote_snapshot.quote.selected_tier,'premium');check(accepted.quote_snapshot.items.length,2);
   check((await read(a.token)).state,'owner_recorded');
-  const invoice=await as(owner,'select public.create_invoice_from_accepted_quote($1,1,$2) result',[a.q,randomUUID()]);
+  const invoiceEvidence=()=>as(owner,'select public.read_crm_accepted_invoice_evidence($1) result',[a.q]);
+  const evidence=await invoiceEvidence();
+  check(evidence.accepted_revision,1);check(evidence.current_revision,2);check(evidence.eligible,true);
+  check(evidence.selected_tier,'premium');check(Number(evidence.total_amount),150);check(evidence.items.length,1);
+  check(evidence.invoice_id,null);
+  await denied(()=>as(other,'select public.read_crm_accepted_invoice_evidence($1) result',[a.q]),'42501');
+  await denied(()=>as(null,'select public.read_crm_accepted_invoice_evidence($1) result',[a.q]),'42501');
+  const invoiceKey=randomUUID();
+  const invoiceResults=await Promise.all([0,1].map(()=>as(owner,'select public.create_invoice_from_accepted_quote($1,1,$2) result',[a.q,invoiceKey])));
+  const invoice=invoiceResults[0];check(invoiceResults[1].invoice.id,invoice.invoice.id);
+  check(invoiceResults.map(r=>r.replayed).sort(),[false,true]);
+  check((await invoiceEvidence()).invoice_id,invoice.invoice.id);
+  const secondKey=await as(owner,'select public.create_invoice_from_accepted_quote($1,1,$2) result',[a.q,randomUUID()]);
+  check(secondKey.invoice.id,invoice.invoice.id);
+
   check(Number(invoice.invoice.total_amount),150);
   check((await admin.query('select count(*)::int n from public.invoice_items where invoice_id=$1',[invoice.invoice.id])).rows[0].n,1);
   const b=await issue();await respond(b.token);await denied(()=>record(b.result.id,finalKey),'23505');check((await admin.query('select status from public.quotes where id=$1',[b.q])).rows[0].status,'draft');

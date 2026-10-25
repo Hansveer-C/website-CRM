@@ -108,13 +108,14 @@ export interface CrmMutationClient {
 }
 
 export class CrmMutationError extends Error {
-  constructor(public readonly code: 'UNAVAILABLE' | 'INVALID_RESPONSE' | 'INVALID_INPUT' | 'CONFLICT', message?: string) {
+  constructor(public readonly code: 'UNAVAILABLE' | 'INVALID_RESPONSE' | 'INVALID_INPUT' | 'CONFLICT' | 'FORBIDDEN', message?: string) {
     super(message ?? (code === 'UNAVAILABLE'
       ? 'This action is temporarily unavailable.'
       : code === 'INVALID_INPUT'
         ? 'The request is invalid.'
         : code === 'CONFLICT'
           ? 'This quote has changed or was already accepted. Refresh it before trying again.'
+        : code === 'FORBIDDEN' ? 'This accepted quote is unavailable for this account.'
         : 'The server returned an invalid response.'));
   }
 }
@@ -331,6 +332,7 @@ export async function createInvoiceFromAcceptedQuote(
     p_request_key: input.requestKey
   });
   if (result.error) {
+    if (object(result.error)?.code === '42501') throw new CrmMutationError('FORBIDDEN');
     if (isConflictError(result.error)) throw new CrmMutationError('CONFLICT', 'This accepted quote is no longer available for invoicing. Refresh it before trying again.');
     if (isInvalidInputError(result.error)) throw new CrmMutationError('INVALID_INPUT', 'This accepted quote cannot be converted to an invoice.');
     throw new CrmMutationError('UNAVAILABLE');
