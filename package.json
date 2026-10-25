@@ -17,6 +17,7 @@
     "supabase:local:start": "npm run supabase:local:guard && npx --yes supabase@2.116.0 start",
     "supabase:local:reset": "npm run supabase:local:guard && npx --yes supabase@2.116.0 db reset --local --no-seed",
     "supabase:local:test": "node supabase/tests/local_supabase_integration.mjs",
+    "test:doc-1b2:live": "tsx supabase/tests/doc_1b2_live_integration.ts",
     "supabase:local:stop": "npx --yes supabase@2.116.0 stop"
   },
   "keywords": [],
@@ -41,10 +42,12 @@
     "vitest": "^1.6.0"
   },
   "dependencies": {
+    "@pdf-lib/fontkit": "1.1.1",
     "@supabase/supabase-js": "^2.100.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.8.0",
     "jsonwebtoken": "^9.0.3",
+    "pdf-lib": "1.17.1",
     "signature_pad": "5.0.5",
     "sortablejs": "1.15.7",
     "twilio": "^5.13.0"
