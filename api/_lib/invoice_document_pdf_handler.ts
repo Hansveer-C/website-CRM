@@ -14,8 +14,8 @@ export function createInvoiceDocumentPdfHandler(env: Record<string, string | und
     if (request.method !== 'POST') return new Response(null, { status: 405, headers: { ...headers, Allow: 'POST' } });
     if (!request.headers.get('content-type')?.toLowerCase().includes('application/json')) return json({ error: 'INVALID_INPUT' }, 400);
     const token = tokenFrom(request); if (!token) return json({ error: 'UNAUTHORIZED' }, 401);
-    let body: { document_spec_id?: unknown }; try { body = await request.json(); } catch { return json({ error: 'INVALID_INPUT' }, 400); }
-    if (!uuid(body.document_spec_id)) return json({ error: 'INVALID_INPUT' }, 400);
+    let body: unknown; try { body = await request.json(); } catch { return json({ error: 'INVALID_INPUT' }, 400); }
+    if (!body || typeof body !== 'object' || Array.isArray(body) || !('document_spec_id' in body) || !uuid(body.document_spec_id)) return json({ error: 'INVALID_INPUT' }, 400);
     const url = env.SUPABASE_URL?.trim() || env.VITE_SUPABASE_URL?.trim() || ''; const key = env.SUPABASE_PUBLISHABLE_KEY?.trim() || env.SUPABASE_ANON_KEY?.trim() || ''; const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY?.trim() || '';
     if (!trustedSupabaseUrl(url) || !key || !serviceKey) return json({ error: 'CONFIGURATION_ERROR' }, 503);
     try {
