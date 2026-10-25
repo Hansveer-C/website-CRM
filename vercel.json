@@ -3,6 +3,7 @@
   "git": {
     "deploymentEnabled": {
       "codex/c04-property-domain": false,
+      "codex/password-recovery": false,
       "codex/pdf-request-validation": false
     }
   },
