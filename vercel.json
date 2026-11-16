@@ -3,7 +3,8 @@
   "git": {
     "deploymentEnabled": {
       "codex/c04-property-domain": false,
-      "codex/pdf-request-validation": false
+      "codex/pdf-request-validation": false,
+      "codex/mot-37-communication-history": false
     }
   },
   "routes": [
