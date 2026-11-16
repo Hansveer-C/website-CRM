@@ -1,6 +1,7 @@
 import { mockContacts, mockOpportunities, mockPipelines, mockActivities, mockQuotes, mockQuoteItems, mockInvoices, mockPages, mockPageSections, mockComponents, mockWebsiteSettings, mockFunnels, mockWebsiteLayouts, mockWebsites, mockWebsiteRoutes, mockTemplates } from './db';
 import { escapeHtmlText, safeTelHref, safeNavHref } from './crm_html_output';
 import { resolveHydratedContact, renderHydratedContactActivity } from './crm_contact_detail';
+import { loadContactCommunicationHistory, renderContactCommunicationHistory, renderContactCommunicationHistoryError, renderContactHistoryTimeline, type ContactHistoryClient } from './crm_contact_history';
 import { createContactNote } from './crm_contact_notes';
 import { ContactNoteController, contactNoteFormHtml, mountContactNote } from './ui/contacts/contact_note';
 import { contactNoteAttempt, contactNoteStorage, clearContactNoteAttempts } from './ui/contacts/contact_note_attempt';
@@ -12373,9 +12374,23 @@ async function loadTimeline(contactId: string) {
   const userId = getActingUserId();
   if (editorUsesSupabase()) {
     if (currentView !== 'contact-detail' || selectedContactId !== contactId) return;
+    const operation = protectedAsyncOperationGuard.captureCurrent('application-navigation', userId);
     const container = document.getElementById('api-timeline-list');
-    if (container) container.innerHTML = renderHydratedContactActivity(userId, contactId,
+    const activities = () => renderHydratedContactActivity(userId, contactId,
       crmProductionHydrator.state.userId === userId && crmProductionHydrator.state.entities.activities === 'ready', mockActivities);
+    if (container) container.innerHTML = renderContactHistoryTimeline(activities(), '<p role="status">Loading communication history…</p>');
+    try {
+      const client = await getBuilderPublicationSupabaseClient();
+      if (!client || !operation) throw new Error('History client unavailable');
+      const history = await loadContactCommunicationHistory(client as unknown as ContactHistoryClient, userId, contactId);
+      if (!protectedAsyncOperationGuard.isCurrent(operation, getActingUserId()) || currentView !== 'contact-detail' || selectedContactId !== contactId) return;
+      const currentContainer = document.getElementById('api-timeline-list');
+      if (currentContainer) currentContainer.innerHTML = renderContactHistoryTimeline(activities(), renderContactCommunicationHistory(history));
+    } catch {
+      if (!operation || !protectedAsyncOperationGuard.isCurrent(operation, getActingUserId()) || currentView !== 'contact-detail' || selectedContactId !== contactId) return;
+      const currentContainer = document.getElementById('api-timeline-list');
+      if (currentContainer) currentContainer.innerHTML = renderContactHistoryTimeline(activities(), renderContactCommunicationHistoryError(contactId));
+    }
     return;
   }
   const operation = protectedAsyncOperationGuard.captureCurrent('application-navigation', userId);
