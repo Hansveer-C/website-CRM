@@ -337,7 +337,7 @@ export function createDashboardViewModel(input: CreateDashboardViewModelInput): 
   const sourceCounts = new Map<string, number>();
   if (availability.contacts) {
     for (const contact of activeLeads) {
-      const source = contact.source.trim() || 'Unknown source';
+      const source = (contact.source ?? '').trim() || 'Unknown source';
       sourceCounts.set(source, (sourceCounts.get(source) ?? 0) + 1);
     }
   }

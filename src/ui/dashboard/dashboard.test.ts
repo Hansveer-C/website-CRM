@@ -148,6 +148,18 @@ describe('Phase 1C / Task 7C.1 Dashboard visual and data architecture', () => {
     expect(html).not.toContain('Jane Smith');
   });
 
+  it.each([null, undefined, '', '   '])('renders an unknown lead source for persisted absent value %s', source => {
+    // The SQL source column is nullable, despite the older browser Contact type.
+    const legacyContact = { ...contacts[0], source: source as unknown as Contact['source'] };
+    const model = createDashboardViewModel(input({ contacts: [legacyContact, contacts[2]] }));
+    expect(model.leadSources).toMatchObject({ totalLeads: 1 });
+    expect(model.leadSources.sources).toEqual([{ source: 'Unknown source', count: 1, percentage: 100 }]);
+    const html = renderDashboardContent(model);
+    expect(html).toContain('Unknown source');
+    expect(html).not.toContain('Foreign source');
+    expect(legacyContact.source).toBe(source);
+  });
+
   it('C. escapes tenant-controlled contact, stage, source, and activity values in the actual Dashboard renderer', () => {
     const dangerous = '"><img src=x onerror=alert(1)>';
     const model = createDashboardViewModel(input({
